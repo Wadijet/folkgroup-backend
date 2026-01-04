@@ -757,6 +757,68 @@ func (r *Router) registerNotificationRoutes(router fiber.Router) error {
 	return nil
 }
 
+// registerCTARoutes đăng ký các route cho CTA Module
+//
+// ⚠️ LƯU Ý: Tất cả routes ở đây PHẢI dùng registerRouteWithMiddleware (xem comment ở đầu file)
+func (r *Router) registerCTARoutes(router fiber.Router) error {
+	// CTA Library routes (CRUD) - dùng CRUD standard
+	ctaLibraryHandler, err := handler.NewCTALibraryHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create CTA library handler: %v", err)
+	}
+	// Sử dụng readWriteConfig cho CTA Library
+	ctaLibraryConfig := readWriteConfig
+	r.registerCRUDRoutes(router, "/cta/library", ctaLibraryHandler, ctaLibraryConfig, "CTALibrary")
+
+	// CTA Tracking route (public, không cần auth) - endpoint đặc biệt cần thiết cho tracking clicks
+	ctaTrackHandler := handler.NewCTATrackHandler()
+	router.Get("/cta/track/:historyId/:ctaIndex", ctaTrackHandler.TrackCTAClick)
+
+	// Lưu ý: CTA Render không có endpoint riêng vì được gọi trực tiếp từ code (internal)
+	// Hệ thống 1 và 2 sẽ gọi trực tiếp cta.Renderer.RenderCTAs() thay vì qua HTTP
+
+	return nil
+}
+
+// registerDeliveryRoutes đăng ký các route cho Delivery Module (Hệ thống 1)
+//
+// ⚠️ LƯU Ý: Tất cả routes ở đây PHẢI dùng registerRouteWithMiddleware (xem comment ở đầu file)
+func (r *Router) registerDeliveryRoutes(router fiber.Router) error {
+	// Delivery Send route (gửi notification trực tiếp)
+	sendHandler, err := handler.NewDeliverySendHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create delivery send handler: %v", err)
+	}
+	sendMiddleware := middleware.AuthMiddleware("Delivery.Send")
+	orgContextMiddleware := middleware.OrganizationContextMiddleware()
+	registerRouteWithMiddleware(router, "/delivery", "POST", "/send", []fiber.Handler{sendMiddleware, orgContextMiddleware}, sendHandler.HandleSend)
+
+	// Delivery Sender routes (CRUD)
+	senderHandler, err := handler.NewDeliverySenderHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create delivery sender handler: %v", err)
+	}
+	r.registerCRUDRoutes(router, "/delivery/sender", senderHandler, notificationSenderConfig, "NotificationSender")
+
+	// Delivery History routes (read-only)
+	historyHandler, err := handler.NewDeliveryHistoryHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create delivery history handler: %v", err)
+	}
+	r.registerCRUDRoutes(router, "/delivery/history", historyHandler, notificationHistoryConfig, "NotificationHistory")
+
+	// Delivery Tracking routes (public, không cần auth)
+	trackHandler, err := handler.NewDeliveryTrackHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create delivery track handler: %v", err)
+	}
+	router.Get("/delivery/track/open/:historyId", trackHandler.HandleTrackOpen)
+	router.Get("/delivery/track/:historyId/:ctaIndex", trackHandler.HandleTrackClick)
+	router.Get("/delivery/confirm/:historyId", trackHandler.HandleTrackConfirm)
+
+	return nil
+}
+
 // SetupRoutes thiết lập tất cả các route cho ứng dụng
 func SetupRoutes(app *fiber.App) error {
 	// Khởi tạo route prefix
@@ -799,6 +861,16 @@ func SetupRoutes(app *fiber.App) error {
 	// 7. Notification Routes
 	if err := router.registerNotificationRoutes(v1); err != nil {
 		return fmt.Errorf("failed to register notification routes: %v", err)
+	}
+
+	// 8. CTA Routes
+	if err := router.registerCTARoutes(v1); err != nil {
+		return fmt.Errorf("failed to register CTA routes: %v", err)
+	}
+
+	// 9. Delivery Routes (Hệ thống 1)
+	if err := router.registerDeliveryRoutes(v1); err != nil {
+		return fmt.Errorf("failed to register delivery routes: %v", err)
 	}
 
 	return nil

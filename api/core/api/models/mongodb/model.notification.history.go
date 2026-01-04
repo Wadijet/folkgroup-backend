@@ -9,9 +9,8 @@ type NotificationHistory struct {
 	ID                 primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"`
 	QueueItemID        primitive.ObjectID `json:"queueItemId" bson:"queueItemId" index:"single:1"`
 	EventType          string             `json:"eventType" bson:"eventType" index:"single:1"`
-	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1"` // Tổ chức sở hữu dữ liệu (phân quyền)
-	ChannelID      primitive.ObjectID `json:"channelId" bson:"channelId" index:"single:1"`
-	ChannelType    string             `json:"channelType" bson:"channelType" index:"single:1"`
+	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1"`
+	ChannelType         string             `json:"channelType" bson:"channelType" index:"single:1"`
 	Recipient      string             `json:"recipient" bson:"recipient"`
 	Status         string             `json:"status" bson:"status" index:"single:1"` // sent, failed
 	Content        string             `json:"content" bson:"content"`                // Content đã render

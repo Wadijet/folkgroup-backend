@@ -59,6 +59,10 @@ func initColNames() {
 	global.MongoDB_ColNames.NotificationQueue = "notification_queue"
 	global.MongoDB_ColNames.NotificationHistory = "notification_history"
 
+	// CTA Module Collections
+	global.MongoDB_ColNames.CTALibrary = "cta_library"
+	global.MongoDB_ColNames.CTATracking = "cta_tracking"
+
 	logrus.Info("Initialized collection names") // Ghi log thông báo đã khởi tạo tên các collection
 }
 
@@ -123,6 +127,10 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.NotificationRoutingRules), models.NotificationRoutingRule{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.NotificationQueue), models.NotificationQueueItem{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.NotificationHistory), models.NotificationHistory{})
+
+	// CTA Module Indexes
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CTALibrary), models.CTALibrary{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CTATracking), models.CTATracking{})
 }
 
 // initFirebase khởi tạo Firebase Admin SDK

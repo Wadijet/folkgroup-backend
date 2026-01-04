@@ -361,6 +361,26 @@ var InitialPermissions = []models.Permission{
 
 	// Trigger Notification: Gửi thông báo
 	{Name: "Notification.Trigger", Describe: "Quyền trigger/gửi thông báo", Group: "Notification", Category: "Notification"},
+
+	// ==================================== CTA MODULE ===========================================
+	// Quản lý CTA Library: Thêm, xem, sửa, xóa
+	{Name: "CTALibrary.Insert", Describe: "Quyền tạo CTA Library", Group: "CTA", Category: "CTALibrary"},
+	{Name: "CTALibrary.Read", Describe: "Quyền xem danh sách CTA Library", Group: "CTA", Category: "CTALibrary"},
+	{Name: "CTALibrary.Update", Describe: "Quyền cập nhật CTA Library", Group: "CTA", Category: "CTALibrary"},
+	{Name: "CTALibrary.Delete", Describe: "Quyền xóa CTA Library", Group: "CTA", Category: "CTALibrary"},
+
+	// ==================================== DELIVERY MODULE ===========================================
+	// Delivery Send: Gửi notification trực tiếp
+	{Name: "Delivery.Send", Describe: "Quyền gửi notification trực tiếp qua Delivery Service", Group: "Delivery", Category: "Delivery"},
+
+	// Quản lý Delivery Sender: Thêm, xem, sửa, xóa (tương tự NotificationSender nhưng trong delivery namespace)
+	{Name: "DeliverySender.Insert", Describe: "Quyền tạo cấu hình sender delivery", Group: "Delivery", Category: "DeliverySender"},
+	{Name: "DeliverySender.Read", Describe: "Quyền xem danh sách cấu hình sender delivery", Group: "Delivery", Category: "DeliverySender"},
+	{Name: "DeliverySender.Update", Describe: "Quyền cập nhật cấu hình sender delivery", Group: "Delivery", Category: "DeliverySender"},
+	{Name: "DeliverySender.Delete", Describe: "Quyền xóa cấu hình sender delivery", Group: "Delivery", Category: "DeliverySender"},
+
+	// Quản lý Delivery History: Chỉ xem
+	{Name: "DeliveryHistory.Read", Describe: "Quyền xem lịch sử delivery", Group: "Delivery", Category: "DeliveryHistory"},
 }
 
 // InitPermission khởi tạo các quyền mặc định cho hệ thống
@@ -1016,118 +1036,6 @@ func (h *InitService) InitNotificationData() error {
 
 	// ==================================== 2. KHỞI TẠO NOTIFICATION TEMPLATES CHO SYSTEM ORGANIZATION =============================================
 	// Templates là dữ liệu hệ thống, thuộc về System Organization để có thể được share với tất cả organizations
-	// Template cho event conversation_unreplied - Email
-	convUnrepliedEmailFilter := bson.M{
-		"ownerOrganizationId": systemOrg.ID,
-		"eventType":           "conversation_unreplied",
-		"channelType":         "email",
-	}
-	_, err = h.notificationTemplateService.FindOne(ctx, convUnrepliedEmailFilter, nil)
-	if err == common.ErrNotFound {
-		template := models.NotificationTemplate{
-			OwnerOrganizationID: &systemOrg.ID, // Thuộc về System Organization (dữ liệu hệ thống) - Phân quyền dữ liệu
-			EventType:           "conversation_unreplied",
-			ChannelType:         "email",
-			Subject:             "Cảnh báo: Cuộc trò chuyện chưa được trả lời",
-			Content: `Xin chào,
-
-Bạn có một cuộc trò chuyện chưa được trả lời trong {{minutes}} phút.
-
-Thông tin cuộc trò chuyện:
-- ID: {{conversationId}}
-- Khách hàng: {{customerName}}
-- Thời gian: {{lastMessageAt}}
-
-Vui lòng kiểm tra và phản hồi sớm nhất có thể.
-
-Trân trọng,
-Hệ thống thông báo`,
-			Variables: []string{"conversationId", "minutes", "customerName", "lastMessageAt"},
-			CTAs: []models.NotificationCTA{
-				{
-					Label:  "Xem cuộc trò chuyện",
-					Action: "{{baseUrl}}/conversations/{{conversationId}}",
-					Style:  "primary",
-				},
-			},
-			IsActive:  true,
-			IsSystem:  true, // Đánh dấu là dữ liệu hệ thống, không thể xóa
-			CreatedAt: currentTime,
-			UpdatedAt: currentTime,
-		}
-		_, err = h.notificationTemplateService.InsertOne(ctx, template)
-		if err != nil {
-			return fmt.Errorf("failed to create conversation_unreplied email template: %v", err)
-		}
-	}
-
-	// Template cho event conversation_unreplied - Telegram
-	convUnrepliedTelegramFilter := bson.M{
-		"ownerOrganizationId": systemOrg.ID,
-		"eventType":           "conversation_unreplied",
-		"channelType":         "telegram",
-	}
-	_, err = h.notificationTemplateService.FindOne(ctx, convUnrepliedTelegramFilter, nil)
-	if err == common.ErrNotFound {
-		template := models.NotificationTemplate{
-			OwnerOrganizationID: &systemOrg.ID, // Thuộc về System Organization (dữ liệu hệ thống) - Phân quyền dữ liệu
-			EventType:           "conversation_unreplied",
-			ChannelType:         "telegram",
-			Subject:             "", // Telegram không có subject
-			Content: `🚨 *Cảnh báo: Cuộc trò chuyện chưa được trả lời*
-
-Bạn có một cuộc trò chuyện chưa được trả lời trong *{{minutes}}* phút.
-
-*Thông tin:*
-• ID: ` + "`{{conversationId}}`" + `
-• Khách hàng: {{customerName}}
-• Thời gian: {{lastMessageAt}}
-
-Vui lòng kiểm tra và phản hồi sớm nhất có thể.`,
-			Variables: []string{"conversationId", "minutes", "customerName", "lastMessageAt"},
-			CTAs: []models.NotificationCTA{
-				{
-					Label:  "Xem cuộc trò chuyện",
-					Action: "{{baseUrl}}/conversations/{{conversationId}}",
-					Style:  "primary",
-				},
-			},
-			IsActive:  true,
-			IsSystem:  true, // Đánh dấu là dữ liệu hệ thống, không thể xóa
-			CreatedAt: currentTime,
-			UpdatedAt: currentTime,
-		}
-		_, err = h.notificationTemplateService.InsertOne(ctx, template)
-		if err != nil {
-			return fmt.Errorf("failed to create conversation_unreplied telegram template: %v", err)
-		}
-	}
-
-	// Template cho event conversation_unreplied - Webhook
-	convUnrepliedWebhookFilter := bson.M{
-		"ownerOrganizationId": systemOrg.ID,
-		"eventType":           "conversation_unreplied",
-		"channelType":         "webhook",
-	}
-	_, err = h.notificationTemplateService.FindOne(ctx, convUnrepliedWebhookFilter, nil)
-	if err == common.ErrNotFound {
-		template := models.NotificationTemplate{
-			OwnerOrganizationID: &systemOrg.ID, // Thuộc về System Organization (dữ liệu hệ thống) - Phân quyền dữ liệu
-			EventType:           "conversation_unreplied",
-			ChannelType:         "webhook",
-			Subject:             "", // Webhook không có subject
-			Content:             `{"eventType":"conversation_unreplied","conversationId":"{{conversationId}}","minutes":{{minutes}},"customerName":"{{customerName}}","lastMessageAt":"{{lastMessageAt}}","baseUrl":"{{baseUrl}}"}`,
-			Variables:           []string{"conversationId", "minutes", "customerName", "lastMessageAt", "baseUrl"},
-			IsActive:            true,
-			IsSystem:            true, // Đánh dấu là dữ liệu hệ thống, không thể xóa
-			CreatedAt:           currentTime,
-			UpdatedAt:           currentTime,
-		}
-		_, err = h.notificationTemplateService.InsertOne(ctx, template)
-		if err != nil {
-			return fmt.Errorf("failed to create conversation_unreplied webhook template: %v", err)
-		}
-	}
 
 	// ==================================== 3. KHỞI TẠO NOTIFICATION CHANNELS CHO TECH TEAM =============================================
 	// Channel Email mặc định cho Tech Team
@@ -1488,27 +1396,6 @@ Hệ thống thông báo`,
 	}
 
 	// ==================================== 5. KHỞI TẠO ROUTING RULES MẶC ĐỊNH =============================================
-	// Routing rule cho event conversation_unreplied
-	convUnrepliedRoutingFilter := bson.M{
-		"eventType": "conversation_unreplied",
-	}
-	_, err = h.notificationRoutingService.FindOne(ctx, convUnrepliedRoutingFilter, nil)
-	if err == common.ErrNotFound {
-		routingRule := models.NotificationRoutingRule{
-			EventType:       "conversation_unreplied",
-			OrganizationIDs: []primitive.ObjectID{techTeam.ID},        // Thuộc về Tech Team
-			ChannelTypes:    []string{"email", "telegram", "webhook"}, // Tất cả channel types
-			IsActive:        false,                                    // Tắt mặc định, admin cần bật sau khi cấu hình channels
-			IsSystem:        true,                                     // Đánh dấu là dữ liệu hệ thống, không thể xóa
-			CreatedAt:       currentTime,
-			UpdatedAt:       currentTime,
-		}
-		_, err = h.notificationRoutingService.InsertOne(ctx, routingRule)
-		if err != nil {
-			return fmt.Errorf("failed to create routing rule for conversation_unreplied: %v", err)
-		}
-	}
-
 	// Tạo routing rules để kết nối system events với Tech Team
 	for _, event := range systemEvents {
 		routingFilter := bson.M{

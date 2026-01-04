@@ -25,7 +25,7 @@ type RenderedCTA struct {
 }
 
 // SendEmail gửi email
-func SendEmail(ctx context.Context, sender *models.NotificationChannelSender, channel *models.NotificationChannel, recipient string, template *RenderedTemplate, historyID string, baseURL string) error {
+func SendEmail(ctx context.Context, sender *models.NotificationChannelSender, recipient string, template *RenderedTemplate, historyID string, baseURL string) error {
 	// Format CTAs thành HTML buttons
 	ctaHTML := ""
 	for _, cta := range template.CTAs {
@@ -44,7 +44,7 @@ func SendEmail(ctx context.Context, sender *models.NotificationChannelSender, ch
 	}
 
 	// Thêm tracking pixel (để track open)
-	trackingPixel := fmt.Sprintf(`<img src="%s/api/v1/notification/track/open/%s" width="1" height="1" style="display:none">`,
+	trackingPixel := fmt.Sprintf(`<img src="%s/api/v1/delivery/track/open/%s" width="1" height="1" style="display:none">`,
 		baseURL, historyID)
 	htmlContent += trackingPixel
 

@@ -7,18 +7,16 @@ import (
 	"fmt"
 	"net/http"
 	"time"
-
-	models "meta_commerce/core/api/models/mongodb"
 )
 
 // SendWebhook gửi webhook
-func SendWebhook(ctx context.Context, channel *models.NotificationChannel, template *RenderedTemplate, historyID string, baseURL string) error {
+func SendWebhook(ctx context.Context, webhookURL string, template *RenderedTemplate, historyID string, baseURL string) error {
 	// Format CTAs thành JSON
 	actions := []map[string]interface{}{}
 	for _, cta := range template.CTAs {
 		actions = append(actions, map[string]interface{}{
 			"label": cta.Label,
-			"url":   cta.Action, // Đã có tracking URL
+			"url":   cta.Action,
 			"style": cta.Style,
 		})
 	}
@@ -26,7 +24,7 @@ func SendWebhook(ctx context.Context, channel *models.NotificationChannel, templ
 	payload := map[string]interface{}{
 		"content":   template.Content,
 		"timestamp": time.Now().Unix(),
-		"actions":   actions, // CTAs với tracking URLs
+		"actions":   actions,
 	}
 
 	jsonData, err := json.Marshal(payload)
@@ -34,16 +32,12 @@ func SendWebhook(ctx context.Context, channel *models.NotificationChannel, templ
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", channel.WebhookURL, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", webhookURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return err
 	}
 
-	// Set headers
 	req.Header.Set("Content-Type", "application/json")
-	for k, v := range channel.WebhookHeaders {
-		req.Header.Set(k, v)
-	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
@@ -58,4 +52,3 @@ func SendWebhook(ctx context.Context, channel *models.NotificationChannel, templ
 
 	return nil
 }
-

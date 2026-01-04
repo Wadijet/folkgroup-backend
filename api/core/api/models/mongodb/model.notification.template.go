@@ -14,8 +14,11 @@ type NotificationTemplate struct {
 	Content        string              `json:"content" bson:"content"`                                                      // Có thể chứa {{variable}}
 	Variables      []string            `json:"variables" bson:"variables"`                                                  // ["conversationId", "minutes"]
 
-	// CTA buttons (optional)
-	CTAs []NotificationCTA `json:"ctas,omitempty" bson:"ctas,omitempty"`
+	// CTA codes (mới) - tham chiếu đến CTALibrary
+	CTACodes []string `json:"ctaCodes,omitempty" bson:"ctaCodes,omitempty"` // ["view_detail", "reply", "mark_read"]
+
+	// CTA buttons (cũ - deprecated, giữ lại để backward compatibility)
+	CTAs []NotificationCTA `json:"ctas,omitempty" bson:"ctas,omitempty"` // Deprecated: Dùng CTACodes thay thế
 
 	IsActive  bool  `json:"isActive" bson:"isActive" index:"single:1"`
 	IsSystem  bool  `json:"-" bson:"isSystem" index:"single:1"` // true = dữ liệu hệ thống, không thể xóa (chỉ dùng nội bộ, không expose ra API)

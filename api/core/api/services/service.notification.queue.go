@@ -10,6 +10,7 @@ import (
 	"meta_commerce/core/global"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -30,14 +31,30 @@ func NewNotificationQueueService() (*NotificationQueueService, error) {
 	}, nil
 }
 
-// FindPending tìm các items có status="pending" và nextRetryAt <= now (hoặc null)
+// FindPending tìm các items có status="pending" hoặc "processing" quá lâu (stale)
+// Stale processing items: items có status="processing" nhưng đã quá 5 phút (có thể processor bị crash)
+// Chỉ lấy items có nextRetryAt là null hoặc đã đến thời điểm retry
 func (s *NotificationQueueService) FindPending(ctx context.Context, limit int) ([]models.NotificationQueueItem, error) {
 	now := time.Now().Unix()
+	staleThreshold := now - 300 // 5 phút trước
+	
 	filter := bson.M{
-		"status": bson.M{"$in": []string{"pending"}},
-		"$or": []bson.M{
-			{"nextRetryAt": bson.M{"$lte": now}},
-			{"nextRetryAt": nil},
+		"$and": []bson.M{
+			{
+				"$or": []bson.M{
+					{"status": "pending"},
+					{
+						"status":     "processing",
+						"updatedAt": bson.M{"$lt": staleThreshold}, // Items processing quá lâu
+					},
+				},
+			},
+			{
+				"$or": []bson.M{
+					{"nextRetryAt": nil},                    // Chưa có nextRetryAt (lần đầu)
+					{"nextRetryAt": bson.M{"$lte": now}},    // Đã đến thời điểm retry
+				},
+			},
 		},
 	}
 
@@ -66,5 +83,60 @@ func (s *NotificationQueueService) UpdateStatus(ctx context.Context, ids []inter
 
 	_, err := s.BaseServiceMongoImpl.collection.UpdateMany(ctx, filter, update)
 	return err
+}
+
+// CleanupFailedItems xóa các items failed đã quá 7 ngày (cleanup old failed items)
+func (s *NotificationQueueService) CleanupFailedItems(ctx context.Context, daysOld int) (int64, error) {
+	cutoffTime := time.Now().Unix() - int64(daysOld*24*60*60)
+	
+	filter := bson.M{
+		"status": "failed",
+		"updatedAt": bson.M{"$lt": cutoffTime},
+	}
+
+	result, err := s.BaseServiceMongoImpl.collection.DeleteMany(ctx, filter)
+	if err != nil {
+		return 0, err
+	}
+
+	return result.DeletedCount, nil
+}
+
+// FindStuckItems tìm các items bị kẹt (stuck)
+// - Items có status="processing" quá lâu (stale)
+// - Items có senderID rỗng
+func (s *NotificationQueueService) FindStuckItems(ctx context.Context, staleMinutes int, limit int) ([]models.NotificationQueueItem, error) {
+	now := time.Now().Unix()
+	staleThreshold := now - int64(staleMinutes*60)
+	zeroObjectID := primitive.NilObjectID
+	
+	filter := bson.M{
+		"$or": []bson.M{
+			{
+				"status":     "processing",
+				"updatedAt": bson.M{"$lt": staleThreshold}, // Items processing quá lâu
+			},
+			{
+				"senderId": zeroObjectID, // Items có senderID rỗng
+			},
+		},
+	}
+
+	opts := options.Find().
+		SetSort(bson.M{"updatedAt": 1}).
+		SetLimit(int64(limit))
+
+	cursor, err := s.BaseServiceMongoImpl.collection.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var items []models.NotificationQueueItem
+	if err := cursor.All(ctx, &items); err != nil {
+		return nil, err
+	}
+
+	return items, nil
 }
 

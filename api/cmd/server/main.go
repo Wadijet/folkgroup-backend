@@ -10,9 +10,9 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
+	"meta_commerce/core/delivery"
 	"meta_commerce/core/global"
 	"meta_commerce/core/logger"
-	"meta_commerce/core/notification"
 )
 
 // initLogger khởi tạo và cấu hình logger cho toàn bộ ứng dụng
@@ -136,7 +136,7 @@ func main() {
 	// Khởi tạo dữ liệu mặc định
 	InitDefaultData()
 
-	// Khởi tạo và chạy Notification Processor (background worker)
+	// Khởi tạo và chạy Delivery Processor (background worker - Hệ thống 1)
 	// Lấy base URL từ environment variable hoặc dùng default
 	baseURL := os.Getenv("BASE_URL")
 	if baseURL == "" {
@@ -150,21 +150,30 @@ func main() {
 	}
 	
 	log := logger.GetAppLogger()
-	processor, err := notification.NewProcessor(baseURL)
+	processor, err := delivery.NewProcessor(baseURL)
 	if err != nil {
-		log.WithError(err).Error("Failed to create notification processor, continuing without notification worker")
+		log.WithError(err).Error("Failed to create delivery processor, continuing without delivery worker")
 	} else {
 		// Tạo context với cancel để có thể dừng processor khi cần
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		// Chạy processor trong goroutine riêng
+		// Chạy processor trong goroutine riêng với recover
 		go func() {
-			log.Info("Starting Notification Processor...")
+			defer func() {
+				if r := recover(); r != nil {
+					log.WithFields(map[string]interface{}{
+						"panic": r,
+					}).Error("📦 [DELIVERY] Processor goroutine panic, processor sẽ tự khởi động lại")
+				}
+			}()
+			
+			log.Info("📦 [DELIVERY] Starting Delivery Processor...")
 			processor.Start(ctx)
+			log.Warn("📦 [DELIVERY] Processor đã dừng (có thể do context cancelled)")
 		}()
 
-		log.Info("Notification Processor started successfully")
+		log.Info("📦 [DELIVERY] Delivery Processor started successfully")
 	}
 
 	// Chạy Fiber server trên main thread

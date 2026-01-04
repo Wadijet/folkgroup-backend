@@ -25,7 +25,8 @@ func InitCollections(client *mongo.Client, cfg *config.Configuration) error {
 	db := client.Database(cfg.MongoDB_DBName_Auth)
 	colNames := []string{"auth_users", "auth_permissions", "auth_roles", "auth_role_permissions", "auth_user_roles", "auth_organizations",
 		"agents", "access_tokens", "fb_pages", "fb_conversations", "fb_messages", "fb_message_items", "fb_posts", "fb_customers", "pc_orders", "customers", "pc_pos_customers", "pc_pos_shops", "pc_pos_warehouses", "pc_pos_products", "pc_pos_variations", "pc_pos_categories", "pc_pos_orders",
-		"notification_senders", "notification_channels", "notification_templates", "notification_routing_rules", "notification_queue", "notification_history"}
+		"notification_senders", "notification_channels", "notification_templates", "notification_routing_rules", "notification_queue", "notification_history",
+		"cta_library", "cta_tracking"}
 
 	for _, name := range colNames {
 		registered, err := global.RegistryCollections.Register(name, db.Collection(name))

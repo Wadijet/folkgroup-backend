@@ -393,7 +393,8 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) UpdateOne(c fiber.Ctx) error 
 				return nil
 			}
 
-			// ✅ Có quyền → Cho phép update (giữ nguyên ownerOrganizationId trong updateData)
+			// ✅ Có quyền → Thay thế string bằng ObjectID trong updateData để MongoDB lưu đúng kiểu
+			updateData["ownerOrganizationId"] = newOwnerOrgID
 		} else {
 			// Không có ownerOrganizationId trong update → Xóa nếu có (giữ nguyên logic cũ)
 			delete(updateData, "ownerOrganizationId")
@@ -459,7 +460,8 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) UpdateMany(c fiber.Ctx) error
 				return nil
 			}
 
-			// ✅ Có quyền → Cho phép update (giữ nguyên ownerOrganizationId trong updateData)
+			// ✅ Có quyền → Thay thế string bằng ObjectID trong updateData để MongoDB lưu đúng kiểu
+			updateData["ownerOrganizationId"] = newOwnerOrgID
 		} else {
 			// Không có ownerOrganizationId trong update → Xóa nếu có (giữ nguyên logic cũ)
 			delete(updateData, "ownerOrganizationId")
@@ -546,8 +548,8 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) UpdateById(c fiber.Ctx) error
 				return nil
 			}
 
-			// ✅ Có quyền cả 2 (document hiện tại + organization mới) → Cho phép update
-			// Giữ nguyên ownerOrganizationId trong updateData
+			// ✅ Có quyền cả 2 (document hiện tại + organization mới) → Thay thế string bằng ObjectID trong updateData để MongoDB lưu đúng kiểu
+			updateData["ownerOrganizationId"] = newOwnerOrgID
 		} else {
 			// Không có ownerOrganizationId trong update → Xóa nếu có (giữ nguyên logic cũ)
 			delete(updateData, "ownerOrganizationId")

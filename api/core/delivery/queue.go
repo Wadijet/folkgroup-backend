@@ -1,4 +1,4 @@
-package notification
+package delivery
 
 import (
 	"context"
@@ -73,4 +73,3 @@ func (q *Queue) Dequeue(ctx context.Context, limit int) ([]*models.NotificationQ
 
 	return result, nil
 }
-

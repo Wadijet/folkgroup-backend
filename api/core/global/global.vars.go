@@ -43,6 +43,10 @@ type MongoDB_Auth_CollectionName struct {
 	NotificationRoutingRules string // Tên collection cho notification routing rules
 	NotificationQueue      string // Tên collection cho notification queue
 	NotificationHistory    string // Tên collection cho notification history
+
+	// CTA Module Collections
+	CTALibrary  string // Tên collection cho CTA library
+	CTATracking string // Tên collection cho CTA tracking
 }
 
 // Các biến toàn cục

@@ -51,13 +51,15 @@ func initColNames() {
 	global.MongoDB_ColNames.PcPosCategories = "pc_pos_categories"
 	global.MongoDB_ColNames.PcPosOrders = "pc_pos_orders"
 
-	// Notification Module Collections
+	// Notification System Collections (Hệ thống 2 - Routing/Template)
 	global.MongoDB_ColNames.NotificationSenders = "notification_senders"
 	global.MongoDB_ColNames.NotificationChannels = "notification_channels"
 	global.MongoDB_ColNames.NotificationTemplates = "notification_templates"
 	global.MongoDB_ColNames.NotificationRoutingRules = "notification_routing_rules"
-	global.MongoDB_ColNames.NotificationQueue = "notification_queue"
-	global.MongoDB_ColNames.NotificationHistory = "notification_history"
+	
+	// Delivery System Collections (Hệ thống 1 - Gửi)
+	global.MongoDB_ColNames.DeliveryQueue = "delivery_queue"
+	global.MongoDB_ColNames.DeliveryHistory = "delivery_history"
 
 	// CTA Module Collections
 	global.MongoDB_ColNames.CTALibrary = "cta_library"
@@ -120,13 +122,15 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.PcPosCategories), models.PcPosCategory{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.PcPosOrders), models.PcPosOrder{})
 
-	// Notification Module Indexes
+	// Notification System Indexes (Hệ thống 2 - Routing/Template)
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.NotificationSenders), models.NotificationChannelSender{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.NotificationChannels), models.NotificationChannel{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.NotificationTemplates), models.NotificationTemplate{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.NotificationRoutingRules), models.NotificationRoutingRule{})
-	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.NotificationQueue), models.NotificationQueueItem{})
-	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.NotificationHistory), models.NotificationHistory{})
+	
+	// Delivery System Indexes (Hệ thống 1 - Gửi)
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DeliveryQueue), models.DeliveryQueueItem{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DeliveryHistory), models.DeliveryHistory{})
 
 	// CTA Module Indexes
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CTALibrary), models.CTALibrary{})

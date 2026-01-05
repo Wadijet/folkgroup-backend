@@ -16,12 +16,12 @@ import (
 
 // NotificationTrackHandler xử lý tracking opens và clicks
 type NotificationTrackHandler struct {
-	historyService *services.NotificationHistoryService
+	historyService *services.DeliveryHistoryService
 }
 
 // NewNotificationTrackHandler tạo mới NotificationTrackHandler
 func NewNotificationTrackHandler() (*NotificationTrackHandler, error) {
-	historyService, err := services.NewNotificationHistoryService()
+	historyService, err := services.NewDeliveryHistoryService()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create notification history service: %v", err)
 	}
@@ -89,30 +89,42 @@ func (h *NotificationTrackHandler) HandleTrackClick(c fiber.Ctx) error {
 		ctaIndexStr := c.Params("ctaIndex")
 
 		if historyIDStr == "" || ctaIndexStr == "" {
-			c.Status(400)
-			c.JSON(map[string]string{"error": "historyId và ctaIndex là bắt buộc"})
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code":    common.ErrCodeValidationFormat.Code,
+				"message": "historyId và ctaIndex là bắt buộc",
+				"status":  "error",
+			})
 			return nil
 		}
 
 		if !primitive.IsValidObjectID(historyIDStr) {
-			c.Status(400)
-			c.JSON(map[string]string{"error": "historyId không hợp lệ"})
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code":    common.ErrCodeValidationFormat.Code,
+				"message": "historyId không hợp lệ",
+				"status":  "error",
+			})
 			return nil
 		}
 
 		historyID := utility.String2ObjectID(historyIDStr)
 		ctaIndex := 0
 		if _, err := fmt.Sscanf(ctaIndexStr, "%d", &ctaIndex); err != nil {
-			c.Status(400)
-			c.JSON(map[string]string{"error": "ctaIndex phải là số"})
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code":    common.ErrCodeValidationFormat.Code,
+				"message": "ctaIndex phải là số",
+				"status":  "error",
+			})
 			return nil
 		}
 
 		// Lấy original URL từ query params
 		originalURL := c.Query("url", "")
 		if originalURL == "" {
-			c.Status(400)
-			c.JSON(map[string]string{"error": "url là bắt buộc"})
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code":    common.ErrCodeValidationFormat.Code,
+				"message": "url là bắt buộc",
+				"status":  "error",
+			})
 			return nil
 		}
 
@@ -174,14 +186,20 @@ func (h *NotificationTrackHandler) HandleTrackConfirm(c fiber.Ctx) error {
 	return SafeHandlerWrapper(c, func() error {
 		historyIDStr := c.Params("historyId")
 		if historyIDStr == "" {
-			c.Status(400)
-			c.JSON(map[string]string{"error": "historyId là bắt buộc"})
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code":    common.ErrCodeValidationFormat.Code,
+				"message": "historyId là bắt buộc",
+				"status":  "error",
+			})
 			return nil
 		}
 
 		if !primitive.IsValidObjectID(historyIDStr) {
-			c.Status(400)
-			c.JSON(map[string]string{"error": "historyId không hợp lệ"})
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code":    common.ErrCodeValidationFormat.Code,
+				"message": "historyId không hợp lệ",
+				"status":  "error",
+			})
 			return nil
 		}
 
@@ -205,9 +223,13 @@ func (h *NotificationTrackHandler) HandleTrackConfirm(c fiber.Ctx) error {
 			return nil
 		}
 
-		c.JSON(map[string]interface{}{
-			"message":     "Notification đã được xác nhận",
-			"confirmedAt": now,
+		c.Status(common.StatusOK).JSON(fiber.Map{
+			"code":    common.StatusOK,
+			"message": "Notification đã được xác nhận",
+			"data": map[string]interface{}{
+				"confirmedAt": now,
+			},
+			"status": "success",
 		})
 		return nil
 	})

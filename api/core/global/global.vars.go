@@ -36,13 +36,15 @@ type MongoDB_Auth_CollectionName struct {
 	PcPosCategories string // Tên collection cho danh mục sản phẩm từ Pancake POS API
 	PcPosOrders     string // Tên collection cho đơn hàng từ Pancake POS API
 
-	// Notification Module Collections
-	NotificationSenders    string // Tên collection cho notification senders
-	NotificationChannels   string // Tên collection cho notification channels
-	NotificationTemplates  string // Tên collection cho notification templates
+	// Notification System Collections (Hệ thống 2 - Routing/Template)
+	NotificationSenders      string // Tên collection cho notification senders
+	NotificationChannels     string // Tên collection cho notification channels
+	NotificationTemplates    string // Tên collection cho notification templates
 	NotificationRoutingRules string // Tên collection cho notification routing rules
-	NotificationQueue      string // Tên collection cho notification queue
-	NotificationHistory    string // Tên collection cho notification history
+	
+	// Delivery System Collections (Hệ thống 1 - Gửi)
+	DeliveryQueue   string // Tên collection cho delivery queue (đổi từ notification_queue)
+	DeliveryHistory  string // Tên collection cho delivery history (đổi từ notification_history)
 
 	// CTA Module Collections
 	CTALibrary  string // Tên collection cho CTA library

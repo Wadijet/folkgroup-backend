@@ -41,7 +41,7 @@ func NewTemplate() (*Template, error) {
 }
 
 // FindTemplate tìm template theo EventType, ChannelType, và OrganizationID
-// Logic: Tìm team-specific trước, nếu không có → tìm global
+// Logic: Tìm team-specific trước, nếu không có → tìm system template
 func (t *Template) FindTemplate(ctx context.Context, eventType string, channelType string, organizationID primitive.ObjectID) (*models.NotificationTemplate, error) {
 	// 1. Tìm team-specific template
 	filter := bson.M{
@@ -59,11 +59,17 @@ func (t *Template) FindTemplate(ctx context.Context, eventType string, channelTy
 		return nil, fmt.Errorf("failed to find team-specific template: %w", err)
 	}
 
-	// 2. Nếu không có → Tìm global template (ownerOrganizationId = null)
+	// 2. Nếu không có → Tìm system template (ownerOrganizationId = systemOrg.ID)
+	// System Organization là cấp cao nhất, chứa templates mặc định cho tất cả organizations
+	systemOrgID, err := cta.GetSystemOrganizationID(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get system organization ID: %w", err)
+	}
+
 	filter = bson.M{
 		"eventType":           eventType,
 		"channelType":         channelType,
-		"ownerOrganizationId": nil,
+		"ownerOrganizationId": systemOrgID,
 		"isActive":            true,
 	}
 
@@ -72,7 +78,7 @@ func (t *Template) FindTemplate(ctx context.Context, eventType string, channelTy
 		if errors.Is(err, common.ErrNotFound) {
 			return nil, fmt.Errorf("template not found for eventType=%s, channelType=%s", eventType, channelType)
 		}
-		return nil, fmt.Errorf("failed to find global template: %w", err)
+		return nil, fmt.Errorf("failed to find system template: %w", err)
 	}
 
 	return &template, nil

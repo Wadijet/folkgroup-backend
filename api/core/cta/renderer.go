@@ -33,7 +33,7 @@ type CTARenderRequest struct {
 	Variables       map[string]interface{} `json:"variables"`       // Variables để render vào CTA
 	BaseURL         string                 `json:"baseURL"`         // Base URL cho tracking endpoint
 	TrackingEnabled bool                   `json:"trackingEnabled"` // Có bật tracking không
-	HistoryID       *primitive.ObjectID    `json:"historyId"`       // ID của NotificationHistory (nếu có)
+	HistoryID       *primitive.ObjectID    `json:"historyId"`       // ID của DeliveryHistory (nếu có)
 	OrganizationID  primitive.ObjectID     `json:"organizationId"` // Organization ID để tìm CTA (organization-specific → system)
 }
 

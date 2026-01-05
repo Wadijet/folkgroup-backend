@@ -4,10 +4,10 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// NotificationQueueItem - Queue item để xử lý
+// DeliveryQueueItem - Queue item để xử lý (thuộc Delivery System)
 // Delivery Service chỉ cần: sender, recipient, content đã render
 // Option C (Hybrid): SenderID (fallback) + SenderConfig (optional, encrypted) - fast path
-type NotificationQueueItem struct {
+type DeliveryQueueItem struct {
 	ID                  primitive.ObjectID     `json:"id,omitempty" bson:"_id,omitempty"`
 	EventType           string                 `json:"eventType" bson:"eventType" index:"single:1"`
 	OwnerOrganizationID primitive.ObjectID     `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1"`
@@ -22,7 +22,8 @@ type NotificationQueueItem struct {
 
 	Status      string `json:"status" bson:"status" index:"single:1"` // pending, processing, completed, failed
 	RetryCount  int    `json:"retryCount" bson:"retryCount"`
-	MaxRetries  int    `json:"maxRetries" bson:"maxRetries"` // Mặc định: 3
+	MaxRetries  int    `json:"maxRetries" bson:"maxRetries"` // Số lần retry tối đa (tính từ Severity)
+	Priority    int    `json:"priority" bson:"priority" index:"single:1"` // Priority để sort queue (1=critical, 2=high, 3=medium, 4=low, 5=info)
 	NextRetryAt *int64 `json:"nextRetryAt,omitempty" bson:"nextRetryAt,omitempty" index:"single:1"`
 
 	Error     string `json:"error,omitempty" bson:"error,omitempty"`

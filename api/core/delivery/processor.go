@@ -12,6 +12,7 @@ import (
 	"meta_commerce/core/api/services"
 	"meta_commerce/core/delivery/channels"
 	"meta_commerce/core/logger"
+	"meta_commerce/core/notification"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -21,20 +22,20 @@ import (
 // Nhận: sender, recipient, content đã render
 // Gửi đi
 type Processor struct {
-	queueService   *services.NotificationQueueService
-	historyService *services.NotificationHistoryService
+	queueService   *services.DeliveryQueueService
+	historyService *services.DeliveryHistoryService
 	senderService  *services.NotificationSenderService
 	baseURL        string
 }
 
 // NewProcessor tạo mới Processor
 func NewProcessor(baseURL string) (*Processor, error) {
-	queueService, err := services.NewNotificationQueueService()
+	queueService, err := services.NewDeliveryQueueService()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create queue service: %w", err)
 	}
 
-	historyService, err := services.NewNotificationHistoryService()
+	historyService, err := services.NewDeliveryHistoryService()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create history service: %w", err)
 	}
@@ -55,7 +56,7 @@ func NewProcessor(baseURL string) (*Processor, error) {
 // handleRetryOrFail xử lý retry logic cho mọi error case
 // Nếu chưa hết retry: tăng retryCount, set nextRetryAt, reset về pending
 // Nếu đã hết retry: đánh dấu failed và xóa khỏi queue
-func (p *Processor) handleRetryOrFail(ctx context.Context, item *models.NotificationQueueItem, err error) error {
+func (p *Processor) handleRetryOrFail(ctx context.Context, item *models.DeliveryQueueItem, err error) error {
 	log := logger.GetAppLogger()
 	
 	// Tăng retryCount
@@ -125,7 +126,7 @@ func (p *Processor) handleRetryOrFail(ctx context.Context, item *models.Notifica
 }
 
 // ProcessQueueItem xử lý một queue item - chỉ xử lý delivery (nhận content đã render)
-func (p *Processor) ProcessQueueItem(ctx context.Context, item *models.NotificationQueueItem) error {
+func (p *Processor) ProcessQueueItem(ctx context.Context, item *models.DeliveryQueueItem) error {
 	var err error
 	log := logger.GetAppLogger()
 	log.WithFields(map[string]interface{}{
@@ -232,12 +233,18 @@ func (p *Processor) ProcessQueueItem(ctx context.Context, item *models.Notificat
 	}
 
 	// 6. Tạo history record (trước khi gửi)
+	// Infer Domain và Severity từ EventType để lưu vào history (cho reporting)
+	domain := notification.GetDomainFromEventType(item.EventType)
+	severity := notification.GetSeverityFromEventType(item.EventType)
+
 	historyID := primitive.NewObjectID()
-	history := &models.NotificationHistory{
+	history := &models.DeliveryHistory{
 		ID:                  historyID,
 		QueueItemID:         item.ID,
 		EventType:           item.EventType,
 		OwnerOrganizationID: item.OwnerOrganizationID,
+		Domain:              domain,   // Lưu để reporting
+		Severity:            severity, // Lưu để reporting
 		ChannelType:         item.ChannelType,
 		Recipient:           item.Recipient,
 		Status:              "pending",

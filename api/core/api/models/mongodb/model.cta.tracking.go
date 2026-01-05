@@ -8,8 +8,8 @@ import (
 // Lưu trữ lịch sử click vào CTA buttons
 type CTATracking struct {
 	ID                 primitive.ObjectID  `json:"id,omitempty" bson:"_id,omitempty"`
-	OwnerOrganizationID primitive.ObjectID  `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1"` // Tổ chức sở hữu (required) - lấy từ NotificationHistory
-	HistoryID          primitive.ObjectID  `json:"historyId" bson:"historyId" index:"single:1"`                        // ID của NotificationHistory
+	OwnerOrganizationID primitive.ObjectID  `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1"` // Tổ chức sở hữu (required) - lấy từ DeliveryHistory
+	HistoryID          primitive.ObjectID  `json:"historyId" bson:"historyId" index:"single:1"`                        // ID của DeliveryHistory
 	CTAIndex           int                 `json:"ctaIndex" bson:"ctaIndex"`                                            // Index của CTA trong mảng CTAs (0-based)
 	CTACode            string              `json:"ctaCode" bson:"ctaCode" index:"single:1"`                            // Mã CTA (từ CTALibrary.Code)
 	ClickedAt          int64               `json:"clickedAt" bson:"clickedAt" index:"single:1"`                      // Thời gian click

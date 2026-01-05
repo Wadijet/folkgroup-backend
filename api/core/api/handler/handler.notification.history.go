@@ -6,14 +6,15 @@ import (
 	"meta_commerce/core/api/services"
 )
 
-// NotificationHistoryHandler xử lý các request liên quan đến Notification History
+// NotificationHistoryHandler xử lý các request liên quan đến Delivery History (alias cho backward compatibility)
+// Note: Thực chất sử dụng DeliveryHistory model (thuộc Delivery System)
 type NotificationHistoryHandler struct {
-	BaseHandler[models.NotificationHistory, models.NotificationHistory, models.NotificationHistory]
+	BaseHandler[models.DeliveryHistory, models.DeliveryHistory, models.DeliveryHistory]
 }
 
 // NewNotificationHistoryHandler tạo mới NotificationHistoryHandler
 func NewNotificationHistoryHandler() (*NotificationHistoryHandler, error) {
-	historyService, err := services.NewNotificationHistoryService()
+	historyService, err := services.NewDeliveryHistoryService()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create notification history service: %v", err)
 	}

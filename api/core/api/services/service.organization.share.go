@@ -59,9 +59,20 @@ func GetSharedOrganizationIDs(ctx context.Context, userOrgIDs []primitive.Object
 		return []primitive.ObjectID{}, nil
 	}
 
-	// Query: toOrgId trong userOrgIDs (dùng tên field trong bson tag)
+	// Query: Tìm shares có:
+	// 1. ToOrgIDs chứa ít nhất 1 org trong userOrgIDs (share với orgs cụ thể)
+	// 2. ToOrgIDs rỗng/null (share với tất cả)
 	filter := bson.M{
-		"toOrgId": bson.M{"$in": userOrgIDs},
+		"$or": []bson.M{
+			// Share với orgs cụ thể: ToOrgIDs chứa ít nhất 1 org trong userOrgIDs
+			{"toOrgIds": bson.M{"$in": userOrgIDs}},
+			// Share với tất cả: ToOrgIDs rỗng hoặc null
+			{"$or": []bson.M{
+				{"toOrgIds": bson.M{"$exists": false}},
+				{"toOrgIds": bson.M{"$size": 0}},
+				{"toOrgIds": nil},
+			}},
+		},
 	}
 
 	// Nếu có permissionName, filter thêm
@@ -69,10 +80,18 @@ func GetSharedOrganizationIDs(ctx context.Context, userOrgIDs []primitive.Object
 		// Share nếu:
 		// 1. PermissionNames rỗng/nil (share tất cả permissions)
 		// 2. PermissionNames chứa permissionName cụ thể
-		filter["$or"] = []bson.M{
-			{"permissionNames": bson.M{"$exists": false}},                // Không có field
-			{"permissionNames": bson.M{"$size": 0}},                      // Array rỗng
-			{"permissionNames": bson.M{"$in": []string{permissionName}}}, // Chứa permissionName
+		permissionFilter := bson.M{
+			"$or": []bson.M{
+				{"permissionNames": bson.M{"$exists": false}},                // Không có field
+				{"permissionNames": bson.M{"$size": 0}},                      // Array rỗng
+				{"permissionNames": bson.M{"$in": []string{permissionName}}}, // Chứa permissionName
+			},
+		}
+		filter = bson.M{
+			"$and": []bson.M{
+				filter,
+				permissionFilter,
+			},
 		}
 	}
 
@@ -84,7 +103,7 @@ func GetSharedOrganizationIDs(ctx context.Context, userOrgIDs []primitive.Object
 		return nil, err
 	}
 
-	// Lấy fromOrgIDs (organizations share data với user)
+	// Lấy OwnerOrganizationID từ shares (organizations share data với user)
 	sharedOrgIDsMap := make(map[primitive.ObjectID]bool)
 	for _, share := range shares {
 		// Nếu có permissionName, kiểm tra kỹ hơn
@@ -104,7 +123,23 @@ func GetSharedOrganizationIDs(ctx context.Context, userOrgIDs []primitive.Object
 			}
 		}
 
-		sharedOrgIDsMap[share.OwnerOrganizationID] = true
+		// Kiểm tra share có áp dụng cho user không
+		// Nếu ToOrgIDs rỗng → share với tất cả → luôn áp dụng
+		// Nếu ToOrgIDs có giá trị → kiểm tra có chứa org của user không
+		if len(share.ToOrgIDs) == 0 {
+			// Share với tất cả → luôn áp dụng
+			sharedOrgIDsMap[share.OwnerOrganizationID] = true
+		} else {
+			// Share với orgs cụ thể → kiểm tra có org của user trong ToOrgIDs không
+			for _, userOrgID := range userOrgIDs {
+				for _, shareToOrgID := range share.ToOrgIDs {
+					if userOrgID == shareToOrgID {
+						sharedOrgIDsMap[share.OwnerOrganizationID] = true
+						break
+					}
+				}
+			}
+		}
 	}
 
 	// Convert to slice

@@ -62,27 +62,35 @@ func (h *OrganizationShareHandler) CreateShare(c fiber.Ctx) error {
 			return nil
 		}
 
-		toOrgID, err := primitive.ObjectIDFromHex(input.ToOrgID)
-		if err != nil {
-			h.HandleResponse(c, nil, common.NewError(
-				common.ErrCodeValidationFormat,
-				fmt.Sprintf("toOrgId không hợp lệ: %v", err),
-				common.StatusBadRequest,
-				err,
-			))
-			return nil
+		// Parse ToOrgIDs từ mảng string sang mảng ObjectID
+		var toOrgIDs []primitive.ObjectID
+		if len(input.ToOrgIDs) > 0 {
+			toOrgIDs = make([]primitive.ObjectID, 0, len(input.ToOrgIDs))
+			for _, toOrgIDStr := range input.ToOrgIDs {
+				toOrgID, err := primitive.ObjectIDFromHex(toOrgIDStr)
+				if err != nil {
+					h.HandleResponse(c, nil, common.NewError(
+						common.ErrCodeValidationFormat,
+						fmt.Sprintf("toOrgIds chứa ID không hợp lệ: %v", err),
+						common.StatusBadRequest,
+						err,
+					))
+					return nil
+				}
+				// Validate: ownerOrgID không được có trong ToOrgIDs
+				if toOrgID == ownerOrgID {
+					h.HandleResponse(c, nil, common.NewError(
+						common.ErrCodeValidationInput,
+						"ownerOrganizationId không được có trong toOrgIds",
+						common.StatusBadRequest,
+						nil,
+					))
+					return nil
+				}
+				toOrgIDs = append(toOrgIDs, toOrgID)
+			}
 		}
-
-		// Validate: ownerOrgID và toOrgID không được giống nhau
-		if ownerOrgID == toOrgID {
-			h.HandleResponse(c, nil, common.NewError(
-				common.ErrCodeValidationInput,
-				"ownerOrganizationId và toOrgId không được giống nhau",
-				common.StatusBadRequest,
-				nil,
-			))
-			return nil
-		}
+		// Nếu ToOrgIDs rỗng hoặc null → share với tất cả (để toOrgIDs = nil hoặc [])
 
 		// Validate: user có quyền share data của ownerOrg
 		userIDStr, ok := c.Locals("user_id").(string)
@@ -123,33 +131,69 @@ func (h *OrganizationShareHandler) CreateShare(c fiber.Ctx) error {
 		}
 
 		// Kiểm tra share đã tồn tại chưa
-		_, err = h.OrganizationShareService.FindOne(c.Context(), bson.M{
+		// Query tất cả shares có cùng ownerOrgID và so sánh thủ công
+		existingShares, err := h.OrganizationShareService.Find(c.Context(), bson.M{
 			"ownerOrganizationId": ownerOrgID,
-			"toOrgId":             toOrgID,
 		}, nil)
-
-		if err == nil {
-			// Share đã tồn tại
-			h.HandleResponse(c, nil, common.NewError(
-				common.ErrCodeBusinessOperation,
-				"Share đã tồn tại giữa 2 organizations này",
-				common.StatusConflict,
-				nil,
-			))
-			return nil
-		}
-		// Nếu err != nil và không phải ErrNotFound, có thể là lỗi khác
-		if err != common.ErrNotFound {
+		if err != nil && err != common.ErrNotFound {
 			h.HandleResponse(c, nil, err)
 			return nil
 		}
-		// err == ErrNotFound, tiếp tục tạo mới
+
+		// So sánh với shares hiện có
+		for _, existingShare := range existingShares {
+			// So sánh ToOrgIDs (không quan tâm thứ tự)
+			if len(toOrgIDs) == 0 {
+				// Share với tất cả: kiểm tra xem share hiện có cũng share với tất cả không
+				if len(existingShare.ToOrgIDs) == 0 {
+					// Cả 2 đều share với tất cả, kiểm tra PermissionNames
+					if comparePermissionNames(input.PermissionNames, existingShare.PermissionNames) {
+						h.HandleResponse(c, nil, common.NewError(
+							common.ErrCodeBusinessOperation,
+							"Share với tất cả organizations đã tồn tại cho organization này với cùng permissions",
+							common.StatusConflict,
+							nil,
+						))
+						return nil
+					}
+				}
+			} else {
+				// Share với orgs cụ thể: kiểm tra xem ToOrgIDs có giống nhau không (không quan tâm thứ tự)
+				if len(existingShare.ToOrgIDs) == len(toOrgIDs) {
+					// Tạo map để so sánh nhanh
+					existingMap := make(map[primitive.ObjectID]bool)
+					for _, id := range existingShare.ToOrgIDs {
+						existingMap[id] = true
+					}
+					allMatch := true
+					for _, id := range toOrgIDs {
+						if !existingMap[id] {
+							allMatch = false
+							break
+						}
+					}
+					if allMatch {
+						// ToOrgIDs giống nhau, kiểm tra PermissionNames
+						if comparePermissionNames(input.PermissionNames, existingShare.PermissionNames) {
+							h.HandleResponse(c, nil, common.NewError(
+								common.ErrCodeBusinessOperation,
+								"Share với các organizations này đã tồn tại với cùng permissions",
+								common.StatusConflict,
+								nil,
+							))
+							return nil
+						}
+					}
+				}
+			}
+		}
 
 		// Tạo share record
 		share := models.OrganizationShare{
 			OwnerOrganizationID: ownerOrgID,
-			ToOrgID:             toOrgID,
+			ToOrgIDs:            toOrgIDs, // Mảng ObjectIDs (rỗng = share với tất cả)
 			PermissionNames:     input.PermissionNames,
+			Description:         input.Description, // Mô tả về lệnh share
 			CreatedAt:           utility.CurrentTimeInMilli(),
 			CreatedBy:           userID,
 		}
@@ -288,7 +332,7 @@ func (h *OrganizationShareHandler) ListShares(c fiber.Ctx) error {
 			filter["ownerOrganizationId"] = ownerOrgID
 		}
 
-		// Filter theo toOrgId
+		// Filter theo toOrgId (tìm shares có toOrgId này trong mảng ToOrgIDs)
 		if toOrgIDStr != "" {
 			toOrgID, err := primitive.ObjectIDFromHex(toOrgIDStr)
 			if err != nil {
@@ -300,7 +344,15 @@ func (h *OrganizationShareHandler) ListShares(c fiber.Ctx) error {
 				))
 				return nil
 			}
-			filter["toOrgId"] = toOrgID
+			// Tìm shares có toOrgID trong mảng ToOrgIDs hoặc share với tất cả (ToOrgIDs rỗng)
+			filter["$or"] = []bson.M{
+				{"toOrgIds": toOrgID}, // ToOrgIDs chứa toOrgID
+				{"$or": []bson.M{ // Share với tất cả
+					{"toOrgIds": bson.M{"$exists": false}},
+					{"toOrgIds": bson.M{"$size": 0}},
+					{"toOrgIds": nil},
+				}},
+			}
 		}
 
 		// Nếu không có filter nào, trả về lỗi
@@ -319,4 +371,26 @@ func (h *OrganizationShareHandler) ListShares(c fiber.Ctx) error {
 		h.HandleResponse(c, data, err)
 		return nil
 	})
+}
+
+// comparePermissionNames so sánh 2 mảng PermissionNames (không quan tâm thứ tự)
+// Trả về true nếu 2 mảng giống nhau (cùng elements, không quan tâm thứ tự)
+func comparePermissionNames(perms1, perms2 []string) bool {
+	if len(perms1) != len(perms2) {
+		return false
+	}
+	if len(perms1) == 0 {
+		return true // Cả 2 đều rỗng = giống nhau
+	}
+	// Tạo map để so sánh
+	perms1Map := make(map[string]bool)
+	for _, p := range perms1 {
+		perms1Map[p] = true
+	}
+	for _, p := range perms2 {
+		if !perms1Map[p] {
+			return false
+		}
+	}
+	return true
 }

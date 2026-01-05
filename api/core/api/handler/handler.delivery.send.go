@@ -11,6 +11,7 @@ import (
 	"meta_commerce/core/common"
 	"meta_commerce/core/delivery"
 	"meta_commerce/core/logger"
+	"meta_commerce/core/notification"
 
 	"github.com/gofiber/fiber/v3"
 	"go.mongodb.org/mongo-driver/bson"
@@ -157,8 +158,13 @@ func (h *DeliverySendHandler) HandleSend(c fiber.Ctx) error {
 			}
 		}
 
+		// Infer Severity từ EventType để tính Priority và MaxRetries
+		severity := notification.GetSeverityFromEventType(req.EventType)
+		priority := notification.GetPriorityFromSeverity(severity)
+		maxRetries := notification.GetMaxRetriesFromSeverity(severity)
+
 		// Tạo queue item
-		queueItem := &models.NotificationQueueItem{
+		queueItem := &models.DeliveryQueueItem{
 			ID:                  primitive.NewObjectID(),
 			EventType:           req.EventType,
 			OwnerOrganizationID: orgID,
@@ -172,13 +178,14 @@ func (h *DeliverySendHandler) HandleSend(c fiber.Ctx) error {
 			Payload:             req.Metadata,
 			Status:              "pending",
 			RetryCount:          0,
-			MaxRetries:          3,
+			MaxRetries:          maxRetries, // Tính từ Severity
+			Priority:            priority,    // Tính từ Severity
 			CreatedAt:           time.Now().Unix(),
 			UpdatedAt:           time.Now().Unix(),
 		}
 
 		// Enqueue
-		err = h.queue.Enqueue(c.Context(), []*models.NotificationQueueItem{queueItem})
+		err = h.queue.Enqueue(c.Context(), []*models.DeliveryQueueItem{queueItem})
 		if err != nil {
 			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
 				"code":    common.ErrCodeBusinessOperation.Code,
@@ -190,10 +197,15 @@ func (h *DeliverySendHandler) HandleSend(c fiber.Ctx) error {
 
 		// Response (messageId sẽ là history ID sau khi processor xử lý)
 		// Tạm thời dùng queueItem ID
-		c.JSON(DeliverySendResponse{
-			MessageID: queueItem.ID.Hex(),
-			Status:    "queued",
-			QueuedAt:  queueItem.CreatedAt,
+		c.Status(common.StatusOK).JSON(fiber.Map{
+			"code":    common.StatusOK,
+			"message": "Notification đã được thêm vào queue",
+			"data": DeliverySendResponse{
+				MessageID: queueItem.ID.Hex(),
+				Status:    "queued",
+				QueuedAt:  queueItem.CreatedAt,
+			},
+			"status": "success",
 		})
 		return nil
 	})

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"meta_commerce/core/common"
 	"meta_commerce/core/cta"
 	"strconv"
 
@@ -24,38 +25,48 @@ func (h *CTATrackHandler) TrackCTAClick(c fiber.Ctx) error {
 	ctaIndexStr := c.Params("ctaIndex")
 
 	if historyIDStr == "" || ctaIndexStr == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "historyId and ctaIndex are required",
+		return c.Status(common.StatusBadRequest).JSON(fiber.Map{
+			"code":    common.ErrCodeValidationFormat.Code,
+			"message": "historyId and ctaIndex are required",
+			"status":  "error",
 		})
 	}
 
 	historyID, err := primitive.ObjectIDFromHex(historyIDStr)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Invalid historyId",
+		return c.Status(common.StatusBadRequest).JSON(fiber.Map{
+			"code":    common.ErrCodeValidationFormat.Code,
+			"message": "Invalid historyId",
+			"status":  "error",
 		})
 	}
 
 	ctaIndex, err := strconv.Atoi(ctaIndexStr)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Invalid ctaIndex",
+		return c.Status(common.StatusBadRequest).JSON(fiber.Map{
+			"code":    common.ErrCodeValidationFormat.Code,
+			"message": "Invalid ctaIndex",
+			"status":  "error",
 		})
 	}
 
 	// Lấy original URL từ query param
 	encodedURL := c.Query("url")
 	if encodedURL == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "url parameter is required",
+		return c.Status(common.StatusBadRequest).JSON(fiber.Map{
+			"code":    common.ErrCodeValidationFormat.Code,
+			"message": "url parameter is required",
+			"status":  "error",
 		})
 	}
 
 	// Decode URL
 	decodedURL, err := cta.DecodeTrackingURL(encodedURL)
 	if err != nil {
-		return c.Status(400).JSON(fiber.Map{
-			"error": "Invalid encoded URL",
+		return c.Status(common.StatusBadRequest).JSON(fiber.Map{
+			"code":    common.ErrCodeValidationFormat.Code,
+			"message": "Invalid encoded URL",
+			"status":  "error",
 		})
 	}
 
@@ -63,26 +74,30 @@ func (h *CTATrackHandler) TrackCTAClick(c fiber.Ctx) error {
 	ipAddress := c.IP()
 	userAgent := c.Get("User-Agent")
 
-	// TODO: Lấy ownerOrganizationID từ NotificationHistory
+	// TODO: Lấy ownerOrganizationID từ DeliveryHistory
 	// Tạm thời dùng System Organization ID
 	ctx := context.Background()
 	systemOrgID, err := cta.GetSystemOrganizationID(ctx)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error": "Failed to get system organization",
+		return c.Status(common.StatusInternalServerError).JSON(fiber.Map{
+			"code":    common.ErrCodeInternalServer.Code,
+			"message": "Failed to get system organization",
+			"status":  "error",
 		})
 	}
 
-	// TODO: Lấy CTA code từ NotificationHistory
+	// TODO: Lấy CTA code từ DeliveryHistory
 	// Tạm thời dùng empty string
 	ctaCode := ""
 
 	// Ghi lại click
 	err = cta.TrackCTAClick(ctx, historyID, ctaIndex, ctaCode, systemOrgID, ipAddress, userAgent)
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error": "Failed to track CTA click",
+		return c.Status(common.StatusInternalServerError).JSON(fiber.Map{
+			"code":    common.ErrCodeInternalServer.Code,
+			"message": "Failed to track CTA click",
 			"details": err.Error(),
+			"status":  "error",
 		})
 	}
 

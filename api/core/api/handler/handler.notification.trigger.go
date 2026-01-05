@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	models "meta_commerce/core/api/models/mongodb"
 	"meta_commerce/core/api/services"
 	"meta_commerce/core/common"
+	"meta_commerce/core/cta"
 	"meta_commerce/core/delivery"
 	"meta_commerce/core/logger"
 	"meta_commerce/core/notification"
@@ -58,6 +60,28 @@ type TriggerNotificationRequest struct {
 // HandleTriggerNotification xử lý request trigger notification
 func (h *NotificationTriggerHandler) HandleTriggerNotification(c fiber.Ctx) error {
 	return SafeHandlerWrapper(c, func() error {
+		// Lấy thông tin request để tracking
+		// Request ID middleware set vào Locals với key "requestid" (lowercase)
+		var requestID string
+		if rid := c.Locals("requestid"); rid != nil {
+			if ridStr, ok := rid.(string); ok {
+				requestID = ridStr
+			}
+		}
+		// Fallback: lấy từ header nếu không có trong Locals
+		if requestID == "" {
+			requestID = c.Get("X-Request-ID")
+		}
+		// Fallback: lấy từ response header nếu middleware đã set
+		if requestID == "" {
+			requestID = c.GetRespHeader("X-Request-ID")
+		}
+		clientIP := c.IP()
+		userID := ""
+		if userIDStr, ok := c.Locals("user_id").(string); ok {
+			userID = userIDStr
+		}
+
 		var req TriggerNotificationRequest
 		if err := c.Bind().Body(&req); err != nil {
 			c.Status(common.StatusBadRequest).JSON(fiber.Map{
@@ -82,9 +106,35 @@ func (h *NotificationTriggerHandler) HandleTriggerNotification(c fiber.Ctx) erro
 			req.Payload = make(map[string]interface{})
 		}
 
-		// Tìm routes cho eventType
-		routes, err := h.router.FindRoutes(c.Context(), req.EventType)
+		// Infer Domain và Severity từ EventType
+		domain := notification.GetDomainFromEventType(req.EventType)
+		severity := notification.GetSeverityFromEventType(req.EventType)
+
+		// Lấy organizationID từ context (nếu có) để filter rules
+		var organizationID *primitive.ObjectID
+		if orgIDStr, ok := c.Locals("active_organization_id").(string); ok && orgIDStr != "" {
+			if orgID, err := primitive.ObjectIDFromHex(orgIDStr); err == nil {
+				organizationID = &orgID
+			}
+		}
+
+		// Tìm routes cho eventType với domain và severity
+		// Lưu ý: Chỉ tìm rules của organization trigger event (hoặc system rules)
+		log := logger.GetAppLogger()
+		log.WithFields(map[string]interface{}{
+			"requestId":      requestID,
+			"clientIp":       clientIP,
+			"userId":         userID,
+			"eventType":      req.EventType,
+			"domain":         domain,
+			"severity":       severity,
+			"organizationId": organizationID,
+			"timestamp":      time.Now().Unix(),
+		}).Info("🔔 [NOTIFICATION] Bắt đầu tìm routes")
+
+		routes, err := h.router.FindRoutes(c.Context(), req.EventType, domain, severity, organizationID)
 		if err != nil {
+			log.WithError(err).WithField("eventType", req.EventType).Error("🔔 [NOTIFICATION] Lỗi khi tìm routes")
 			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
 				"code":    common.ErrCodeBusinessOperation.Code,
 				"message": fmt.Sprintf("Không thể tìm routes cho eventType '%s': %v", req.EventType, err),
@@ -93,11 +143,40 @@ func (h *NotificationTriggerHandler) HandleTriggerNotification(c fiber.Ctx) erro
 			return nil
 		}
 
+		log.WithFields(map[string]interface{}{
+			"requestId":   requestID,
+			"clientIp":    clientIP,
+			"userId":      userID,
+			"eventType":   req.EventType,
+			"routesFound": len(routes),
+		}).Info("🔔 [NOTIFICATION] Đã tìm thấy routes")
+
+		// Log chi tiết về routes để debug
+		if len(routes) > 0 {
+			routeDetails := make([]map[string]interface{}, 0, len(routes))
+			for _, route := range routes {
+				routeDetails = append(routeDetails, map[string]interface{}{
+					"organizationId": route.OrganizationID.Hex(),
+					"channelId":      route.ChannelID.Hex(),
+				})
+			}
+			log.WithFields(map[string]interface{}{
+				"requestId":   requestID,
+				"routes":      routeDetails,
+				"routesCount": len(routes),
+			}).Debug("🔔 [NOTIFICATION] Chi tiết routes")
+		}
+
 		if len(routes) == 0 {
-			c.JSON(map[string]interface{}{
-				"message":   "Không có routing rule nào cho eventType này",
-				"eventType": req.EventType,
-				"queued":    0,
+			log.WithField("eventType", req.EventType).Warn("🔔 [NOTIFICATION] Không có routes nào cho eventType này")
+			c.Status(common.StatusOK).JSON(fiber.Map{
+				"code":    common.StatusOK,
+				"message": "Không có routing rule nào cho eventType này",
+				"data": map[string]interface{}{
+					"eventType": req.EventType,
+					"queued":    0,
+				},
+				"status": "success",
 			})
 			return nil
 		}
@@ -114,7 +193,8 @@ func (h *NotificationTriggerHandler) HandleTriggerNotification(c fiber.Ctx) erro
 		}
 
 		// Tạo queue items cho mỗi route
-		queueItems := make([]*models.NotificationQueueItem, 0)
+		queueItems := make([]*models.DeliveryQueueItem, 0)
+		renderErrors := make([]string, 0) // Thu thập lỗi render để trả về cho client
 		channelService, err := services.NewNotificationChannelService()
 		if err != nil {
 			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
@@ -135,7 +215,6 @@ func (h *NotificationTriggerHandler) HandleTriggerNotification(c fiber.Ctx) erro
 			return nil
 		}
 
-		log := logger.GetAppLogger()
 		for _, route := range routes {
 			// Lấy channel để biết recipients và channel type
 			channel, err := channelService.FindOneById(c.Context(), route.ChannelID)
@@ -161,12 +240,16 @@ func (h *NotificationTriggerHandler) HandleTriggerNotification(c fiber.Ctx) erro
 			// Render template (subject, content, CTAs)
 			rendered, err := h.template.Render(c.Context(), template, req.Payload, route.OrganizationID, baseURL)
 			if err != nil {
+				// Thu thập lỗi render để trả về cho client
+				errorMsg := fmt.Sprintf("Lỗi khi render template cho channel %s (type: %s, templateId: %s): %v",
+					channel.ID.Hex(), channel.ChannelType, template.ID.Hex(), err)
+				renderErrors = append(renderErrors, errorMsg)
 				log.WithError(err).WithFields(map[string]interface{}{
 					"eventType":      req.EventType,
 					"channelType":    channel.ChannelType,
 					"organizationId": route.OrganizationID.Hex(),
 					"templateId":     template.ID.Hex(),
-				}).Error("🔔 [NOTIFICATION] Lỗi khi render template, bỏ qua route")
+				}).Error("🔔 [NOTIFICATION] Lỗi khi render template")
 				continue
 			}
 
@@ -227,18 +310,25 @@ func (h *NotificationTriggerHandler) HandleTriggerNotification(c fiber.Ctx) erro
 			}
 
 			log.WithFields(map[string]interface{}{
-				"eventType":         req.EventType,
-				"channelType":       channel.ChannelType,
-				"channelId":         channel.ID.Hex(),
-				"senderId":           senderID.Hex(),
-				"hasSenderConfig":   encryptedSenderConfig != "",
-				"recipientCount":    len(recipients),
-				"ctaCount":          len(rendered.CTAs),
+				"requestId":       requestID,
+				"eventType":       req.EventType,
+				"channelType":     channel.ChannelType,
+				"channelId":       channel.ID.Hex(),
+				"organizationId":  route.OrganizationID.Hex(),
+				"senderId":        senderID.Hex(),
+				"hasSenderConfig": encryptedSenderConfig != "",
+				"recipientCount":  len(recipients),
+				"recipients":      recipients, // Log recipients để debug
+				"ctaCount":        len(rendered.CTAs),
 			}).Info("🔔 [NOTIFICATION] Đã render template thành công, tạo queue items")
+
+			// Tính Priority và MaxRetries từ Severity
+			priority := notification.GetPriorityFromSeverity(severity)
+			maxRetries := notification.GetMaxRetriesFromSeverity(severity)
 
 			// Tạo queue item cho mỗi recipient (với content đã render và sender config đã encrypt)
 			for _, recipient := range recipients {
-				queueItems = append(queueItems, &models.NotificationQueueItem{
+				queueItems = append(queueItems, &models.DeliveryQueueItem{
 					ID:                  primitive.NewObjectID(),
 					EventType:           req.EventType,
 					OwnerOrganizationID: route.OrganizationID,
@@ -252,17 +342,49 @@ func (h *NotificationTriggerHandler) HandleTriggerNotification(c fiber.Ctx) erro
 					Payload:             req.Payload,
 					Status:              "pending",
 					RetryCount:          0,
-					MaxRetries:          3,
+					MaxRetries:          maxRetries, // Tính từ Severity
+					Priority:            priority,   // Tính từ Severity
 					CreatedAt:           time.Now().Unix(),
 					UpdatedAt:           time.Now().Unix(),
 				})
 			}
 		}
 
+		// Nếu có lỗi render, trả về lỗi cho client
+		if len(renderErrors) > 0 {
+			errorMessage := fmt.Sprintf("Không thể render template cho %d route(s). Chi tiết: %s",
+				len(renderErrors), strings.Join(renderErrors, "; "))
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code":    common.ErrCodeBusinessOperation.Code,
+				"message": errorMessage,
+				"errors":  renderErrors,
+				"status":  "error",
+			})
+			return nil
+		}
+
 		// Enqueue items
 		if len(queueItems) > 0 {
+			// Log trước khi enqueue để track
+			log.WithFields(map[string]interface{}{
+				"requestId":    requestID,
+				"clientIp":     clientIP,
+				"userId":       userID,
+				"eventType":    req.EventType,
+				"queueItems":   len(queueItems),
+				"timestamp":    time.Now().Unix(),
+				"organizationId": organizationID,
+			}).Info("🔔 [NOTIFICATION] Bắt đầu enqueue items vào delivery queue")
+
 			err = h.queue.Enqueue(c.Context(), queueItems)
 			if err != nil {
+				log.WithError(err).WithFields(map[string]interface{}{
+					"requestId":  requestID,
+					"clientIp":   clientIP,
+					"userId":     userID,
+					"eventType":  req.EventType,
+					"queueItems": len(queueItems),
+				}).Error("🔔 [NOTIFICATION] Lỗi khi enqueue items")
 				c.Status(common.StatusInternalServerError).JSON(fiber.Map{
 					"code":    common.ErrCodeBusinessOperation.Code,
 					"message": fmt.Sprintf("Không thể thêm items vào queue: %v", err),
@@ -270,12 +392,27 @@ func (h *NotificationTriggerHandler) HandleTriggerNotification(c fiber.Ctx) erro
 				})
 				return nil
 			}
+
+			// Log sau khi enqueue thành công
+			log.WithFields(map[string]interface{}{
+				"requestId":    requestID,
+				"clientIp":     clientIP,
+				"userId":       userID,
+				"eventType":    req.EventType,
+				"queued":       len(queueItems),
+				"timestamp":    time.Now().Unix(),
+				"organizationId": organizationID,
+			}).Info("🔔 [NOTIFICATION] Đã enqueue items thành công")
 		}
 
-		c.JSON(map[string]interface{}{
-			"message":   "Notification đã được thêm vào queue",
-			"eventType": req.EventType,
-			"queued":    len(queueItems),
+		c.Status(common.StatusOK).JSON(fiber.Map{
+			"code":    common.StatusOK,
+			"message": "Notification đã được thêm vào queue",
+			"data": map[string]interface{}{
+				"eventType": req.EventType,
+				"queued":    len(queueItems),
+			},
+			"status": "success",
 		})
 		return nil
 	})
@@ -295,12 +432,18 @@ func findSenderForChannel(ctx context.Context, senderService *services.Notificat
 	}
 
 	// 2. Tìm sender active cho organization và channel type
+	// Lấy System Organization ID để tìm system sender
+	systemOrgID, err := cta.GetSystemOrganizationID(ctx)
+	if err != nil {
+		return nil, primitive.NilObjectID, fmt.Errorf("failed to get system organization ID: %w", err)
+	}
+
 	filter := bson.M{
 		"channelType": channel.ChannelType,
 		"isActive":    true,
 		"$or": []bson.M{
 			{"ownerOrganizationId": organizationID},
-			{"ownerOrganizationId": nil}, // System sender
+			{"ownerOrganizationId": systemOrgID}, // System sender (thuộc System Organization)
 		},
 	}
 
@@ -312,9 +455,9 @@ func findSenderForChannel(ctx context.Context, senderService *services.Notificat
 				return &s, s.ID, nil
 			}
 		}
-		// Fallback về system sender
+		// Fallback về system sender (thuộc System Organization)
 		for _, s := range senders {
-			if s.OwnerOrganizationID == nil {
+			if s.OwnerOrganizationID != nil && s.OwnerOrganizationID.Hex() == systemOrgID.Hex() {
 				return &s, s.ID, nil
 			}
 		}

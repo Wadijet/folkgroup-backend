@@ -10,6 +10,7 @@ type NotificationTemplate struct {
 	OwnerOrganizationID *primitive.ObjectID `json:"ownerOrganizationId,omitempty" bson:"ownerOrganizationId,omitempty" index:"single:1"` // Tổ chức sở hữu dữ liệu (phân quyền) - null = System Organization
 	EventType      string              `json:"eventType" bson:"eventType" index:"single:1"`                                // conversation_unreplied, order_created, ...
 	ChannelType    string              `json:"channelType" bson:"channelType" index:"single:1"`                           // email, telegram, webhook
+	Description    string              `json:"description,omitempty" bson:"description,omitempty"`                        // Mô tả về template để người dùng hiểu được mục đích sử dụng
 	Subject        string              `json:"subject,omitempty" bson:"subject,omitempty"`                                  // Cho email
 	Content        string              `json:"content" bson:"content"`                                                      // Có thể chứa {{variable}}
 	Variables      []string            `json:"variables" bson:"variables"`                                                  // ["conversationId", "minutes"]

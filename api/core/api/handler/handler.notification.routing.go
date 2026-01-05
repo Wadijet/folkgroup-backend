@@ -5,11 +5,17 @@ import (
 	"meta_commerce/core/api/dto"
 	models "meta_commerce/core/api/models/mongodb"
 	"meta_commerce/core/api/services"
+	"meta_commerce/core/common"
+
+	"github.com/gofiber/fiber/v3"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // NotificationRoutingHandler xử lý các request liên quan đến Notification Routing Rule
 type NotificationRoutingHandler struct {
 	BaseHandler[models.NotificationRoutingRule, dto.NotificationRoutingRuleCreateInput, dto.NotificationRoutingRuleUpdateInput]
+	routingService *services.NotificationRoutingService
 }
 
 // NewNotificationRoutingHandler tạo mới NotificationRoutingHandler
@@ -21,7 +27,8 @@ func NewNotificationRoutingHandler() (*NotificationRoutingHandler, error) {
 
 	baseHandler := NewBaseHandler[models.NotificationRoutingRule, dto.NotificationRoutingRuleCreateInput, dto.NotificationRoutingRuleUpdateInput](routingService)
 	handler := &NotificationRoutingHandler{
-		BaseHandler: *baseHandler,
+		BaseHandler:    *baseHandler,
+		routingService: routingService,
 	}
 
 	// Khởi tạo filterOptions với giá trị mặc định
@@ -43,3 +50,107 @@ func NewNotificationRoutingHandler() (*NotificationRoutingHandler, error) {
 	return handler, nil
 }
 
+// InsertOne override để thêm validation uniqueness
+// Mỗi organization chỉ có thể có 1 rule cho mỗi eventType hoặc domain
+func (h *NotificationRoutingHandler) InsertOne(c fiber.Ctx) error {
+	return h.SafeHandler(c, func() error {
+		// Parse request body thành struct T
+		input := new(models.NotificationRoutingRule)
+		if err := h.ParseRequestBody(c, input); err != nil {
+			h.HandleResponse(c, nil, common.NewError(
+				common.ErrCodeValidationFormat,
+				fmt.Sprintf("Dữ liệu gửi lên không đúng định dạng JSON hoặc không khớp với cấu trúc yêu cầu. Chi tiết: %v", err),
+				common.StatusBadRequest,
+				err,
+			))
+			return nil
+		}
+
+		// ✅ Xử lý ownerOrganizationId: Cho phép chỉ định từ request hoặc dùng context
+		ownerOrgIDFromRequest := h.getOwnerOrganizationIDFromModel(input)
+		if ownerOrgIDFromRequest != nil && !ownerOrgIDFromRequest.IsZero() {
+			// Có ownerOrganizationId trong request → Validate quyền
+			if err := h.validateUserHasAccessToOrg(c, *ownerOrgIDFromRequest); err != nil {
+				h.HandleResponse(c, nil, err)
+				return nil
+			}
+			// ✅ Có quyền → Giữ nguyên ownerOrganizationId từ request
+		} else {
+			// Không có trong request → Dùng context (backward compatible)
+			activeOrgID := h.getActiveOrganizationID(c)
+			if activeOrgID != nil && !activeOrgID.IsZero() {
+				h.setOrganizationID(input, *activeOrgID)
+			} else {
+				h.HandleResponse(c, nil, common.NewError(
+					common.ErrCodeValidationInput,
+					"Không thể xác định organization. Vui lòng cung cấp ownerOrganizationId hoặc set active organization context",
+					common.StatusBadRequest,
+					nil,
+				))
+				return nil
+			}
+		}
+
+		// ✅ Validate uniqueness: Kiểm tra đã có rule cho eventType/domain và ownerOrganizationId chưa
+		ownerOrgID := h.getOwnerOrganizationIDFromModel(input)
+		if ownerOrgID != nil && !ownerOrgID.IsZero() {
+			// Kiểm tra rule với eventType (nếu có)
+			if input.EventType != nil && *input.EventType != "" {
+				filter := bson.M{
+					"eventType":           *input.EventType,
+					"ownerOrganizationId":  *ownerOrgID,
+					"isActive":            true, // Chỉ check rules đang active
+				}
+				_, err := h.routingService.FindOne(c.Context(), filter, nil)
+				if err == nil {
+					h.HandleResponse(c, nil, common.NewError(
+						common.ErrCodeBusinessOperation,
+						fmt.Sprintf("Đã tồn tại routing rule cho eventType '%s' và organization này. Mỗi organization chỉ có thể có 1 rule cho mỗi eventType", *input.EventType),
+						common.StatusConflict,
+						nil,
+					))
+					return nil
+				}
+				if err != common.ErrNotFound {
+					h.HandleResponse(c, nil, err)
+					return nil
+				}
+			}
+
+			// Kiểm tra rule với domain (nếu có)
+			if input.Domain != nil && *input.Domain != "" {
+				filter := bson.M{
+					"domain":              *input.Domain,
+					"ownerOrganizationId":  *ownerOrgID,
+					"isActive":            true, // Chỉ check rules đang active
+				}
+				_, err := h.routingService.FindOne(c.Context(), filter, nil)
+				if err == nil {
+					h.HandleResponse(c, nil, common.NewError(
+						common.ErrCodeBusinessOperation,
+						fmt.Sprintf("Đã tồn tại routing rule cho domain '%s' và organization này. Mỗi organization chỉ có thể có 1 rule cho mỗi domain", *input.Domain),
+						common.StatusConflict,
+						nil,
+					))
+					return nil
+				}
+				if err != common.ErrNotFound {
+					h.HandleResponse(c, nil, err)
+					return nil
+				}
+			}
+		}
+
+		// ✅ Lưu userID vào context để service có thể check admin
+		ctx := c.Context()
+		if userIDStr, ok := c.Locals("user_id").(string); ok && userIDStr != "" {
+			if userID, err := primitive.ObjectIDFromHex(userIDStr); err == nil {
+				ctx = services.SetUserIDToContext(ctx, userID)
+			}
+		}
+
+		data, err := h.BaseService.InsertOne(ctx, *input)
+		h.HandleResponse(c, data, err)
+		return nil
+	})
+}

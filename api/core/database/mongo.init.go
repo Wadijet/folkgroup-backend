@@ -238,6 +238,8 @@ func CreateIndexes(ctx context.Context, collection *mongo.Collection, model inte
 
 	compoundGroups := map[string]bson.D{}
 	compoundOptions := map[string]*options.IndexOptions{}
+	compoundUnique := map[string]bool{} // Track compound indexes cần unique
+	compoundSparse := map[string]bool{} // Track compound indexes cần sparse
 
 	for i := 0; i < modelType.NumField(); i++ {
 		field := modelType.Field(i)
@@ -312,13 +314,29 @@ func CreateIndexes(ctx context.Context, collection *mongo.Collection, model inte
 				if _, exists := compoundOptions[groupName]; !exists {
 					compoundOptions[groupName] = options.Index().SetName(groupName)
 				}
+				// Kiểm tra xem compound index có cần unique không (từ tên group có chứa "_unique")
+				if strings.Contains(groupName, "_unique") {
+					compoundUnique[groupName] = true
+				}
+				// Kiểm tra xem compound index có cần sparse không
+				if _, hasSparse := config["sparse"]; hasSparse {
+					compoundSparse[groupName] = true
+				}
 			}
 		}
 	}
 
 	// Tạo compound index
 	for groupName, fields := range compoundGroups {
-		if err := checkAndReplaceIndex(ctx, collection, existingIndexes, groupName, fields, compoundOptions[groupName]); err != nil {
+		opts := compoundOptions[groupName]
+		// Apply unique và sparse nếu cần
+		if compoundUnique[groupName] {
+			opts = opts.SetUnique(true)
+		}
+		if compoundSparse[groupName] {
+			opts = opts.SetSparse(true)
+		}
+		if err := checkAndReplaceIndex(ctx, collection, existingIndexes, groupName, fields, opts); err != nil {
 			return err
 		}
 	}

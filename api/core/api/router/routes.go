@@ -734,7 +734,7 @@ func (r *Router) registerNotificationRoutes(router fiber.Router) error {
 	if err != nil {
 		return fmt.Errorf("failed to create notification history handler: %v", err)
 	}
-	r.registerCRUDRoutes(router, "/notification/history", historyHandler, notificationHistoryConfig, "NotificationHistory")
+	r.registerCRUDRoutes(router, "/notification/history", historyHandler, notificationHistoryConfig, "DeliveryHistory")
 
 	// Notification Trigger route
 	triggerHandler, err := handler.NewNotificationTriggerHandler()
@@ -793,28 +793,18 @@ func (r *Router) registerDeliveryRoutes(router fiber.Router) error {
 	orgContextMiddleware := middleware.OrganizationContextMiddleware()
 	registerRouteWithMiddleware(router, "/delivery", "POST", "/send", []fiber.Handler{sendMiddleware, orgContextMiddleware}, sendHandler.HandleSend)
 
-	// Delivery Sender routes (CRUD)
-	senderHandler, err := handler.NewDeliverySenderHandler()
-	if err != nil {
-		return fmt.Errorf("failed to create delivery sender handler: %v", err)
-	}
-	r.registerCRUDRoutes(router, "/delivery/sender", senderHandler, notificationSenderConfig, "NotificationSender")
-
 	// Delivery History routes (read-only)
-	historyHandler, err := handler.NewDeliveryHistoryHandler()
+	// Lưu ý: History thuộc Delivery System (cùng với Queue), nên đặt endpoint trong /delivery namespace
+	// để nhất quán với model DeliveryHistory và collection delivery_history
+	historyHandler, err := handler.NewNotificationHistoryHandler()
 	if err != nil {
 		return fmt.Errorf("failed to create delivery history handler: %v", err)
 	}
-	r.registerCRUDRoutes(router, "/delivery/history", historyHandler, notificationHistoryConfig, "NotificationHistory")
+	r.registerCRUDRoutes(router, "/delivery/history", historyHandler, notificationHistoryConfig, "DeliveryHistory")
 
-	// Delivery Tracking routes (public, không cần auth)
-	trackHandler, err := handler.NewDeliveryTrackHandler()
-	if err != nil {
-		return fmt.Errorf("failed to create delivery track handler: %v", err)
-	}
-	router.Get("/delivery/track/open/:historyId", trackHandler.HandleTrackOpen)
-	router.Get("/delivery/track/:historyId/:ctaIndex", trackHandler.HandleTrackClick)
-	router.Get("/delivery/confirm/:historyId", trackHandler.HandleTrackConfirm)
+	// Lưu ý: Delivery Sender và Tracking routes
+	// - Sender: Dùng /notification/sender (cùng resource, thuộc Notification System)
+	// - Tracking: Dùng /notification/track/* (cùng chức năng)
 
 	return nil
 }

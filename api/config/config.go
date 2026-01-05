@@ -35,6 +35,10 @@ type Configuration struct {
 	EnableTLS   bool   `env:"ENABLE_TLS" envDefault:"false"` // Bật HTTPS
 	TLSCertFile string `env:"TLS_CERT_FILE"`                 // Đường dẫn đến file certificate (.crt hoặc .pem)
 	TLSKeyFile  string `env:"TLS_KEY_FILE"`                  // Đường dẫn đến file private key (.key)
+	// Telegram Notification Configuration (optional - dùng cho notification init)
+	TelegramBotToken    string `env:"TELEGRAM_BOT_TOKEN"`    // Bot token cho Telegram sender mặc định (optional)
+	TelegramBotUsername string `env:"TELEGRAM_BOT_USERNAME"` // Bot username cho Telegram sender mặc định (optional)
+	TelegramChatIDs     string `env:"TELEGRAM_CHAT_IDS"`    // Danh sách chat IDs phân cách bằng dấu phẩy, ví dụ: "-123456789,-987654321" (optional)
 }
 
 // getEnvPath trả về đường dẫn đến file env dựa trên môi trường

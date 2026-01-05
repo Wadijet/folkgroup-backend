@@ -10,6 +10,7 @@ type NotificationChannelSender struct {
 	OwnerOrganizationID *primitive.ObjectID `json:"ownerOrganizationId,omitempty" bson:"ownerOrganizationId,omitempty" index:"single:1"` // Tổ chức sở hữu dữ liệu (phân quyền) - null = System Organization
 	ChannelType    string              `json:"channelType" bson:"channelType" index:"single:1"`                           // email, telegram, webhook
 	Name           string              `json:"name" bson:"name" index:"single:1"`
+	Description    string              `json:"description,omitempty" bson:"description,omitempty"`                         // Mô tả về sender để người dùng hiểu được mục đích sử dụng
 	IsActive       bool                `json:"isActive" bson:"isActive" index:"single:1"`
 	IsSystem       bool                `json:"-" bson:"isSystem" index:"single:1"` // true = dữ liệu hệ thống, không thể xóa (chỉ dùng nội bộ, không expose ra API)
 

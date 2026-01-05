@@ -14,27 +14,27 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// NotificationQueueService là cấu trúc chứa các phương thức liên quan đến Notification Queue
-type NotificationQueueService struct {
-	*BaseServiceMongoImpl[models.NotificationQueueItem]
+// DeliveryQueueService là cấu trúc chứa các phương thức liên quan đến Delivery Queue (thuộc Delivery System)
+type DeliveryQueueService struct {
+	*BaseServiceMongoImpl[models.DeliveryQueueItem]
 }
 
-// NewNotificationQueueService tạo mới NotificationQueueService
-func NewNotificationQueueService() (*NotificationQueueService, error) {
-	collection, exist := global.RegistryCollections.Get(global.MongoDB_ColNames.NotificationQueue)
+// NewDeliveryQueueService tạo mới DeliveryQueueService
+func NewDeliveryQueueService() (*DeliveryQueueService, error) {
+	collection, exist := global.RegistryCollections.Get(global.MongoDB_ColNames.DeliveryQueue)
 	if !exist {
-		return nil, fmt.Errorf("failed to get notification_queue collection: %v", common.ErrNotFound)
+		return nil, fmt.Errorf("failed to get delivery_queue collection: %v", common.ErrNotFound)
 	}
 
-	return &NotificationQueueService{
-		BaseServiceMongoImpl: NewBaseServiceMongo[models.NotificationQueueItem](collection),
+	return &DeliveryQueueService{
+		BaseServiceMongoImpl: NewBaseServiceMongo[models.DeliveryQueueItem](collection),
 	}, nil
 }
 
 // FindPending tìm các items có status="pending" hoặc "processing" quá lâu (stale)
 // Stale processing items: items có status="processing" nhưng đã quá 5 phút (có thể processor bị crash)
 // Chỉ lấy items có nextRetryAt là null hoặc đã đến thời điểm retry
-func (s *NotificationQueueService) FindPending(ctx context.Context, limit int) ([]models.NotificationQueueItem, error) {
+func (s *DeliveryQueueService) FindPending(ctx context.Context, limit int) ([]models.DeliveryQueueItem, error) {
 	now := time.Now().Unix()
 	staleThreshold := now - 300 // 5 phút trước
 	
@@ -58,8 +58,12 @@ func (s *NotificationQueueService) FindPending(ctx context.Context, limit int) (
 		},
 	}
 
+	// Dùng bson.D cho sort với nhiều keys (MongoDB driver yêu cầu)
 	opts := options.Find().
-		SetSort(bson.M{"createdAt": 1}).
+		SetSort(bson.D{
+			{Key: "priority", Value: 1},   // Sort theo Priority trước (1=critical xử lý đầu tiên)
+			{Key: "createdAt", Value: 1},  // Sau đó sort theo createdAt
+		}).
 		SetLimit(int64(limit))
 
 	cursor, err := s.BaseServiceMongoImpl.collection.Find(ctx, filter, opts)
@@ -68,7 +72,7 @@ func (s *NotificationQueueService) FindPending(ctx context.Context, limit int) (
 	}
 	defer cursor.Close(ctx)
 
-	var items []models.NotificationQueueItem
+	var items []models.DeliveryQueueItem
 	if err := cursor.All(ctx, &items); err != nil {
 		return nil, err
 	}
@@ -77,7 +81,7 @@ func (s *NotificationQueueService) FindPending(ctx context.Context, limit int) (
 }
 
 // UpdateStatus cập nhật status cho nhiều items
-func (s *NotificationQueueService) UpdateStatus(ctx context.Context, ids []interface{}, status string) error {
+func (s *DeliveryQueueService) UpdateStatus(ctx context.Context, ids []interface{}, status string) error {
 	filter := bson.M{"_id": bson.M{"$in": ids}}
 	update := bson.M{"$set": bson.M{"status": status, "updatedAt": time.Now().Unix()}}
 
@@ -86,7 +90,7 @@ func (s *NotificationQueueService) UpdateStatus(ctx context.Context, ids []inter
 }
 
 // CleanupFailedItems xóa các items failed đã quá 7 ngày (cleanup old failed items)
-func (s *NotificationQueueService) CleanupFailedItems(ctx context.Context, daysOld int) (int64, error) {
+func (s *DeliveryQueueService) CleanupFailedItems(ctx context.Context, daysOld int) (int64, error) {
 	cutoffTime := time.Now().Unix() - int64(daysOld*24*60*60)
 	
 	filter := bson.M{
@@ -102,10 +106,41 @@ func (s *NotificationQueueService) CleanupFailedItems(ctx context.Context, daysO
 	return result.DeletedCount, nil
 }
 
+// FindRecentDuplicates tìm các items duplicate trong khoảng thời gian gần đây
+// Dùng để tránh tạo duplicate items khi client spam hoặc có nhiều channels trùng lặp
+// Kiểm tra: eventType, recipient, channelType trong khoảng thời gian (default: 1 phút)
+func (s *DeliveryQueueService) FindRecentDuplicates(ctx context.Context, eventType string, recipient string, channelType string, timeWindowSeconds int64) ([]models.DeliveryQueueItem, error) {
+	now := time.Now().Unix()
+	timeThreshold := now - timeWindowSeconds
+
+	filter := bson.M{
+		"eventType":   eventType,
+		"recipient":   recipient,
+		"channelType": channelType,
+		"createdAt":   bson.M{"$gte": timeThreshold}, // Items được tạo trong khoảng thời gian gần đây
+		"status":      bson.M{"$in": []string{"pending", "processing"}}, // Chỉ check items chưa completed/failed
+	}
+
+	opts := options.Find().SetSort(bson.M{"createdAt": -1}).SetLimit(10)
+
+	cursor, err := s.BaseServiceMongoImpl.collection.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var items []models.DeliveryQueueItem
+	if err := cursor.All(ctx, &items); err != nil {
+		return nil, err
+	}
+
+	return items, nil
+}
+
 // FindStuckItems tìm các items bị kẹt (stuck)
 // - Items có status="processing" quá lâu (stale)
 // - Items có senderID rỗng
-func (s *NotificationQueueService) FindStuckItems(ctx context.Context, staleMinutes int, limit int) ([]models.NotificationQueueItem, error) {
+func (s *DeliveryQueueService) FindStuckItems(ctx context.Context, staleMinutes int, limit int) ([]models.DeliveryQueueItem, error) {
 	now := time.Now().Unix()
 	staleThreshold := now - int64(staleMinutes*60)
 	zeroObjectID := primitive.NilObjectID
@@ -132,11 +167,10 @@ func (s *NotificationQueueService) FindStuckItems(ctx context.Context, staleMinu
 	}
 	defer cursor.Close(ctx)
 
-	var items []models.NotificationQueueItem
+	var items []models.DeliveryQueueItem
 	if err := cursor.All(ctx, &items); err != nil {
 		return nil, err
 	}
 
 	return items, nil
 }
-

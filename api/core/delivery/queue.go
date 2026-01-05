@@ -7,16 +7,17 @@ import (
 
 	models "meta_commerce/core/api/models/mongodb"
 	"meta_commerce/core/api/services"
+	"meta_commerce/core/logger"
 )
 
 // Queue xử lý việc enqueue và dequeue
 type Queue struct {
-	queueService *services.NotificationQueueService
+	queueService *services.DeliveryQueueService
 }
 
 // NewQueue tạo mới Queue
 func NewQueue() (*Queue, error) {
-	queueService, err := services.NewNotificationQueueService()
+	queueService, err := services.NewDeliveryQueueService()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create queue service: %w", err)
 	}
@@ -27,28 +28,77 @@ func NewQueue() (*Queue, error) {
 }
 
 // Enqueue thêm items vào queue
-func (q *Queue) Enqueue(ctx context.Context, items []*models.NotificationQueueItem) error {
+func (q *Queue) Enqueue(ctx context.Context, items []*models.DeliveryQueueItem) error {
 	now := time.Now().Unix()
+	log := logger.GetAppLogger()
+
+	// Log thông tin items trước khi insert
+	eventTypes := make(map[string]int)
+	recipients := make(map[string]int)
+	channelTypes := make(map[string]int)
+	organizationIDs := make(map[string]int)
+
 	for _, item := range items {
 		item.Status = "pending"
 		item.RetryCount = 0
-		item.MaxRetries = 3
+		// MaxRetries và Priority đã được set ở NotificationTriggerHandler (từ Severity)
+		// Chỉ set default nếu chưa có
+		if item.MaxRetries == 0 {
+			item.MaxRetries = 3 // Default
+		}
+		if item.Priority == 0 {
+			item.Priority = 3 // Default medium
+		}
 		item.CreatedAt = now
 		item.UpdatedAt = now
+
+		// Track statistics
+		eventTypes[item.EventType]++
+		recipients[item.Recipient]++
+		channelTypes[item.ChannelType]++
+		organizationIDs[item.OwnerOrganizationID.Hex()]++
 	}
 
-	// Convert []*models.NotificationQueueItem to []models.NotificationQueueItem
-	itemsToInsert := make([]models.NotificationQueueItem, len(items))
+	// Log trước khi insert
+	log.WithFields(map[string]interface{}{
+		"totalItems":      len(items),
+		"eventTypes":      eventTypes,
+		"uniqueRecipients": len(recipients),
+		"channelTypes":    channelTypes,
+		"organizationIds": organizationIDs,
+		"timestamp":       now,
+	}).Info("📦 [DELIVERY] Bắt đầu insert queue items vào database")
+
+	// Convert []*models.DeliveryQueueItem to []models.DeliveryQueueItem
+	itemsToInsert := make([]models.DeliveryQueueItem, len(items))
 	for i, item := range items {
 		itemsToInsert[i] = *item
 	}
 
-	_, err := q.queueService.InsertMany(ctx, itemsToInsert)
-	return err
+	insertedItems, err := q.queueService.InsertMany(ctx, itemsToInsert)
+	if err != nil {
+		log.WithError(err).WithFields(map[string]interface{}{
+			"totalItems": len(items),
+		}).Error("📦 [DELIVERY] Lỗi khi insert queue items vào database")
+		return err
+	}
+
+	// Log sau khi insert thành công
+	log.WithFields(map[string]interface{}{
+		"totalItems":       len(items),
+		"insertedCount":    len(insertedItems),
+		"eventTypes":       eventTypes,
+		"uniqueRecipients": len(recipients),
+		"channelTypes":     channelTypes,
+		"organizationIds": organizationIDs,
+		"timestamp":        now,
+	}).Info("📦 [DELIVERY] Đã insert queue items thành công vào database")
+
+	return nil
 }
 
 // Dequeue lấy items từ queue (status="pending", limit)
-func (q *Queue) Dequeue(ctx context.Context, limit int) ([]*models.NotificationQueueItem, error) {
+func (q *Queue) Dequeue(ctx context.Context, limit int) ([]*models.DeliveryQueueItem, error) {
 	items, err := q.queueService.FindPending(ctx, limit)
 	if err != nil {
 		return nil, err
@@ -66,7 +116,7 @@ func (q *Queue) Dequeue(ctx context.Context, limit int) ([]*models.NotificationQ
 	}
 
 	// Convert to pointers
-	result := make([]*models.NotificationQueueItem, len(items))
+	result := make([]*models.DeliveryQueueItem, len(items))
 	for i := range items {
 		result[i] = &items[i]
 	}

@@ -14,6 +14,7 @@ type CTALibrary struct {
 	Action             string              `json:"action" bson:"action"`                                                 // URL action (có thể chứa {{variable}})
 	Style              string              `json:"style,omitempty" bson:"style,omitempty"`                          // Style: "primary", "success", "secondary", "danger"
 	Variables          []string            `json:"variables" bson:"variables"`                                         // Danh sách variables cần render: ["conversationId", "orderId"]
+	Description        string              `json:"description,omitempty" bson:"description,omitempty"`              // Mô tả về CTA để người dùng hiểu được mục đích sử dụng
 	IsActive           bool                `json:"isActive" bson:"isActive" index:"single:1"`
 	IsSystem           bool                `json:"-" bson:"isSystem" index:"single:1"` // true = dữ liệu hệ thống, không thể xóa
 	CreatedAt          int64               `json:"createdAt" bson:"createdAt"`

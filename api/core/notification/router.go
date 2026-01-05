@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	models "meta_commerce/core/api/models/mongodb"
 	"meta_commerce/core/api/services"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -40,35 +41,86 @@ func NewRouter() (*Router, error) {
 }
 
 // FindRoutes tìm tất cả routes cho một eventType
-func (r *Router) FindRoutes(ctx context.Context, eventType string) ([]Route, error) {
-	// Tìm tất cả rules cho eventType
-	rules, err := r.routingService.FindByEventType(ctx, eventType)
+// Hỗ trợ routing theo EventType (cụ thể) hoặc Domain (tổng quát)
+// Có thể filter theo Severity để tránh spam
+// Lưu ý: Chỉ tìm rules của organization trigger event (hoặc system rules)
+func (r *Router) FindRoutes(ctx context.Context, eventType string, domain string, severity string, organizationID *primitive.ObjectID) ([]Route, error) {
+	rules := []models.NotificationRoutingRule{}
+
+	// 1. Tìm rules theo EventType (nếu có)
+	eventTypeRules, err := r.routingService.FindByEventType(ctx, eventType, organizationID)
 	if err != nil {
-		return nil, err
+		// Log error nhưng tiếp tục với domain search
+		fmt.Printf("🔔 [NOTIFICATION] Error finding rules by eventType '%s': %v\n", eventType, err)
+	} else {
+		fmt.Printf("🔔 [NOTIFICATION] Found %d rules by eventType '%s' for organization %v\n", len(eventTypeRules), eventType, organizationID)
+		rules = append(rules, eventTypeRules...)
 	}
 
-	routes := []Route{}
+	// 2. Tìm rules theo Domain (nếu có)
+	if domain != "" {
+		domainRules, err := r.routingService.FindByDomain(ctx, domain, organizationID)
+		if err == nil {
+			rules = append(rules, domainRules...)
+		}
+	}
 
-	// Với mỗi rule
+	// 3. Filter theo Severity và loại bỏ duplicate
+	filteredRules := []models.NotificationRoutingRule{}
+	seenRuleIDs := make(map[string]bool)
+
 	for _, rule := range rules {
 		if !rule.IsActive {
 			continue
 		}
 
+		// Loại bỏ duplicate (cùng rule ID)
+		ruleID := rule.ID.Hex()
+		if seenRuleIDs[ruleID] {
+			continue
+		}
+		seenRuleIDs[ruleID] = true
+
+		// Nếu rule có filter Severity, kiểm tra
+		if len(rule.Severities) > 0 {
+			severityMatched := false
+			for _, s := range rule.Severities {
+				if s == severity {
+					severityMatched = true
+					break
+				}
+			}
+			if !severityMatched {
+				continue // Bỏ qua rule này (severity không match)
+			}
+		}
+
+		filteredRules = append(filteredRules, rule)
+	}
+
+	// 4. Tạo routes từ filtered rules
+	routes := []Route{}
+
+	for _, rule := range filteredRules {
 		// Với mỗi team trong rule
 		for _, orgID := range rule.OrganizationIDs {
 			// Lấy TẤT CẢ channels của team (filter theo ChannelTypes nếu có)
 			channels, err := r.channelService.FindByOrganizationID(ctx, orgID, rule.ChannelTypes)
 			if err != nil {
 				// Log error nhưng tiếp tục với team khác
+				fmt.Printf("🔔 [NOTIFICATION] Error finding channels for orgID %s: %v\n", orgID.Hex(), err)
 				continue
 			}
+
+			fmt.Printf("🔔 [NOTIFICATION] Found %d channels for orgID %s (ChannelTypes: %v)\n", len(channels), orgID.Hex(), rule.ChannelTypes)
 
 			// Với mỗi channel của team
 			for _, channel := range channels {
 				if !channel.IsActive {
+					fmt.Printf("🔔 [NOTIFICATION] Channel %s is not active, skipping\n", channel.ID.Hex())
 					continue
 				}
+				fmt.Printf("🔔 [NOTIFICATION] Adding route: orgID=%s, channelID=%s, channelType=%s\n", orgID.Hex(), channel.ID.Hex(), channel.ChannelType)
 				routes = append(routes, Route{
 					OrganizationID: orgID,
 					ChannelID:      channel.ID,
@@ -76,6 +128,8 @@ func (r *Router) FindRoutes(ctx context.Context, eventType string) ([]Route, err
 			}
 		}
 	}
+
+	fmt.Printf("🔔 [NOTIFICATION] Total routes found: %d\n", len(routes))
 
 	return routes, nil
 }

@@ -4,12 +4,14 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// NotificationHistory - Lịch sử gửi thông báo
-type NotificationHistory struct {
+// DeliveryHistory - Lịch sử gửi thông báo (thuộc Delivery System)
+type DeliveryHistory struct {
 	ID                 primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"`
 	QueueItemID        primitive.ObjectID `json:"queueItemId" bson:"queueItemId" index:"single:1"`
 	EventType          string             `json:"eventType" bson:"eventType" index:"single:1"`
 	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1"`
+	Domain             string             `json:"domain,omitempty" bson:"domain,omitempty" index:"single:1"`    // Domain để reporting (optional, có thể infer từ EventType)
+	Severity           string             `json:"severity,omitempty" bson:"severity,omitempty" index:"single:1"`  // Severity để reporting (optional, có thể infer từ EventType)
 	ChannelType         string             `json:"channelType" bson:"channelType" index:"single:1"`
 	Recipient      string             `json:"recipient" bson:"recipient"`
 	Status         string             `json:"status" bson:"status" index:"single:1"` // sent, failed
@@ -41,4 +43,3 @@ type CTAClick struct {
 	FirstClickAt  *int64 `json:"firstClickAt,omitempty" bson:"firstClickAt,omitempty"` // Thời gian click đầu tiên
 	LastClickAt   *int64 `json:"lastClickAt,omitempty" bson:"lastClickAt,omitempty"`    // Thời gian click cuối cùng
 }
-

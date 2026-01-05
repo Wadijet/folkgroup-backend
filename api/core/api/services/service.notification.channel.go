@@ -42,18 +42,23 @@ func (s *NotificationChannelService) FindByOrganizationID(ctx context.Context, o
 		filter["channelType"] = bson.M{"$in": channelTypes}
 	}
 
+	fmt.Printf("🔔 [NOTIFICATION] Querying channels with filter: orgID=%s, channelTypes=%v\n", orgID.Hex(), channelTypes)
+
 	opts := options.Find().SetSort(bson.M{"createdAt": -1})
 	cursor, err := s.BaseServiceMongoImpl.collection.Find(ctx, filter, opts)
 	if err != nil {
+		fmt.Printf("🔔 [NOTIFICATION] Error querying channels: %v\n", err)
 		return nil, err
 	}
 	defer cursor.Close(ctx)
 
 	var channels []models.NotificationChannel
 	if err := cursor.All(ctx, &channels); err != nil {
+		fmt.Printf("🔔 [NOTIFICATION] Error reading channels: %v\n", err)
 		return nil, err
 	}
 
+	fmt.Printf("🔔 [NOTIFICATION] Found %d channels for orgID %s\n", len(channels), orgID.Hex())
 	return channels, nil
 }
 

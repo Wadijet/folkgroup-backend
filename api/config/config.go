@@ -75,28 +75,32 @@ func getEnvPath() string {
 	}
 }
 
-// NewConfig sẽ đọc dữ liệu cấu hình từ file env được cung cấp
+// NewConfig sẽ đọc dữ liệu cấu hình từ environment variables hoặc file env
+// Ưu tiên: Environment variables (systemd EnvironmentFile) > File env (development)
 func NewConfig(files ...string) *Configuration {
-	envPath := getEnvPath()
-	if envPath == "" {
-		// Sử dụng fmt.Printf vì logger có thể chưa được init ở đây
-		fmt.Printf("Không tìm thấy thư mục config/env\n")
-		return nil
-	}
-
-	err := godotenv.Load(envPath)
-	if err != nil {
-		// Sử dụng fmt.Printf vì logger có thể chưa được init ở đây
-		fmt.Printf("Không thể load file env tại %s: %v\n", envPath, err)
-		return nil
-	}
-
 	cfg := Configuration{}
-	err = env.Parse(&cfg)
+	
+	// Bước 1: Thử load từ file env (cho development, optional)
+	// Nếu có systemd EnvironmentFile, env vars sẽ override file
+	envPath := getEnvPath()
+	if envPath != "" {
+		// Load file nhưng không fail nếu không tìm thấy
+		// File env chỉ dùng cho development, production dùng systemd EnvironmentFile
+		if err := godotenv.Load(envPath); err != nil {
+			// Chỉ log warning, không fail - sẽ dùng environment variables
+			fmt.Printf("Warning: Không thể load file env tại %s: %v (sẽ dùng environment variables)\n", envPath, err)
+		}
+	}
+	
+	// Bước 2: Parse từ environment variables (ưu tiên)
+	// env.Parse sẽ đọc từ os.Getenv()
+	// Systemd EnvironmentFile sẽ load env vars vào os.Getenv() trước khi chạy
+	// Nếu có env vars từ systemd, chúng sẽ override giá trị từ file
+	err := env.Parse(&cfg)
 	if err != nil {
 		fmt.Printf("Lỗi khi parse config: %+v\n", err)
 		return nil
 	}
-
+	
 	return &cfg
 }

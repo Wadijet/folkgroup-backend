@@ -1157,6 +1157,102 @@ func (h *InitService) InitNotificationData() error {
 		}
 	}
 
+	// ==================================== 3.1. KHỞI TẠO NOTIFICATION CHANNELS CHO SYSTEM ORGANIZATION =============================================
+	// Channels hệ thống thuộc về System Organization để có thể được share hoặc sử dụng trực tiếp
+	// Channel Email hệ thống cho System Organization
+	systemEmailChannelFilter := bson.M{
+		"ownerOrganizationId": systemOrg.ID,
+		"channelType":         "email",
+		"name":                "System Email Channel",
+	}
+	_, err = h.notificationChannelService.FindOne(ctx, systemEmailChannelFilter, nil)
+	if err == common.ErrNotFound {
+		systemEmailChannel := models.NotificationChannel{
+			OwnerOrganizationID: systemOrg.ID, // Thuộc về System Organization - Phân quyền dữ liệu
+			ChannelType:         "email",
+			Name:                "System Email Channel",
+			Description:         "Kênh email hệ thống thuộc System Organization. Dùng để nhận thông báo hệ thống qua email. Có thể được share với tất cả organizations. Admin cần cấu hình danh sách email recipients trước khi sử dụng.",
+			IsActive:            false,      // Tắt mặc định, admin cần cấu hình recipients trước khi bật
+			IsSystem:            true,       // Đánh dấu là dữ liệu hệ thống, không thể xóa
+			Recipients:          []string{}, // Admin cần bổ sung email addresses
+			CreatedAt:           currentTime,
+			UpdatedAt:           currentTime,
+		}
+		_, err = h.notificationChannelService.InsertOne(ctx, systemEmailChannel)
+		if err != nil {
+			return fmt.Errorf("failed to create system email channel: %v", err)
+		}
+	}
+
+	// Channel Telegram hệ thống cho System Organization
+	systemTelegramChannelFilter := bson.M{
+		"ownerOrganizationId": systemOrg.ID,
+		"channelType":         "telegram",
+		"name":                "System Telegram Channel",
+	}
+	_, err = h.notificationChannelService.FindOne(ctx, systemTelegramChannelFilter, nil)
+	if err == common.ErrNotFound {
+		// Lấy chat IDs từ config (nếu có)
+		chatIDs := []string{}
+		isActive := false
+		if global.MongoDB_ServerConfig != nil && global.MongoDB_ServerConfig.TelegramChatIDs != "" {
+			// Parse chat IDs từ string (phân cách bằng dấu phẩy)
+			chatIDStrings := strings.Split(global.MongoDB_ServerConfig.TelegramChatIDs, ",")
+			for _, chatID := range chatIDStrings {
+				chatID = strings.TrimSpace(chatID)
+				if chatID != "" {
+					chatIDs = append(chatIDs, chatID)
+				}
+			}
+			// Tự động bật nếu có ít nhất 1 chat ID
+			if len(chatIDs) > 0 {
+				isActive = true
+			}
+		}
+
+		systemTelegramChannel := models.NotificationChannel{
+			OwnerOrganizationID: systemOrg.ID, // Thuộc về System Organization - Phân quyền dữ liệu
+			ChannelType:         "telegram",
+			Name:                "System Telegram Channel",
+			Description:         "Kênh Telegram hệ thống thuộc System Organization. Dùng để nhận thông báo hệ thống qua Telegram. Có thể được share với tất cả organizations. Chat IDs có thể được cấu hình từ environment variables.",
+			IsActive:            isActive, // Tự động bật nếu có chat IDs từ env, ngược lại tắt mặc định
+			IsSystem:            true,      // Đánh dấu là dữ liệu hệ thống, không thể xóa
+			ChatIDs:             chatIDs,   // Lấy từ env nếu có, ngược lại để trống
+			CreatedAt:           currentTime,
+			UpdatedAt:           currentTime,
+		}
+		_, err = h.notificationChannelService.InsertOne(ctx, systemTelegramChannel)
+		if err != nil {
+			return fmt.Errorf("failed to create system telegram channel: %v", err)
+		}
+	}
+
+	// Channel Webhook hệ thống cho System Organization
+	systemWebhookChannelFilter := bson.M{
+		"ownerOrganizationId": systemOrg.ID,
+		"channelType":         "webhook",
+		"name":                "System Webhook Channel",
+	}
+	_, err = h.notificationChannelService.FindOne(ctx, systemWebhookChannelFilter, nil)
+	if err == common.ErrNotFound {
+		systemWebhookChannel := models.NotificationChannel{
+			OwnerOrganizationID: systemOrg.ID, // Thuộc về System Organization - Phân quyền dữ liệu
+			ChannelType:         "webhook",
+			Name:                "System Webhook Channel",
+			Description:         "Kênh webhook hệ thống thuộc System Organization. Dùng để nhận thông báo hệ thống qua webhook đến các hệ thống bên ngoài. Có thể được share với tất cả organizations. Admin cần cấu hình webhook URL trước khi sử dụng.",
+			IsActive:            false,               // Tắt mặc định, admin cần cấu hình webhook URL trước khi bật
+			IsSystem:            true,                // Đánh dấu là dữ liệu hệ thống, không thể xóa
+			WebhookURL:          "",                  // Admin cần bổ sung webhook URL
+			WebhookHeaders:      map[string]string{}, // Admin có thể bổ sung headers nếu cần
+			CreatedAt:           currentTime,
+			UpdatedAt:           currentTime,
+		}
+		_, err = h.notificationChannelService.InsertOne(ctx, systemWebhookChannel)
+		if err != nil {
+			return fmt.Errorf("failed to create system webhook channel: %v", err)
+		}
+	}
+
 	// ==================================== 4. KHỞI TẠO TEMPLATES CHO CÁC EVENT CẤP HỆ THỐNG =============================================
 	systemEvents := []struct {
 		eventType string

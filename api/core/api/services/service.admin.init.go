@@ -948,12 +948,8 @@ func (h *InitService) InitNotificationData() error {
 	}
 
 	// ==================================== 0.1. KHỞI TẠO TEAM MẶC ĐỊNH CHO NOTIFICATION =============================================
-	// Tạo Tech Team thuộc System Organization để có thể tạo channel và routing rule mặc định
-	// (Channels và Routing Rules cần thuộc về một team cụ thể, không thể thuộc System Organization trực tiếp)
-	techTeam, err := h.InitDefaultNotificationTeam()
-	if err != nil {
-		return fmt.Errorf("failed to initialize default notification team: %v", err)
-	}
+	// Lưu ý: Không cần tạo Tech Team nữa vì channels hệ thống thuộc về System Organization trực tiếp
+	// Tech Team vẫn có thể được tạo nếu cần cho mục đích khác, nhưng không bắt buộc cho notification channels
 
 	// ==================================== 1. KHỞI TẠO NOTIFICATION SENDERS CHO SYSTEM ORGANIZATION =============================================
 	// Senders là dữ liệu hệ thống, thuộc về System Organization để có thể được share với tất cả organizations
@@ -1062,102 +1058,8 @@ func (h *InitService) InitNotificationData() error {
 	// ==================================== 2. KHỞI TẠO NOTIFICATION TEMPLATES CHO SYSTEM ORGANIZATION =============================================
 	// Templates là dữ liệu hệ thống, thuộc về System Organization để có thể được share với tất cả organizations
 
-	// ==================================== 3. KHỞI TẠO NOTIFICATION CHANNELS CHO TECH TEAM =============================================
-	// Channel Email mặc định cho Tech Team
-	emailChannelFilter := bson.M{
-		"ownerOrganizationId": techTeam.ID,
-		"channelType":         "email",
-		"name":                "Email Channel Mặc Định",
-	}
-	_, err = h.notificationChannelService.FindOne(ctx, emailChannelFilter, nil)
-	if err == common.ErrNotFound {
-		emailChannel := models.NotificationChannel{
-			OwnerOrganizationID: techTeam.ID, // Thuộc về Tech Team - Phân quyền dữ liệu
-			ChannelType:         "email",
-			Name:                "Email Channel Mặc Định",
-			Description:         "Kênh email mặc định cho Tech Team. Dùng để nhận thông báo hệ thống qua email. Admin cần cấu hình danh sách email recipients trước khi sử dụng.",
-			IsActive:            false,      // Tắt mặc định, admin cần cấu hình recipients trước khi bật
-			IsSystem:            true,       // Đánh dấu là dữ liệu hệ thống, không thể xóa
-			Recipients:          []string{}, // Admin cần bổ sung email addresses
-			CreatedAt:           currentTime,
-			UpdatedAt:           currentTime,
-		}
-		_, err = h.notificationChannelService.InsertOne(ctx, emailChannel)
-		if err != nil {
-			return fmt.Errorf("failed to create email channel for tech team: %v", err)
-		}
-	}
-
-	// Channel Telegram mặc định cho Tech Team
-	telegramChannelFilter := bson.M{
-		"ownerOrganizationId": techTeam.ID,
-		"channelType":         "telegram",
-		"name":                "Telegram Channel Mặc Định",
-	}
-	_, err = h.notificationChannelService.FindOne(ctx, telegramChannelFilter, nil)
-	if err == common.ErrNotFound {
-		// Lấy chat IDs từ config (nếu có)
-		chatIDs := []string{}
-		isActive := false
-		if global.MongoDB_ServerConfig != nil && global.MongoDB_ServerConfig.TelegramChatIDs != "" {
-			// Parse chat IDs từ string (phân cách bằng dấu phẩy)
-			chatIDStrings := strings.Split(global.MongoDB_ServerConfig.TelegramChatIDs, ",")
-			for _, chatID := range chatIDStrings {
-				chatID = strings.TrimSpace(chatID)
-				if chatID != "" {
-					chatIDs = append(chatIDs, chatID)
-				}
-			}
-			// Tự động bật nếu có ít nhất 1 chat ID
-			if len(chatIDs) > 0 {
-				isActive = true
-			}
-		}
-
-		telegramChannel := models.NotificationChannel{
-			OwnerOrganizationID: techTeam.ID, // Thuộc về Tech Team - Phân quyền dữ liệu
-			ChannelType:         "telegram",
-			Name:                "Telegram Channel Mặc Định",
-			Description:         "Kênh Telegram mặc định cho Tech Team. Dùng để nhận thông báo hệ thống qua Telegram. Chat IDs có thể được cấu hình từ environment variables.",
-			IsActive:            isActive, // Tự động bật nếu có chat IDs từ env, ngược lại tắt mặc định
-			IsSystem:            true,      // Đánh dấu là dữ liệu hệ thống, không thể xóa
-			ChatIDs:             chatIDs,   // Lấy từ env nếu có, ngược lại để trống
-			CreatedAt:           currentTime,
-			UpdatedAt:           currentTime,
-		}
-		_, err = h.notificationChannelService.InsertOne(ctx, telegramChannel)
-		if err != nil {
-			return fmt.Errorf("failed to create telegram channel for tech team: %v", err)
-		}
-	}
-
-	// Channel Webhook mặc định cho Tech Team
-	webhookChannelFilter := bson.M{
-		"ownerOrganizationId": techTeam.ID,
-		"channelType":         "webhook",
-		"name":                "Webhook Channel Mặc Định",
-	}
-	_, err = h.notificationChannelService.FindOne(ctx, webhookChannelFilter, nil)
-	if err == common.ErrNotFound {
-		webhookChannel := models.NotificationChannel{
-			OwnerOrganizationID: techTeam.ID, // Thuộc về Tech Team - Phân quyền dữ liệu
-			ChannelType:         "webhook",
-			Name:                "Webhook Channel Mặc Định",
-			Description:         "Kênh webhook mặc định cho Tech Team. Dùng để nhận thông báo hệ thống qua webhook đến các hệ thống bên ngoài. Admin cần cấu hình webhook URL trước khi sử dụng.",
-			IsActive:            false,               // Tắt mặc định, admin cần cấu hình webhook URL trước khi bật
-			IsSystem:            true,                // Đánh dấu là dữ liệu hệ thống, không thể xóa
-			WebhookURL:          "",                  // Admin cần bổ sung webhook URL
-			WebhookHeaders:      map[string]string{}, // Admin có thể bổ sung headers nếu cần
-			CreatedAt:           currentTime,
-			UpdatedAt:           currentTime,
-		}
-		_, err = h.notificationChannelService.InsertOne(ctx, webhookChannel)
-		if err != nil {
-			return fmt.Errorf("failed to create webhook channel for tech team: %v", err)
-		}
-	}
-
-	// ==================================== 3.1. KHỞI TẠO NOTIFICATION CHANNELS CHO SYSTEM ORGANIZATION =============================================
+	// ==================================== 3. KHỞI TẠO NOTIFICATION CHANNELS CHO SYSTEM ORGANIZATION =============================================
+	// Channels hệ thống thuộc về System Organization để có thể được share hoặc sử dụng trực tiếp
 	// Channels hệ thống thuộc về System Organization để có thể được share hoặc sử dụng trực tiếp
 	// Channel Email hệ thống cho System Organization
 	systemEmailChannelFilter := bson.M{
@@ -1541,9 +1443,9 @@ Hệ thống thông báo`,
 	}
 
 	// ==================================== 5. KHỞI TẠO ROUTING RULES MẶC ĐỊNH =============================================
-	// Tạo routing rules để kết nối system events với Tech Team
+	// Tạo routing rules để kết nối system events với System Organization channels
 	// Lưu ý: Routing rules thuộc về System Organization (ownerOrganizationId = systemOrg.ID)
-	// nhưng gửi notification cho Tech Team (organizationIds = [techTeam.ID])
+	// và gửi notification cho System Organization (organizationIds = [systemOrg.ID]) để sử dụng channels hệ thống
 	// Lưu ý: Nếu có lỗi duplicate, chỉ log warning và tiếp tục (không return error)
 	for _, event := range systemEvents {
 		eventTypePtr := &event.eventType // Convert string to *string
@@ -1556,8 +1458,8 @@ Hệ thống thông báo`,
 			routingRule := models.NotificationRoutingRule{
 				OwnerOrganizationID: systemOrg.ID,                          // Thuộc về System Organization (phân quyền dữ liệu)
 				EventType:           eventTypePtr,
-				Description:         fmt.Sprintf("Routing rule mặc định cho event '%s'. Gửi thông báo đến Tech Team qua tất cả các kênh (email, telegram, webhook). Được tạo tự động khi khởi tạo hệ thống.", event.eventType),
-				OrganizationIDs:      []primitive.ObjectID{techTeam.ID},   // Teams nào nhận notification (logic nghiệp vụ)
+				Description:         fmt.Sprintf("Routing rule mặc định cho event '%s'. Gửi thông báo đến System Organization qua tất cả các kênh hệ thống (email, telegram, webhook). Được tạo tự động khi khởi tạo hệ thống.", event.eventType),
+				OrganizationIDs:      []primitive.ObjectID{systemOrg.ID},   // System Organization nhận notification (logic nghiệp vụ) - sử dụng channels hệ thống
 				ChannelTypes:        []string{"email", "telegram", "webhook"}, // Tất cả channel types
 				IsActive:            false,                                // Tắt mặc định, admin cần bật sau khi cấu hình channels
 				IsSystem:            true,                                 // Đánh dấu là dữ liệu hệ thống, không thể xóa

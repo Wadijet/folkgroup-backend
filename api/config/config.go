@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/caarlos0/env"
 	"github.com/joho/godotenv"
@@ -78,29 +79,75 @@ func getEnvPath() string {
 // NewConfig sẽ đọc dữ liệu cấu hình từ environment variables hoặc file env
 // Ưu tiên: Environment variables (systemd EnvironmentFile) > File env (development)
 func NewConfig(files ...string) *Configuration {
+	fmt.Println("[Config] ========================================")
+	fmt.Println("[Config] Bắt đầu đọc cấu hình Backend...")
+	
 	cfg := Configuration{}
 	
 	// Bước 1: Thử load từ file env (cho development, optional)
+	fmt.Println("[Config] [Bước 1/2] Kiểm tra file env (development)...")
 	// Nếu có systemd EnvironmentFile, env vars sẽ override file
 	envPath := getEnvPath()
 	if envPath != "" {
+		fmt.Printf("[Config] [Bước 1/2] Tìm file env tại: %s\n", envPath)
 		// Load file nhưng không fail nếu không tìm thấy
 		// File env chỉ dùng cho development, production dùng systemd EnvironmentFile
 		if err := godotenv.Load(envPath); err != nil {
 			// Chỉ log warning, không fail - sẽ dùng environment variables
-			fmt.Printf("Warning: Không thể load file env tại %s: %v (sẽ dùng environment variables)\n", envPath, err)
+			fmt.Printf("[Config] [Bước 1/2] ⚠️  Warning: Không thể load file env tại %s: %v\n", envPath, err)
+			fmt.Println("[Config] [Bước 1/2] Sẽ dùng environment variables (systemd EnvironmentFile)")
+		} else {
+			fmt.Printf("[Config] [Bước 1/2] ✅ Đã load file env từ %s\n", envPath)
 		}
+	} else {
+		fmt.Println("[Config] [Bước 1/2] Không tìm thấy thư mục config/env, bỏ qua file env")
 	}
 	
 	// Bước 2: Parse từ environment variables (ưu tiên)
+	fmt.Println("[Config] [Bước 2/2] Parse từ environment variables (systemd EnvironmentFile)...")
 	// env.Parse sẽ đọc từ os.Getenv()
 	// Systemd EnvironmentFile sẽ load env vars vào os.Getenv() trước khi chạy
 	// Nếu có env vars từ systemd, chúng sẽ override giá trị từ file
 	err := env.Parse(&cfg)
 	if err != nil {
-		fmt.Printf("Lỗi khi parse config: %+v\n", err)
+		fmt.Printf("[Config] [Bước 2/2] ❌ Lỗi khi parse config: %+v\n", err)
+		fmt.Println("[Config] ========================================")
 		return nil
 	}
 	
+	fmt.Println("[Config] [Bước 2/2] ✅ Parse config thành công")
+	fmt.Printf("[Config] [Bước 2/2] Config values:\n")
+	fmt.Printf("[Config]   • ADDRESS: %s\n", cfg.Address)
+	fmt.Printf("[Config]   • MONGODB_CONNECTION_URI: %s\n", maskMongoURI(cfg.MongoDB_ConnectionURI))
+	fmt.Printf("[Config]   • MONGODB_DBNAME_AUTH: %s\n", cfg.MongoDB_DBName_Auth)
+	fmt.Printf("[Config]   • MONGODB_DBNAME_STAGING: %s\n", cfg.MongoDB_DBName_Staging)
+	fmt.Printf("[Config]   • MONGODB_DBNAME_DATA: %s\n", cfg.MongoDB_DBName_Data)
+	fmt.Printf("[Config]   • CORS_ORIGINS: %s\n", cfg.CORS_Origins)
+	fmt.Printf("[Config]   • CORS_ALLOW_CREDENTIALS: %v\n", cfg.CORS_AllowCredentials)
+	fmt.Printf("[Config]   • FIREBASE_PROJECT_ID: %s\n", cfg.FirebaseProjectID)
+	fmt.Printf("[Config]   • FIREBASE_CREDENTIALS_PATH: %s\n", cfg.FirebaseCredentialsPath)
+	fmt.Printf("[Config]   • FRONTEND_URL: %s\n", cfg.FrontendURL)
+	fmt.Println("[Config] ========================================")
+	
 	return &cfg
+}
+
+// Helper function để mask MongoDB URI (ẩn password)
+func maskMongoURI(uri string) string {
+	// Mask password trong MongoDB URI: mongodb://user:password@host:port/db
+	if strings.Contains(uri, "@") {
+		parts := strings.Split(uri, "@")
+		if len(parts) == 2 {
+			userPass := parts[0]
+			rest := parts[1]
+			if strings.Contains(userPass, ":") {
+				userParts := strings.Split(userPass, ":")
+				if len(userParts) >= 3 {
+					// mongodb://user:password
+					return userParts[0] + ":***@" + rest
+				}
+			}
+		}
+	}
+	return uri
 }

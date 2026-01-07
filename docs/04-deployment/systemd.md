@@ -29,10 +29,10 @@ StandardError=journal
 SyslogIdentifier=folkform-auth
 
 # Sử dụng file env từ thư mục config
-# Cách 1: Chỉ định thư mục chứa file env (sẽ tìm {GO_ENV}.env hoặc .env)
+# Cách 1: Chỉ định thư mục chứa file env (sẽ tìm file backend.env)
 Environment="ENV_FILE_DIR=/home/dungdm/folkform/config"
 # Cách 2: Hoặc chỉ định đường dẫn tuyệt đối đến file env
-# Environment="ENV_FILE_PATH=/home/dungdm/folkform/config/production.env"
+# Environment="ENV_FILE_PATH=/home/dungdm/folkform/config/backend.env"
 
 # Load environment variables từ file
 EnvironmentFile=/home/dungdm/folkform/config/backend.env
@@ -160,10 +160,7 @@ Environment="ENV_FILE_DIR=/home/dungdm/folkform/config"
 EnvironmentFile=/home/dungdm/folkform/config/backend.env
 ```
 
-Hệ thống sẽ tự động tìm file theo thứ tự ưu tiên:
-1. `{GO_ENV}.env` (ví dụ: `production.env`, `development.env`)
-2. `backend.env` (tên file mặc định trên VPS)
-3. `.env`
+Hệ thống sẽ tự động tìm file `backend.env` trong thư mục được chỉ định.
 
 ### Cách 2: Sử dụng ENV_FILE_PATH
 

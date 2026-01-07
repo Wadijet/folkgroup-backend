@@ -64,19 +64,9 @@ func getEnvPath() string {
 
 	// Bước 2: Kiểm tra ENV_FILE_DIR (thư mục chứa file env)
 	// Ví dụ: ENV_FILE_DIR=/home/dungdm/folkform/config
+	// Sử dụng tên file cố định: backend.env
 	if envFileDir := os.Getenv("ENV_FILE_DIR"); envFileDir != "" {
-		// Thử tìm file {GO_ENV}.env (ví dụ: production.env, development.env)
-		envPath := filepath.Join(envFileDir, fmt.Sprintf("%s.env", env))
-		if _, err := os.Stat(envPath); err == nil {
-			return envPath
-		}
-		// Thử với tên file backend.env (tên file mặc định trên VPS)
-		envPath = filepath.Join(envFileDir, "backend.env")
-		if _, err := os.Stat(envPath); err == nil {
-			return envPath
-		}
-		// Thử với tên file .env (không có prefix environment)
-		envPath = filepath.Join(envFileDir, ".env")
+		envPath := filepath.Join(envFileDir, "backend.env")
 		if _, err := os.Stat(envPath); err == nil {
 			return envPath
 		}

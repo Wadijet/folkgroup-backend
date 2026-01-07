@@ -10,6 +10,39 @@ Tài liệu này hướng dẫn cách tạo systemd service để chạy ứng d
 
 Tạo file `/etc/systemd/system/folkform-auth.service`:
 
+### Cách 1: Sử dụng EnvironmentFile (Khuyến nghị)
+
+```ini
+[Unit]
+Description=FolkForm Auth Backend
+After=network.target mongodb.service
+
+[Service]
+Type=simple
+User=dungdm
+WorkingDirectory=/home/dungdm/folkform
+ExecStart=/home/dungdm/folkform/server
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=folkform-auth
+
+# Sử dụng file env từ thư mục config
+# Cách 1: Chỉ định thư mục chứa file env (sẽ tìm {GO_ENV}.env hoặc .env)
+Environment="ENV_FILE_DIR=/home/dungdm/folkform/config"
+# Cách 2: Hoặc chỉ định đường dẫn tuyệt đối đến file env
+# Environment="ENV_FILE_PATH=/home/dungdm/folkform/config/production.env"
+
+# Load environment variables từ file
+EnvironmentFile=/home/dungdm/folkform/config/production.env
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Cách 2: Sử dụng Environment variables trực tiếp
+
 ```ini
 [Unit]
 Description=FolkForm Auth Backend
@@ -114,6 +147,33 @@ sudo systemctl disable folkform-auth.service
 - Cấu hình environment variables trong service file hoặc file riêng
 - Sử dụng `Restart=always` để tự động restart khi crash
 - Kiểm tra logs thường xuyên để phát hiện lỗi
+
+## 🔧 Cấu Hình File Env trên VPS
+
+Khi file env được đặt tại `/home/dungdm/folkform/config`, bạn có thể cấu hình theo 2 cách:
+
+### Cách 1: Sử dụng ENV_FILE_DIR (Khuyến nghị)
+
+Thêm vào systemd service file:
+```ini
+Environment="ENV_FILE_DIR=/home/dungdm/folkform/config"
+EnvironmentFile=/home/dungdm/folkform/config/production.env
+```
+
+Hệ thống sẽ tự động tìm file `{GO_ENV}.env` hoặc `.env` trong thư mục này.
+
+### Cách 2: Sử dụng ENV_FILE_PATH
+
+Nếu bạn muốn chỉ định chính xác file env:
+```ini
+Environment="ENV_FILE_PATH=/home/dungdm/folkform/config/production.env"
+EnvironmentFile=/home/dungdm/folkform/config/production.env
+```
+
+**Lưu ý:** 
+- `ENV_FILE_PATH` hoặc `ENV_FILE_DIR` chỉ dùng để load file env (bước 1)
+- `EnvironmentFile` trong systemd sẽ load env vars vào `os.Getenv()` (bước 2, có độ ưu tiên cao hơn)
+- Nếu cả hai đều được set, environment variables từ `EnvironmentFile` sẽ override giá trị từ file env
 
 ## 📚 Tài Liệu Liên Quan
 

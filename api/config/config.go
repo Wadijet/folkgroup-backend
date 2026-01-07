@@ -39,10 +39,11 @@ type Configuration struct {
 	// Telegram Notification Configuration (optional - dùng cho notification init)
 	TelegramBotToken    string `env:"TELEGRAM_BOT_TOKEN"`    // Bot token cho Telegram sender mặc định (optional)
 	TelegramBotUsername string `env:"TELEGRAM_BOT_USERNAME"` // Bot username cho Telegram sender mặc định (optional)
-	TelegramChatIDs     string `env:"TELEGRAM_CHAT_IDS"`    // Danh sách chat IDs phân cách bằng dấu phẩy, ví dụ: "-123456789,-987654321" (optional)
+	TelegramChatIDs     string `env:"TELEGRAM_CHAT_IDS"`     // Danh sách chat IDs phân cách bằng dấu phẩy, ví dụ: "-123456789,-987654321" (optional)
 }
 
 // getEnvPath trả về đường dẫn đến file env dựa trên môi trường
+// Ưu tiên: ENV_FILE_PATH (đường dẫn tuyệt đối) > ENV_FILE_DIR (thư mục) > Tìm trong cây thư mục
 func getEnvPath() string {
 	// Mặc định sử dụng môi trường development
 	env := os.Getenv("GO_ENV")
@@ -50,7 +51,32 @@ func getEnvPath() string {
 		env = "development"
 	}
 
-	// Tìm thư mục config
+	// Bước 1: Kiểm tra ENV_FILE_PATH (đường dẫn tuyệt đối đến file env)
+	// Ví dụ: ENV_FILE_PATH=/home/dungdm/folkform/config/production.env
+	if envFilePath := os.Getenv("ENV_FILE_PATH"); envFilePath != "" {
+		// Kiểm tra file có tồn tại không
+		if _, err := os.Stat(envFilePath); err == nil {
+			return envFilePath
+		}
+		// Nếu không tìm thấy, log warning nhưng vẫn tiếp tục tìm các cách khác
+		fmt.Printf("[Config] ⚠️  ENV_FILE_PATH được set nhưng file không tồn tại: %s\n", envFilePath)
+	}
+
+	// Bước 2: Kiểm tra ENV_FILE_DIR (thư mục chứa file env)
+	// Ví dụ: ENV_FILE_DIR=/home/dungdm/folkform/config
+	if envFileDir := os.Getenv("ENV_FILE_DIR"); envFileDir != "" {
+		envPath := filepath.Join(envFileDir, fmt.Sprintf("%s.env", env))
+		if _, err := os.Stat(envPath); err == nil {
+			return envPath
+		}
+		// Thử với tên file .env (không có prefix environment)
+		envPath = filepath.Join(envFileDir, ".env")
+		if _, err := os.Stat(envPath); err == nil {
+			return envPath
+		}
+	}
+
+	// Bước 3: Tìm trong cây thư mục hiện tại (cho development)
 	currentDir, err := os.Getwd()
 	if err != nil {
 		// Sử dụng fmt.Printf vì logger có thể chưa được init ở đây
@@ -81,9 +107,9 @@ func getEnvPath() string {
 func NewConfig(files ...string) *Configuration {
 	fmt.Println("[Config] ========================================")
 	fmt.Println("[Config] Bắt đầu đọc cấu hình Backend...")
-	
+
 	cfg := Configuration{}
-	
+
 	// Bước 1: Thử load từ file env (cho development, optional)
 	fmt.Println("[Config] [Bước 1/2] Kiểm tra file env (development)...")
 	// Nếu có systemd EnvironmentFile, env vars sẽ override file
@@ -102,7 +128,7 @@ func NewConfig(files ...string) *Configuration {
 	} else {
 		fmt.Println("[Config] [Bước 1/2] Không tìm thấy thư mục config/env, bỏ qua file env")
 	}
-	
+
 	// Bước 2: Parse từ environment variables (ưu tiên)
 	fmt.Println("[Config] [Bước 2/2] Parse từ environment variables (systemd EnvironmentFile)...")
 	// env.Parse sẽ đọc từ os.Getenv()
@@ -114,7 +140,7 @@ func NewConfig(files ...string) *Configuration {
 		fmt.Println("[Config] ========================================")
 		return nil
 	}
-	
+
 	fmt.Println("[Config] [Bước 2/2] ✅ Parse config thành công")
 	fmt.Printf("[Config] [Bước 2/2] Config values:\n")
 	fmt.Printf("[Config]   • ADDRESS: %s\n", cfg.Address)
@@ -128,7 +154,7 @@ func NewConfig(files ...string) *Configuration {
 	fmt.Printf("[Config]   • FIREBASE_CREDENTIALS_PATH: %s\n", cfg.FirebaseCredentialsPath)
 	fmt.Printf("[Config]   • FRONTEND_URL: %s\n", cfg.FrontendURL)
 	fmt.Println("[Config] ========================================")
-	
+
 	return &cfg
 }
 

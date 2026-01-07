@@ -42,29 +42,28 @@ type Configuration struct {
 	TelegramChatIDs     string `env:"TELEGRAM_CHAT_IDS"`     // Danh sách chat IDs phân cách bằng dấu phẩy, ví dụ: "-123456789,-987654321" (optional)
 }
 
-// getEnvPath trả về đường dẫn đến file env dựa trên môi trường
-// Ưu tiên: ENV_FILE_PATH (đường dẫn tuyệt đối) > ENV_FILE_DIR (thư mục) > Tìm trong cây thư mục
+// getEnvPath trả về đường dẫn đến file env
+// Ưu tiên: Đường dẫn cố định trên VPS > ENV_FILE_PATH > ENV_FILE_DIR
 func getEnvPath() string {
-	// Mặc định sử dụng môi trường development
-	env := os.Getenv("GO_ENV")
-	if env == "" {
-		env = "development"
+	// Bước 1: Kiểm tra đường dẫn cố định trên VPS (ưu tiên cao nhất)
+	// Đường dẫn: /home/dungdm/folkform/config/backend.env
+	defaultVPSPath := "/home/dungdm/folkform/config/backend.env"
+	if _, err := os.Stat(defaultVPSPath); err == nil {
+		return defaultVPSPath
 	}
 
-	// Bước 1: Kiểm tra ENV_FILE_PATH (đường dẫn tuyệt đối đến file env)
-	// Ví dụ: ENV_FILE_PATH=/home/dungdm/folkform/config/production.env
+	// Bước 2: Kiểm tra ENV_FILE_PATH (đường dẫn tuyệt đối đến file env)
+	// Ví dụ: ENV_FILE_PATH=/home/dungdm/folkform/config/backend.env
 	if envFilePath := os.Getenv("ENV_FILE_PATH"); envFilePath != "" {
-		// Kiểm tra file có tồn tại không
 		if _, err := os.Stat(envFilePath); err == nil {
 			return envFilePath
 		}
-		// Nếu không tìm thấy, log warning nhưng vẫn tiếp tục tìm các cách khác
 		fmt.Printf("[Config] ⚠️  ENV_FILE_PATH được set nhưng file không tồn tại: %s\n", envFilePath)
 	}
 
-	// Bước 2: Kiểm tra ENV_FILE_DIR (thư mục chứa file env)
+	// Bước 3: Kiểm tra ENV_FILE_DIR (thư mục chứa file backend.env)
 	// Ví dụ: ENV_FILE_DIR=/home/dungdm/folkform/config
-	// Sử dụng tên file cố định: backend.env
+	// Sẽ tìm file backend.env trong thư mục này
 	if envFileDir := os.Getenv("ENV_FILE_DIR"); envFileDir != "" {
 		envPath := filepath.Join(envFileDir, "backend.env")
 		if _, err := os.Stat(envPath); err == nil {
@@ -72,30 +71,8 @@ func getEnvPath() string {
 		}
 	}
 
-	// Bước 3: Tìm trong cây thư mục hiện tại (cho development)
-	currentDir, err := os.Getwd()
-	if err != nil {
-		// Sử dụng fmt.Printf vì logger có thể chưa được init ở đây
-		fmt.Printf("Không thể lấy được thư mục hiện tại: %v\n", err)
-		return ""
-	}
-
-	// Tìm thư mục config/env
-	for {
-		envDir := filepath.Join(currentDir, "config", "env")
-		if _, err := os.Stat(envDir); err == nil {
-			// Tìm thấy thư mục config/env
-			envPath := filepath.Join(envDir, fmt.Sprintf("%s.env", env))
-			return envPath
-		}
-
-		// Đi lên thư mục cha
-		parentDir := filepath.Dir(currentDir)
-		if parentDir == currentDir {
-			return ""
-		}
-		currentDir = parentDir
-	}
+	// Không tìm thấy file env
+	return ""
 }
 
 // NewConfig sẽ đọc dữ liệu cấu hình từ environment variables hoặc file env

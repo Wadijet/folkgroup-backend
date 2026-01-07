@@ -43,7 +43,7 @@ type Configuration struct {
 }
 
 // getEnvPath trả về đường dẫn đến file env
-// Ưu tiên: Đường dẫn cố định trên VPS > ENV_FILE_PATH > ENV_FILE_DIR
+// Ưu tiên: Đường dẫn cố định trên VPS > ENV_FILE_PATH > ENV_FILE_DIR > File env local (development.env)
 func getEnvPath() string {
 	// Bước 1: Kiểm tra đường dẫn cố định trên VPS (ưu tiên cao nhất)
 	// Đường dẫn: /home/dungdm/folkform/config/backend.env
@@ -68,6 +68,31 @@ func getEnvPath() string {
 		envPath := filepath.Join(envFileDir, "backend.env")
 		if _, err := os.Stat(envPath); err == nil {
 			return envPath
+		}
+	}
+
+	// Bước 4: Fallback về file env local (cho development)
+	// Tìm file api/config/env/development.env
+	currentDir, err := os.Getwd()
+	if err == nil {
+		// Tìm thư mục api/config/env
+		for {
+			envDir := filepath.Join(currentDir, "config", "env")
+			if _, err := os.Stat(envDir); err == nil {
+				// Tìm thấy thư mục config/env
+				localEnvPath := filepath.Join(envDir, "development.env")
+				if _, err := os.Stat(localEnvPath); err == nil {
+					return localEnvPath
+				}
+				break
+			}
+
+			// Đi lên thư mục cha
+			parentDir := filepath.Dir(currentDir)
+			if parentDir == currentDir {
+				break
+			}
+			currentDir = parentDir
 		}
 	}
 

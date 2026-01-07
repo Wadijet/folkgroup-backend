@@ -10,6 +10,7 @@ import (
 	models "meta_commerce/core/api/models/mongodb"
 	"meta_commerce/core/common"
 	"meta_commerce/core/global"
+	"meta_commerce/core/logger"
 	"meta_commerce/core/utility"
 
 	"github.com/sirupsen/logrus"
@@ -458,23 +459,49 @@ func (h *InitService) InitPermission() error {
 // Returns:
 //   - error: Lỗi nếu có trong quá trình khởi tạo
 func (h *InitService) InitRootOrganization() error {
+	log := logger.GetAppLogger()
+
 	// Kiểm tra System Organization đã tồn tại chưa
 	systemFilter := bson.M{
 		"type":  models.OrganizationTypeSystem,
 		"level": -1,
 		"code":  "SYSTEM",
 	}
+
+	log.Infof("🔍 [INIT] Checking for System Organization with filter: type=%s, level=%d, code=%s",
+		models.OrganizationTypeSystem, -1, "SYSTEM")
+
 	_, err := h.organizationService.FindOne(context.TODO(), systemFilter, nil)
 	if err != nil && err != common.ErrNotFound {
+		// Log chi tiết lỗi
+		log.Errorf("❌ [INIT] Failed to check system organization: %v", err)
+		log.Errorf("❌ [INIT] Error type: %T", err)
+		log.Errorf("❌ [INIT] Error details: %+v", err)
+
+		// Kiểm tra nếu là lỗi MongoDB connection
+		if commonErr, ok := err.(*common.Error); ok {
+			log.Errorf("❌ [INIT] Error code: %s", commonErr.Code.Code)
+			log.Errorf("❌ [INIT] Error message: %s", commonErr.Message)
+			if commonErr.Details != nil {
+				log.Errorf("❌ [INIT] Error details: %v", commonErr.Details)
+			}
+		}
+
 		return fmt.Errorf("failed to check system organization: %v", err)
 	}
 
 	// Nếu đã tồn tại, không cần tạo mới
 	if err == nil {
+		log.Info("✅ [INIT] System Organization already exists, skipping creation")
 		return nil
 	}
 
+	if err == common.ErrNotFound {
+		log.Info("ℹ️  [INIT] System Organization not found, will create new one")
+	}
+
 	// Tạo mới System Organization
+	log.Info("🔄 [INIT] Creating new System Organization...")
 	systemOrgModel := models.Organization{
 		Name:     "Hệ Thống",
 		Code:     "SYSTEM",
@@ -486,14 +513,32 @@ func (h *InitService) InitRootOrganization() error {
 		IsSystem: true, // Đánh dấu là dữ liệu hệ thống
 	}
 
+	log.Infof("📝 [INIT] System Organization model: Name=%s, Code=%s, Type=%s, Level=%d",
+		systemOrgModel.Name, systemOrgModel.Code, systemOrgModel.Type, systemOrgModel.Level)
+
 	// Sử dụng context cho phép insert system data trong quá trình init
 	// Lưu ý: withSystemDataInsertAllowed là unexported, chỉ có thể gọi từ trong package services
 	initCtx := withSystemDataInsertAllowed(context.TODO())
+	log.Info("💾 [INIT] Inserting System Organization into database...")
 	_, err = h.organizationService.InsertOne(initCtx, systemOrgModel)
 	if err != nil {
+		log.Errorf("❌ [INIT] Failed to create system organization: %v", err)
+		log.Errorf("❌ [INIT] Error type: %T", err)
+		log.Errorf("❌ [INIT] Error details: %+v", err)
+
+		// Kiểm tra nếu là lỗi MongoDB connection
+		if commonErr, ok := err.(*common.Error); ok {
+			log.Errorf("❌ [INIT] Error code: %s", commonErr.Code.Code)
+			log.Errorf("❌ [INIT] Error message: %s", commonErr.Message)
+			if commonErr.Details != nil {
+				log.Errorf("❌ [INIT] Error details: %v", commonErr.Details)
+			}
+		}
+
 		return fmt.Errorf("failed to create system organization: %v", err)
 	}
 
+	log.Info("✅ [INIT] System Organization created successfully")
 	return nil
 }
 
@@ -1043,9 +1088,9 @@ func (h *InitService) InitNotificationData() error {
 			ChannelType:         "telegram",
 			Name:                "Telegram Bot Mặc Định",
 			Description:         "Cấu hình Telegram bot mặc định của hệ thống. Dùng để gửi thông báo qua Telegram. Bot token có thể được cấu hình từ environment variables.",
-			IsActive:            isActive, // Tự động bật nếu có bot token từ env, ngược lại tắt mặc định
-			IsSystem:            true,     // Đánh dấu là dữ liệu hệ thống, không thể xóa
-			BotToken:            botToken,  // Lấy từ env nếu có, ngược lại để trống
+			IsActive:            isActive,    // Tự động bật nếu có bot token từ env, ngược lại tắt mặc định
+			IsSystem:            true,        // Đánh dấu là dữ liệu hệ thống, không thể xóa
+			BotToken:            botToken,    // Lấy từ env nếu có, ngược lại để trống
 			BotUsername:         botUsername, // Lấy từ env nếu có, ngược lại để trống
 			CreatedAt:           currentTime,
 			UpdatedAt:           currentTime,
@@ -1146,8 +1191,8 @@ func (h *InitService) InitNotificationData() error {
 			Name:                "System Telegram Channel",
 			Description:         "Kênh Telegram hệ thống thuộc System Organization. Dùng để nhận thông báo hệ thống qua Telegram. Có thể được share với tất cả organizations. Chat IDs có thể được cấu hình từ environment variables.",
 			IsActive:            isActive, // Tự động bật nếu có chat IDs từ env, ngược lại tắt mặc định
-			IsSystem:            true,      // Đánh dấu là dữ liệu hệ thống, không thể xóa
-			ChatIDs:             chatIDs,   // Lấy từ env nếu có, ngược lại để trống
+			IsSystem:            true,     // Đánh dấu là dữ liệu hệ thống, không thể xóa
+			ChatIDs:             chatIDs,  // Lấy từ env nếu có, ngược lại để trống
 			CreatedAt:           currentTime,
 			UpdatedAt:           currentTime,
 		}
@@ -1478,19 +1523,19 @@ Hệ thống thông báo`,
 	for _, event := range systemEvents {
 		eventTypePtr := &event.eventType // Convert string to *string
 		routingFilter := bson.M{
-			"eventType":          event.eventType,
+			"eventType":           event.eventType,
 			"ownerOrganizationId": systemOrg.ID, // Filter theo ownerOrganizationId để tránh duplicate
 		}
 		_, err = h.notificationRoutingService.FindOne(ctx, routingFilter, nil)
 		if err == common.ErrNotFound {
 			routingRule := models.NotificationRoutingRule{
-				OwnerOrganizationID: systemOrg.ID,                          // Thuộc về System Organization (phân quyền dữ liệu)
+				OwnerOrganizationID: systemOrg.ID, // Thuộc về System Organization (phân quyền dữ liệu)
 				EventType:           eventTypePtr,
 				Description:         fmt.Sprintf("Routing rule mặc định cho event '%s'. Gửi thông báo đến System Organization qua tất cả các kênh hệ thống (email, telegram, webhook). Được tạo tự động khi khởi tạo hệ thống.", event.eventType),
-				OrganizationIDs:      []primitive.ObjectID{systemOrg.ID},   // System Organization nhận notification (logic nghiệp vụ) - sử dụng channels hệ thống
+				OrganizationIDs:     []primitive.ObjectID{systemOrg.ID},       // System Organization nhận notification (logic nghiệp vụ) - sử dụng channels hệ thống
 				ChannelTypes:        []string{"email", "telegram", "webhook"}, // Tất cả channel types
-				IsActive:            false,                                // Tắt mặc định, admin cần bật sau khi cấu hình channels
-				IsSystem:            true,                                 // Đánh dấu là dữ liệu hệ thống, không thể xóa
+				IsActive:            false,                                    // Tắt mặc định, admin cần bật sau khi cấu hình channels
+				IsSystem:            true,                                     // Đánh dấu là dữ liệu hệ thống, không thể xóa
 				CreatedAt:           currentTime,
 				UpdatedAt:           currentTime,
 			}
@@ -1530,7 +1575,7 @@ Hệ thống thông báo`,
 // đến tất cả organizations (sử dụng "share all" với ToOrgIDs = [])
 func (h *InitService) initNotificationDataShare(ctx context.Context, systemOrgID primitive.ObjectID, currentTime int64) error {
 	logrus.Info("🔄 [INIT] Initializing notification data share...")
-	
+
 	// Permissions cần share cho notification data
 	notificationPermissions := []string{
 		"NotificationSender.Read",
@@ -1554,9 +1599,9 @@ func (h *InitService) initNotificationDataShare(ctx context.Context, systemOrgID
 	}
 
 	logrus.WithFields(logrus.Fields{
-		"systemOrgID":     systemOrgID.Hex(),
-		"foundShares":     len(existingShares),
-		"filter":          existingShareFilter,
+		"systemOrgID": systemOrgID.Hex(),
+		"foundShares": len(existingShares),
+		"filter":      existingShareFilter,
 	}).Debug("🔍 [INIT] Checking for existing notification shares")
 
 	// Tìm share có cùng permissions hoặc share tất cả permissions
@@ -1564,11 +1609,11 @@ func (h *InitService) initNotificationDataShare(ctx context.Context, systemOrgID
 	for i := range existingShares {
 		share := existingShares[i]
 		logrus.WithFields(logrus.Fields{
-			"shareID":       share.ID.Hex(),
+			"shareID":         share.ID.Hex(),
 			"permissionNames": share.PermissionNames,
-			"toOrgIDs":      share.ToOrgIDs,
+			"toOrgIDs":        share.ToOrgIDs,
 		}).Debug("🔍 [INIT] Checking share")
-		
+
 		// Nếu share có permissionNames rỗng/nil → share tất cả permissions → phù hợp
 		if len(share.PermissionNames) == 0 {
 			existingShare = &share
@@ -1616,7 +1661,7 @@ func (h *InitService) initNotificationDataShare(ctx context.Context, systemOrgID
 			"toOrgIDs":    share.ToOrgIDs,
 			"permissions": share.PermissionNames,
 		}).Debug("📝 [INIT] Attempting to insert notification share")
-		
+
 		createdShare, err := h.organizationShareService.InsertOne(ctx, share)
 		if err != nil {
 			logrus.WithError(err).WithFields(logrus.Fields{
@@ -1626,11 +1671,11 @@ func (h *InitService) initNotificationDataShare(ctx context.Context, systemOrgID
 		}
 		// Log để debug
 		logrus.WithFields(logrus.Fields{
-			"shareID":        createdShare.ID.Hex(),
-			"ownerOrgID":     systemOrgID.Hex(),
-			"toOrgIDs":       "[] (share all)",
-			"permissions":    notificationPermissions,
-			"description":    share.Description,
+			"shareID":     createdShare.ID.Hex(),
+			"ownerOrgID":  systemOrgID.Hex(),
+			"toOrgIDs":    "[] (share all)",
+			"permissions": notificationPermissions,
+			"description": share.Description,
 		}).Info("✅ [INIT] Created notification data share")
 	} else {
 		// Đã có share, kiểm tra xem có cần cập nhật description, permissions, hoặc toOrgIDs không
@@ -1690,8 +1735,8 @@ func (h *InitService) initNotificationDataShare(ctx context.Context, systemOrgID
 			}
 			// Log để debug
 			logrus.WithFields(logrus.Fields{
-				"shareID":  existingShare.ID.Hex(),
-				"updates":  updateData,
+				"shareID": existingShare.ID.Hex(),
+				"updates": updateData,
 			}).Info("✅ [INIT] Updated notification data share")
 		} else {
 			// Log để debug - share đã tồn tại và không cần update
@@ -1727,19 +1772,19 @@ func (h *InitService) InitCTALibrary() error {
 	// Chỉ tạo các CTA cần thiết cho các system events (system_error, security_alert, database_error, etc.)
 	defaultCTAs := []struct {
 		code        string
-		label        string
-		action       string
-		style        string
-		variables    []string
-		description  string
+		label       string
+		action      string
+		style       string
+		variables   []string
+		description string
 	}{
 		{
 			code:        "contact_support",
-			label:        "Liên hệ hỗ trợ",
-			action:       "/support/contact",
-			style:        "secondary",
-			variables:    []string{},
-			description:  "CTA để liên hệ bộ phận hỗ trợ. Dùng trong các system events cần hỗ trợ như system_error, security_alert, database_error.",
+			label:       "Liên hệ hỗ trợ",
+			action:      "/support/contact",
+			style:       "secondary",
+			variables:   []string{},
+			description: "CTA để liên hệ bộ phận hỗ trợ. Dùng trong các system events cần hỗ trợ như system_error, security_alert, database_error.",
 		},
 	}
 

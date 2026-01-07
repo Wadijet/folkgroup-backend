@@ -35,7 +35,7 @@ Environment="ENV_FILE_DIR=/home/dungdm/folkform/config"
 # Environment="ENV_FILE_PATH=/home/dungdm/folkform/config/production.env"
 
 # Load environment variables từ file
-EnvironmentFile=/home/dungdm/folkform/config/production.env
+EnvironmentFile=/home/dungdm/folkform/config/backend.env
 
 [Install]
 WantedBy=multi-user.target
@@ -157,17 +157,20 @@ Khi file env được đặt tại `/home/dungdm/folkform/config`, bạn có th�
 Thêm vào systemd service file:
 ```ini
 Environment="ENV_FILE_DIR=/home/dungdm/folkform/config"
-EnvironmentFile=/home/dungdm/folkform/config/production.env
+EnvironmentFile=/home/dungdm/folkform/config/backend.env
 ```
 
-Hệ thống sẽ tự động tìm file `{GO_ENV}.env` hoặc `.env` trong thư mục này.
+Hệ thống sẽ tự động tìm file theo thứ tự ưu tiên:
+1. `{GO_ENV}.env` (ví dụ: `production.env`, `development.env`)
+2. `backend.env` (tên file mặc định trên VPS)
+3. `.env`
 
 ### Cách 2: Sử dụng ENV_FILE_PATH
 
 Nếu bạn muốn chỉ định chính xác file env:
 ```ini
-Environment="ENV_FILE_PATH=/home/dungdm/folkform/config/production.env"
-EnvironmentFile=/home/dungdm/folkform/config/production.env
+Environment="ENV_FILE_PATH=/home/dungdm/folkform/config/backend.env"
+EnvironmentFile=/home/dungdm/folkform/config/backend.env
 ```
 
 **Lưu ý:** 

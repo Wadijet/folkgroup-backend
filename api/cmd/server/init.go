@@ -65,6 +65,13 @@ func initColNames() {
 	global.MongoDB_ColNames.CTALibrary = "cta_library"
 	global.MongoDB_ColNames.CTATracking = "cta_tracking"
 
+	// Agent Management System Collections (Bot Management)
+	global.MongoDB_ColNames.AgentRegistry = "agent_registry"
+	global.MongoDB_ColNames.AgentConfigs = "agent_configs"
+	global.MongoDB_ColNames.AgentCommands = "agent_commands"
+	// AgentStatus đã được ghép vào AgentRegistry, không cần collection riêng nữa
+	global.MongoDB_ColNames.AgentActivityLogs = "agent_activity_logs"
+
 	logrus.Info("Initialized collection names") // Ghi log thông báo đã khởi tạo tên các collection
 }
 
@@ -135,6 +142,13 @@ func initDatabase_MongoDB() {
 	// CTA Module Indexes
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CTALibrary), models.CTALibrary{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CTATracking), models.CTATracking{})
+
+	// Agent Management System Indexes (Bot Management)
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AgentRegistry), models.AgentRegistry{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AgentConfigs), models.AgentConfig{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AgentCommands), models.AgentCommand{})
+	// AgentStatus đã được ghép vào AgentRegistry, không cần index riêng nữa
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AgentActivityLogs), models.AgentActivityLog{})
 }
 
 // initFirebase khởi tạo Firebase Admin SDK

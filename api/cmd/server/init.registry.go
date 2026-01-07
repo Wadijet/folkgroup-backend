@@ -27,7 +27,8 @@ func InitCollections(client *mongo.Client, cfg *config.Configuration) error {
 		"agents", "access_tokens", "fb_pages", "fb_conversations", "fb_messages", "fb_message_items", "fb_posts", "fb_customers", "pc_orders", "customers", "pc_pos_customers", "pc_pos_shops", "pc_pos_warehouses", "pc_pos_products", "pc_pos_variations", "pc_pos_categories", "pc_pos_orders",
 		"notification_senders", "notification_channels", "notification_templates", "notification_routing_rules",
 		"delivery_queue", "delivery_history",
-		"cta_library", "cta_tracking"}
+		"cta_library", "cta_tracking",
+		"agent_registry", "agent_configs", "agent_commands", "agent_activity_logs"}
 
 	for _, name := range colNames {
 		registered, err := global.RegistryCollections.Register(name, db.Collection(name))

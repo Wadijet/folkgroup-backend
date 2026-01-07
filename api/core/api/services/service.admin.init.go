@@ -390,6 +390,34 @@ var InitialPermissions = []models.Permission{
 
 	// Quản lý Delivery History: Chỉ xem
 	{Name: "DeliveryHistory.Read", Describe: "Quyền xem lịch sử delivery", Group: "Delivery", Category: "DeliveryHistory"},
+
+	// ==================================== AGENT MANAGEMENT MODULE ===========================================
+	// Quản lý Agent Registry (Bot Registry): Thêm, xem, sửa, xóa
+	{Name: "AgentRegistry.Insert", Describe: "Quyền tạo bot registry", Group: "AgentManagement", Category: "AgentRegistry"},
+	{Name: "AgentRegistry.Read", Describe: "Quyền xem danh sách bot registry", Group: "AgentManagement", Category: "AgentRegistry"},
+	{Name: "AgentRegistry.Update", Describe: "Quyền cập nhật bot registry", Group: "AgentManagement", Category: "AgentRegistry"},
+	{Name: "AgentRegistry.Delete", Describe: "Quyền xóa bot registry", Group: "AgentManagement", Category: "AgentRegistry"},
+
+	// Quản lý Agent Config: Thêm, xem, sửa, xóa
+	{Name: "AgentConfig.Insert", Describe: "Quyền tạo bot config", Group: "AgentManagement", Category: "AgentConfig"},
+	{Name: "AgentConfig.Read", Describe: "Quyền xem danh sách bot config", Group: "AgentManagement", Category: "AgentConfig"},
+	{Name: "AgentConfig.Update", Describe: "Quyền cập nhật bot config", Group: "AgentManagement", Category: "AgentConfig"},
+	{Name: "AgentConfig.Delete", Describe: "Quyền xóa bot config", Group: "AgentManagement", Category: "AgentConfig"},
+
+	// Quản lý Agent Command: Thêm, xem, sửa, xóa
+	{Name: "AgentCommand.Insert", Describe: "Quyền tạo bot command", Group: "AgentManagement", Category: "AgentCommand"},
+	{Name: "AgentCommand.Read", Describe: "Quyền xem danh sách bot command", Group: "AgentManagement", Category: "AgentCommand"},
+	{Name: "AgentCommand.Update", Describe: "Quyền cập nhật bot command", Group: "AgentManagement", Category: "AgentCommand"},
+	{Name: "AgentCommand.Delete", Describe: "Quyền xóa bot command", Group: "AgentManagement", Category: "AgentCommand"},
+
+	// Lưu ý: Agent Status đã được ghép vào Agent Registry, không cần permission riêng nữa
+	// Status có thể được xem/update qua Agent Registry permissions
+
+	// Quản lý Agent Activity Log: Chỉ xem (bot tự log)
+	{Name: "AgentActivityLog.Read", Describe: "Quyền xem bot activity log", Group: "AgentManagement", Category: "AgentActivityLog"},
+
+	// Quyền đặc biệt cho check-in endpoint
+	{Name: "AgentManagement.CheckIn", Describe: "Quyền check-in từ bot", Group: "AgentManagement", Category: "AgentManagement"},
 }
 
 // InitPermission khởi tạo các quyền mặc định cho hệ thống

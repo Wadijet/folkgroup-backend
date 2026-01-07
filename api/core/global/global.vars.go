@@ -49,6 +49,12 @@ type MongoDB_Auth_CollectionName struct {
 	// CTA Module Collections
 	CTALibrary  string // Tên collection cho CTA library
 	CTATracking string // Tên collection cho CTA tracking
+
+	// Agent Management System Collections (Bot Management)
+	AgentRegistry    string // Tên collection cho agent registry (đã ghép với agent_status)
+	AgentConfigs     string // Tên collection cho agent configs
+	AgentCommands    string // Tên collection cho agent commands
+	AgentActivityLogs string // Tên collection cho agent activity logs
 }
 
 // Các biến toàn cục

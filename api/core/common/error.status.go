@@ -207,9 +207,18 @@ func (e *Error) Is(target error) bool {
 	}
 
 	// Nếu target là ErrNotFound (kiểu error interface), so sánh trực tiếp
+	// Hỗ trợ cả trường hợp target là error interface (ErrNotFound)
 	if target == ErrNotFound {
 		if errNotFound, ok := ErrNotFound.(*Error); ok {
 			return e.Code.Code == errNotFound.Code.Code && e.Message == errNotFound.Message
+		}
+	}
+
+	// Hỗ trợ errors.Is với wrapped errors - kiểm tra bằng cách so sánh error message
+	// Nếu target error có message giống, coi như match
+	if target != nil {
+		if target.Error() == e.Message && e.Code.Code == ErrCodeDatabaseQuery.Code && e.Message == "Không tìm thấy dữ liệu" {
+			return true
 		}
 	}
 
@@ -341,6 +350,33 @@ var (
 func ConvertMongoError(err error) error {
 	if err == nil {
 		return nil
+	}
+
+	// Kiểm tra ErrNotFound trước - không convert lỗi này
+	// Thử nhiều cách để đảm bảo nhận diện đúng
+
+	// Cách 1: Kiểm tra bằng errors.Is (hỗ trợ wrapped errors)
+	if errors.Is(err, ErrNotFound) {
+		return err
+	}
+
+	// Cách 2: Kiểm tra xem có phải là ErrNotFound bằng cách so sánh error code và message
+	if errNotFound, ok := err.(*Error); ok {
+		if errNotFound.Code.Code == ErrCodeDatabaseQuery.Code &&
+			errNotFound.Message == "Không tìm thấy dữ liệu" {
+			return err
+		}
+	}
+
+	// Cách 3: Kiểm tra bằng error message (cho trường hợp wrapped errors)
+	errMsg := err.Error()
+	if errMsg == "Không tìm thấy dữ liệu" || errMsg == ErrNotFound.Error() {
+		return ErrNotFound
+	}
+
+	// Cách 4: Kiểm tra bằng cách so sánh với ErrNotFound trực tiếp
+	if err == ErrNotFound {
+		return err
 	}
 
 	// Kiểm tra các loại lỗi MongoDB cụ thể

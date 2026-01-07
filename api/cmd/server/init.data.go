@@ -52,24 +52,35 @@ func InitDefaultData() {
 		log.Info("User đầu tiên login sẽ tự động trở thành admin (First user becomes admin)")
 	}
 
-	// 5. Khởi tạo dữ liệu mặc định cho hệ thống notification
-	// Tạo các sender và template mặc định (global), các thông tin như token/password sẽ để trống để admin bổ sung sau
-	log.Info("🔄 [INIT] Step 5: Initializing notification data...")
-	if err := initService.InitNotificationData(); err != nil {
-		log.WithError(err).Error("❌ [INIT] Step 5: Failed to initialize notification data")
-		log.Warnf("Failed to initialize notification data: %v", err)
+	// 5. Khởi tạo Tech Team mặc định (nếu chưa có)
+	// Tạo team "Tech Team" thuộc System Organization để sử dụng cho các mục đích khác nhau
+	log.Info("🔄 [INIT] Step 5: Initializing default Tech Team...")
+	techTeam, err := initService.InitDefaultNotificationTeam()
+	if err != nil {
+		log.WithError(err).Error("❌ [INIT] Step 5: Failed to initialize Tech Team")
+		log.Warnf("Failed to initialize Tech Team: %v", err)
 	} else {
-		log.Info("✅ [INIT] Step 5: Notification data initialized successfully")
+		log.Infof("✅ [INIT] Step 5: Tech Team initialized successfully (ID: %s)", techTeam.ID.Hex())
 	}
 
-	// 6. Khởi tạo CTA Library mặc định
+	// 6. Khởi tạo dữ liệu mặc định cho hệ thống notification
+	// Tạo các sender và template mặc định (global), các thông tin như token/password sẽ để trống để admin bổ sung sau
+	log.Info("🔄 [INIT] Step 6: Initializing notification data...")
+	if err := initService.InitNotificationData(); err != nil {
+		log.WithError(err).Error("❌ [INIT] Step 6: Failed to initialize notification data")
+		log.Warnf("Failed to initialize notification data: %v", err)
+	} else {
+		log.Info("✅ [INIT] Step 6: Notification data initialized successfully")
+	}
+
+	// 7. Khởi tạo CTA Library mặc định
 	// Tạo các CTA templates phổ biến để có thể reuse trong notification templates
-	log.Info("🔄 [INIT] Step 6: Initializing CTA library...")
+	log.Info("🔄 [INIT] Step 7: Initializing CTA library...")
 	if err := initService.InitCTALibrary(); err != nil {
-		log.WithError(err).Error("❌ [INIT] Step 6: Failed to initialize CTA library")
+		log.WithError(err).Error("❌ [INIT] Step 7: Failed to initialize CTA library")
 		log.Warnf("Failed to initialize CTA library: %v", err)
 	} else {
-		log.Info("✅ [INIT] Step 6: CTA library initialized successfully")
+		log.Info("✅ [INIT] Step 7: CTA library initialized successfully")
 	}
 	
 	log.Info("✅ [INIT] InitDefaultData completed successfully")

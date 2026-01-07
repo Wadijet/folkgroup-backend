@@ -809,6 +809,60 @@ func (r *Router) registerDeliveryRoutes(router fiber.Router) error {
 	return nil
 }
 
+// registerAgentManagementRoutes đăng ký các route cho Agent Management System (Bot Management)
+//
+// ⚠️ LƯU Ý: Tất cả routes ở đây PHẢI dùng registerRouteWithMiddleware (xem comment ở đầu file)
+func (r *Router) registerAgentManagementRoutes(router fiber.Router) error {
+	// Agent Management Handler (chỉ cho check-in endpoint đặc biệt)
+	agentManagementHandler, err := handler.NewAgentManagementHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create agent management handler: %v", err)
+	}
+
+	// Enhanced Check-In endpoint (cần auth với permission AgentManagement.CheckIn)
+	// Bot gửi check-in với thông tin chi tiết, server trả về commands và config updates
+	checkInMiddleware := middleware.AuthMiddleware("AgentManagement.CheckIn")
+	registerRouteWithMiddleware(router, "/agent-management", "POST", "/check-in", []fiber.Handler{checkInMiddleware}, agentManagementHandler.HandleEnhancedCheckIn)
+
+	// Agent Registry CRUD routes
+	agentRegistryHandler, err := handler.NewAgentRegistryHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create agent registry handler: %v", err)
+	}
+	r.registerCRUDRoutes(router, "/agent-management/registry", agentRegistryHandler, readWriteConfig, "AgentRegistry")
+
+	// Agent Config CRUD routes
+	agentConfigHandler, err := handler.NewAgentConfigHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create agent config handler: %v", err)
+	}
+	r.registerCRUDRoutes(router, "/agent-management/config", agentConfigHandler, readWriteConfig, "AgentConfig")
+
+	// Agent Config Update Data endpoint (tạo version mới)
+	// Endpoint riêng để update configData với versioning logic
+	configUpdateMiddleware := middleware.AuthMiddleware("AgentConfig.Update")
+	registerRouteWithMiddleware(router, "/agent-management/config", "PUT", "/:agentId/update-data", []fiber.Handler{configUpdateMiddleware}, agentConfigHandler.HandleUpdateConfigData)
+
+	// Agent Command CRUD routes
+	agentCommandHandler, err := handler.NewAgentCommandHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create agent command handler: %v", err)
+	}
+	r.registerCRUDRoutes(router, "/agent-management/command", agentCommandHandler, readWriteConfig, "AgentCommand")
+
+	// Lưu ý: Agent Status đã được ghép vào Agent Registry, không cần route riêng nữa
+	// Status có thể được xem/update qua Agent Registry endpoints
+
+	// Agent Activity Log CRUD routes (read-only cho admin, bot tự log qua check-in)
+	agentActivityHandler, err := handler.NewAgentActivityLogHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create agent activity handler: %v", err)
+	}
+	r.registerCRUDRoutes(router, "/agent-management/activity", agentActivityHandler, readOnlyConfig, "AgentActivityLog")
+
+	return nil
+}
+
 // SetupRoutes thiết lập tất cả các route cho ứng dụng
 func SetupRoutes(app *fiber.App) error {
 	// Khởi tạo route prefix
@@ -861,6 +915,11 @@ func SetupRoutes(app *fiber.App) error {
 	// 9. Delivery Routes (Hệ thống 1)
 	if err := router.registerDeliveryRoutes(v1); err != nil {
 		return fmt.Errorf("failed to register delivery routes: %v", err)
+	}
+
+	// 10. Agent Management Routes (Bot Management System)
+	if err := router.registerAgentManagementRoutes(v1); err != nil {
+		return fmt.Errorf("failed to register agent management routes: %v", err)
 	}
 
 	return nil

@@ -2,6 +2,7 @@ package logger
 
 import (
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -71,6 +72,45 @@ func DefaultConfig() *LogConfig {
 	}
 	if output := os.Getenv("LOG_OUTPUT"); output != "" {
 		config.Output = strings.ToLower(output)
+	}
+
+	// Override rotation config từ environment variables
+	if maxSizeStr := os.Getenv("LOG_MAX_SIZE"); maxSizeStr != "" {
+		if maxSize, err := strconv.Atoi(maxSizeStr); err == nil && maxSize > 0 {
+			config.MaxSize = maxSize
+		}
+	}
+	if maxBackupsStr := os.Getenv("LOG_MAX_BACKUPS"); maxBackupsStr != "" {
+		if maxBackups, err := strconv.Atoi(maxBackupsStr); err == nil && maxBackups >= 0 {
+			config.MaxBackups = maxBackups
+		}
+	}
+	if maxAgeStr := os.Getenv("LOG_MAX_AGE"); maxAgeStr != "" {
+		if maxAge, err := strconv.Atoi(maxAgeStr); err == nil && maxAge > 0 {
+			config.MaxAge = maxAge
+		}
+	}
+	if compressStr := os.Getenv("LOG_COMPRESS"); compressStr != "" {
+		if compress, err := strconv.ParseBool(compressStr); err == nil {
+			config.Compress = compress
+		}
+	}
+
+	// Override log paths từ environment variables
+	if logPath := os.Getenv("LOG_PATH"); logPath != "" {
+		config.LogPath = logPath
+	}
+	if appFile := os.Getenv("LOG_APP_FILE"); appFile != "" {
+		config.AppFile = appFile
+	}
+	if auditFile := os.Getenv("LOG_AUDIT_FILE"); auditFile != "" {
+		config.AuditFile = auditFile
+	}
+	if perfFile := os.Getenv("LOG_PERF_FILE"); perfFile != "" {
+		config.PerformanceFile = perfFile
+	}
+	if errorFile := os.Getenv("LOG_ERROR_FILE"); errorFile != "" {
+		config.ErrorFile = errorFile
 	}
 
 	return config

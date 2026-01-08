@@ -3,6 +3,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -1521,16 +1522,17 @@ Hệ thống thông báo`,
 	// và gửi notification cho System Organization (organizationIds = [systemOrg.ID]) để sử dụng channels hệ thống
 	// Lưu ý: Nếu có lỗi duplicate, chỉ log warning và tiếp tục (không return error)
 	for _, event := range systemEvents {
-		eventTypePtr := &event.eventType // Convert string to *string
+		// Query với eventType cụ thể và ownerOrganizationId để kiểm tra duplicate
 		routingFilter := bson.M{
-			"eventType":           event.eventType,
-			"ownerOrganizationId": systemOrg.ID, // Filter theo ownerOrganizationId để tránh duplicate
+			"eventType":           event.eventType, // Query trực tiếp với string (EventType giờ là string, không phải *string)
+			"ownerOrganizationId": systemOrg.ID,    // Filter theo ownerOrganizationId để tránh duplicate
 		}
-		_, err = h.notificationRoutingService.FindOne(ctx, routingFilter, nil)
+		existingRule, err := h.notificationRoutingService.FindOne(ctx, routingFilter, nil)
 		if err == common.ErrNotFound {
+			// Chưa có rule cho eventType này, tạo mới
 			routingRule := models.NotificationRoutingRule{
-				OwnerOrganizationID: systemOrg.ID, // Thuộc về System Organization (phân quyền dữ liệu)
-				EventType:           eventTypePtr,
+				OwnerOrganizationID: systemOrg.ID,    // Thuộc về System Organization (phân quyền dữ liệu)
+				EventType:           event.eventType, // EventType giờ là string, không phải *string
 				Description:         fmt.Sprintf("Routing rule mặc định cho event '%s'. Gửi thông báo đến System Organization qua tất cả các kênh hệ thống (email, telegram, webhook). Được tạo tự động khi khởi tạo hệ thống.", event.eventType),
 				OrganizationIDs:     []primitive.ObjectID{systemOrg.ID},       // System Organization nhận notification (logic nghiệp vụ) - sử dụng channels hệ thống
 				ChannelTypes:        []string{"email", "telegram", "webhook"}, // Tất cả channel types
@@ -1539,16 +1541,59 @@ Hệ thống thông báo`,
 				CreatedAt:           currentTime,
 				UpdatedAt:           currentTime,
 			}
-			_, err = h.notificationRoutingService.InsertOne(ctx, routingRule)
+			createdRule, err := h.notificationRoutingService.InsertOne(ctx, routingRule)
 			if err != nil {
-				// Nếu lỗi duplicate, chỉ log warning và tiếp tục (không return error)
-				// Đảm bảo phần tạo share vẫn được gọi
-				logrus.WithError(err).Warnf("⚠️ [INIT] Failed to create routing rule for %s (có thể do duplicate), tiếp tục...", event.eventType)
+				// Kiểm tra xem có phải lỗi duplicate key không
+				if errors.Is(err, common.ErrMongoDuplicate) {
+					// Lỗi duplicate key - rule đã tồn tại (có thể do race condition hoặc query không tìm thấy)
+					// Thử query lại với nhiều cách khác nhau để tìm rule đã tồn tại
+					var existingRule models.NotificationRoutingRule
+					var queryErr error
+
+					// Cách 1: Query với filter ban đầu
+					existingRule, queryErr = h.notificationRoutingService.FindOne(ctx, routingFilter, nil)
+					if queryErr != nil {
+						// Cách 2: Query chỉ với ownerOrganizationId và eventType (không dùng filter phức tạp)
+						simpleFilter := bson.M{
+							"ownerOrganizationId": systemOrg.ID,
+							"eventType":           event.eventType,
+						}
+						existingRule, queryErr = h.notificationRoutingService.FindOne(ctx, simpleFilter, nil)
+					}
+
+					if queryErr == nil {
+						logrus.WithFields(logrus.Fields{
+							"eventType": event.eventType,
+							"ruleId":    existingRule.ID.Hex(),
+						}).Infof("ℹ️  [INIT] Routing rule for eventType '%s' already exists (detected via duplicate key error), skipping...", event.eventType)
+					} else {
+						// Không thể query lại rule đã tồn tại, nhưng duplicate key error cho thấy rule đã tồn tại
+						// Log info thay vì warning vì đây là trường hợp bình thường (rule đã tồn tại)
+						logrus.WithFields(logrus.Fields{
+							"eventType": event.eventType,
+							"error":     err.Error(),
+						}).Infof("ℹ️  [INIT] Routing rule for eventType '%s' already exists (duplicate key detected, không thể query lại nhưng rule đã tồn tại), skipping...", event.eventType)
+					}
+				} else {
+					// Lỗi khác, log warning và tiếp tục
+					logrus.WithError(err).Warnf("⚠️ [INIT] Failed to create routing rule for %s, tiếp tục...", event.eventType)
+				}
 				// Không return error, tiếp tục với event tiếp theo
+			} else {
+				logrus.WithFields(logrus.Fields{
+					"eventType": event.eventType,
+					"ruleId":    createdRule.ID.Hex(),
+				}).Infof("✅ [INIT] Created routing rule for eventType '%s'", event.eventType)
 			}
 		} else if err != nil {
 			// Lỗi khác khi query, log warning và tiếp tục
 			logrus.WithError(err).Warnf("⚠️ [INIT] Failed to check existing routing rule for %s, tiếp tục...", event.eventType)
+		} else {
+			// Rule đã tồn tại, log info
+			logrus.WithFields(logrus.Fields{
+				"eventType": event.eventType,
+				"ruleId":    existingRule.ID.Hex(),
+			}).Infof("ℹ️  [INIT] Routing rule for eventType '%s' already exists, skipping...", event.eventType)
 		}
 	}
 

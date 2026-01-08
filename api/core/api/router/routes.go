@@ -148,7 +148,6 @@ var (
 	roleConfig              = readWriteConfig
 	rolePermConfig          = readWriteConfig
 	userRoleConfig          = readWriteConfig
-	agentConfig             = readWriteConfig
 	organizationShareConfig = readWriteConfig
 
 	// Pancake Module Collections
@@ -159,7 +158,6 @@ var (
 	fbMessageConfig     = readWriteConfig
 	fbMessageItemConfig = readWriteConfig
 	pcOrderConfig       = readWriteConfig
-	customerConfig      = readWriteConfig
 
 	// Notification Module Collections
 	notificationSenderConfig   = readWriteConfig
@@ -471,19 +469,6 @@ func (r *Router) registerRBACRoutes(router fiber.Router) error {
 	// CRUD routes - đăng ký đầy đủ các operation CRUD (Find, FindById, Update, v.v.)
 	r.registerCRUDRoutes(router, "/organization-share", organizationShareHandler, organizationShareConfig, "OrganizationShare")
 
-	// Agent routes
-	agentHandler, err := handler.NewAgentHandler()
-	if err != nil {
-		return fmt.Errorf("failed to create agent handler: %v", err)
-	}
-	// Đăng ký các route đặc biệt cho agent: check-in/check-out
-	// FIX: Dùng registerRouteWithMiddleware với .Use() method (cách đúng) thay vì cách trực tiếp có bug trong Fiber v3
-	agentCheckInMiddleware := middleware.AuthMiddleware("Agent.CheckIn")
-	agentCheckOutMiddleware := middleware.AuthMiddleware("Agent.CheckOut")
-	registerRouteWithMiddleware(router, "/agent", "POST", "/check-in/:id", []fiber.Handler{agentCheckInMiddleware}, agentHandler.HandleCheckIn)    // Route check-in cho agent
-	registerRouteWithMiddleware(router, "/agent", "POST", "/check-out/:id", []fiber.Handler{agentCheckOutMiddleware}, agentHandler.HandleCheckOut) // Route check-out cho agent
-	r.registerCRUDRoutes(router, "/agent", agentHandler, agentConfig, "Agent")
-
 	return nil
 }
 
@@ -584,14 +569,6 @@ func (r *Router) registerFacebookRoutes(router fiber.Router) error {
 		return fmt.Errorf("failed to create pancake order handler: %v", err)
 	}
 	r.registerCRUDRoutes(router, "/pancake/order", pcOrderHandler, pcOrderConfig, "PcOrder")
-
-	// Customer routes (deprecated - dùng fb-customer và pc-pos-customer)
-	customerHandler, err := handler.NewCustomerHandler()
-	if err != nil {
-		return fmt.Errorf("failed to create customer handler: %v", err)
-	}
-	// CRUD routes chuẩn (bao gồm upsert-one với filter)
-	r.registerCRUDRoutes(router, "/customer", customerHandler, readWriteConfig, "Customer")
 
 	// Facebook Customer routes
 	fbCustomerHandler, err := handler.NewFbCustomerHandler()
@@ -743,7 +720,8 @@ func (r *Router) registerNotificationRoutes(router fiber.Router) error {
 	}
 	// FIX: Dùng registerRouteWithMiddleware với .Use() method (cách đúng) thay vì cách trực tiếp có bug trong Fiber v3
 	notificationTriggerMiddleware := middleware.AuthMiddleware("Notification.Trigger")
-	registerRouteWithMiddleware(router, "/notification", "POST", "/trigger", []fiber.Handler{notificationTriggerMiddleware}, triggerHandler.HandleTriggerNotification)
+	orgContextMiddleware := middleware.OrganizationContextMiddleware()
+	registerRouteWithMiddleware(router, "/notification", "POST", "/trigger", []fiber.Handler{notificationTriggerMiddleware, orgContextMiddleware}, triggerHandler.HandleTriggerNotification)
 
 	// Notification Tracking routes (public, không cần auth)
 	trackHandler, err := handler.NewNotificationTrackHandler()

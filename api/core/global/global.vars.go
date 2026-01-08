@@ -18,7 +18,6 @@ type MongoDB_Auth_CollectionName struct {
 	RolePermissions string // Tên collection cho vai trò và quyền
 	UserRoles       string // Tên collection cho người dùng và vai trò
 	Organizations   string // Tên collection cho tổ chức
-	Agents          string // Tên collection cho bot
 	AccessTokens    string // Tên collection cho token
 	FbPages         string // Tên collection cho trang Facebook
 	FbConvesations  string // Tên collection cho cuộc trò chuyện trên Facebook
@@ -27,7 +26,6 @@ type MongoDB_Auth_CollectionName struct {
 	FbPosts         string // Tên collection cho bài viết trên Facebook
 	FbCustomers     string // Tên collection cho khách hàng từ Facebook (Pancake)
 	PcOrders        string // Tên collection cho đơn hàng trên PanCake
-	Customers       string // Tên collection cho khách hàng (deprecated - dùng FbCustomers và PcPosCustomers)
 	PcPosCustomers  string // Tên collection cho khách hàng từ Pancake POS
 	PcPosShops      string // Tên collection cho cửa hàng từ Pancake POS API
 	PcPosWarehouses string // Tên collection cho kho hàng từ Pancake POS API
@@ -41,19 +39,19 @@ type MongoDB_Auth_CollectionName struct {
 	NotificationChannels     string // Tên collection cho notification channels
 	NotificationTemplates    string // Tên collection cho notification templates
 	NotificationRoutingRules string // Tên collection cho notification routing rules
-	
+
 	// Delivery System Collections (Hệ thống 1 - Gửi)
 	DeliveryQueue   string // Tên collection cho delivery queue (đổi từ notification_queue)
-	DeliveryHistory  string // Tên collection cho delivery history (đổi từ notification_history)
+	DeliveryHistory string // Tên collection cho delivery history (đổi từ notification_history)
 
 	// CTA Module Collections
 	CTALibrary  string // Tên collection cho CTA library
 	CTATracking string // Tên collection cho CTA tracking
 
 	// Agent Management System Collections (Bot Management)
-	AgentRegistry    string // Tên collection cho agent registry (đã ghép với agent_status)
-	AgentConfigs     string // Tên collection cho agent configs
-	AgentCommands    string // Tên collection cho agent commands
+	AgentRegistry     string // Tên collection cho agent registry (đã ghép với agent_status)
+	AgentConfigs      string // Tên collection cho agent configs
+	AgentCommands     string // Tên collection cho agent commands
 	AgentActivityLogs string // Tên collection cho agent activity logs
 }
 

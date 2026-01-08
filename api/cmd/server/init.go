@@ -33,7 +33,6 @@ func initColNames() {
 	global.MongoDB_ColNames.RolePermissions = "auth_role_permissions"
 	global.MongoDB_ColNames.UserRoles = "auth_user_roles"
 	global.MongoDB_ColNames.Organizations = "auth_organizations"
-	global.MongoDB_ColNames.Agents = "agents"
 	global.MongoDB_ColNames.AccessTokens = "access_tokens"
 	global.MongoDB_ColNames.FbPages = "fb_pages"
 	global.MongoDB_ColNames.FbConvesations = "fb_conversations"
@@ -42,7 +41,6 @@ func initColNames() {
 	global.MongoDB_ColNames.FbPosts = "fb_posts"
 	global.MongoDB_ColNames.FbCustomers = "fb_customers"
 	global.MongoDB_ColNames.PcOrders = "pc_orders"
-	global.MongoDB_ColNames.Customers = "customers"
 	global.MongoDB_ColNames.PcPosCustomers = "pc_pos_customers"
 	global.MongoDB_ColNames.PcPosShops = "pc_pos_shops"
 	global.MongoDB_ColNames.PcPosWarehouses = "pc_pos_warehouses"
@@ -56,7 +54,7 @@ func initColNames() {
 	global.MongoDB_ColNames.NotificationChannels = "notification_channels"
 	global.MongoDB_ColNames.NotificationTemplates = "notification_templates"
 	global.MongoDB_ColNames.NotificationRoutingRules = "notification_routing_rules"
-	
+
 	// Delivery System Collections (Hệ thống 1 - Gửi)
 	global.MongoDB_ColNames.DeliveryQueue = "delivery_queue"
 	global.MongoDB_ColNames.DeliveryHistory = "delivery_history"
@@ -111,7 +109,6 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.UserRoles), models.UserRole{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.RolePermissions), models.RolePermission{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.Organizations), models.Organization{})
-	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.Agents), models.Agent{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AccessTokens), models.AccessToken{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.FbPages), models.FbPage{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.FbConvesations), models.FbConversation{})
@@ -120,7 +117,6 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.FbPosts), models.FbPost{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.FbCustomers), models.FbCustomer{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.PcOrders), models.PcOrder{})
-	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.Customers), models.Customer{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.PcPosCustomers), models.PcPosCustomer{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.PcPosShops), models.PcPosShop{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.PcPosWarehouses), models.PcPosWarehouse{})
@@ -134,7 +130,7 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.NotificationChannels), models.NotificationChannel{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.NotificationTemplates), models.NotificationTemplate{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.NotificationRoutingRules), models.NotificationRoutingRule{})
-	
+
 	// Delivery System Indexes (Hệ thống 1 - Gửi)
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DeliveryQueue), models.DeliveryQueueItem{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DeliveryHistory), models.DeliveryHistory{})

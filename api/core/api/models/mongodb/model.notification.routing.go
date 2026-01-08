@@ -10,9 +10,9 @@ import (
 // Lưu ý: Mỗi organization chỉ có thể có 1 rule cho mỗi eventType hoặc domain (unique constraint)
 type NotificationRoutingRule struct {
 	ID                  primitive.ObjectID   `json:"id,omitempty" bson:"_id,omitempty"`
-	OwnerOrganizationID primitive.ObjectID   `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:eventType_ownerOrg_unique,compound:domain_ownerOrg_unique"` // Tổ chức sở hữu rule (phân quyền dữ liệu)
-	EventType           *string              `json:"eventType,omitempty" bson:"eventType,omitempty" index:"single:1,compound:eventType_ownerOrg_unique"`                               // Optional: routing theo eventType cụ thể (null = dùng Domain)
-	Domain              *string              `json:"domain,omitempty" bson:"domain,omitempty" index:"single:1,compound:domain_ownerOrg_unique"`                                          // Optional: routing theo domain (null = dùng EventType)
+	OwnerOrganizationID primitive.ObjectID   `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:eventType_ownerOrg_unique"` // Tổ chức sở hữu rule (phân quyền dữ liệu)
+	EventType           string               `json:"eventType" bson:"eventType" index:"single:1,compound:eventType_ownerOrg_unique"`                                                      // Required: routing theo eventType cụ thể (không được null)
+	Domain              *string              `json:"domain,omitempty" bson:"domain,omitempty" index:"single:1,sparse"`                                                                      // Optional: routing theo domain (null = dùng EventType) - không unique vì có thể có nhiều rules cùng domain
 	Description         string               `json:"description,omitempty" bson:"description,omitempty"`                                                                                // Mô tả về routing rule để người dùng hiểu được mục đích sử dụng
 	OrganizationIDs     []primitive.ObjectID `json:"organizationIds" bson:"organizationIds"`                                                                                             // Teams nào nhận (có thể nhiều)
 	ChannelTypes        []string             `json:"channelTypes,omitempty" bson:"channelTypes,omitempty"`                                                                            // Filter channels theo type (optional: email, telegram, webhook)

@@ -91,37 +91,46 @@ func (h *NotificationRoutingHandler) InsertOne(c fiber.Ctx) error {
 			}
 		}
 
-		// ✅ Validate uniqueness: Kiểm tra đã có rule cho eventType/domain và ownerOrganizationId chưa
+		// ✅ Validate EventType: EventType là bắt buộc
+		if input.EventType == "" {
+			h.HandleResponse(c, nil, common.NewError(
+				common.ErrCodeValidationInput,
+				"EventType là bắt buộc và không được để trống",
+				common.StatusBadRequest,
+				nil,
+			))
+			return nil
+		}
+
+		// ✅ Validate uniqueness: Kiểm tra đã có rule cho eventType và ownerOrganizationId chưa
 		ownerOrgID := h.getOwnerOrganizationIDFromModel(input)
 		if ownerOrgID != nil && !ownerOrgID.IsZero() {
-			// Kiểm tra rule với eventType (nếu có)
-			if input.EventType != nil && *input.EventType != "" {
-				filter := bson.M{
-					"eventType":           *input.EventType,
-					"ownerOrganizationId":  *ownerOrgID,
-					"isActive":            true, // Chỉ check rules đang active
-				}
-				_, err := h.routingService.FindOne(c.Context(), filter, nil)
-				if err == nil {
-					h.HandleResponse(c, nil, common.NewError(
-						common.ErrCodeBusinessOperation,
-						fmt.Sprintf("Đã tồn tại routing rule cho eventType '%s' và organization này. Mỗi organization chỉ có thể có 1 rule cho mỗi eventType", *input.EventType),
-						common.StatusConflict,
-						nil,
-					))
-					return nil
-				}
-				if err != common.ErrNotFound {
-					h.HandleResponse(c, nil, err)
-					return nil
-				}
+			// Kiểm tra rule với eventType (EventType là bắt buộc)
+			filter := bson.M{
+				"eventType":           input.EventType, // EventType giờ là string, không phải *string
+				"ownerOrganizationId": *ownerOrgID,
+				"isActive":            true, // Chỉ check rules đang active
+			}
+			_, err := h.routingService.FindOne(c.Context(), filter, nil)
+			if err == nil {
+				h.HandleResponse(c, nil, common.NewError(
+					common.ErrCodeBusinessOperation,
+					fmt.Sprintf("Đã tồn tại routing rule cho eventType '%s' và organization này. Mỗi organization chỉ có thể có 1 rule cho mỗi eventType", input.EventType),
+					common.StatusConflict,
+					nil,
+				))
+				return nil
+			}
+			if err != common.ErrNotFound {
+				h.HandleResponse(c, nil, err)
+				return nil
 			}
 
 			// Kiểm tra rule với domain (nếu có)
 			if input.Domain != nil && *input.Domain != "" {
 				filter := bson.M{
 					"domain":              *input.Domain,
-					"ownerOrganizationId":  *ownerOrgID,
+					"ownerOrganizationId": *ownerOrgID,
 					"isActive":            true, // Chỉ check rules đang active
 				}
 				_, err := h.routingService.FindOne(c.Context(), filter, nil)

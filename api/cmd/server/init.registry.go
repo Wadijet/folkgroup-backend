@@ -28,7 +28,8 @@ func InitCollections(client *mongo.Client, cfg *config.Configuration) error {
 		"notification_senders", "notification_channels", "notification_templates", "notification_routing_rules",
 		"delivery_queue", "delivery_history",
 		"cta_library", "cta_tracking",
-		"agent_registry", "agent_configs", "agent_commands", "agent_activity_logs"}
+		"agent_registry", "agent_configs", "agent_commands", "agent_activity_logs",
+		"webhook_logs"}
 
 	for _, name := range colNames {
 		registered, err := global.RegistryCollections.Register(name, db.Collection(name))

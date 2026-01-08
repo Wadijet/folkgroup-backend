@@ -53,6 +53,9 @@ type MongoDB_Auth_CollectionName struct {
 	AgentConfigs      string // Tên collection cho agent configs
 	AgentCommands     string // Tên collection cho agent commands
 	AgentActivityLogs string // Tên collection cho agent activity logs
+
+	// Webhook Logs Collection
+	WebhookLogs string // Tên collection cho webhook logs (để debug)
 }
 
 // Các biến toàn cục

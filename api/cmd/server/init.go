@@ -70,6 +70,9 @@ func initColNames() {
 	// AgentStatus đã được ghép vào AgentRegistry, không cần collection riêng nữa
 	global.MongoDB_ColNames.AgentActivityLogs = "agent_activity_logs"
 
+	// Webhook Logs Collection
+	global.MongoDB_ColNames.WebhookLogs = "webhook_logs"
+
 	logrus.Info("Initialized collection names") // Ghi log thông báo đã khởi tạo tên các collection
 }
 

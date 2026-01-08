@@ -570,6 +570,22 @@ func (r *Router) registerFacebookRoutes(router fiber.Router) error {
 	}
 	r.registerCRUDRoutes(router, "/pancake/order", pcOrderHandler, pcOrderConfig, "PcOrder")
 
+	// Pancake Webhook routes (public, không cần auth - Pancake gọi trực tiếp)
+	pancakeWebhookHandler, err := handler.NewPancakeWebhookHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create pancake webhook handler: %v", err)
+	}
+	// Webhook endpoint không cần authentication middleware
+	router.Post("/pancake/webhook", pancakeWebhookHandler.HandlePancakeWebhook)
+
+	// Pancake POS Webhook routes (public, không cần auth - Pancake POS gọi trực tiếp)
+	pancakePosWebhookHandler, err := handler.NewPancakePosWebhookHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create pancake pos webhook handler: %v", err)
+	}
+	// Webhook endpoint không cần authentication middleware
+	router.Post("/pancake-pos/webhook", pancakePosWebhookHandler.HandlePancakePosWebhook)
+
 	// Facebook Customer routes
 	fbCustomerHandler, err := handler.NewFbCustomerHandler()
 	if err != nil {

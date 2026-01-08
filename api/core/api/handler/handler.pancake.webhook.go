@@ -89,33 +89,36 @@ func (h *PancakeWebhookHandler) HandlePancakeWebhook(c fiber.Ctx) error {
 		// Lưu raw body trước khi parse (để lưu vào webhook log)
 		rawBody := string(c.Body())
 
-		// Parse request body
-		var req dto.PancakeWebhookRequest
-		if err := c.Bind().Body(&req); err != nil {
-			log.WithError(err).Warn("🔔 [PANCAKE WEBHOOK] Không thể parse request body")
-			c.Status(common.StatusBadRequest).JSON(fiber.Map{
-				"code":    common.ErrCodeValidationFormat.Code,
-				"message": "Dữ liệu gửi lên không đúng định dạng JSON",
-				"status":  "error",
-			})
-			return nil
-		}
-
-		// Validate
-		if req.Payload.EventType == "" {
-			c.Status(common.StatusBadRequest).JSON(fiber.Map{
-				"code":    common.ErrCodeValidationFormat.Code,
-				"message": "eventType không được để trống",
-				"status":  "error",
-			})
-			return nil
-		}
-
-		// Lưu webhook log để debug (trước khi xử lý)
+		// Lưu webhook log NGAY LẬP TỨC (trước khi parse/validate) để debug
 		ctx := c.Context()
-		webhookLog, logErr := h.saveWebhookLog(ctx, c, "pancake", req, rawBody)
+		var req dto.PancakeWebhookRequest
+		parseErr := c.Bind().Body(&req)
+		
+		// Lưu webhook log kể cả khi parse lỗi
+		webhookLog, logErr := h.saveWebhookLog(ctx, c, "pancake", req, rawBody, parseErr)
 		if logErr != nil {
 			log.WithError(logErr).Warn("🔔 [PANCAKE WEBHOOK] Không thể lưu webhook log")
+		}
+
+		// Log raw body để debug
+		log.WithFields(map[string]interface{}{
+			"rawBody": rawBody,
+			"parseErr": func() string {
+				if parseErr != nil {
+					return parseErr.Error()
+				}
+				return ""
+			}(),
+		}).Info("🔔 [PANCAKE WEBHOOK] Nhận webhook từ Pancake (đã lưu log)")
+
+		// Nếu parse lỗi, vẫn trả về 200 OK (để Pancake không retry)
+		if parseErr != nil {
+			c.Status(common.StatusOK).JSON(fiber.Map{
+				"code":    common.StatusOK,
+				"message": "Webhook đã được nhận và lưu log",
+				"status":  "success",
+			})
+			return nil
 		}
 
 		// TODO: Verify webhook signature (nếu Pancake hỗ trợ)
@@ -130,51 +133,49 @@ func (h *PancakeWebhookHandler) HandlePancakeWebhook(c fiber.Ctx) error {
 		//     }
 		// }
 
-		// Log webhook received
-		log.WithFields(map[string]interface{}{
-			"eventType": req.Payload.EventType,
-			"pageId":    req.Payload.PageID,
-			"timestamp": req.Payload.Timestamp,
-		}).Info("🔔 [PANCAKE WEBHOOK] Nhận webhook từ Pancake")
-
-		// Xử lý webhook dựa trên eventType
+		// Xử lý webhook dựa trên eventType (nếu có)
 		var processErr error
-		switch req.Payload.EventType {
-		case "order_created", "order_updated":
-			processErr = h.handleOrderEvent(ctx, req.Payload)
-		case "conversation_updated":
-			processErr = h.handleConversationEvent(ctx, req.Payload)
-		case "message_received":
-			processErr = h.handleMessageEvent(ctx, req.Payload)
-		case "customer_updated":
-			processErr = h.handleCustomerEvent(ctx, req.Payload)
-		default:
-			log.WithField("eventType", req.Payload.EventType).Warn("🔔 [PANCAKE WEBHOOK] Event type chưa được xử lý")
-		}
-
-		// Cập nhật trạng thái xử lý trong webhook log
-		if webhookLog != nil {
-			errorMsg := ""
-			if processErr != nil {
-				errorMsg = processErr.Error()
-			}
-			_ = h.webhookLogService.UpdateProcessedStatus(ctx, webhookLog.ID, processErr == nil, errorMsg)
-		}
-
-		if processErr != nil {
-			log.WithError(processErr).WithField("eventType", req.Payload.EventType).Error("🔔 [PANCAKE WEBHOOK] Lỗi khi xử lý webhook")
-			// Vẫn trả về 200 OK để Pancake không retry
-		}
-
-		// Trả về success response
-		c.Status(common.StatusOK).JSON(fiber.Map{
-			"code":    common.StatusOK,
-			"message": "Webhook đã được nhận và xử lý thành công",
-			"data": fiber.Map{
+		if req.Payload.EventType != "" {
+			log.WithFields(map[string]interface{}{
 				"eventType": req.Payload.EventType,
 				"pageId":    req.Payload.PageID,
-			},
-			"status": "success",
+				"timestamp": req.Payload.Timestamp,
+			}).Info("🔔 [PANCAKE WEBHOOK] Xử lý webhook")
+
+			switch req.Payload.EventType {
+			case "order_created", "order_updated":
+				processErr = h.handleOrderEvent(ctx, req.Payload)
+			case "conversation_updated":
+				processErr = h.handleConversationEvent(ctx, req.Payload)
+			case "message_received":
+				processErr = h.handleMessageEvent(ctx, req.Payload)
+			case "customer_updated":
+				processErr = h.handleCustomerEvent(ctx, req.Payload)
+			default:
+				log.WithField("eventType", req.Payload.EventType).Warn("🔔 [PANCAKE WEBHOOK] Event type chưa được xử lý")
+			}
+
+			// Cập nhật trạng thái xử lý trong webhook log
+			if webhookLog != nil {
+				errorMsg := ""
+				if processErr != nil {
+					errorMsg = processErr.Error()
+				}
+				_ = h.webhookLogService.UpdateProcessedStatus(ctx, webhookLog.ID, processErr == nil, errorMsg)
+			}
+
+			if processErr != nil {
+				log.WithError(processErr).WithField("eventType", req.Payload.EventType).Error("🔔 [PANCAKE WEBHOOK] Lỗi khi xử lý webhook")
+			}
+		} else {
+			log.Warn("🔔 [PANCAKE WEBHOOK] Không có eventType, chỉ lưu log")
+		}
+
+		// Luôn trả về 200 OK (để Pancake không retry)
+		c.Status(common.StatusOK).JSON(fiber.Map{
+			"code":    common.StatusOK,
+			"message": "Webhook đã được nhận và lưu log",
+			"status":  "success",
 		})
 
 		return nil
@@ -431,7 +432,8 @@ func (h *PancakeWebhookHandler) handleCustomerEvent(ctx context.Context, payload
 }
 
 // saveWebhookLog lưu webhook log vào database để debug
-func (h *PancakeWebhookHandler) saveWebhookLog(ctx context.Context, c fiber.Ctx, source string, req dto.PancakeWebhookRequest, rawBody string) (*models.WebhookLog, error) {
+// Nhận parseErr để lưu vào log nếu có lỗi parse
+func (h *PancakeWebhookHandler) saveWebhookLog(ctx context.Context, c fiber.Ctx, source string, req dto.PancakeWebhookRequest, rawBody string, parseErr error) (*models.WebhookLog, error) {
 	now := time.Now().UnixMilli()
 
 	// Lấy request headers
@@ -440,17 +442,45 @@ func (h *PancakeWebhookHandler) saveWebhookLog(ctx context.Context, c fiber.Ctx,
 		requestHeaders[string(key)] = string(value)
 	})
 
+	// Tạo requestBody từ parsed request hoặc raw body nếu parse lỗi
+	requestBody := make(map[string]interface{})
+	if parseErr == nil && req.Payload.EventType != "" {
+		// Parse thành công, dùng parsed data
+		requestBody = map[string]interface{}{
+			"payload": req.Payload,
+		}
+	} else {
+		// Parse lỗi hoặc không có data, lưu raw body dưới dạng string
+		requestBody = map[string]interface{}{
+			"raw": rawBody,
+			"parseError": func() string {
+				if parseErr != nil {
+					return parseErr.Error()
+				}
+				return ""
+			}(),
+		}
+	}
+
+	// Extract eventType và pageId từ parsed request (nếu có)
+	eventType := req.Payload.EventType
+	pageID := req.Payload.PageID
+
 	// Tạo webhook log
 	webhookLog := models.WebhookLog{
 		Source:         source,
-		EventType:      req.Payload.EventType,
-		PageID:         req.Payload.PageID,
+		EventType:      eventType,
+		PageID:         pageID,
 		RequestHeaders: requestHeaders,
-		RequestBody: map[string]interface{}{
-			"payload": req.Payload,
-		},
-		RawBody:    rawBody,
-		Processed:  false,
+		RequestBody:    requestBody,
+		RawBody:        rawBody,
+		Processed:      false,
+		ProcessError:   func() string {
+			if parseErr != nil {
+				return fmt.Sprintf("Parse error: %v", parseErr)
+			}
+			return ""
+		}(),
 		IPAddress:  c.IP(),
 		UserAgent:  c.Get("User-Agent"),
 		ReceivedAt: now,

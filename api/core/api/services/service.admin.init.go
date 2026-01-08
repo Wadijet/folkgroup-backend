@@ -420,6 +420,13 @@ var InitialPermissions = []models.Permission{
 
 	// Quyền đặc biệt cho check-in endpoint
 	{Name: "AgentManagement.CheckIn", Describe: "Quyền check-in từ bot", Group: "AgentManagement", Category: "AgentManagement"},
+
+	// ==================================== WEBHOOK LOGS MODULE ===========================================
+	// Quản lý Webhook Log: Thêm, xem, sửa, xóa (để debug và tracking webhooks)
+	{Name: "WebhookLog.Insert", Describe: "Quyền tạo webhook log", Group: "Webhook", Category: "WebhookLog"},
+	{Name: "WebhookLog.Read", Describe: "Quyền xem danh sách webhook logs", Group: "Webhook", Category: "WebhookLog"},
+	{Name: "WebhookLog.Update", Describe: "Quyền cập nhật webhook log", Group: "Webhook", Category: "WebhookLog"},
+	{Name: "WebhookLog.Delete", Describe: "Quyền xóa webhook log", Group: "Webhook", Category: "WebhookLog"},
 }
 
 // InitPermission khởi tạo các quyền mặc định cho hệ thống

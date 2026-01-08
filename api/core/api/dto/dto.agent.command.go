@@ -2,7 +2,7 @@ package dto
 
 // AgentCommandCreateInput là input để tạo agent command
 type AgentCommandCreateInput struct {
-	AgentID string                 `json:"agentId" validate:"required"` // ObjectID của agent registry
+	AgentID string                 `json:"agentId" validate:"required"` // AgentID (string) - id chung giữa các collection, tương ứng với AgentRegistry.AgentID
 	Type    string                 `json:"type" validate:"required"`    // "stop", "start", "restart", "reload_config", "shutdown", "run_job", "pause_job", "resume_job", "disable_job", "enable_job", "update_job_schedule"
 	Target  string                 `json:"target" validate:"required"`  // "bot" hoặc job name
 	Params  map[string]interface{} `json:"params,omitempty"`            // Tham số cho command

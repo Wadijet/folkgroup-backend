@@ -106,10 +106,14 @@ func (s *AgentManagementService) HandleEnhancedCheckIn(ctx context.Context, agen
 	}
 
 	// 6. Check pending commands
-	pendingCommand, err := s.commandService.GetPendingCommand(ctx, agentRegistry.ID)
+	// Sử dụng agentId (string) - id chung giữa các collection
+	pendingCommands, err := s.commandService.GetPendingCommands(ctx, agentId)
 	if err != nil {
-		// Log warning nhưng không fail
-		fmt.Printf("[AgentManagement] Warning: Failed to get pending command: %v\n", err)
+		// Log error nhưng không fail check-in (bot vẫn cần nhận được response)
+		fmt.Printf("[AgentManagement] Error: Failed to get pending commands for agent %s: %v\n", agentId, err)
+	} else if len(pendingCommands) > 0 {
+		// Log info khi có commands để debug
+		fmt.Printf("[AgentManagement] Info: Found %d pending commands for agent %s\n", len(pendingCommands), agentId)
 	}
 
 	// 7. Get current config và tính diff
@@ -139,9 +143,9 @@ func (s *AgentManagementService) HandleEnhancedCheckIn(ctx context.Context, agen
 		"nextCheckIn": 60, // Default 60 giây
 	}
 
-	// Add command nếu có
-	if pendingCommand != nil {
-		response["command"] = pendingCommand
+	// Add commands nếu có (danh sách commands)
+	if len(pendingCommands) > 0 {
+		response["commands"] = pendingCommands
 	}
 
 	// Add config (với diff nếu có update)

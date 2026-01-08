@@ -165,6 +165,9 @@ var (
 	notificationTemplateConfig = readWriteConfig
 	notificationRoutingConfig  = readWriteConfig
 	notificationHistoryConfig  = readOnlyConfig // History chỉ đọc
+
+	// Webhook Logs Module Collections
+	webhookLogConfig = readWriteConfig // Webhook logs có thể xem, tạo, sửa, xóa để debug
 )
 
 // RoutePrefix chứa các prefix cơ bản cho API
@@ -585,6 +588,13 @@ func (r *Router) registerFacebookRoutes(router fiber.Router) error {
 	}
 	// Webhook endpoint không cần authentication middleware
 	router.Post("/pancake-pos/webhook", pancakePosWebhookHandler.HandlePancakePosWebhook)
+
+	// Webhook Log CRUD routes (cần auth - để admin xem và debug webhooks)
+	webhookLogHandler, err := handler.NewWebhookLogHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create webhook log handler: %v", err)
+	}
+	r.registerCRUDRoutes(router, "/webhook-log", webhookLogHandler, webhookLogConfig, "WebhookLog")
 
 	// Facebook Customer routes
 	fbCustomerHandler, err := handler.NewFbCustomerHandler()

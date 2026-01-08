@@ -1,9 +1,13 @@
 package logger
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/joho/godotenv"
 )
 
 // LogConfig chứa cấu hình cho hệ thống logging
@@ -31,8 +35,76 @@ type LogConfig struct {
 	ErrorFile       string `env:"LOG_ERROR_FILE" envDefault:"error.log"`
 }
 
+// getEnvPath trả về đường dẫn đến file env (tương tự như config.getEnvPath)
+func getEnvPath() string {
+	// Bước 1: Kiểm tra đường dẫn cố định trên VPS (ưu tiên cao nhất)
+	defaultVPSPath := "/home/dungdm/folkform/config/backend.env"
+	if _, err := os.Stat(defaultVPSPath); err == nil {
+		return defaultVPSPath
+	}
+
+	// Bước 2: Kiểm tra ENV_FILE_PATH (đường dẫn tuyệt đối đến file env)
+	if envFilePath := os.Getenv("ENV_FILE_PATH"); envFilePath != "" {
+		if _, err := os.Stat(envFilePath); err == nil {
+			return envFilePath
+		}
+	}
+
+	// Bước 3: Kiểm tra ENV_FILE_DIR (thư mục chứa file backend.env)
+	if envFileDir := os.Getenv("ENV_FILE_DIR"); envFileDir != "" {
+		envPath := filepath.Join(envFileDir, "backend.env")
+		if _, err := os.Stat(envPath); err == nil {
+			return envPath
+		}
+	}
+
+	// Bước 4: Fallback về file env local (cho development)
+	// Tìm file api/config/env/development.env
+	currentDir, err := os.Getwd()
+	if err == nil {
+		// Tìm thư mục api/config/env
+		for {
+			envDir := filepath.Join(currentDir, "config", "env")
+			if _, err := os.Stat(envDir); err == nil {
+				// Tìm thấy thư mục config/env
+				localEnvPath := filepath.Join(envDir, "development.env")
+				if _, err := os.Stat(localEnvPath); err == nil {
+					return localEnvPath
+				}
+				break
+			}
+
+			// Đi lên thư mục cha
+			parentDir := filepath.Dir(currentDir)
+			if parentDir == currentDir {
+				break
+			}
+			currentDir = parentDir
+		}
+	}
+
+	// Không tìm thấy file env
+	return ""
+}
+
 // DefaultConfig trả về cấu hình mặc định
 func DefaultConfig() *LogConfig {
+	// Load file env nếu có (tương tự như config.NewConfig)
+	// Chỉ load nếu chưa có env vars từ systemd
+	envPath := getEnvPath()
+	if envPath != "" {
+		// Chỉ load nếu các env vars quan trọng chưa được set
+		// (có thể đã được set từ systemd EnvironmentFile)
+		if os.Getenv("LOG_LEVEL") == "" || os.Getenv("LOG_MAX_AGE") == "" {
+			if err := godotenv.Load(envPath); err != nil {
+				// Không fail, chỉ log warning nếu không load được
+				fmt.Printf("[Logger] ⚠️  Không thể load file env tại %s: %v (sẽ dùng giá trị mặc định)\n", envPath, err)
+			} else {
+				fmt.Printf("[Logger] ✅ Đã load file env từ %s\n", envPath)
+			}
+		}
+	}
+
 	// Lấy environment
 	env := os.Getenv("GO_ENV")
 	if env == "" {

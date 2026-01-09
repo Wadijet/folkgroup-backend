@@ -12,7 +12,6 @@ import (
 	models "meta_commerce/core/api/models/mongodb"
 	"meta_commerce/core/common"
 	"meta_commerce/core/global"
-	"meta_commerce/core/logger"
 	"meta_commerce/core/utility"
 
 	"github.com/sirupsen/logrus"
@@ -75,9 +74,7 @@ func (s *UserService) Logout(ctx context.Context, userID primitive.ObjectID, inp
 
 // LoginWithFirebase đăng nhập bằng Firebase ID token
 func (s *UserService) LoginWithFirebase(ctx context.Context, input *dto.FirebaseLoginInput) (*models.User, error) {
-	logrus.WithFields(logrus.Fields{
-		"hwid": input.Hwid,
-	}).Debug("LoginWithFirebase: Bắt đầu đăng nhập với Firebase")
+	// Đã tắt debug log để giảm log
 
 	// 1. Verify Firebase ID token
 	token, err := utility.VerifyIDToken(ctx, input.IDToken)
@@ -91,10 +88,6 @@ func (s *UserService) LoginWithFirebase(ctx context.Context, input *dto.Firebase
 		)
 	}
 
-	logrus.WithFields(logrus.Fields{
-		"firebase_uid": token.UID,
-	}).Debug("LoginWithFirebase: Firebase token hợp lệ")
-
 	// 2. Lấy thông tin user từ Firebase
 	firebaseUser, err := utility.GetUserByUID(ctx, token.UID)
 	if err != nil {
@@ -105,12 +98,7 @@ func (s *UserService) LoginWithFirebase(ctx context.Context, input *dto.Firebase
 		return nil, err
 	}
 
-	logrus.WithFields(logrus.Fields{
-		"firebase_uid":   token.UID,
-		"email":          firebaseUser.Email,
-		"phone":          firebaseUser.PhoneNumber,
-		"email_verified": firebaseUser.EmailVerified,
-	}).Debug("LoginWithFirebase: Đã lấy thông tin user từ Firebase")
+	// Đã tắt debug log để giảm log
 
 	// 3. Kiểm tra conflict với email/phone trước khi upsert
 	// (để tránh tạo user mới khi đã có user khác dùng email/phone này)
@@ -120,16 +108,10 @@ func (s *UserService) LoginWithFirebase(ctx context.Context, input *dto.Firebase
 	// Kiểm tra theo email nếu có
 	if firebaseUser.Email != "" {
 		emailFilter := bson.M{"email": firebaseUser.Email}
-		logrus.WithFields(logrus.Fields{
-			"email": firebaseUser.Email,
-		}).Debug("LoginWithFirebase: Kiểm tra user theo email")
+		// Đã tắt debug log để giảm log
 		if emailUser, emailErr := s.BaseServiceMongoImpl.FindOne(ctx, emailFilter, nil); emailErr == nil {
 			existingUser = &emailUser
 			foundBy = "email"
-			logrus.WithFields(logrus.Fields{
-				"user_id":      emailUser.ID.Hex(),
-				"firebase_uid": emailUser.FirebaseUID,
-			}).Debug("LoginWithFirebase: Tìm thấy user theo email")
 		} else if !errors.Is(emailErr, common.ErrNotFound) {
 			logrus.WithError(emailErr).Error("LoginWithFirebase: Lỗi khi tìm user theo email")
 			return nil, emailErr
@@ -139,16 +121,10 @@ func (s *UserService) LoginWithFirebase(ctx context.Context, input *dto.Firebase
 	// Kiểm tra theo phone nếu có và chưa tìm thấy user
 	if existingUser == nil && firebaseUser.PhoneNumber != "" {
 		phoneFilter := bson.M{"phone": firebaseUser.PhoneNumber}
-		logrus.WithFields(logrus.Fields{
-			"phone": firebaseUser.PhoneNumber,
-		}).Debug("LoginWithFirebase: Kiểm tra user theo phone")
+		// Đã tắt debug log để giảm log
 		if phoneUser, phoneErr := s.BaseServiceMongoImpl.FindOne(ctx, phoneFilter, nil); phoneErr == nil {
 			existingUser = &phoneUser
 			foundBy = "phone"
-			logrus.WithFields(logrus.Fields{
-				"user_id":      phoneUser.ID.Hex(),
-				"firebase_uid": phoneUser.FirebaseUID,
-			}).Debug("LoginWithFirebase: Tìm thấy user theo phone")
 		} else if !errors.Is(phoneErr, common.ErrNotFound) {
 			logrus.WithError(phoneErr).Error("LoginWithFirebase: Lỗi khi tìm user theo phone")
 			return nil, phoneErr
@@ -179,11 +155,7 @@ func (s *UserService) LoginWithFirebase(ctx context.Context, input *dto.Firebase
 			)
 		}
 		// User này chưa có firebaseUid hoặc firebaseUid trùng, sẽ update bằng upsert
-		logrus.WithFields(logrus.Fields{
-			"user_id": existingUser.ID.Hex(),
-		}).Debug("LoginWithFirebase: User đã tồn tại, sẽ update bằng upsert")
-	} else {
-		logrus.Debug("LoginWithFirebase: Không tìm thấy user, sẽ tạo mới bằng upsert")
+		// Đã tắt debug log để giảm log
 	}
 
 	// 5. Chuẩn bị dữ liệu để upsert
@@ -222,23 +194,11 @@ func (s *UserService) LoginWithFirebase(ctx context.Context, input *dto.Firebase
 	if existingUser != nil {
 		// Nếu đã tìm thấy user, upsert với _id để update user đó
 		filter = bson.M{"_id": existingUser.ID}
-		logrus.WithFields(logrus.Fields{
-			"filter":  filter,
-			"user_id": existingUser.ID.Hex(),
-		}).Debug("LoginWithFirebase: Upsert với filter _id")
 	} else {
 		// Nếu chưa tìm thấy, upsert với firebaseUid để tạo mới hoặc update
 		filter = bson.M{"firebaseUid": token.UID}
-		logrus.WithFields(logrus.Fields{
-			"filter":       filter,
-			"firebase_uid": token.UID,
-		}).Debug("LoginWithFirebase: Upsert với filter firebaseUid")
 	}
-
-	logrus.WithFields(logrus.Fields{
-		"filter":      filter,
-		"update_keys": getUpdateDataKeys(updateData),
-	}).Debug("LoginWithFirebase: Bắt đầu gọi Upsert")
+	// Đã tắt debug log để giảm log
 
 	user, err = s.BaseServiceMongoImpl.Upsert(ctx, filter, updateData)
 	if err != nil {
@@ -253,9 +213,7 @@ func (s *UserService) LoginWithFirebase(ctx context.Context, input *dto.Firebase
 			firebaseFilter := bson.M{"firebaseUid": token.UID}
 			if found, findErr := s.BaseServiceMongoImpl.FindOne(ctx, firebaseFilter, nil); findErr == nil {
 				user = found
-				logrus.WithFields(logrus.Fields{
-					"user_id": user.ID.Hex(),
-				}).Debug("LoginWithFirebase: Đã tìm lại user sau lỗi duplicate")
+				// Đã tắt debug log để giảm log
 			} else {
 				logrus.WithError(findErr).Error("LoginWithFirebase: Không tìm thấy user sau lỗi duplicate")
 				return nil, err
@@ -263,11 +221,8 @@ func (s *UserService) LoginWithFirebase(ctx context.Context, input *dto.Firebase
 		} else {
 			return nil, err
 		}
-	} else {
-		logrus.WithFields(logrus.Fields{
-			"user_id": user.ID.Hex(),
-		}).Debug("LoginWithFirebase: Upsert thành công")
 	}
+	// Đã tắt debug log để giảm log
 
 	// 6. Kiểm tra user bị block
 	if user.IsBlock {
@@ -310,33 +265,12 @@ func (s *UserService) LoginWithFirebase(ctx context.Context, input *dto.Firebase
 			Hwid:     input.Hwid,
 			JwtToken: tokenMap["token"],
 		})
-		logrus.WithFields(logrus.Fields{
-			"user_id": user.ID.Hex(),
-			"hwid":    input.Hwid,
-			"token":   tokenMap["token"][:20] + "...",
-		}).Debug("LoginWithFirebase: Thêm token mới vào tokens array")
 	} else {
 		user.Tokens[idTokenExist].JwtToken = tokenMap["token"]
-		logrus.WithFields(logrus.Fields{
-			"user_id": user.ID.Hex(),
-			"hwid":    input.Hwid,
-			"token":   tokenMap["token"][:20] + "...",
-		}).Debug("LoginWithFirebase: Cập nhật token trong tokens array")
 	}
-
-	// Log số lượng tokens trước khi lưu
-	logrus.WithFields(logrus.Fields{
-		"user_id":      user.ID.Hex(),
-		"tokens_count": len(user.Tokens),
-		"hwid":         input.Hwid,
-	}).Debug("LoginWithFirebase: Số lượng tokens trước khi lưu")
+	// Đã tắt debug log để giảm log
 
 	// 9. Lưu user - Sử dụng UpdateData để đảm bảo update đúng các field
-	logrus.WithFields(logrus.Fields{
-		"user_id":      user.ID.Hex(),
-		"token_length": len(user.Token),
-		"tokens_count": len(user.Tokens),
-	}).Debug("LoginWithFirebase: Bắt đầu cập nhật token vào user")
 
 	// Sử dụng UpdateData để update chỉ các field cần thiết
 	tokenUpdateData := &UpdateData{
@@ -346,14 +280,7 @@ func (s *UserService) LoginWithFirebase(ctx context.Context, input *dto.Firebase
 		},
 	}
 	
-	// Log trước khi update để debug - dùng GetAppLogger để ghi vào file
-	logger.GetAppLogger().WithFields(logrus.Fields{
-		"user_id":      user.ID.Hex(),
-		"token_length": len(user.Token),
-		"tokens_count": len(user.Tokens),
-		"update_data_set_keys": []string{"token", "tokens"},
-	}).Error("🔄 [LOGIN] LoginWithFirebase: Chuẩn bị update token với UpdateData - FORCE LOG")
-	
+	// Đã tắt debug log và force log để giảm log
 	updatedUser, err := s.BaseServiceMongoImpl.UpdateById(ctx, user.ID, tokenUpdateData)
 	if err != nil {
 		logrus.WithFields(logrus.Fields{
@@ -362,40 +289,7 @@ func (s *UserService) LoginWithFirebase(ctx context.Context, input *dto.Firebase
 		}).Error("LoginWithFirebase: Lỗi khi cập nhật token vào user")
 		return nil, err
 	}
-
-	// Verify token đã được lưu - dùng GetAppLogger để ghi vào file
-	tokenMatch := updatedUser.Token == user.Token
-	logger.GetAppLogger().WithFields(logrus.Fields{
-		"user_id":      updatedUser.ID.Hex(),
-		"token_length": len(updatedUser.Token),
-		"tokens_count": len(updatedUser.Tokens),
-		"token_match":  tokenMatch,
-	}).Error("✅ [LOGIN] LoginWithFirebase: Đã cập nhật token vào user - verify - FORCE LOG")
-	
-	if !tokenMatch {
-		logger.GetAppLogger().WithFields(logrus.Fields{
-			"user_id":         updatedUser.ID.Hex(),
-			"expected_token":  user.Token[:min(50, len(user.Token))] + "...",
-			"actual_token":    updatedUser.Token[:min(50, len(updatedUser.Token))] + "...",
-		}).Error("❌ [LOGIN] LoginWithFirebase: Token không khớp sau khi update!")
-	}
-
-	logrus.WithFields(logrus.Fields{
-		"user_id":      updatedUser.ID.Hex(),
-		"tokens_count": len(updatedUser.Tokens),
-		"hwid":         input.Hwid,
-	}).Debug("LoginWithFirebase: Đã cập nhật token vào user")
-
-	// Log token cuối cùng trong tokens array để verify
-	if len(updatedUser.Tokens) > 0 {
-		lastToken := updatedUser.Tokens[len(updatedUser.Tokens)-1]
-		logrus.WithFields(logrus.Fields{
-			"user_id":      updatedUser.ID.Hex(),
-			"last_hwid":    lastToken.Hwid,
-			"last_token":   lastToken.JwtToken[:20] + "...",
-			"tokens_count": len(updatedUser.Tokens),
-		}).Debug("LoginWithFirebase: Token cuối cùng trong tokens array")
-	}
+	// Đã tắt debug log để giảm log
 
 	// 10. Nếu chưa có admin nào, tự động set user đầu tiên làm admin
 	// Đây là phương án phổ biến: "First user becomes admin"

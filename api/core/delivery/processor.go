@@ -85,13 +85,7 @@ func (p *Processor) handleRetryOrFail(ctx context.Context, item *models.Delivery
 			return fmt.Errorf("failed to update queue item for retry: %w", updateErr)
 		}
 		
-		log.WithFields(map[string]interface{}{
-			"queueItemId": item.ID.Hex(),
-			"retryCount":  item.RetryCount,
-			"maxRetries":  item.MaxRetries,
-			"nextRetryAt": nextRetryAt,
-			"error":       err.Error(),
-		}).Info("📦 [DELIVERY] Đã schedule retry cho queue item")
+		// Đã tắt log Info để giảm log (chỉ log Error/Warn)
 		return err // Return error để caller biết cần retry
 	} else {
 		// Đã hết số lần retry, đánh dấu failed và xóa khỏi queue
@@ -113,12 +107,7 @@ func (p *Processor) handleRetryOrFail(ctx context.Context, item *models.Delivery
 		if deleteErr != nil {
 			log.WithError(deleteErr).WithField("queueItemId", item.ID.Hex()).Warn("📦 [DELIVERY] Failed to delete failed queue item (đã đánh dấu failed, sẽ không được filter ra nữa)")
 		} else {
-			log.WithFields(map[string]interface{}{
-				"queueItemId": item.ID.Hex(),
-				"retryCount":  item.RetryCount,
-				"maxRetries":  item.MaxRetries,
-				"error":       err.Error(),
-			}).Info("📦 [DELIVERY] Đã xóa queue item sau khi hết retry")
+			// Đã tắt log Info để giảm log (chỉ log Error/Warn)
 		}
 		
 		return fmt.Errorf("max retries exceeded: %w", err)
@@ -129,15 +118,7 @@ func (p *Processor) handleRetryOrFail(ctx context.Context, item *models.Delivery
 func (p *Processor) ProcessQueueItem(ctx context.Context, item *models.DeliveryQueueItem) error {
 	var err error
 	log := logger.GetAppLogger()
-	log.WithFields(map[string]interface{}{
-		"queueItemId": item.ID.Hex(),
-		"eventType":   item.EventType,
-		"channelType": item.ChannelType,
-		"recipient":   item.Recipient,
-		"senderId":    item.SenderID.Hex(),
-		"status":      item.Status,
-		"retryCount":  item.RetryCount,
-	}).Info("📦 [DELIVERY] Bắt đầu xử lý queue item")
+	// Đã tắt log Info để giảm log (background job chạy thường xuyên)
 
 	// 1. Validate senderID trước
 	if item.SenderID.IsZero() {
@@ -184,9 +165,7 @@ func (p *Processor) ProcessQueueItem(ctx context.Context, item *models.DeliveryQ
 				sender = &s
 			} else {
 				sender = &decryptedSender
-				log.WithFields(map[string]interface{}{
-					"senderId": item.SenderID.Hex(),
-				}).Debug("📦 [DELIVERY] Đã dùng sender config từ queue item (fast path)")
+				// Đã tắt log Debug để giảm log
 			}
 		}
 	} else {
@@ -199,9 +178,7 @@ func (p *Processor) ProcessQueueItem(ctx context.Context, item *models.DeliveryQ
 			return fmt.Errorf("sender not found: %w", err)
 		}
 		sender = &s
-		log.WithFields(map[string]interface{}{
-			"senderId": item.SenderID.Hex(),
-		}).Debug("📦 [DELIVERY] Đã query sender từ database (fallback path)")
+		// Đã tắt log Debug để giảm log
 	}
 
 	if !sender.IsActive {
@@ -292,7 +269,7 @@ func (p *Processor) ProcessQueueItem(ctx context.Context, item *models.DeliveryQ
 		if err != nil {
 			log.WithError(err).WithField("queueItemId", item.ID.Hex()).Warn("📦 [DELIVERY] Failed to delete completed queue item")
 		} else {
-			log.WithField("queueItemId", item.ID.Hex()).Info("📦 [DELIVERY] Đã xóa queue item sau khi gửi thành công")
+			// Đã tắt log Info để giảm log (chỉ log Error/Warn)
 		}
 		return nil
 	}
@@ -344,11 +321,11 @@ func (p *Processor) StartCleanupJob(ctx context.Context) {
 				}
 
 				if len(stuckItems) == 0 {
-					log.Debug("📦 [CLEANUP] Không có items bị kẹt")
+					// Đã tắt log Debug để giảm log
 					continue
 				}
 
-				log.WithField("count", len(stuckItems)).Info("📦 [CLEANUP] Tìm thấy items bị kẹt, bắt đầu dọn dẹp")
+				// Đã tắt log Info để giảm log (chỉ log Error/Warn khi có vấn đề nghiêm trọng)
 
 				for _, item := range stuckItems {
 					func() {
@@ -378,7 +355,7 @@ func (p *Processor) StartCleanupJob(ctx context.Context) {
 								log.WithError(err).WithField("queueItemId", item.ID.Hex()).Error("📦 [CLEANUP] Failed to mark item as failed")
 							} else {
 								p.queueService.DeleteOne(ctx, bson.M{"_id": item.ID})
-								log.WithField("queueItemId", item.ID.Hex()).Info("📦 [CLEANUP] Đã xóa item có senderID rỗng")
+								// Đã tắt log Info để giảm log
 							}
 						} else if item.Status == "processing" {
 							// Item đang processing quá lâu, reset về pending để retry
@@ -394,7 +371,7 @@ func (p *Processor) StartCleanupJob(ctx context.Context) {
 							if err != nil {
 								log.WithError(err).WithField("queueItemId", item.ID.Hex()).Error("📦 [CLEANUP] Failed to reset stale item to pending")
 							} else {
-								log.WithField("queueItemId", item.ID.Hex()).Info("📦 [CLEANUP] Đã reset stale item về pending")
+								// Đã tắt log Info để giảm log
 							}
 						}
 					}()
@@ -405,7 +382,7 @@ func (p *Processor) StartCleanupJob(ctx context.Context) {
 				if err != nil {
 					log.WithError(err).Error("📦 [CLEANUP] Failed to cleanup old failed items")
 				} else if deletedCount > 0 {
-					log.WithField("count", deletedCount).Info("📦 [CLEANUP] Đã xóa items failed cũ")
+					// Đã tắt log Info để giảm log
 				}
 			}
 		}
@@ -457,11 +434,11 @@ func (p *Processor) Start(ctx context.Context) {
 
 					if len(items) == 0 {
 						// Log mỗi 30 giây một lần để biết processor đang chạy
-						log.Debug("📦 [DELIVERY] Không có queue items pending")
+						// Đã tắt log Debug để giảm log
 						continue
 					}
 
-					log.WithField("count", len(items)).Info("📦 [DELIVERY] Tìm thấy queue items, bắt đầu xử lý")
+					// Đã tắt log Info để giảm log (background job chạy thường xuyên)
 
 					for _, item := range items {
 						// Nếu item đang processing (stale), reset về pending trước
@@ -472,7 +449,7 @@ func (p *Processor) Start(ctx context.Context) {
 								log.WithError(err).WithField("queueItemId", item.ID.Hex()).Error("📦 [DELIVERY] Failed to reset stale item to pending")
 								continue
 							}
-							log.WithField("queueItemId", item.ID.Hex()).Info("📦 [DELIVERY] Reset stale processing item to pending")
+							// Đã tắt log Info để giảm log
 							item.Status = "pending"
 						}
 						
@@ -527,7 +504,7 @@ func (p *Processor) Start(ctx context.Context) {
 									if updateErr != nil {
 										log.WithError(updateErr).WithField("queueItemId", item.ID.Hex()).Error("📦 [DELIVERY] Failed to reset item to pending after error")
 									} else {
-										log.WithField("queueItemId", item.ID.Hex()).Info("📦 [DELIVERY] Đã reset item về pending sau khi xử lý lỗi")
+										// Đã tắt log Info để giảm log
 									}
 								}
 							}

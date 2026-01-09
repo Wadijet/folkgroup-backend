@@ -5,14 +5,12 @@ import (
 	"meta_commerce/core/api/router"
 	"meta_commerce/core/common"
 	"meta_commerce/core/global"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
 	"github.com/gofiber/fiber/v3/middleware/limiter"
-	fiberlogger "github.com/gofiber/fiber/v3/middleware/logger"
 	"github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/gofiber/fiber/v3/middleware/requestid"
 	"meta_commerce/core/logger"
@@ -83,10 +81,7 @@ func InitFiberApp() *fiber.App {
 
 			// Nếu là TLS handshake, downgrade log level và trả về lỗi phù hợp
 			if isTLSHandshake {
-				// Log ở mức Debug thay vì Error vì đây là hành vi bình thường
-				logger.WithRequest(c).WithFields(map[string]interface{}{
-					"reason": "TLS handshake to HTTP server",
-				}).Debug("Client attempted HTTPS connection to HTTP server")
+				// Không log TLS handshake để giảm log (đây là hành vi bình thường)
 
 				// Trả về lỗi Bad Request với message hướng dẫn rõ ràng
 				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -128,31 +123,11 @@ func InitFiberApp() *fiber.App {
 		},
 	}))
 
-	// 2. Debug Middleware - Log tất cả requests và responses (tạm thời để debug CORS)
-	app.Use(func(c fiber.Ctx) error {
-		// Log request
-		logger.WithRequest(c).WithFields(map[string]interface{}{
-			"origin":  c.Get("Origin"),
-			"headers": c.GetReqHeaders(),
-		}).Debug("Incoming request")
-		
-		// Execute next middleware/handler
-		err := c.Next()
-		
-		// Log response
-		logger.WithRequest(c).WithFields(map[string]interface{}{
-			"status":        c.Response().StatusCode(),
-			"response_size": len(c.Response().Body()),
-			"cors_headers": map[string]string{
-				"Access-Control-Allow-Origin":      c.Get("Access-Control-Allow-Origin"),
-				"Access-Control-Allow-Methods":   c.Get("Access-Control-Allow-Methods"),
-				"Access-Control-Allow-Headers":   c.Get("Access-Control-Allow-Headers"),
-				"Access-Control-Allow-Credentials": c.Get("Access-Control-Allow-Credentials"),
-			},
-		}).Debug("Outgoing response")
-		
-		return err
-	})
+	// 2. Debug Middleware - Đã tắt để giảm log
+	// Chỉ log khi có lỗi hoặc trong development mode
+	// app.Use(func(c fiber.Ctx) error {
+	// 	return c.Next()
+	// })
 
 	// 3. CORS Middleware - PHẢI ĐẶT Ở ĐẦU để xử lý preflight requests trước các middleware khác
 	corsOrigins := global.MongoDB_ServerConfig.CORS_Origins
@@ -260,16 +235,17 @@ func InitFiberApp() *fiber.App {
 		},
 	}))
 
-	// 7. Logger Middleware
-	app.Use(fiberlogger.New(fiberlogger.Config{
-		Format:     "${time} | ${ip} | ${status} | ${latency} | ${method} | ${path} | ${requestID} | ${error}\n",
-		TimeFormat: "2006-01-02 15:04:05",
-		TimeZone:   "Asia/Ho_Chi_Minh",
-		Output:     os.Stdout,
-		Next: func(c fiber.Ctx) bool {
-			return c.Path() == "/health" || c.Path() == "/api/v1/system/health"
-		},
-	}))
+	// 7. Logger Middleware - Đã tắt để giảm log (chỉ log errors qua error handler)
+	// Fiber logger middleware log mỗi request, tắt để giảm tải
+	// app.Use(fiberlogger.New(fiberlogger.Config{
+	// 	Format:     "${time} | ${ip} | ${status} | ${latency} | ${method} | ${path} | ${requestID} | ${error}\n",
+	// 	TimeFormat: "2006-01-02 15:04:05",
+	// 	TimeZone:   "Asia/Ho_Chi_Minh",
+	// 	Output:     os.Stdout,
+	// 	Next: func(c fiber.Ctx) bool {
+	// 		return c.Path() == "/health" || c.Path() == "/api/v1/system/health"
+	// 	},
+	// }))
 
 	// Khởi tạo routes trước khi đăng ký response middleware
 	router.SetupRoutes(app)

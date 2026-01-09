@@ -187,6 +187,10 @@ func createLogger(name string) *logrus.Logger {
 	}
 
 	// Set output
+	// ⚠️ QUAN TRỌNG: Tách file writer và stdout writer để tránh blocking
+	// Nếu dùng MultiWriter, khi file I/O chậm sẽ block cả stdout
+	// Giải pháp: Dùng async hook cho tất cả writers để tránh blocking request handling
+
 	var writers []io.Writer
 
 	// File output với rotation
@@ -207,10 +211,14 @@ func createLogger(name string) *logrus.Logger {
 		writers = append(writers, os.Stdout)
 	}
 
-	// MultiWriter để ghi vào nhiều destinations
+	// Dùng async hook cho tất cả writers để tránh blocking
+	// Buffer size: 1000 entries (có thể config sau nếu cần)
 	if len(writers) > 0 {
-		mw := io.MultiWriter(writers...)
-		logger.SetOutput(mw)
+		asyncHook := NewAsyncHookWithWriters(writers, 1000)
+		logger.AddHook(asyncHook)
+		// Không set output để tránh duplicate logs
+		// Hook sẽ xử lý tất cả logging
+		logger.SetOutput(io.Discard) // Discard output để chỉ dùng hook
 	}
 
 	// Bật caller logging

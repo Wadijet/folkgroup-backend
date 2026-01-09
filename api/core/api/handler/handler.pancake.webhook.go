@@ -100,16 +100,7 @@ func (h *PancakeWebhookHandler) HandlePancakeWebhook(c fiber.Ctx) error {
 			log.WithError(logErr).Warn("🔔 [PANCAKE WEBHOOK] Không thể lưu webhook log")
 		}
 
-		// Log raw body để debug
-		log.WithFields(map[string]interface{}{
-			"rawBody": rawBody,
-			"parseErr": func() string {
-				if parseErr != nil {
-					return parseErr.Error()
-				}
-				return ""
-			}(),
-		}).Info("🔔 [PANCAKE WEBHOOK] Nhận webhook từ Pancake (đã lưu log)")
+		// Đã tắt log Info để giảm log (webhook log đã được lưu vào database)
 
 		// Nếu parse lỗi, vẫn trả về 200 OK (để Pancake không retry)
 		if parseErr != nil {
@@ -136,11 +127,7 @@ func (h *PancakeWebhookHandler) HandlePancakeWebhook(c fiber.Ctx) error {
 		// Xử lý webhook dựa trên eventType (nếu có)
 		var processErr error
 		if req.Payload.EventType != "" {
-			log.WithFields(map[string]interface{}{
-				"eventType": req.Payload.EventType,
-				"pageId":    req.Payload.PageID,
-				"timestamp": req.Payload.Timestamp,
-			}).Info("🔔 [PANCAKE WEBHOOK] Xử lý webhook")
+			// Đã tắt log Info để giảm log
 
 			switch req.Payload.EventType {
 			case "order_created", "order_updated":
@@ -184,7 +171,7 @@ func (h *PancakeWebhookHandler) HandlePancakeWebhook(c fiber.Ctx) error {
 
 // handleOrderEvent xử lý webhook events liên quan đến đơn hàng (order_created, order_updated)
 func (h *PancakeWebhookHandler) handleOrderEvent(ctx context.Context, payload dto.PancakeWebhookPayload) error {
-	log := logger.GetAppLogger()
+	// Đã tắt log để giảm log
 
 	// Lấy dữ liệu order từ payload.data
 	orderData, ok := payload.Data["order"].(map[string]interface{})
@@ -232,17 +219,14 @@ func (h *PancakeWebhookHandler) handleOrderEvent(ctx context.Context, payload dt
 		return fmt.Errorf("failed to upsert order: %v", err)
 	}
 
-	log.WithFields(map[string]interface{}{
-		"pancakeOrderId": pancakeOrderId,
-		"eventType":      payload.EventType,
-	}).Info("🔔 [PANCAKE WEBHOOK] Đã lưu order vào database")
+	// Đã tắt log Info để giảm log
 
 	return nil
 }
 
 // handleConversationEvent xử lý webhook events liên quan đến conversation (conversation_updated)
 func (h *PancakeWebhookHandler) handleConversationEvent(ctx context.Context, payload dto.PancakeWebhookPayload) error {
-	log := logger.GetAppLogger()
+	// Đã tắt log để giảm log
 
 	// Lấy dữ liệu conversation từ payload.data
 	conversationData, ok := payload.Data["conversation"].(map[string]interface{})
@@ -295,18 +279,13 @@ func (h *PancakeWebhookHandler) handleConversationEvent(ctx context.Context, pay
 		return fmt.Errorf("failed to upsert conversation: %v", err)
 	}
 
-	log.WithFields(map[string]interface{}{
-		"conversationId": conversationId,
-		"pageId":         pageId,
-		"eventType":      payload.EventType,
-	}).Info("🔔 [PANCAKE WEBHOOK] Đã lưu conversation vào database")
-
+	// Đã tắt log Info để giảm log
 	return nil
 }
 
 // handleMessageEvent xử lý webhook events liên quan đến message (message_received)
 func (h *PancakeWebhookHandler) handleMessageEvent(ctx context.Context, payload dto.PancakeWebhookPayload) error {
-	log := logger.GetAppLogger()
+	// Đã tắt log để giảm log
 
 	// Lấy dữ liệu message từ payload.data
 	messageData, ok := payload.Data["message"].(map[string]interface{})
@@ -364,18 +343,13 @@ func (h *PancakeWebhookHandler) handleMessageEvent(ctx context.Context, payload 
 		return fmt.Errorf("failed to upsert message: %v", err)
 	}
 
-	log.WithFields(map[string]interface{}{
-		"conversationId": conversationId,
-		"pageId":         pageId,
-		"eventType":      payload.EventType,
-	}).Info("🔔 [PANCAKE WEBHOOK] Đã lưu message vào database")
-
+	// Đã tắt log Info để giảm log
 	return nil
 }
 
 // handleCustomerEvent xử lý webhook events liên quan đến customer (customer_updated)
 func (h *PancakeWebhookHandler) handleCustomerEvent(ctx context.Context, payload dto.PancakeWebhookPayload) error {
-	log := logger.GetAppLogger()
+	// Đã tắt log để giảm log
 
 	// Lấy dữ liệu customer từ payload.data
 	customerData, ok := payload.Data["customer"].(map[string]interface{})
@@ -423,10 +397,7 @@ func (h *PancakeWebhookHandler) handleCustomerEvent(ctx context.Context, payload
 		return fmt.Errorf("failed to upsert customer: %v", err)
 	}
 
-	log.WithFields(map[string]interface{}{
-		"customerId": customerId,
-		"eventType":  payload.EventType,
-	}).Info("🔔 [PANCAKE WEBHOOK] Đã lưu customer vào database")
+	// Đã tắt log Info để giảm log
 
 	return nil
 }

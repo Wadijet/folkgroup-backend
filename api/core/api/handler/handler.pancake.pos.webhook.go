@@ -89,23 +89,14 @@ func (h *PancakePosWebhookHandler) HandlePancakePosWebhook(c fiber.Ctx) error {
 		ctx := c.Context()
 		var req dto.PancakePosWebhookRequest
 		parseErr := c.Bind().Body(&req)
-		
+
 		// Lưu webhook log kể cả khi parse lỗi
 		webhookLog, logErr := h.saveWebhookLog(ctx, c, "pancake_pos", req, rawBody, parseErr)
 		if logErr != nil {
 			log.WithError(logErr).Warn("🔔 [PANCAKE POS WEBHOOK] Không thể lưu webhook log")
 		}
 
-		// Log raw body để debug
-		log.WithFields(map[string]interface{}{
-			"rawBody": rawBody,
-			"parseErr": func() string {
-				if parseErr != nil {
-					return parseErr.Error()
-				}
-				return ""
-			}(),
-		}).Info("🔔 [PANCAKE POS WEBHOOK] Nhận webhook từ Pancake POS (đã lưu log)")
+		// Đã tắt log Info để giảm log (webhook log đã được lưu vào database)
 
 		// Nếu parse lỗi, vẫn trả về 200 OK (để Pancake POS không retry)
 		if parseErr != nil {
@@ -134,11 +125,7 @@ func (h *PancakePosWebhookHandler) HandlePancakePosWebhook(c fiber.Ctx) error {
 		// Xử lý webhook dựa trên eventType (nếu có)
 		var processErr error
 		if req.Payload.EventType != "" {
-			log.WithFields(map[string]interface{}{
-				"eventType": req.Payload.EventType,
-				"shopId":    req.Payload.ShopID,
-				"timestamp": req.Payload.Timestamp,
-			}).Info("🔔 [PANCAKE POS WEBHOOK] Xử lý webhook")
+			// Đã tắt log Info để giảm log
 
 			switch req.Payload.EventType {
 			case "order_created", "order_updated", "order_status_changed":
@@ -182,7 +169,7 @@ func (h *PancakePosWebhookHandler) HandlePancakePosWebhook(c fiber.Ctx) error {
 
 // handleOrderEvent xử lý webhook events liên quan đến đơn hàng (order_created, order_updated, order_status_changed)
 func (h *PancakePosWebhookHandler) handleOrderEvent(ctx context.Context, payload dto.PancakePosWebhookPayload) error {
-	log := logger.GetAppLogger()
+	// Đã tắt log để giảm log
 
 	// Lấy dữ liệu order từ payload.data
 	orderData, ok := payload.Data["order"].(map[string]interface{})
@@ -216,8 +203,8 @@ func (h *PancakePosWebhookHandler) handleOrderEvent(ctx context.Context, payload
 			"updatedAt": now,
 		},
 		"$setOnInsert": bson.M{
-			"orderId": orderId,
-			"shopId":  payload.ShopID,
+			"orderId":   orderId,
+			"shopId":    payload.ShopID,
 			"createdAt": now,
 		},
 	}
@@ -229,18 +216,14 @@ func (h *PancakePosWebhookHandler) handleOrderEvent(ctx context.Context, payload
 		return fmt.Errorf("failed to upsert order: %v", err)
 	}
 
-	log.WithFields(map[string]interface{}{
-		"orderId":   orderId,
-		"shopId":    payload.ShopID,
-		"eventType": payload.EventType,
-	}).Info("🔔 [PANCAKE POS WEBHOOK] Đã lưu order vào database")
+	// Đã tắt log Info để giảm log
 
 	return nil
 }
 
 // handleProductEvent xử lý webhook events liên quan đến sản phẩm (product_created, product_updated)
 func (h *PancakePosWebhookHandler) handleProductEvent(ctx context.Context, payload dto.PancakePosWebhookPayload) error {
-	log := logger.GetAppLogger()
+	// Đã tắt log để giảm log
 
 	// Lấy dữ liệu product từ payload.data
 	productData, ok := payload.Data["product"].(map[string]interface{})
@@ -288,18 +271,14 @@ func (h *PancakePosWebhookHandler) handleProductEvent(ctx context.Context, paylo
 		return fmt.Errorf("failed to upsert product: %v", err)
 	}
 
-	log.WithFields(map[string]interface{}{
-		"productId": productId,
-		"shopId":    payload.ShopID,
-		"eventType": payload.EventType,
-	}).Info("🔔 [PANCAKE POS WEBHOOK] Đã lưu product vào database")
+	// Đã tắt log Info để giảm log
 
 	return nil
 }
 
 // handleCustomerEvent xử lý webhook events liên quan đến khách hàng (customer_created, customer_updated)
 func (h *PancakePosWebhookHandler) handleCustomerEvent(ctx context.Context, payload dto.PancakePosWebhookPayload) error {
-	log := logger.GetAppLogger()
+	// Đã tắt log để giảm log
 
 	// Lấy dữ liệu customer từ payload.data
 	customerData, ok := payload.Data["customer"].(map[string]interface{})
@@ -348,18 +327,14 @@ func (h *PancakePosWebhookHandler) handleCustomerEvent(ctx context.Context, payl
 		return fmt.Errorf("failed to upsert customer: %v", err)
 	}
 
-	log.WithFields(map[string]interface{}{
-		"customerId": customerId,
-		"shopId":     payload.ShopID,
-		"eventType":  payload.EventType,
-	}).Info("🔔 [PANCAKE POS WEBHOOK] Đã lưu customer vào database")
+	// Đã tắt log Info để giảm log
 
 	return nil
 }
 
 // handleInventoryEvent xử lý webhook events liên quan đến tồn kho (inventory_updated)
 func (h *PancakePosWebhookHandler) handleInventoryEvent(ctx context.Context, payload dto.PancakePosWebhookPayload) error {
-	log := logger.GetAppLogger()
+	// Đã tắt log để giảm log
 
 	// Lấy dữ liệu inventory từ payload.data
 	inventoryData, ok := payload.Data["inventory"].(map[string]interface{})
@@ -376,10 +351,7 @@ func (h *PancakePosWebhookHandler) handleInventoryEvent(ctx context.Context, pay
 	// Inventory có thể liên quan đến variation, cần xử lý theo variation_id
 	// Hiện tại chỉ log, chưa implement chi tiết vì cần xem cấu trúc dữ liệu thực tế từ Pancake POS
 
-	log.WithFields(map[string]interface{}{
-		"shopId":    payload.ShopID,
-		"eventType": payload.EventType,
-	}).Info("🔔 [PANCAKE POS WEBHOOK] Nhận inventory update (chưa xử lý chi tiết)")
+	// Đã tắt log Info để giảm log
 
 	return nil
 }
@@ -428,7 +400,7 @@ func (h *PancakePosWebhookHandler) saveWebhookLog(ctx context.Context, c fiber.C
 		RequestBody:    requestBody,
 		RawBody:        rawBody,
 		Processed:      false,
-		ProcessError:   func() string {
+		ProcessError: func() string {
 			if parseErr != nil {
 				return fmt.Sprintf("Parse error: %v", parseErr)
 			}

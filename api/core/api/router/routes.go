@@ -232,13 +232,12 @@ func registerRouteWithMiddleware(router fiber.Router, prefix string, method stri
 // Nếu thêm route mới bên ngoài hàm này, PHẢI dùng registerRouteWithMiddleware (xem comment ở đầu file)
 func (r *Router) registerCRUDRoutes(router fiber.Router, prefix string, h CRUDHandler, config CRUDConfig, permissionPrefix string) {
 	// Tạo middleware chain: AuthMiddleware → OrganizationContextMiddleware
-	fmt.Printf("[ROUTER] Registering CRUD routes for prefix: %s, permissionPrefix: %s\n", prefix, permissionPrefix)
+	// Đã tắt log để giảm log khi khởi động
 	authMiddleware := middleware.AuthMiddleware(permissionPrefix + ".Insert")
 	orgContextMiddleware := middleware.OrganizationContextMiddleware()
 	authReadMiddleware := middleware.AuthMiddleware(permissionPrefix + ".Read")
 	authUpdateMiddleware := middleware.AuthMiddleware(permissionPrefix + ".Update")
 	authDeleteMiddleware := middleware.AuthMiddleware(permissionPrefix + ".Delete")
-	fmt.Printf("[ROUTER] Middleware created for prefix: %s\n", prefix)
 
 	// Create operations
 	if config.InsOne {
@@ -407,7 +406,7 @@ func (r *Router) registerRBACRoutes(router fiber.Router) error {
 	if err != nil {
 		return fmt.Errorf("failed to create permission handler: %v", err)
 	}
-	fmt.Printf("Registering permission routes with prefix: /permission\n")
+	// Đã tắt log để giảm log khi khởi động
 	// Route đặc biệt cho lấy permissions theo category
 	// FIX: Dùng registerRouteWithMiddleware với .Use() method (cách đúng) thay vì cách trực tiếp có bug trong Fiber v3
 	permReadMiddleware := middleware.AuthMiddleware("Permission.Read")
@@ -453,9 +452,8 @@ func (r *Router) registerRBACRoutes(router fiber.Router) error {
 	if err != nil {
 		return fmt.Errorf("failed to create organization handler: %v", err)
 	}
-	fmt.Printf("Registering organization routes with prefix: /organization\n")
+	// Đã tắt log để giảm log khi khởi động
 	r.registerCRUDRoutes(router, "/organization", organizationHandler, readWriteConfig, "Organization")
-	fmt.Printf("Organization routes registered successfully\n")
 
 	// Organization Share routes
 	organizationShareHandler, err := handler.NewOrganizationShareHandler()

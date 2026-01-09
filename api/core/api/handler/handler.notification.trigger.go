@@ -121,16 +121,7 @@ func (h *NotificationTriggerHandler) HandleTriggerNotification(c fiber.Ctx) erro
 		// Tìm routes cho eventType với domain và severity
 		// Lưu ý: Chỉ tìm rules của organization trigger event (hoặc system rules)
 		log := logger.GetAppLogger()
-		log.WithFields(map[string]interface{}{
-			"requestId":      requestID,
-			"clientIp":       clientIP,
-			"userId":         userID,
-			"eventType":      req.EventType,
-			"domain":         domain,
-			"severity":       severity,
-			"organizationId": organizationID,
-			"timestamp":      time.Now().Unix(),
-		}).Info("🔔 [NOTIFICATION] Bắt đầu tìm routes")
+		// Đã tắt log Info để giảm log
 
 		routes, err := h.router.FindRoutes(c.Context(), req.EventType, domain, severity, organizationID)
 		if err != nil {
@@ -143,29 +134,7 @@ func (h *NotificationTriggerHandler) HandleTriggerNotification(c fiber.Ctx) erro
 			return nil
 		}
 
-		log.WithFields(map[string]interface{}{
-			"requestId":   requestID,
-			"clientIp":    clientIP,
-			"userId":      userID,
-			"eventType":   req.EventType,
-			"routesFound": len(routes),
-		}).Info("🔔 [NOTIFICATION] Đã tìm thấy routes")
-
-		// Log chi tiết về routes để debug
-		if len(routes) > 0 {
-			routeDetails := make([]map[string]interface{}, 0, len(routes))
-			for _, route := range routes {
-				routeDetails = append(routeDetails, map[string]interface{}{
-					"organizationId": route.OrganizationID.Hex(),
-					"channelId":      route.ChannelID.Hex(),
-				})
-			}
-			log.WithFields(map[string]interface{}{
-				"requestId":   requestID,
-				"routes":      routeDetails,
-				"routesCount": len(routes),
-			}).Debug("🔔 [NOTIFICATION] Chi tiết routes")
-		}
+		// Đã tắt log Info và Debug để giảm log
 
 		if len(routes) == 0 {
 			log.WithField("eventType", req.EventType).Warn("🔔 [NOTIFICATION] Không có routes nào cho eventType này")
@@ -309,18 +278,7 @@ func (h *NotificationTriggerHandler) HandleTriggerNotification(c fiber.Ctx) erro
 				}
 			}
 
-			log.WithFields(map[string]interface{}{
-				"requestId":       requestID,
-				"eventType":       req.EventType,
-				"channelType":     channel.ChannelType,
-				"channelId":       channel.ID.Hex(),
-				"organizationId":  route.OrganizationID.Hex(),
-				"senderId":        senderID.Hex(),
-				"hasSenderConfig": encryptedSenderConfig != "",
-				"recipientCount":  len(recipients),
-				"recipients":      recipients, // Log recipients để debug
-				"ctaCount":        len(rendered.CTAs),
-			}).Info("🔔 [NOTIFICATION] Đã render template thành công, tạo queue items")
+			// Đã tắt log Info để giảm log (recipients có thể chứa thông tin nhạy cảm)
 
 			// Tính Priority và MaxRetries từ Severity
 			priority := notification.GetPriorityFromSeverity(severity)
@@ -365,16 +323,7 @@ func (h *NotificationTriggerHandler) HandleTriggerNotification(c fiber.Ctx) erro
 
 		// Enqueue items
 		if len(queueItems) > 0 {
-			// Log trước khi enqueue để track
-			log.WithFields(map[string]interface{}{
-				"requestId":    requestID,
-				"clientIp":     clientIP,
-				"userId":       userID,
-				"eventType":    req.EventType,
-				"queueItems":   len(queueItems),
-				"timestamp":    time.Now().Unix(),
-				"organizationId": organizationID,
-			}).Info("🔔 [NOTIFICATION] Bắt đầu enqueue items vào delivery queue")
+			// Đã tắt log Info để giảm log
 
 			err = h.queue.Enqueue(c.Context(), queueItems)
 			if err != nil {
@@ -393,16 +342,7 @@ func (h *NotificationTriggerHandler) HandleTriggerNotification(c fiber.Ctx) erro
 				return nil
 			}
 
-			// Log sau khi enqueue thành công
-			log.WithFields(map[string]interface{}{
-				"requestId":    requestID,
-				"clientIp":     clientIP,
-				"userId":       userID,
-				"eventType":    req.EventType,
-				"queued":       len(queueItems),
-				"timestamp":    time.Now().Unix(),
-				"organizationId": organizationID,
-			}).Info("🔔 [NOTIFICATION] Đã enqueue items thành công")
+			// Đã tắt log Info để giảm log
 		}
 
 		c.Status(common.StatusOK).JSON(fiber.Map{

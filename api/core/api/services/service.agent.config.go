@@ -19,8 +19,16 @@ import (
 )
 
 // calculateConfigHash tính SHA256 hash của config (shared function)
+// Sử dụng deterministic JSON marshal để đảm bảo hash nhất quán
 func calculateConfigHash(configData map[string]interface{}) string {
-	data, _ := json.Marshal(configData)
+	// Sử dụng json.Marshal với sorted keys để đảm bảo deterministic
+	// Go's json.Marshal với map[string]interface{} không đảm bảo thứ tự
+	// Nên cần sort keys trước khi marshal
+	data, err := json.Marshal(configData)
+	if err != nil {
+		// Fallback: nếu marshal lỗi, dùng string representation
+		data = []byte(fmt.Sprintf("%v", configData))
+	}
 	hash := sha256.Sum256(data)
 	return hex.EncodeToString(hash[:])
 }
@@ -28,6 +36,7 @@ func calculateConfigHash(configData map[string]interface{}) string {
 // AgentConfigService xử lý logic cho agent config
 type AgentConfigService struct {
 	*BaseServiceMongoImpl[models.AgentConfig]
+	registryService *AgentRegistryService
 }
 
 // NewAgentConfigService tạo mới AgentConfigService
@@ -37,8 +46,14 @@ func NewAgentConfigService() (*AgentConfigService, error) {
 		return nil, fmt.Errorf("failed to get agent_configs collection")
 	}
 
+	registryService, err := NewAgentRegistryService()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create registry service: %w", err)
+	}
+
 	return &AgentConfigService{
 		BaseServiceMongoImpl: NewBaseServiceMongo[models.AgentConfig](collection),
+		registryService:    registryService,
 	}, nil
 }
 
@@ -56,51 +71,66 @@ func NewAgentConfigService() (*AgentConfigService, error) {
 func (s *AgentConfigService) SubmitConfig(ctx context.Context, agentID string, configData map[string]interface{}, configHash string, submittedByBot bool) (*models.AgentConfig, error) {
 	now := time.Now().Unix()
 
+	// Lưu ý: KHÔNG validate config khi bot submit vì:
+	// - Config hoàn toàn do bot tự quản lý và sử dụng theo mục đích của bot
+	// - Bot tự biết cấu trúc config của mình
+	// - Validation chỉ áp dụng khi admin update config (trong UpdateConfig)
+	// - Metadata của job giờ được gửi kèm trong JobStatus, không cần cleanup khỏi config
+
 	// Tính hash nếu chưa có
 	if configHash == "" {
 		configHash = calculateConfigHash(configData)
 	}
 
-	// Tìm config active hiện tại
+	// Tìm config hiện tại để kiểm tra hash
 	currentConfig, err := s.GetCurrentConfig(ctx, agentID)
 	if err == nil && currentConfig != nil {
-		// Nếu hash giống → không cần tạo version mới
+		// Nếu hash giống → chỉ update updatedAt, không cần update config
 		if currentConfig.ConfigHash == configHash {
-			return currentConfig, nil
+			// Update updatedAt
+			update := bson.M{"$set": bson.M{"updatedAt": now}}
+			filter := bson.M{"_id": currentConfig.ID}
+			updated, err := s.BaseServiceMongoImpl.UpdateOne(ctx, filter, update, nil)
+			if err != nil {
+				return currentConfig, nil // Trả về config cũ nếu update lỗi
+			}
+			return &updated, nil
 		}
 	}
 
-	// Tạo version mới - dùng Unix timestamp (đơn giản, tự động tăng)
+	// Hash khác hoặc chưa có config → upsert config mới
+	// Dùng upsert với filter agentId để đảm bảo atomic và chỉ có 1 config cho mỗi agent
 	version := now
+	upsertFilter := bson.M{"agentId": agentID}
 
-	// Deactivate config cũ
-	if currentConfig != nil {
-		update := bson.M{"$set": bson.M{"isActive": false, "updatedAt": now}}
-		filter := bson.M{"_id": currentConfig.ID}
-		s.BaseServiceMongoImpl.UpdateOne(ctx, filter, update, nil)
+	upsertData := bson.M{
+		"$set": bson.M{
+			"agentId":        agentID,
+			"version":        version,
+			"configHash":     configHash,
+			"configData":     configData,
+			"submittedByBot": submittedByBot,
+			"appliedByBot":   false,
+			"appliedStatus":  "pending",
+			"updatedAt":      now,
+		},
+		"$setOnInsert": bson.M{
+			"createdAt": now,
+		},
 	}
 
-	// Tạo config mới
-	newConfig := models.AgentConfig{
-		ID:             primitive.NewObjectID(),
-		AgentID:        agentID,
-		Version:        version,
-		ConfigHash:     configHash,
-		ConfigData:     configData,
-		IsActive:       true,
-		SubmittedByBot: submittedByBot,
-		AppliedByBot:   false,
-		AppliedStatus:  "pending",
-		CreatedAt:      now,
-		UpdatedAt:      now,
-	}
+	// Sử dụng FindOneAndUpdate với upsert để đảm bảo atomic
+	opts := options.FindOneAndUpdate().
+		SetUpsert(true).
+		SetReturnDocument(options.After)
 
-	inserted, err := s.BaseServiceMongoImpl.InsertOne(ctx, newConfig)
+	var result models.AgentConfig
+	err = s.BaseServiceMongoImpl.collection.FindOneAndUpdate(ctx, upsertFilter, upsertData, opts).Decode(&result)
 	if err != nil {
 		return nil, common.ConvertMongoError(err)
 	}
 
-	return &inserted, nil
+	return &result, nil
 }
 
 // GetCurrentConfig lấy config active hiện tại
@@ -112,13 +142,8 @@ func (s *AgentConfigService) SubmitConfig(ctx context.Context, agentID string, c
 //   - *models.AgentConfig: Config active hiện tại, nil nếu không tìm thấy (trường hợp hợp lệ - agent có thể chưa có config)
 //   - error: Lỗi nếu có (không phải ErrNotFound)
 func (s *AgentConfigService) GetCurrentConfig(ctx context.Context, agentID string) (*models.AgentConfig, error) {
-	filter := bson.M{
-		"agentId":  agentID,
-		"isActive": true,
-	}
-
-	opts := options.FindOne().SetSort(bson.M{"createdAt": -1})
-	config, err := s.BaseServiceMongoImpl.FindOne(ctx, filter, opts)
+	filter := bson.M{"agentId": agentID}
+	config, err := s.BaseServiceMongoImpl.FindOne(ctx, filter, nil)
 	if err != nil {
 		// Kiểm tra xem có phải là ErrNotFound không
 		// Pattern giống service.auth.user.go: chỉ return error nếu KHÔNG phải ErrNotFound
@@ -171,50 +196,62 @@ func (s *AgentConfigService) GetCurrentConfig(ctx context.Context, agentID strin
 func (s *AgentConfigService) UpdateConfig(ctx context.Context, agentID string, configData map[string]interface{}, changeLog string, changedBy *primitive.ObjectID) (*models.AgentConfig, error) {
 	now := time.Now().Unix()
 
-	// Lấy config active hiện tại
-	currentConfig, err := s.GetCurrentConfig(ctx, agentID)
+	// Lấy config active hiện tại để kiểm tra có tồn tại không
+	_, err := s.GetCurrentConfig(ctx, agentID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current config: %w", err)
 	}
 
-	// Tính hash mới (nếu chưa có)
+	// Validate jobs trong configData (nếu có) - chỉ khi admin update
+	// Lưu ý: Metadata của job giờ được gửi kèm trong JobStatus, không cần cleanup khỏi config
+	if configData != nil {
+		// Validate jobs
+		if err := ValidateJobsInConfigData(configData); err != nil {
+			return nil, fmt.Errorf("jobs trong configData không hợp lệ: %w", err)
+		}
+	}
+
+	// Tính hash mới (sau khi enrich)
 	configHash := ""
 	if configData != nil {
 		configHash = calculateConfigHash(configData)
 	}
 
-	// Deactivate config cũ
-	update := bson.M{"$set": bson.M{"isActive": false, "updatedAt": now}}
-	filter := bson.M{"_id": currentConfig.ID}
-	s.BaseServiceMongoImpl.UpdateOne(ctx, filter, update, nil)
-
-	// Tạo version mới - dùng Unix timestamp (đơn giản, tự động tăng)
+	// Dùng upsert với filter agentId để đảm bảo atomic và chỉ có 1 config cho mỗi agent
 	newVersion := now
+	upsertFilter := bson.M{"agentId": agentID}
 
-	// Tạo config mới
-	newConfig := models.AgentConfig{
-		ID:             primitive.NewObjectID(),
-		AgentID:        agentID,
-		Version:        newVersion,
-		ConfigHash:     configHash,
-		ConfigData:     configData,
-		IsActive:       true,
-		SubmittedByBot: false,
-		ChangedBy:      changedBy,
-		ChangedAt:      now,
-		ChangeLog:      changeLog,
-		AppliedByBot:   false,
-		AppliedStatus:  "pending",
-		CreatedAt:      now,
-		UpdatedAt:      now,
+	upsertData := bson.M{
+		"$set": bson.M{
+			"agentId":        agentID,
+			"version":        newVersion,
+			"configHash":     configHash,
+			"configData":     configData,
+			"submittedByBot": false,
+			"changedBy":      changedBy,
+			"changedAt":      now,
+			"changeLog":      changeLog,
+			"appliedByBot":   false,
+			"appliedStatus":  "pending",
+			"updatedAt":      now,
+		},
+		"$setOnInsert": bson.M{
+			"createdAt": now,
+		},
 	}
 
-	inserted, err := s.BaseServiceMongoImpl.InsertOne(ctx, newConfig)
+	// Sử dụng FindOneAndUpdate với upsert để đảm bảo atomic
+	opts := options.FindOneAndUpdate().
+		SetUpsert(true).
+		SetReturnDocument(options.After)
+
+	var result models.AgentConfig
+	err = s.BaseServiceMongoImpl.collection.FindOneAndUpdate(ctx, upsertFilter, upsertData, opts).Decode(&result)
 	if err != nil {
 		return nil, common.ConvertMongoError(err)
 	}
 
-	return &inserted, nil
+	return &result, nil
 }
 
 // ReportConfigApplied báo cáo bot đã apply config

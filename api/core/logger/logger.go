@@ -52,20 +52,70 @@ func initRootDir() error {
 		return nil
 	}
 
-	executable, err := os.Executable()
-	if err != nil {
-		// Fallback: sử dụng working directory
-		wd, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("could not get executable or working directory: %v", err)
+	// Bước 1: Thử lấy từ environment variable LOG_ROOT_DIR (ưu tiên cao nhất)
+	if envRootDir := os.Getenv("LOG_ROOT_DIR"); envRootDir != "" {
+		// Resolve symlinks trên Linux
+		resolvedPath, err := filepath.EvalSymlinks(envRootDir)
+		if err == nil {
+			rootDir = resolvedPath
+			return nil
 		}
-		// Tìm thư mục api (2 cấp trên cmd)
-		rootDir = filepath.Dir(filepath.Dir(wd))
+		// Nếu không resolve được, dùng đường dẫn gốc
+		rootDir = envRootDir
 		return nil
 	}
 
-	// Lấy đường dẫn gốc của project (2 cấp trên thư mục cmd)
-	rootDir = filepath.Dir(filepath.Dir(filepath.Dir(executable)))
+	// Bước 2: Thử lấy từ executable path
+	executable, err := os.Executable()
+	if err == nil {
+		// Resolve symlinks trên Linux (quan trọng khi chạy qua systemd)
+		resolvedExecutable, err := filepath.EvalSymlinks(executable)
+		if err == nil {
+			executable = resolvedExecutable
+		}
+
+		// Lấy đường dẫn gốc của project (2 cấp trên thư mục cmd)
+		// Ví dụ: /path/to/api/cmd/server/main -> /path/to/api
+		rootDir = filepath.Dir(filepath.Dir(filepath.Dir(executable)))
+		
+		// Kiểm tra xem đường dẫn có hợp lệ không (có thư mục logs hoặc config)
+		if _, err := os.Stat(filepath.Join(rootDir, "logs")); err == nil {
+			return nil
+		}
+		if _, err := os.Stat(filepath.Join(rootDir, "config")); err == nil {
+			return nil
+		}
+	}
+
+	// Bước 3: Fallback: sử dụng working directory
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("could not get executable or working directory: %v", err)
+	}
+
+	// Tìm thư mục api bằng cách đi lên từ working directory
+	currentDir := wd
+	for i := 0; i < 5; i++ { // Tối đa đi lên 5 cấp
+		// Kiểm tra xem có thư mục logs hoặc config không
+		if _, err := os.Stat(filepath.Join(currentDir, "logs")); err == nil {
+			rootDir = currentDir
+			return nil
+		}
+		if _, err := os.Stat(filepath.Join(currentDir, "config")); err == nil {
+			rootDir = currentDir
+			return nil
+		}
+
+		// Đi lên thư mục cha
+		parentDir := filepath.Dir(currentDir)
+		if parentDir == currentDir {
+			break // Đã đến root
+		}
+		currentDir = parentDir
+	}
+
+	// Nếu không tìm thấy, dùng working directory (2 cấp trên)
+	rootDir = filepath.Dir(filepath.Dir(wd))
 	return nil
 }
 

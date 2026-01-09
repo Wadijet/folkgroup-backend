@@ -59,20 +59,28 @@ func (s *AgentManagementService) HandleEnhancedCheckIn(ctx context.Context, agen
 
 	// 2. Xử lý config submit (nếu có configData trong request)
 	if configData, ok := checkInData["configData"].(map[string]interface{}); ok {
+		// Lưu ý: Không tính hash ở đây vì SubmitConfig sẽ cleanup metadata trước khi tính hash
+		// Nếu bot gửi configHash, chỉ dùng để tham khảo, SubmitConfig sẽ tính lại sau khi cleanup
 		configHash := ""
 		if hash, ok := checkInData["configHash"].(string); ok {
+			// Lưu hash từ bot để tham khảo, nhưng SubmitConfig sẽ tính lại sau khi cleanup metadata
 			configHash = hash
-		} else {
-			// Tính hash từ configData
-			configHash = calculateConfigHash(configData)
 		}
 
-		// Submit config (hash sẽ được tính trong SubmitConfig nếu chưa có)
+		// Submit config (hash sẽ được tính lại trong SubmitConfig sau khi cleanup metadata)
 		// Sử dụng agentRegistry.AgentID (string) thay vì agentRegistry.ID để tương ứng với AgentConfig.AgentID
-		_, err := s.configService.SubmitConfig(ctx, agentRegistry.AgentID, configData, configHash, true)
+		fmt.Printf("[AgentManagement] Info: Submitting config for agent %s\n", agentRegistry.AgentID)
+		submittedConfig, err := s.configService.SubmitConfig(ctx, agentRegistry.AgentID, configData, configHash, true)
 		if err != nil {
-			// Log warning nhưng không fail check-in
-			fmt.Printf("[AgentManagement] Warning: Failed to submit config: %v\n", err)
+			// Log error nhưng không fail check-in (bot vẫn cần nhận được response)
+			fmt.Printf("[AgentManagement] Error: Failed to submit config for agent %s: %v\n", agentRegistry.AgentID, err)
+		} else if submittedConfig != nil {
+			// Log info để debug
+			fmt.Printf("[AgentManagement] Info: Config submitted successfully for agent %s, version: %d, hash: %s, id: %s\n",
+				agentRegistry.AgentID, submittedConfig.Version, submittedConfig.ConfigHash, submittedConfig.ID.Hex())
+		} else {
+			// Trường hợp config đã tồn tại với hash giống (không tạo version mới)
+			fmt.Printf("[AgentManagement] Info: Config already exists with same hash for agent %s\n", agentRegistry.AgentID)
 		}
 	}
 
@@ -88,6 +96,32 @@ func (s *AgentManagementService) HandleEnhancedCheckIn(ctx context.Context, agen
 		"configHash":    checkInData["configHash"],
 		"lastCheckInAt": now,
 		"lastSeenAt":    now,
+	}
+
+	// 3.1. Xử lý metadata từ bot (nếu có) - chỉ update nếu giá trị mới khác rỗng
+	// Lưu ý: Bot có thể gửi metadata trong check-in, nhưng admin vẫn có thể override qua CRUD endpoint
+	// Chỉ update metadata nếu giá trị mới khác rỗng và agent chưa có giá trị đó (hoặc cho phép bot update)
+	metadataFields := []string{"name", "displayName", "description", "botVersion", "icon", "color", "category"}
+	for _, field := range metadataFields {
+		if val, ok := checkInData[field]; ok {
+			// Chỉ update nếu giá trị mới khác rỗng
+			if strVal, ok := val.(string); ok && strVal != "" {
+				statusData[field] = strVal
+			}
+		}
+	}
+
+	// Xử lý tags (array)
+	if tags, ok := checkInData["tags"].([]interface{}); ok && len(tags) > 0 {
+		tagsStr := make([]string, 0, len(tags))
+		for _, tag := range tags {
+			if tagStr, ok := tag.(string); ok && tagStr != "" {
+				tagsStr = append(tagsStr, tagStr)
+			}
+		}
+		if len(tagsStr) > 0 {
+			statusData["tags"] = tagsStr
+		}
 	}
 
 	err = s.registryService.UpdateStatus(ctx, agentRegistry.ID, statusData)

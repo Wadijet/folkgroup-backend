@@ -103,6 +103,38 @@ func (s *AgentRegistryService) UpdateStatus(ctx context.Context, agentRegistryID
 		},
 	}
 
+	// Xử lý metadata fields (chỉ update nếu có giá trị mới trong statusData)
+	// Lưu ý: Bot có thể gửi metadata trong check-in, nhưng chỉ update nếu giá trị mới khác rỗng
+	metadataFields := []string{"name", "displayName", "description", "botVersion", "icon", "color", "category"}
+	for _, field := range metadataFields {
+		if val, ok := statusData[field]; ok {
+			// Chỉ update nếu giá trị mới khác rỗng
+			if strVal, ok := val.(string); ok && strVal != "" {
+				update["$set"].(bson.M)[field] = strVal
+			}
+		}
+	}
+
+	// Xử lý tags (array) - hỗ trợ cả []string và []interface{}
+	if tags, ok := statusData["tags"]; ok {
+		if tagsSlice, ok := tags.([]string); ok && len(tagsSlice) > 0 {
+			update["$set"].(bson.M)["tags"] = tagsSlice
+		} else if tagsInterface, ok := tags.([]interface{}); ok && len(tagsInterface) > 0 {
+			// Convert []interface{} sang []string
+			tagsStr := make([]string, 0, len(tagsInterface))
+			for _, tag := range tagsInterface {
+				if tagStr, ok := tag.(string); ok && tagStr != "" {
+					tagsStr = append(tagsStr, tagStr)
+				}
+			}
+			if len(tagsStr) > 0 {
+				update["$set"].(bson.M)["tags"] = tagsStr
+			}
+		}
+	}
+
+	// Lưu ý: JobMetadata giờ được gửi kèm trong JobStatus, không cần xử lý riêng
+
 	// Nếu FirstSeenAt chưa có, set nó
 	if existingAgent.FirstSeenAt == 0 {
 		update["$set"].(bson.M)["firstSeenAt"] = getInt64(statusData, "firstSeenAt", now)

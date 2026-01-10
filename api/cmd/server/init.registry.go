@@ -29,7 +29,13 @@ func InitCollections(client *mongo.Client, cfg *config.Configuration) error {
 		"delivery_queue", "delivery_history",
 		"cta_library", "cta_tracking",
 		"agent_registry", "agent_configs", "agent_commands", "agent_activity_logs",
-		"webhook_logs"}
+		"webhook_logs",
+		// Module 1: Content Storage Collections (tất cả đều có prefix "content_" để nhất quán)
+		"content_nodes", "content_videos", "content_publications",
+		"content_draft_nodes", "content_draft_videos", "content_draft_publications", "content_draft_approvals",
+		// Module 2: AI Service Collections (tất cả đều có prefix "ai_" để nhất quán)
+		"ai_workflows", "ai_steps", "ai_prompt_templates", "ai_workflow_runs", "ai_step_runs",
+		"ai_generation_batches", "ai_candidates", "ai_runs", "ai_workflow_commands"}
 
 	for _, name := range colNames {
 		registered, err := global.RegistryCollections.Register(name, db.Collection(name))

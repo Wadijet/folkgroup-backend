@@ -56,6 +56,26 @@ type MongoDB_Auth_CollectionName struct {
 
 	// Webhook Logs Collection
 	WebhookLogs string // Tên collection cho webhook logs (để debug)
+
+	// Module 1: Content Storage Collections (tất cả đều có prefix "content_" để nhất quán)
+	ContentNodes        string // Tên collection cho content nodes (L1-L6): content_nodes
+	Videos              string // Tên collection cho videos (L7): content_videos
+	Publications        string // Tên collection cho publications (L8): content_publications
+	DraftContentNodes   string // Tên collection cho draft content nodes: content_draft_nodes
+	DraftVideos         string // Tên collection cho draft videos: content_draft_videos
+	DraftPublications   string // Tên collection cho draft publications: content_draft_publications
+	DraftApprovals      string // Tên collection cho draft approvals: content_draft_approvals
+
+	// Module 2: AI Service Collections (tất cả đều có prefix "ai_" để nhất quán)
+	AIWorkflows         string // Tên collection cho workflows: ai_workflows
+	AISteps             string // Tên collection cho steps: ai_steps
+	AIPromptTemplates   string // Tên collection cho prompt templates: ai_prompt_templates
+	AIWorkflowRuns      string // Tên collection cho workflow runs: ai_workflow_runs
+	AIStepRuns          string // Tên collection cho step runs: ai_step_runs
+	AIGenerationBatches string // Tên collection cho generation batches: ai_generation_batches
+	AICandidates        string // Tên collection cho candidates: ai_candidates
+	AIRuns              string // Tên collection cho AI runs: ai_runs
+	AIWorkflowCommands  string // Tên collection cho workflow commands: ai_workflow_commands
 }
 
 // Các biến toàn cục

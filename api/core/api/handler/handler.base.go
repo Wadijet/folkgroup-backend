@@ -135,11 +135,13 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) getOrganizationIDFromModel(mo
 	}
 }
 
-// getPermissionNameFromRoute lấy permission name từ route (nếu có)
-// Có thể lấy từ route path hoặc từ context
+// getPermissionNameFromRoute lấy permission name từ context (đã được set bởi middleware)
+// Middleware AuthMiddleware đã lưu permission name vào context với key "permission_name"
 func (h *BaseHandler[T, CreateInput, UpdateInput]) getPermissionNameFromRoute(c fiber.Ctx) string {
-	// Có thể lấy từ route path hoặc từ context
-	// Hiện tại trả về rỗng, có thể mở rộng sau
+	// Lấy từ context (đã được middleware set)
+	if permissionName, ok := c.Locals("permission_name").(string); ok && permissionName != "" {
+		return permissionName
+	}
 	return ""
 }
 
@@ -184,21 +186,21 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) getOwnerOrganizationIDFromMod
 // validateUserHasAccessToOrg validate user có quyền với organization không
 // Dùng để validate khi create/update với ownerOrganizationId từ request
 func (h *BaseHandler[T, CreateInput, UpdateInput]) validateUserHasAccessToOrg(c fiber.Ctx, orgID primitive.ObjectID) error {
-	// Lấy user ID từ context
-	userIDStr, ok := c.Locals("user_id").(string)
-	if !ok {
-		return common.NewError(common.ErrCodeAuthRole, "Không có thông tin user", common.StatusUnauthorized, nil)
+	// Lấy active role ID từ context (đã được middleware set)
+	activeRoleIDStr, ok := c.Locals("active_role_id").(string)
+	if !ok || activeRoleIDStr == "" {
+		return common.NewError(common.ErrCodeAuthRole, "Không có role context", common.StatusUnauthorized, nil)
 	}
-	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	activeRoleID, err := primitive.ObjectIDFromHex(activeRoleIDStr)
 	if err != nil {
-		return common.NewError(common.ErrCodeAuthRole, "User ID không hợp lệ", common.StatusUnauthorized, err)
+		return common.NewError(common.ErrCodeAuthRole, "Role ID không hợp lệ", common.StatusUnauthorized, err)
 	}
 
-	// Lấy permission name từ route (nếu có)
+	// Lấy permission name từ context (đã được middleware set)
 	permissionName := h.getPermissionNameFromRoute(c)
 
-	// Lấy allowed organization IDs
-	allowedOrgIDs, err := services.GetUserAllowedOrganizationIDs(c.Context(), userID, permissionName)
+	// Lấy allowed organization IDs từ active role (đơn giản hơn, chỉ từ role context)
+	allowedOrgIDs, err := services.GetAllowedOrganizationIDsFromRole(c.Context(), activeRoleID, permissionName)
 	if err != nil {
 		return err
 	}
@@ -227,21 +229,21 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) applyOrganizationFilter(c fib
 		return baseFilter // Model không có OwnerOrganizationID, không cần filter
 	}
 
-	// Lấy permission name từ route (nếu có)
-	permissionName := h.getPermissionNameFromRoute(c)
-
-	// Lấy user ID
-	userIDStr, ok := c.Locals("user_id").(string)
-	if !ok {
-		return baseFilter // Không có user ID, không filter
+	// Lấy active role ID từ context (đã được middleware set)
+	activeRoleIDStr, ok := c.Locals("active_role_id").(string)
+	if !ok || activeRoleIDStr == "" {
+		return baseFilter // Không có active role, không filter
 	}
-	userID, err := primitive.ObjectIDFromHex(userIDStr)
+	activeRoleID, err := primitive.ObjectIDFromHex(activeRoleIDStr)
 	if err != nil {
 		return baseFilter
 	}
 
-	// Lấy allowed organization IDs (chỉ từ scope, KHÔNG có parents)
-	allowedOrgIDs, err := services.GetUserAllowedOrganizationIDs(c.Context(), userID, permissionName)
+	// Lấy permission name từ context (đã được middleware set)
+	permissionName := h.getPermissionNameFromRoute(c)
+
+	// Lấy allowed organization IDs từ active role (đơn giản hơn, chỉ từ role context)
+	allowedOrgIDs, err := services.GetAllowedOrganizationIDsFromRole(c.Context(), activeRoleID, permissionName)
 	if err != nil || len(allowedOrgIDs) == 0 {
 		return baseFilter
 	}
@@ -307,12 +309,21 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) validateOrganizationAccess(c 
 		return nil // Không có organizationId, không cần validate
 	}
 
-	// Lấy allowed organization IDs
-	userIDStr, _ := c.Locals("user_id").(string)
-	userID, _ := primitive.ObjectIDFromHex(userIDStr)
+	// Lấy active role ID từ context (đã được middleware set)
+	activeRoleIDStr, ok := c.Locals("active_role_id").(string)
+	if !ok || activeRoleIDStr == "" {
+		return common.NewError(common.ErrCodeAuthRole, "Không có role context", common.StatusUnauthorized, nil)
+	}
+	activeRoleID, err := primitive.ObjectIDFromHex(activeRoleIDStr)
+	if err != nil {
+		return common.NewError(common.ErrCodeAuthRole, "Role ID không hợp lệ", common.StatusUnauthorized, err)
+	}
+
+	// Lấy permission name từ context (đã được middleware set)
 	permissionName := h.getPermissionNameFromRoute(c)
 
-	allowedOrgIDs, err := services.GetUserAllowedOrganizationIDs(c.Context(), userID, permissionName)
+	// Lấy allowed organization IDs từ active role (đơn giản hơn, chỉ từ role context)
+	allowedOrgIDs, err := services.GetAllowedOrganizationIDsFromRole(c.Context(), activeRoleID, permissionName)
 	if err != nil {
 		return err
 	}

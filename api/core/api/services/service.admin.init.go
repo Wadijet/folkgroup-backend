@@ -421,6 +421,107 @@ var InitialPermissions = []models.Permission{
 	// Quyền đặc biệt cho check-in endpoint
 	{Name: "AgentManagement.CheckIn", Describe: "Quyền check-in từ bot", Group: "AgentManagement", Category: "AgentManagement"},
 
+	// ==================================== CONTENT MODULE (MODULE 1 - CONTENT STORAGE) ===========================================
+	// Quản lý Content Nodes (collection: content_nodes): Thêm, xem, sửa, xóa
+	{Name: "ContentNodes.Insert", Describe: "Quyền tạo content node", Group: "Content", Category: "ContentNodes"},
+	{Name: "ContentNodes.Read", Describe: "Quyền xem danh sách content nodes", Group: "Content", Category: "ContentNodes"},
+	{Name: "ContentNodes.Update", Describe: "Quyền cập nhật content node", Group: "Content", Category: "ContentNodes"},
+	{Name: "ContentNodes.Delete", Describe: "Quyền xóa content node", Group: "Content", Category: "ContentNodes"},
+
+	// Quản lý Videos (collection: content_videos): Thêm, xem, sửa, xóa
+	{Name: "ContentVideos.Insert", Describe: "Quyền tạo video", Group: "Content", Category: "ContentVideos"},
+	{Name: "ContentVideos.Read", Describe: "Quyền xem danh sách videos", Group: "Content", Category: "ContentVideos"},
+	{Name: "ContentVideos.Update", Describe: "Quyền cập nhật video", Group: "Content", Category: "ContentVideos"},
+	{Name: "ContentVideos.Delete", Describe: "Quyền xóa video", Group: "Content", Category: "ContentVideos"},
+
+	// Quản lý Publications (collection: content_publications): Thêm, xem, sửa, xóa
+	{Name: "ContentPublications.Insert", Describe: "Quyền tạo publication", Group: "Content", Category: "ContentPublications"},
+	{Name: "ContentPublications.Read", Describe: "Quyền xem danh sách publications", Group: "Content", Category: "ContentPublications"},
+	{Name: "ContentPublications.Update", Describe: "Quyền cập nhật publication", Group: "Content", Category: "ContentPublications"},
+	{Name: "ContentPublications.Delete", Describe: "Quyền xóa publication", Group: "Content", Category: "ContentPublications"},
+
+	// Quản lý Draft Content Nodes (collection: content_draft_nodes): Thêm, xem, sửa, xóa
+	{Name: "ContentDraftNodes.Insert", Describe: "Quyền tạo draft content node", Group: "Content", Category: "ContentDraftNodes"},
+	{Name: "ContentDraftNodes.Read", Describe: "Quyền xem danh sách draft content nodes", Group: "Content", Category: "ContentDraftNodes"},
+	{Name: "ContentDraftNodes.Update", Describe: "Quyền cập nhật draft content node", Group: "Content", Category: "ContentDraftNodes"},
+	{Name: "ContentDraftNodes.Delete", Describe: "Quyền xóa draft content node", Group: "Content", Category: "ContentDraftNodes"},
+
+	// Quản lý Draft Videos (collection: content_draft_videos): Thêm, xem, sửa, xóa
+	{Name: "ContentDraftVideos.Insert", Describe: "Quyền tạo draft video", Group: "Content", Category: "ContentDraftVideos"},
+	{Name: "ContentDraftVideos.Read", Describe: "Quyền xem danh sách draft videos", Group: "Content", Category: "ContentDraftVideos"},
+	{Name: "ContentDraftVideos.Update", Describe: "Quyền cập nhật draft video", Group: "Content", Category: "ContentDraftVideos"},
+	{Name: "ContentDraftVideos.Delete", Describe: "Quyền xóa draft video", Group: "Content", Category: "ContentDraftVideos"},
+
+	// Quản lý Draft Publications (collection: content_draft_publications): Thêm, xem, sửa, xóa
+	{Name: "ContentDraftPublications.Insert", Describe: "Quyền tạo draft publication", Group: "Content", Category: "ContentDraftPublications"},
+	{Name: "ContentDraftPublications.Read", Describe: "Quyền xem danh sách draft publications", Group: "Content", Category: "ContentDraftPublications"},
+	{Name: "ContentDraftPublications.Update", Describe: "Quyền cập nhật draft publication", Group: "Content", Category: "ContentDraftPublications"},
+	{Name: "ContentDraftPublications.Delete", Describe: "Quyền xóa draft publication", Group: "Content", Category: "ContentDraftPublications"},
+
+	// Quản lý Draft Approvals (collection: content_draft_approvals): Thêm, xem, sửa, xóa
+	{Name: "ContentDraftApprovals.Insert", Describe: "Quyền tạo draft approval", Group: "Content", Category: "ContentDraftApprovals"},
+	{Name: "ContentDraftApprovals.Read", Describe: "Quyền xem danh sách draft approvals", Group: "Content", Category: "ContentDraftApprovals"},
+	{Name: "ContentDraftApprovals.Update", Describe: "Quyền cập nhật draft approval", Group: "Content", Category: "ContentDraftApprovals"},
+	{Name: "ContentDraftApprovals.Delete", Describe: "Quyền xóa draft approval", Group: "Content", Category: "ContentDraftApprovals"},
+
+	// Quyền đặc biệt cho commit draft content node (commit draft → production)
+	{Name: "ContentDraftNodes.Commit", Describe: "Quyền commit draft content node sang production", Group: "Content", Category: "ContentDraftNodes"},
+
+	// ==================================== AI SERVICE MODULE (MODULE 2 - AI SERVICE) ===========================================
+	// Quản lý AI Workflows (collection: ai_workflows): Thêm, xem, sửa, xóa
+	{Name: "AIWorkflows.Insert", Describe: "Quyền tạo AI workflow", Group: "AI", Category: "AIWorkflows"},
+	{Name: "AIWorkflows.Read", Describe: "Quyền xem danh sách AI workflows", Group: "AI", Category: "AIWorkflows"},
+	{Name: "AIWorkflows.Update", Describe: "Quyền cập nhật AI workflow", Group: "AI", Category: "AIWorkflows"},
+	{Name: "AIWorkflows.Delete", Describe: "Quyền xóa AI workflow", Group: "AI", Category: "AIWorkflows"},
+
+	// Quản lý AI Steps (collection: ai_steps): Thêm, xem, sửa, xóa
+	{Name: "AISteps.Insert", Describe: "Quyền tạo AI step", Group: "AI", Category: "AISteps"},
+	{Name: "AISteps.Read", Describe: "Quyền xem danh sách AI steps", Group: "AI", Category: "AISteps"},
+	{Name: "AISteps.Update", Describe: "Quyền cập nhật AI step", Group: "AI", Category: "AISteps"},
+	{Name: "AISteps.Delete", Describe: "Quyền xóa AI step", Group: "AI", Category: "AISteps"},
+
+	// Quản lý AI Prompt Templates (collection: ai_prompt_templates): Thêm, xem, sửa, xóa
+	{Name: "AIPromptTemplates.Insert", Describe: "Quyền tạo AI prompt template", Group: "AI", Category: "AIPromptTemplates"},
+	{Name: "AIPromptTemplates.Read", Describe: "Quyền xem danh sách AI prompt templates", Group: "AI", Category: "AIPromptTemplates"},
+	{Name: "AIPromptTemplates.Update", Describe: "Quyền cập nhật AI prompt template", Group: "AI", Category: "AIPromptTemplates"},
+	{Name: "AIPromptTemplates.Delete", Describe: "Quyền xóa AI prompt template", Group: "AI", Category: "AIPromptTemplates"},
+
+	// Quản lý AI Workflow Runs (collection: ai_workflow_runs): Thêm, xem, sửa, xóa
+	{Name: "AIWorkflowRuns.Insert", Describe: "Quyền tạo AI workflow run", Group: "AI", Category: "AIWorkflowRuns"},
+	{Name: "AIWorkflowRuns.Read", Describe: "Quyền xem danh sách AI workflow runs", Group: "AI", Category: "AIWorkflowRuns"},
+	{Name: "AIWorkflowRuns.Update", Describe: "Quyền cập nhật AI workflow run", Group: "AI", Category: "AIWorkflowRuns"},
+	{Name: "AIWorkflowRuns.Delete", Describe: "Quyền xóa AI workflow run", Group: "AI", Category: "AIWorkflowRuns"},
+
+	// Quản lý AI Step Runs (collection: ai_step_runs): Thêm, xem, sửa, xóa
+	{Name: "AIStepRuns.Insert", Describe: "Quyền tạo AI step run", Group: "AI", Category: "AIStepRuns"},
+	{Name: "AIStepRuns.Read", Describe: "Quyền xem danh sách AI step runs", Group: "AI", Category: "AIStepRuns"},
+	{Name: "AIStepRuns.Update", Describe: "Quyền cập nhật AI step run", Group: "AI", Category: "AIStepRuns"},
+	{Name: "AIStepRuns.Delete", Describe: "Quyền xóa AI step run", Group: "AI", Category: "AIStepRuns"},
+
+	// Quản lý AI Generation Batches (collection: ai_generation_batches): Thêm, xem, sửa, xóa
+	{Name: "AIGenerationBatches.Insert", Describe: "Quyền tạo AI generation batch", Group: "AI", Category: "AIGenerationBatches"},
+	{Name: "AIGenerationBatches.Read", Describe: "Quyền xem danh sách AI generation batches", Group: "AI", Category: "AIGenerationBatches"},
+	{Name: "AIGenerationBatches.Update", Describe: "Quyền cập nhật AI generation batch", Group: "AI", Category: "AIGenerationBatches"},
+	{Name: "AIGenerationBatches.Delete", Describe: "Quyền xóa AI generation batch", Group: "AI", Category: "AIGenerationBatches"},
+
+	// Quản lý AI Candidates (collection: ai_candidates): Thêm, xem, sửa, xóa
+	{Name: "AICandidates.Insert", Describe: "Quyền tạo AI candidate", Group: "AI", Category: "AICandidates"},
+	{Name: "AICandidates.Read", Describe: "Quyền xem danh sách AI candidates", Group: "AI", Category: "AICandidates"},
+	{Name: "AICandidates.Update", Describe: "Quyền cập nhật AI candidate", Group: "AI", Category: "AICandidates"},
+	{Name: "AICandidates.Delete", Describe: "Quyền xóa AI candidate", Group: "AI", Category: "AICandidates"},
+
+	// Quản lý AI Runs (collection: ai_runs): Thêm, xem, sửa, xóa
+	{Name: "AIRuns.Insert", Describe: "Quyền tạo AI run", Group: "AI", Category: "AIRuns"},
+	{Name: "AIRuns.Read", Describe: "Quyền xem danh sách AI runs", Group: "AI", Category: "AIRuns"},
+	{Name: "AIRuns.Update", Describe: "Quyền cập nhật AI run", Group: "AI", Category: "AIRuns"},
+	{Name: "AIRuns.Delete", Describe: "Quyền xóa AI run", Group: "AI", Category: "AIRuns"},
+
+	// Quản lý AI Workflow Commands (collection: ai_workflow_commands): Thêm, xem, sửa, xóa
+	{Name: "AIWorkflowCommands.Insert", Describe: "Quyền tạo AI workflow command", Group: "AI", Category: "AIWorkflowCommands"},
+	{Name: "AIWorkflowCommands.Read", Describe: "Quyền xem danh sách AI workflow commands", Group: "AI", Category: "AIWorkflowCommands"},
+	{Name: "AIWorkflowCommands.Update", Describe: "Quyền cập nhật AI workflow command", Group: "AI", Category: "AIWorkflowCommands"},
+	{Name: "AIWorkflowCommands.Delete", Describe: "Quyền xóa AI workflow command", Group: "AI", Category: "AIWorkflowCommands"},
+
 	// ==================================== WEBHOOK LOGS MODULE ===========================================
 	// Quản lý Webhook Log: Thêm, xem, sửa, xóa (để debug và tracking webhooks)
 	{Name: "WebhookLog.Insert", Describe: "Quyền tạo webhook log", Group: "Webhook", Category: "WebhookLog"},

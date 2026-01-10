@@ -865,6 +865,173 @@ func (r *Router) registerAgentManagementRoutes(router fiber.Router) error {
 	return nil
 }
 
+// registerContentStorageRoutes đăng ký các route cho Module 1: Content Storage
+//
+// ⚠️ LƯU Ý: Tất cả routes ở đây PHẢI dùng registerRouteWithMiddleware (xem comment ở đầu file)
+//
+// Cấu trúc routes:
+// - Production content: /api/v1/content/{nodes|videos|publications}/*
+// - Drafts: /api/v1/content/drafts/{nodes|videos|publications}/*
+// - Approvals: /api/v1/content/drafts/approvals/*
+//
+// Tất cả đều dùng prefix /content/ để tránh lẫn sang module khác (Module 2, Module 3)
+func (r *Router) registerContentStorageRoutes(router fiber.Router) error {
+	// ===== PRODUCTION CONTENT (đã được duyệt và commit) =====
+
+	// Content Node CRUD routes (L1-L6) - collection: content_nodes
+	contentNodeHandler, err := handler.NewContentNodeHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create content node handler: %v", err)
+	}
+	r.registerCRUDRoutes(router, "/content/nodes", contentNodeHandler, readWriteConfig, "ContentNodes")
+
+	// Custom endpoint: GetTree (recursive tree)
+	contentNodeReadMiddleware := middleware.AuthMiddleware("ContentNodes.Read")
+	registerRouteWithMiddleware(router, "/content/nodes", "GET", "/tree/:id", []fiber.Handler{contentNodeReadMiddleware}, contentNodeHandler.GetTree)
+
+	// Video CRUD routes (L7) - collection: content_videos
+	videoHandler, err := handler.NewVideoHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create video handler: %v", err)
+	}
+	r.registerCRUDRoutes(router, "/content/videos", videoHandler, readWriteConfig, "ContentVideos")
+
+	// Publication CRUD routes (L8) - collection: content_publications
+	publicationHandler, err := handler.NewPublicationHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create publication handler: %v", err)
+	}
+	r.registerCRUDRoutes(router, "/content/publications", publicationHandler, readWriteConfig, "ContentPublications")
+
+	// ===== DRAFTS (bản nháp chưa được duyệt) =====
+
+	// Draft Content Node CRUD routes - collection: content_draft_nodes
+	draftContentNodeHandler, err := handler.NewDraftContentNodeHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create draft content node handler: %v", err)
+	}
+	r.registerCRUDRoutes(router, "/content/drafts/nodes", draftContentNodeHandler, readWriteConfig, "ContentDraftNodes")
+
+	// Custom endpoint: CommitDraftNode (commit draft → production)
+	draftContentNodeCommitMiddleware := middleware.AuthMiddleware("ContentDraftNodes.Commit")
+	registerRouteWithMiddleware(router, "/content/drafts/nodes", "POST", "/:id/commit", []fiber.Handler{draftContentNodeCommitMiddleware}, draftContentNodeHandler.CommitDraftNode)
+
+	// Draft Video CRUD routes - collection: content_draft_videos
+	draftVideoHandler, err := handler.NewDraftVideoHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create draft video handler: %v", err)
+	}
+	r.registerCRUDRoutes(router, "/content/drafts/videos", draftVideoHandler, readWriteConfig, "ContentDraftVideos")
+
+	// Draft Publication CRUD routes - collection: content_draft_publications
+	draftPublicationHandler, err := handler.NewDraftPublicationHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create draft publication handler: %v", err)
+	}
+	r.registerCRUDRoutes(router, "/content/drafts/publications", draftPublicationHandler, readWriteConfig, "ContentDraftPublications")
+
+	// ===== APPROVALS (quản lý approval workflow) =====
+
+	// Draft Approval CRUD routes - collection: content_draft_approvals
+	draftApprovalHandler, err := handler.NewDraftApprovalHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create draft approval handler: %v", err)
+	}
+	r.registerCRUDRoutes(router, "/content/drafts/approvals", draftApprovalHandler, readWriteConfig, "ContentDraftApprovals")
+
+	// Custom endpoints: Approval workflows
+	draftApprovalApproveMiddleware := middleware.AuthMiddleware("ApprovalRequest.Approve")
+	registerRouteWithMiddleware(router, "/content/drafts/approvals", "POST", "/:id/approve", []fiber.Handler{draftApprovalApproveMiddleware}, draftApprovalHandler.ApproveDraftWorkflowRun)
+
+	draftApprovalRejectMiddleware := middleware.AuthMiddleware("ApprovalRequest.Reject")
+	registerRouteWithMiddleware(router, "/content/drafts/approvals", "POST", "/:id/reject", []fiber.Handler{draftApprovalRejectMiddleware}, draftApprovalHandler.RejectDraftWorkflowRun)
+
+	return nil
+}
+
+// registerAIServiceRoutes đăng ký các route cho Module 2: AI Service
+//
+// ⚠️ LƯU Ý: Tất cả routes ở đây PHẢI dùng registerRouteWithMiddleware (xem comment ở đầu file)
+//
+// Cấu trúc routes:
+// - Workflows: /api/v1/ai/workflows/*
+// - Steps: /api/v1/ai/steps/*
+// - Prompt Templates: /api/v1/ai/prompt-templates/*
+// - Workflow Runs: /api/v1/ai/workflow-runs/*
+// - Step Runs: /api/v1/ai/step-runs/*
+// - Generation Batches: /api/v1/ai/generation-batches/*
+// - Candidates: /api/v1/ai/candidates/*
+// - AI Runs: /api/v1/ai/ai-runs/*
+// - Workflow Commands: /api/v1/ai/workflow-commands/*
+//
+// Tất cả đều dùng prefix /api/v1/ai/ để phân biệt với Module 1 (/api/v1/content/)
+func (r *Router) registerAIServiceRoutes(router fiber.Router) error {
+	// ===== WORKFLOWS =====
+	aiWorkflowHandler, err := handler.NewAIWorkflowHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create AI workflow handler: %v", err)
+	}
+	r.registerCRUDRoutes(router, "/ai/workflows", aiWorkflowHandler, readWriteConfig, "AIWorkflows")
+
+	// ===== STEPS =====
+	aiStepHandler, err := handler.NewAIStepHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create AI step handler: %v", err)
+	}
+	r.registerCRUDRoutes(router, "/ai/steps", aiStepHandler, readWriteConfig, "AISteps")
+
+	// ===== PROMPT TEMPLATES =====
+	aiPromptTemplateHandler, err := handler.NewAIPromptTemplateHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create AI prompt template handler: %v", err)
+	}
+	r.registerCRUDRoutes(router, "/ai/prompt-templates", aiPromptTemplateHandler, readWriteConfig, "AIPromptTemplates")
+
+	// ===== WORKFLOW RUNS =====
+	aiWorkflowRunHandler, err := handler.NewAIWorkflowRunHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create AI workflow run handler: %v", err)
+	}
+	r.registerCRUDRoutes(router, "/ai/workflow-runs", aiWorkflowRunHandler, readWriteConfig, "AIWorkflowRuns")
+
+	// ===== STEP RUNS =====
+	aiStepRunHandler, err := handler.NewAIStepRunHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create AI step run handler: %v", err)
+	}
+	r.registerCRUDRoutes(router, "/ai/step-runs", aiStepRunHandler, readWriteConfig, "AIStepRuns")
+
+	// ===== GENERATION BATCHES =====
+	aiGenerationBatchHandler, err := handler.NewAIGenerationBatchHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create AI generation batch handler: %v", err)
+	}
+	r.registerCRUDRoutes(router, "/ai/generation-batches", aiGenerationBatchHandler, readWriteConfig, "AIGenerationBatches")
+
+	// ===== CANDIDATES =====
+	aiCandidateHandler, err := handler.NewAICandidateHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create AI candidate handler: %v", err)
+	}
+	r.registerCRUDRoutes(router, "/ai/candidates", aiCandidateHandler, readWriteConfig, "AICandidates")
+
+	// ===== AI RUNS =====
+	aiRunHandler, err := handler.NewAIRunHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create AI run handler: %v", err)
+	}
+	r.registerCRUDRoutes(router, "/ai/ai-runs", aiRunHandler, readWriteConfig, "AIRuns")
+
+	// ===== WORKFLOW COMMANDS =====
+	aiWorkflowCommandHandler, err := handler.NewAIWorkflowCommandHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create AI workflow command handler: %v", err)
+	}
+	r.registerCRUDRoutes(router, "/ai/workflow-commands", aiWorkflowCommandHandler, readWriteConfig, "AIWorkflowCommands")
+
+	return nil
+}
+
 // SetupRoutes thiết lập tất cả các route cho ứng dụng
 func SetupRoutes(app *fiber.App) error {
 	// Khởi tạo route prefix
@@ -922,6 +1089,16 @@ func SetupRoutes(app *fiber.App) error {
 	// 10. Agent Management Routes (Bot Management System)
 	if err := router.registerAgentManagementRoutes(v1); err != nil {
 		return fmt.Errorf("failed to register agent management routes: %v", err)
+	}
+
+	// 11. Content Storage Routes (Module 1)
+	if err := router.registerContentStorageRoutes(v1); err != nil {
+		return fmt.Errorf("failed to register content storage routes: %v", err)
+	}
+
+	// 12. AI Service Routes (Module 2)
+	if err := router.registerAIServiceRoutes(v1); err != nil {
+		return fmt.Errorf("failed to register AI service routes: %v", err)
 	}
 
 	return nil

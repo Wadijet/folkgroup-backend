@@ -400,8 +400,9 @@ func AuthMiddleware(requirePermission string) fiber.Handler {
 			return nil
 		}
 
-		// Lưu scope tối thiểu vào context để sử dụng trong handler
+		// Lưu scope tối thiểu và permission name vào context để sử dụng trong handler
 		c.Locals("minScope", scope)
+		c.Locals("permission_name", requirePermission) // Lưu permission name để handler sử dụng
 		return c.Next()
 	}
 }

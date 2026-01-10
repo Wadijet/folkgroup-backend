@@ -73,6 +73,26 @@ func initColNames() {
 	// Webhook Logs Collection
 	global.MongoDB_ColNames.WebhookLogs = "webhook_logs"
 
+	// Module 1: Content Storage Collections (tất cả đều có prefix "content_" để nhất quán)
+	global.MongoDB_ColNames.ContentNodes = "content_nodes"
+	global.MongoDB_ColNames.Videos = "content_videos"
+	global.MongoDB_ColNames.Publications = "content_publications"
+	global.MongoDB_ColNames.DraftContentNodes = "content_draft_nodes"
+	global.MongoDB_ColNames.DraftVideos = "content_draft_videos"
+	global.MongoDB_ColNames.DraftPublications = "content_draft_publications"
+	global.MongoDB_ColNames.DraftApprovals = "content_draft_approvals"
+
+	// Module 2: AI Service Collections (tất cả đều có prefix "ai_" để nhất quán)
+	global.MongoDB_ColNames.AIWorkflows = "ai_workflows"
+	global.MongoDB_ColNames.AISteps = "ai_steps"
+	global.MongoDB_ColNames.AIPromptTemplates = "ai_prompt_templates"
+	global.MongoDB_ColNames.AIWorkflowRuns = "ai_workflow_runs"
+	global.MongoDB_ColNames.AIStepRuns = "ai_step_runs"
+	global.MongoDB_ColNames.AIGenerationBatches = "ai_generation_batches"
+	global.MongoDB_ColNames.AICandidates = "ai_candidates"
+	global.MongoDB_ColNames.AIRuns = "ai_runs"
+	global.MongoDB_ColNames.AIWorkflowCommands = "ai_workflow_commands"
+
 	logrus.Info("Initialized collection names") // Ghi log thông báo đã khởi tạo tên các collection
 }
 
@@ -148,6 +168,26 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AgentCommands), models.AgentCommand{})
 	// AgentStatus đã được ghép vào AgentRegistry, không cần index riêng nữa
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AgentActivityLogs), models.AgentActivityLog{})
+
+	// Module 1: Content Storage Indexes
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.ContentNodes), models.ContentNode{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.Videos), models.Video{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.Publications), models.Publication{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DraftContentNodes), models.DraftContentNode{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DraftVideos), models.DraftVideo{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DraftPublications), models.DraftPublication{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DraftApprovals), models.DraftApproval{})
+
+	// Module 2: AI Service Indexes
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AIWorkflows), models.AIWorkflow{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AISteps), models.AIStep{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AIPromptTemplates), models.AIPromptTemplate{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AIWorkflowRuns), models.AIWorkflowRun{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AIStepRuns), models.AIStepRun{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AIGenerationBatches), models.AIGenerationBatch{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AICandidates), models.AICandidate{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AIRuns), models.AIRun{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AIWorkflowCommands), models.AIWorkflowCommand{})
 }
 
 // initFirebase khởi tạo Firebase Admin SDK

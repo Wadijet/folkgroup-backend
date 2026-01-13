@@ -51,7 +51,23 @@ func NewNotificationRoutingHandler() (*NotificationRoutingHandler, error) {
 }
 
 // InsertOne override để thêm validation uniqueness
-// Mỗi organization chỉ có thể có 1 rule cho mỗi eventType hoặc domain
+//
+// LÝ DO PHẢI OVERRIDE (không thể dùng CRUD chuẩn):
+// 1. Validation uniqueness phức tạp:
+//    - Mỗi organization chỉ có thể có 1 rule cho mỗi eventType (eventType + ownerOrganizationId là unique)
+//    - Mỗi organization chỉ có thể có 1 rule cho mỗi domain (domain + ownerOrganizationId là unique)
+//    - Chỉ check rules đang active (isActive = true)
+//    - Cần query database để check duplicate trước khi insert
+// 2. Validation nghiệp vụ:
+//    - EventType là bắt buộc và không được để trống
+//    - Nếu có Domain, cũng phải validate uniqueness cho Domain
+// 3. Logic đặc biệt:
+//    - Parse trực tiếp vào Model (không dùng DTO) vì cần validate uniqueness dựa trên Model fields
+//    - Validate quyền với ownerOrganizationId (nếu có trong request)
+//    - Set ownerOrganizationId từ context nếu không có trong request
+//
+// KẾT LUẬN: Cần giữ override vì validation uniqueness phức tạp (query database để check duplicate)
+//           và logic nghiệp vụ đặc biệt (chỉ check rules active, validate eventType bắt buộc)
 func (h *NotificationRoutingHandler) InsertOne(c fiber.Ctx) error {
 	return h.SafeHandler(c, func() error {
 		// Parse request body thành struct T

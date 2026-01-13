@@ -34,6 +34,11 @@ type InitService struct {
 	notificationChannelService  *NotificationChannelService  // Service xử lý notification channel
 	notificationRoutingService  *NotificationRoutingService  // Service xử lý notification routing
 	ctaLibraryService           *CTALibraryService           // Service xử lý CTA Library
+	aiProviderProfileService    *AIProviderProfileService    // Service xử lý AI provider profiles
+	aiPromptTemplateService     *AIPromptTemplateService     // Service xử lý AI prompt templates
+	aiStepService               *AIStepService               // Service xử lý AI steps
+	aiWorkflowService           *AIWorkflowService           // Service xử lý AI workflows
+	aiWorkflowCommandService    *AIWorkflowCommandService    // Service xử lý AI workflow commands
 }
 
 // NewInitService tạo mới một đối tượng InitService
@@ -103,6 +108,31 @@ func NewInitService() (*InitService, error) {
 		return nil, fmt.Errorf("failed to create CTA library service: %v", err)
 	}
 
+	aiProviderProfileService, err := NewAIProviderProfileService()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AI provider profile service: %v", err)
+	}
+
+	aiPromptTemplateService, err := NewAIPromptTemplateService()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AI prompt template service: %v", err)
+	}
+
+	aiStepService, err := NewAIStepService()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AI step service: %v", err)
+	}
+
+	aiWorkflowService, err := NewAIWorkflowService()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AI workflow service: %v", err)
+	}
+
+	aiWorkflowCommandService, err := NewAIWorkflowCommandService()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AI workflow command service: %v", err)
+	}
+
 	return &InitService{
 		userService:                 userService,
 		roleService:                 roleService,
@@ -116,6 +146,11 @@ func NewInitService() (*InitService, error) {
 		notificationChannelService:  notificationChannelService,
 		notificationRoutingService:  notificationRoutingService,
 		ctaLibraryService:           ctaLibraryService,
+		aiProviderProfileService:    aiProviderProfileService,
+		aiPromptTemplateService:     aiPromptTemplateService,
+		aiStepService:               aiStepService,
+		aiWorkflowService:           aiWorkflowService,
+		aiWorkflowCommandService:    aiWorkflowCommandService,
 	}, nil
 }
 
@@ -243,6 +278,9 @@ var InitialPermissions = []models.Permission{
 	{Name: "Agent.Delete", Describe: "Quyền xóa đại lý", Group: "Auth", Category: "Agent"},
 	{Name: "Agent.CheckIn", Describe: "Quyền kiểm tra trạng thái đại lý", Group: "Auth", Category: "Agent"},
 	{Name: "Agent.CheckOut", Describe: "Quyền kiểm tra trạng thái đại lý", Group: "Auth", Category: "Agent"},
+
+	// Quản lý khởi tạo hệ thống: Thiết lập administrator và đồng bộ quyền
+	{Name: "Init.SetAdmin", Describe: "Quyền thiết lập administrator và đồng bộ quyền cho Administrator", Group: "Auth", Category: "Init"},
 
 	// ==================================== PANCAKE MODULE ===========================================
 	// Quản lý token truy cập: Thêm, xem, sửa, xóa token
@@ -485,6 +523,12 @@ var InitialPermissions = []models.Permission{
 	{Name: "AIPromptTemplates.Read", Describe: "Quyền xem danh sách AI prompt templates", Group: "AI", Category: "AIPromptTemplates"},
 	{Name: "AIPromptTemplates.Update", Describe: "Quyền cập nhật AI prompt template", Group: "AI", Category: "AIPromptTemplates"},
 	{Name: "AIPromptTemplates.Delete", Describe: "Quyền xóa AI prompt template", Group: "AI", Category: "AIPromptTemplates"},
+
+	// Quản lý AI Provider Profiles (collection: ai_provider_profiles): Thêm, xem, sửa, xóa
+	{Name: "AIProviderProfiles.Insert", Describe: "Quyền tạo AI provider profile", Group: "AI", Category: "AIProviderProfiles"},
+	{Name: "AIProviderProfiles.Read", Describe: "Quyền xem danh sách AI provider profiles", Group: "AI", Category: "AIProviderProfiles"},
+	{Name: "AIProviderProfiles.Update", Describe: "Quyền cập nhật AI provider profile", Group: "AI", Category: "AIProviderProfiles"},
+	{Name: "AIProviderProfiles.Delete", Describe: "Quyền xóa AI provider profile", Group: "AI", Category: "AIProviderProfiles"},
 
 	// Quản lý AI Workflow Runs (collection: ai_workflow_runs): Thêm, xem, sửa, xóa
 	{Name: "AIWorkflowRuns.Insert", Describe: "Quyền tạo AI workflow run", Group: "AI", Category: "AIWorkflowRuns"},
@@ -1993,4 +2037,1542 @@ func (h *InitService) InitCTALibrary() error {
 	}
 
 	return nil
+}
+
+// InitAIData khởi tạo dữ liệu mặc định cho hệ thống AI workflow (Module 2)
+// Tạo provider profiles, prompt templates, steps, và workflows mẫu
+// Returns:
+//   - error: Lỗi nếu có trong quá trình khởi tạo
+func (h *InitService) InitAIData() error {
+	// Sử dụng context cho phép insert system data trong quá trình init
+	ctx := withSystemDataInsertAllowed(context.TODO())
+	currentTime := time.Now().UnixMilli()
+
+	// Lấy System Organization
+	systemOrg, err := h.GetRootOrganization()
+	if err != nil {
+		return fmt.Errorf("failed to get system organization: %v", err)
+	}
+
+	// 1. Khởi tạo AI Provider Profiles
+	if err := h.initAIProviderProfiles(ctx, systemOrg.ID, currentTime); err != nil {
+		logrus.WithError(err).Warn("Failed to initialize AI provider profiles")
+		// Không dừng quá trình init, chỉ log warning
+	}
+
+	// 2. Khởi tạo AI Prompt Templates (cần provider profiles)
+	if err := h.initAIPromptTemplates(ctx, systemOrg.ID, currentTime); err != nil {
+		logrus.WithError(err).Warn("Failed to initialize AI prompt templates")
+		// Không dừng quá trình init, chỉ log warning
+	}
+
+	// 3. Khởi tạo AI Steps (cần prompt templates)
+	if err := h.initAISteps(ctx, systemOrg.ID, currentTime); err != nil {
+		logrus.WithError(err).Warn("Failed to initialize AI steps")
+		// Không dừng quá trình init, chỉ log warning
+	}
+
+	// 4. Khởi tạo AI Workflows (cần steps)
+	if err := h.initAIWorkflows(ctx, systemOrg.ID, currentTime); err != nil {
+		logrus.WithError(err).Warn("Failed to initialize AI workflows")
+		// Không dừng quá trình init, chỉ log warning
+	}
+
+	// 5. Khởi tạo AI Workflow Commands (cần workflows và steps)
+	if err := h.initAIWorkflowCommands(ctx, systemOrg.ID, currentTime); err != nil {
+		logrus.WithError(err).Warn("Failed to initialize AI workflow commands")
+		// Không dừng quá trình init, chỉ log warning
+	}
+
+	return nil
+}
+
+// initAIProviderProfiles khởi tạo các AI provider profiles mẫu
+// Tạo profiles cho OpenAI, Anthropic, Google (API keys để trống, admin sẽ cập nhật sau)
+func (h *InitService) initAIProviderProfiles(ctx context.Context, systemOrgID primitive.ObjectID, currentTime int64) error {
+	defaultProviders := []struct {
+		name            string
+		description     string
+		provider        string
+		defaultModel    string
+		availableModels []string
+		pricingConfig   map[string]interface{}
+	}{
+		{
+			name:            "OpenAI Production",
+			description:     "OpenAI provider profile mặc định cho production (API key cần được cấu hình)",
+			provider:        models.AIProviderTypeOpenAI,
+			defaultModel:    "gpt-4",
+			availableModels: []string{"gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"},
+			pricingConfig: map[string]interface{}{
+				"gpt-4": map[string]interface{}{
+					"input":  0.03,
+					"output": 0.06,
+				},
+				"gpt-4-turbo": map[string]interface{}{
+					"input":  0.01,
+					"output": 0.03,
+				},
+				"gpt-3.5-turbo": map[string]interface{}{
+					"input":  0.0015,
+					"output": 0.002,
+				},
+			},
+		},
+		{
+			name:            "Anthropic Production",
+			description:     "Anthropic (Claude) provider profile mặc định cho production (API key cần được cấu hình)",
+			provider:        models.AIProviderTypeAnthropic,
+			defaultModel:    "claude-3-opus",
+			availableModels: []string{"claude-3-opus", "claude-3-sonnet", "claude-3-haiku"},
+			pricingConfig: map[string]interface{}{
+				"claude-3-opus": map[string]interface{}{
+					"input":  0.015,
+					"output": 0.075,
+				},
+				"claude-3-sonnet": map[string]interface{}{
+					"input":  0.003,
+					"output": 0.015,
+				},
+				"claude-3-haiku": map[string]interface{}{
+					"input":  0.00025,
+					"output": 0.00125,
+				},
+			},
+		},
+		{
+			name:            "Google Production",
+			description:     "Google (Gemini) provider profile mặc định cho production (API key cần được cấu hình)",
+			provider:        models.AIProviderTypeGoogle,
+			defaultModel:    "gemini-pro",
+			availableModels: []string{"gemini-pro", "gemini-pro-vision"},
+			pricingConfig: map[string]interface{}{
+				"gemini-pro": map[string]interface{}{
+					"input":  0.0005,
+					"output": 0.0015,
+				},
+			},
+		},
+		{
+			name:            "Google AI Studio",
+			description:     "Google AI Studio provider profile với các models Gemini mới nhất (gemini-1.5-pro, gemini-1.5-flash). API key cần được cấu hình từ Google AI Studio (https://aistudio.google.com/)",
+			provider:        models.AIProviderTypeGoogle,
+			defaultModel:    "gemini-1.5-pro",
+			availableModels: []string{"gemini-1.5-pro", "gemini-1.5-flash", "gemini-1.5-pro-latest", "gemini-1.5-flash-latest"},
+			pricingConfig: map[string]interface{}{
+				"gemini-1.5-pro": map[string]interface{}{
+					"input":  0.00125,
+					"output": 0.005,
+				},
+				"gemini-1.5-flash": map[string]interface{}{
+					"input":  0.000075,
+					"output": 0.0003,
+				},
+				"gemini-1.5-pro-latest": map[string]interface{}{
+					"input":  0.00125,
+					"output": 0.005,
+				},
+				"gemini-1.5-flash-latest": map[string]interface{}{
+					"input":  0.000075,
+					"output": 0.0003,
+				},
+			},
+		},
+	}
+
+	for _, providerData := range defaultProviders {
+		// Kiểm tra provider profile đã tồn tại chưa
+		profileFilter := bson.M{
+			"ownerOrganizationId": systemOrgID,
+			"name":                providerData.name,
+		}
+		existingProfile, err := h.aiProviderProfileService.FindOne(ctx, profileFilter, nil)
+		if err != nil && err != common.ErrNotFound {
+			continue // Lỗi khác, bỏ qua
+		}
+
+		if err == common.ErrNotFound {
+			// Chưa có, tạo mới
+			defaultTemp := 0.7
+			defaultMaxTokens := 2000
+			profile := models.AIProviderProfile{
+				OwnerOrganizationID: systemOrgID,
+				Name:                providerData.name,
+				Description:         providerData.description,
+				Provider:            providerData.provider,
+				Status:              models.AIProviderProfileStatusInactive, // Inactive vì chưa có API key
+				APIKey:              "",                                     // Để trống, admin sẽ cập nhật sau
+				APIKeyEncrypted:     false,
+				DefaultModel:        providerData.defaultModel,
+				AvailableModels:     providerData.availableModels,
+				DefaultTemperature:  &defaultTemp,
+				DefaultMaxTokens:    &defaultMaxTokens,
+				PricingConfig:       providerData.pricingConfig,
+				CreatedAt:           currentTime,
+				UpdatedAt:           currentTime,
+			}
+			_, err = h.aiProviderProfileService.InsertOne(ctx, profile)
+			if err != nil {
+				logrus.WithError(err).Warnf("Failed to create provider profile: %s", providerData.name)
+				continue
+			}
+		} else {
+			// Đã có, có thể update description nếu cần
+			var existingProfileModel models.AIProviderProfile
+			bsonBytes, _ := bson.Marshal(existingProfile)
+			if err := bson.Unmarshal(bsonBytes, &existingProfileModel); err == nil {
+				if existingProfileModel.Description == "" {
+					updateFilter := bson.M{"_id": existingProfileModel.ID}
+					updateData := bson.M{
+						"$set": bson.M{
+							"description": providerData.description,
+							"updatedAt":   currentTime,
+						},
+					}
+					_, _ = h.aiProviderProfileService.UpdateOne(ctx, updateFilter, updateData, nil)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
+// initAIPromptTemplates khởi tạo các AI prompt templates mẫu
+// Tạo templates cho GENERATE, JUDGE, STEP_GENERATION
+func (h *InitService) initAIPromptTemplates(ctx context.Context, systemOrgID primitive.ObjectID, currentTime int64) error {
+
+	defaultTemplates := []struct {
+		name        string
+		description string
+		type_       string
+		version     string
+		prompt      string
+		variables   []models.AIPromptTemplateVariable
+	}{
+		// Template GENERATE chung (có thể dùng cho tất cả level transitions)
+		{
+			name:        "Tạo Nội Dung - Mẫu Chung",
+			description: "Template mẫu chung để tạo nhiều phương án nội dung (candidates) cho bất kỳ cấp độ nào. Template này có thể tùy chỉnh để phù hợp với từng loại nội dung cụ thể (STP, Insight, Content Line, Gene, Script).",
+			type_:       models.AIPromptTemplateTypeGenerate,
+			version:     "1.0.0",
+			prompt: `Bạn là một chuyên gia content strategy với nhiều năm kinh nghiệm. Nhiệm vụ của bạn là tạo ra {{numberOfCandidates}} phương án nội dung (candidates) chất lượng cao cho {{targetTypeName}} dựa trên {{parentTypeName}}.
+
+📋 THÔNG TIN ĐẦU VÀO:
+
+Nội dung {{parentTypeName}}:
+{{parentContent}}
+{{#if parentDescription}}
+
+Mô tả bổ sung: {{parentDescription}}
+{{/if}}
+{{#if targetAudience}}
+
+🎯 Đối tượng mục tiêu: {{targetAudience}}
+{{/if}}
+{{#if context.industry}}
+
+🏢 Ngành nghề: {{context.industry}}
+{{/if}}
+{{#if context.productType}}
+
+📦 Loại sản phẩm: {{context.productType}}
+{{/if}}
+{{#if context.tone}}
+
+💬 Tone mong muốn: {{context.tone}}
+{{/if}}
+
+✅ YÊU CẦU:
+
+1. Tạo {{numberOfCandidates}} phương án {{targetTypeName}} khác nhau, mỗi phương án phải có góc tiếp cận riêng biệt
+2. Mỗi phương án phải bao gồm:
+   - **title**: Tiêu đề ngắn gọn, hấp dẫn (tối đa 100 ký tự)
+   - **content**: Nội dung chi tiết, đầy đủ thông tin
+   - **summary**: Tóm tắt ngắn gọn (2-3 câu) về điểm nổi bật của phương án
+3. Nội dung phải phù hợp với đối tượng mục tiêu và context đã cho
+4. Đảm bảo tính sáng tạo, độc đáo và thực tế
+5. Tuân thủ quy tắc: {{targetTypeName}} phải phát triển logic từ {{parentTypeName}}, không được tách rời
+
+📤 ĐỊNH DẠNG KẾT QUẢ (JSON):
+{
+  "candidates": [
+    {
+      "title": "Tiêu đề phương án 1",
+      "content": "Nội dung chi tiết của phương án 1...",
+      "summary": "Tóm tắt ngắn gọn về phương án này"
+    }
+  ]
+}`,
+			variables: []models.AIPromptTemplateVariable{
+				{Name: "parentContent", Required: true, Description: "Nội dung của parent node"},
+				{Name: "parentDescription", Required: false, Description: "Mô tả của parent node"},
+				{Name: "parentTypeName", Required: true, Description: "Tên loại parent (Layer, STP, Insight, etc.)"},
+				{Name: "targetTypeName", Required: true, Description: "Tên loại target (STP, Insight, Content Line, etc.)"},
+				{Name: "targetAudience", Required: false, Description: "Đối tượng mục tiêu (B2B, B2C, B2B2C)"},
+				{Name: "numberOfCandidates", Required: false, Default: "3", Description: "Số lượng candidates"},
+			},
+		},
+		// Template GENERATE cho từng level transition
+		{
+			name:        "Tạo STP từ Layer",
+			description: "Template để tạo các phương án STP (Segmentation, Targeting, Positioning) từ Layer. STP giúp xác định phân khúc khách hàng, đối tượng mục tiêu và định vị sản phẩm/dịch vụ. Mỗi phương án sẽ bao gồm đầy đủ 3 thành phần: Segmentation (phân khúc), Targeting (đối tượng), và Positioning (định vị).",
+			type_:       models.AIPromptTemplateTypeGenerate,
+			version:     "1.0.0",
+			prompt: `Bạn là một chuyên gia marketing strategy với nhiều năm kinh nghiệm. Nhiệm vụ của bạn là tạo ra {{numberOfCandidates}} phương án STP (Segmentation, Targeting, Positioning) chất lượng cao từ Layer.
+
+📋 THÔNG TIN ĐẦU VÀO:
+
+Nội dung Layer:
+{{parentContent}}
+{{#if targetAudience}}
+
+🎯 Đối tượng mục tiêu: {{targetAudience}}
+{{/if}}
+{{#if context.industry}}
+
+🏢 Ngành nghề: {{context.industry}}
+{{/if}}
+
+✅ YÊU CẦU:
+
+1. Tạo {{numberOfCandidates}} phương án STP khác nhau, mỗi phương án phải có cách tiếp cận riêng biệt
+2. Mỗi STP phải bao gồm đầy đủ 3 thành phần:
+   - **Segmentation (Phân khúc)**: Xác định các nhóm khách hàng khác nhau dựa trên đặc điểm, nhu cầu, hành vi
+   - **Targeting (Đối tượng)**: Chọn phân khúc mục tiêu cụ thể để tập trung vào
+   - **Positioning (Định vị)**: Xác định vị trí của sản phẩm/dịch vụ trong tâm trí khách hàng so với đối thủ
+3. STP phải logic, phù hợp với Layer và đối tượng mục tiêu
+4. Đảm bảo tính thực tế, khả thi và có tính phân biệt rõ ràng
+
+📤 ĐỊNH DẠNG KẾT QUẢ (JSON):
+{
+  "candidates": [
+    {
+      "title": "STP: [Tên ngắn gọn mô tả phương án]",
+      "content": "Segmentation: Mô tả chi tiết về phân khúc...\n\nTargeting: Giải thích tại sao chọn phân khúc này...\n\nPositioning: Định vị cụ thể trong thị trường...",
+      "summary": "Tóm tắt ngắn gọn về điểm nổi bật của STP này"
+    }
+  ]
+}`,
+			variables: []models.AIPromptTemplateVariable{
+				{Name: "parentContent", Required: true, Description: "Nội dung của Layer"},
+				{Name: "targetAudience", Required: false, Description: "Đối tượng mục tiêu (B2B, B2C, B2B2C)"},
+				{Name: "numberOfCandidates", Required: false, Default: "3", Description: "Số lượng candidates"},
+			},
+		},
+		{
+			name:        "Tạo Insight từ STP",
+			description: "Template để tạo các phương án Insight (góc nhìn sâu sắc) từ STP. Insight là những thông tin chi tiết, góc nhìn sâu sắc về đối tượng mục tiêu, giúp hiểu rõ hơn về nhu cầu, hành vi và động cơ của khách hàng. Insight phải dựa trên STP và phù hợp với đối tượng mục tiêu.",
+			type_:       models.AIPromptTemplateTypeGenerate,
+			version:     "1.0.0",
+			prompt: `Bạn là một chuyên gia consumer insights với khả năng phân tích sâu sắc về hành vi và tâm lý khách hàng. Nhiệm vụ của bạn là tạo ra {{numberOfCandidates}} phương án Insight (góc nhìn sâu sắc) chất lượng cao từ STP.
+
+📋 THÔNG TIN ĐẦU VÀO:
+
+Nội dung STP:
+{{parentContent}}
+{{#if targetAudience}}
+
+🎯 Đối tượng mục tiêu: {{targetAudience}}
+{{/if}}
+
+✅ YÊU CẦU:
+
+1. Tạo {{numberOfCandidates}} phương án Insight khác nhau, mỗi phương án phải có góc nhìn riêng biệt
+2. Insight phải là:
+   - Thông tin chi tiết, sâu sắc về đối tượng mục tiêu
+   - Góc nhìn mới mẻ, có giá trị thực tế
+   - Dựa trên phân tích hành vi, nhu cầu, động cơ của khách hàng
+   - Có thể áp dụng để tạo nội dung hiệu quả
+3. Insight phải logic, phù hợp với STP và đối tượng mục tiêu
+4. Đảm bảo tính độc đáo, không trùng lặp và có tính ứng dụng cao
+
+💡 GỢI Ý: Insight tốt thường trả lời câu hỏi "Tại sao khách hàng lại hành động như vậy?" hoặc "Điều gì thực sự thúc đẩy họ?"
+
+📤 ĐỊNH DẠNG KẾT QUẢ (JSON):
+{
+  "candidates": [
+    {
+      "title": "Insight: [Tên ngắn gọn mô tả góc nhìn]",
+      "content": "Mô tả chi tiết về insight, bao gồm: bối cảnh, hành vi khách hàng, động cơ, và ý nghĩa cho content strategy...",
+      "summary": "Tóm tắt ngắn gọn về giá trị và ứng dụng của insight này"
+    }
+  ]
+}`,
+			variables: []models.AIPromptTemplateVariable{
+				{Name: "parentContent", Required: true, Description: "Nội dung của STP"},
+				{Name: "targetAudience", Required: false, Description: "Đối tượng mục tiêu"},
+				{Name: "numberOfCandidates", Required: false, Default: "3", Description: "Số lượng candidates"},
+			},
+		},
+		{
+			name:        "Tạo Content Line từ Insight",
+			description: "Template để tạo các phương án Content Line (dòng nội dung) từ Insight. Content Line là những dòng nội dung cụ thể, có thể triển khai trực tiếp thành content thực tế. Mỗi Content Line phải dựa trên Insight và phù hợp với đối tượng mục tiêu, có thể sử dụng ngay để tạo nội dung.",
+			type_:       models.AIPromptTemplateTypeGenerate,
+			version:     "1.0.0",
+			prompt: `Bạn là một chuyên gia content creation với khả năng biến insights thành nội dung hấp dẫn. Nhiệm vụ của bạn là tạo ra {{numberOfCandidates}} phương án Content Line (dòng nội dung) cụ thể, có thể triển khai ngay từ Insight.
+
+📋 THÔNG TIN ĐẦU VÀO:
+
+Nội dung Insight:
+{{parentContent}}
+{{#if targetAudience}}
+
+🎯 Đối tượng mục tiêu: {{targetAudience}}
+{{/if}}
+
+✅ YÊU CẦU:
+
+1. Tạo {{numberOfCandidates}} phương án Content Line khác nhau, mỗi phương án phải có cách tiếp cận riêng biệt
+2. Content Line phải:
+   - Là dòng nội dung cụ thể, rõ ràng, có thể sử dụng ngay
+   - Dựa trên Insight đã cho, không được tách rời
+   - Phù hợp với đối tượng mục tiêu và có tính hấp dẫn
+   - Có thể triển khai thành content thực tế (bài viết, video, post, etc.)
+3. Mỗi Content Line phải có:
+   - Chủ đề rõ ràng
+   - Góc tiếp cận cụ thể
+   - Thông điệp chính
+4. Đảm bảo tính sáng tạo, độc đáo và thực tế
+
+💡 GỢI Ý: Content Line tốt thường trả lời câu hỏi "Nội dung này sẽ nói gì với khách hàng?" và "Tại sao họ sẽ quan tâm?"
+
+📤 ĐỊNH DẠNG KẾT QUẢ (JSON):
+{
+  "candidates": [
+    {
+      "title": "Content Line: [Tên ngắn gọn mô tả dòng nội dung]",
+      "content": "Mô tả chi tiết về dòng nội dung, bao gồm: chủ đề, góc tiếp cận, thông điệp chính, và cách triển khai...",
+      "summary": "Tóm tắt ngắn gọn về giá trị và điểm nổi bật của content line này"
+    }
+  ]
+}`,
+			variables: []models.AIPromptTemplateVariable{
+				{Name: "parentContent", Required: true, Description: "Nội dung của Insight"},
+				{Name: "targetAudience", Required: false, Description: "Đối tượng mục tiêu"},
+				{Name: "numberOfCandidates", Required: false, Default: "3", Description: "Số lượng candidates"},
+			},
+		},
+		{
+			name:        "Tạo Gene từ Content Line",
+			description: "Template để tạo các phương án Gene (DNA của nội dung) từ Content Line. Gene định nghĩa tone (giọng điệu), style (phong cách) và các đặc điểm đặc trưng của nội dung. Gene giúp đảm bảo tính nhất quán về phong cách và cảm xúc trong tất cả các nội dung được tạo ra. Mỗi Gene phải phù hợp với Content Line và đối tượng mục tiêu.",
+			type_:       models.AIPromptTemplateTypeGenerate,
+			version:     "1.0.0",
+			prompt: `Bạn là một chuyên gia brand voice và content style với khả năng định nghĩa DNA của nội dung. Nhiệm vụ của bạn là tạo ra {{numberOfCandidates}} phương án Gene (DNA của nội dung) từ Content Line.
+
+📋 THÔNG TIN ĐẦU VÀO:
+
+Nội dung Content Line:
+{{parentContent}}
+{{#if targetAudience}}
+
+🎯 Đối tượng mục tiêu: {{targetAudience}}
+{{/if}}
+
+✅ YÊU CẦU:
+
+1. Tạo {{numberOfCandidates}} phương án Gene khác nhau, mỗi phương án phải có phong cách riêng biệt
+2. Gene phải định nghĩa đầy đủ:
+   - **Tone (Giọng điệu)**: Cách nói chuyện với khách hàng (thân thiện, chuyên nghiệp, vui vẻ, nghiêm túc, etc.)
+   - **Style (Phong cách)**: Cách trình bày nội dung (ngắn gọn, chi tiết, hình ảnh, storytelling, etc.)
+   - **Characteristics (Đặc điểm)**: Các đặc trưng riêng biệt (từ ngữ thường dùng, cấu trúc, cảm xúc, etc.)
+3. Gene phải:
+   - Phù hợp với Content Line và đối tượng mục tiêu
+   - Tạo ra sự nhất quán trong tất cả nội dung
+   - Dễ nhận biết và phân biệt với đối thủ
+4. Đảm bảo tính sáng tạo, độc đáo và có thể áp dụng thực tế
+
+💡 GỢI Ý: Gene tốt giống như "DNA" của thương hiệu - mọi nội dung đều mang đặc điểm này, tạo ra sự nhận diện mạnh mẽ.
+
+📤 ĐỊNH DẠNG KẾT QUẢ (JSON):
+{
+  "candidates": [
+    {
+      "title": "Gene: [Tên ngắn gọn mô tả phong cách]",
+      "content": "Tone: Mô tả chi tiết về giọng điệu...\n\nStyle: Mô tả chi tiết về phong cách trình bày...\n\nCharacteristics: Mô tả các đặc điểm đặc trưng...",
+      "summary": "Tóm tắt ngắn gọn về điểm nổi bật và ứng dụng của Gene này"
+    }
+  ]
+}`,
+			variables: []models.AIPromptTemplateVariable{
+				{Name: "parentContent", Required: true, Description: "Nội dung của Content Line"},
+				{Name: "targetAudience", Required: false, Description: "Đối tượng mục tiêu"},
+				{Name: "numberOfCandidates", Required: false, Default: "3", Description: "Số lượng candidates"},
+			},
+		},
+		{
+			name:        "Tạo Script từ Gene",
+			description: "Template để tạo các phương án Script (kịch bản) từ Gene. Script là kịch bản chi tiết cho video hoặc nội dung đa phương tiện, bao gồm Hook (3 giây đầu thu hút), Body (nội dung chính) và Call-to-Action (lời kêu gọi hành động). Script phải tuân theo tone và style đã được định nghĩa trong Gene, phù hợp với đối tượng mục tiêu và có tính hấp dẫn cao.",
+			type_:       models.AIPromptTemplateTypeGenerate,
+			version:     "1.0.0",
+			prompt: `Bạn là một chuyên gia scriptwriting và video production với khả năng tạo ra kịch bản hấp dẫn. Nhiệm vụ của bạn là tạo ra {{numberOfCandidates}} phương án Script (kịch bản) chi tiết từ Gene.
+
+📋 THÔNG TIN ĐẦU VÀO:
+
+Nội dung Gene:
+{{parentContent}}
+{{#if targetAudience}}
+
+🎯 Đối tượng mục tiêu: {{targetAudience}}
+{{/if}}
+
+✅ YÊU CẦU:
+
+1. Tạo {{numberOfCandidates}} phương án Script khác nhau, mỗi phương án phải có cách tiếp cận riêng biệt
+2. Script phải là kịch bản chi tiết, đầy đủ với 3 phần chính:
+   - **Hook (3 giây đầu)**: Câu mở đầu cực kỳ hấp dẫn, thu hút ngay lập tức, khiến người xem không thể bỏ qua
+   - **Body (Nội dung chính)**: Phần nội dung chính, truyền tải thông điệp một cách logic, hấp dẫn và dễ hiểu
+   - **Call-to-Action (Lời kêu gọi)**: Lời kêu gọi hành động rõ ràng, cụ thể, thuyết phục
+3. Script phải:
+   - Tuân theo tone và style đã được định nghĩa trong Gene
+   - Phù hợp với đối tượng mục tiêu
+   - Có tính hấp dẫn cao, dễ hiểu và dễ nhớ
+   - Có thể sử dụng ngay để quay video hoặc tạo nội dung
+4. Đảm bảo tính sáng tạo, độc đáo và thực tế
+
+💡 GỢI Ý: Script tốt thường có Hook cực mạnh trong 3 giây đầu, Body logic và hấp dẫn, và CTA rõ ràng, dễ thực hiện.
+
+📤 ĐỊNH DẠNG KẾT QUẢ (JSON):
+{
+  "candidates": [
+    {
+      "title": "Script: [Tên ngắn gọn mô tả kịch bản]",
+      "content": "Hook (3 giây đầu): [Câu mở đầu cực hấp dẫn]\n\nBody: [Nội dung chính chi tiết, có thể chia thành các phần nhỏ]\n\nCall-to-Action: [Lời kêu gọi hành động rõ ràng, cụ thể]",
+      "summary": "Tóm tắt ngắn gọn về điểm nổi bật và mục tiêu của script này"
+    }
+  ]
+}`,
+			variables: []models.AIPromptTemplateVariable{
+				{Name: "parentContent", Required: true, Description: "Nội dung của Gene"},
+				{Name: "targetAudience", Required: false, Description: "Đối tượng mục tiêu"},
+				{Name: "numberOfCandidates", Required: false, Default: "3", Description: "Số lượng candidates"},
+			},
+		},
+		// Template JUDGE chung (dùng cho tất cả level transitions)
+		{
+			name:        "Đánh Giá Phương Án Nội Dung",
+			description: "Template để đánh giá và chấm điểm các phương án nội dung (candidates) dựa trên các tiêu chí: Relevance (độ liên quan), Clarity (độ rõ ràng), Engagement (độ hấp dẫn) và Accuracy (độ chính xác). Template này có thể sử dụng cho tất cả các cấp độ nội dung (STP, Insight, Content Line, Gene, Script) để chọn ra phương án tốt nhất.",
+			type_:       models.AIPromptTemplateTypeJudge,
+			version:     "1.0.0",
+			prompt: `Bạn là một chuyên gia đánh giá content với khả năng phân tích sâu sắc và công bằng. Nhiệm vụ của bạn là đánh giá và chấm điểm các phương án nội dung (candidates) một cách khách quan và chi tiết.
+
+📋 DANH SÁCH PHƯƠNG ÁN CẦN ĐÁNH GIÁ:
+
+{{#each candidates}}
+📌 Phương án {{@index}}:
+- Tiêu đề: {{title}}
+- Nội dung: {{content}}
+{{#if summary}}
+- Tóm tắt: {{summary}}
+{{/if}}
+
+---
+{{/each}}
+
+📊 TIÊU CHÍ ĐÁNH GIÁ:
+
+Bạn cần đánh giá từng phương án dựa trên 4 tiêu chí sau (thang điểm 0-10):
+- **Relevance (Độ liên quan)**: Phương án có liên quan chặt chẽ với parent content và mục tiêu không? ({{criteria.relevance}}/10)
+- **Clarity (Độ rõ ràng)**: Phương án có rõ ràng, dễ hiểu, không mơ hồ không? ({{criteria.clarity}}/10)
+- **Engagement (Độ hấp dẫn)**: Phương án có hấp dẫn, thu hút được sự chú ý không? ({{criteria.engagement}}/10)
+- **Accuracy (Độ chính xác)**: Phương án có chính xác, logic, khả thi không? ({{criteria.accuracy}}/10)
+{{#if context.targetAudience}}
+
+🎯 Đối tượng mục tiêu: {{context.targetAudience}}
+{{/if}}
+{{#if context.industry}}
+
+🏢 Ngành nghề: {{context.industry}}
+{{/if}}
+{{#if parentContent}}
+
+📄 Nội dung gốc (parent): {{parentContent}}
+{{/if}}
+
+✅ YÊU CẦU:
+
+1. Đánh giá từng phương án một cách công bằng, chi tiết theo từng tiêu chí
+2. Tính điểm tổng thể (overallScore) cho mỗi phương án (0-10), dựa trên trung bình có trọng số của các tiêu chí
+3. Xếp hạng các phương án theo điểm số từ cao xuống thấp
+4. Chọn phương án tốt nhất và giải thích rõ ràng lý do tại sao phương án đó tốt nhất
+5. Cung cấp feedback chi tiết cho từng phương án, bao gồm điểm mạnh và điểm cần cải thiện
+
+💡 LƯU Ý: Hãy đánh giá một cách khách quan, công bằng và chi tiết. Feedback của bạn sẽ giúp cải thiện chất lượng nội dung.
+
+📤 ĐỊNH DẠNG KẾT QUẢ (JSON):
+{
+  "scores": [
+    {
+      "candidateIndex": 0,
+      "overallScore": 8.5,
+      "criteriaScores": {
+        "relevance": 9,
+        "clarity": 8,
+        "engagement": 9,
+        "accuracy": 8
+      },
+      "feedback": "Phương án này có điểm mạnh về... Tuy nhiên cần cải thiện..."
+    }
+  ],
+  "rankings": [
+    {"rank": 1, "candidateIndex": 0, "score": 8.5}
+  ],
+  "bestCandidate": {
+    "candidateIndex": 0,
+    "score": 8.5,
+    "reason": "Giải thích chi tiết tại sao phương án này tốt nhất..."
+  }
+}`,
+			variables: []models.AIPromptTemplateVariable{
+				{Name: "candidates", Required: true, Description: "Danh sách candidates cần đánh giá"},
+				{Name: "criteria", Required: true, Description: "Tiêu chí đánh giá (relevance, clarity, engagement, accuracy)"},
+				{Name: "context", Required: false, Description: "Context để đánh giá"},
+				{Name: "parentContent", Required: false, Description: "Nội dung của parent node"},
+			},
+		},
+		// Template STEP_GENERATION (giữ nguyên)
+		{
+			name:        "Tạo Workflow Steps - Động",
+			description: "Template để tạo các bước (steps) động cho workflow dựa trên yêu cầu và context. Template này giúp tự động thiết kế workflow phù hợp với từng tình huống cụ thể, bao gồm số lượng steps, loại steps, dependencies và cấu trúc workflow.",
+			type_:       models.AIPromptTemplateTypeStepGeneration,
+			version:     "1.0.0",
+			prompt: `Bạn là một chuyên gia workflow design. Nhiệm vụ của bạn là tạo ra một kế hoạch workflow với các steps phù hợp.
+
+Context từ parent:
+{{parentContext.content}}
+{{#if parentContext.layerType}}
+
+Loại: {{parentContext.layerType}}
+{{/if}}
+
+Yêu cầu:
+- Số lượng steps: {{requirements.numberOfSteps}}
+- Loại steps cho phép: {{requirements.stepTypes}}
+{{#if requirements.focusAreas}}
+- Lĩnh vực tập trung: {{requirements.focusAreas}}
+{{/if}}
+- Độ phức tạp: {{requirements.complexity}}
+- Level mục tiêu: {{targetLevel}}
+{{#if constraints.maxExecutionTime}}
+- Thời gian thực thi tối đa: {{constraints.maxExecutionTime}}s
+{{/if}}
+{{#if constraints.excludedStepTypes}}
+- Loại steps không được dùng: {{constraints.excludedStepTypes}}
+{{/if}}
+
+Yêu cầu:
+1. Tạo {{requirements.numberOfSteps}} steps phù hợp
+2. Mỗi step phải có: name, type, order, inputSchema, outputSchema, description
+3. Xác định dependencies giữa các steps
+4. Tạo generation plan với workflow structure
+
+Format output (JSON):
+{
+  "generatedSteps": [
+    {
+      "stepName": "...",
+      "stepType": "GENERATE|JUDGE|STEP_GENERATION",
+      "order": 0,
+      "inputSchema": {...},
+      "outputSchema": {...},
+      "description": "...",
+      "dependencies": []
+    }
+  ],
+  "generationPlan": {
+    "totalSteps": 3,
+    "estimatedTime": 120,
+    "workflowStructure": {
+      "parallelSteps": [],
+      "sequentialSteps": [[0, 1, 2]]
+    },
+    "reasoning": "..."
+  }
+}`,
+			variables: []models.AIPromptTemplateVariable{
+				{Name: "parentContext", Required: true, Description: "Context từ parent layer/step"},
+				{Name: "requirements", Required: true, Description: "Yêu cầu generate steps"},
+				{Name: "targetLevel", Required: true, Description: "Level mục tiêu (L1-L8)"},
+				{Name: "constraints", Required: false, Description: "Ràng buộc cho việc generate"},
+			},
+		},
+	}
+
+	for _, templateData := range defaultTemplates {
+		// Kiểm tra template đã tồn tại chưa
+		templateFilter := bson.M{
+			"ownerOrganizationId": systemOrgID,
+			"name":                templateData.name,
+			"version":             templateData.version,
+		}
+		_, err := h.aiPromptTemplateService.FindOne(ctx, templateFilter, nil)
+		if err != nil && err != common.ErrNotFound {
+			continue // Lỗi khác, bỏ qua
+		}
+
+		if err == common.ErrNotFound {
+			// Chưa có, tạo mới
+			template := models.AIPromptTemplate{
+				OwnerOrganizationID: systemOrgID,
+				Name:                templateData.name,
+				Description:         templateData.description,
+				Type:                templateData.type_,
+				Version:             templateData.version,
+				Prompt:              templateData.prompt,
+				Variables:           templateData.variables,
+				Status:              "active",
+				CreatedAt:           currentTime,
+				UpdatedAt:           currentTime,
+			}
+			_, err = h.aiPromptTemplateService.InsertOne(ctx, template)
+			if err != nil {
+				logrus.WithError(err).Warnf("Failed to create prompt template: %s", templateData.name)
+				continue
+			}
+		}
+	}
+
+	return nil
+}
+
+// initAISteps khởi tạo các AI steps mẫu với standard schemas
+// Tạo steps cho tất cả level transitions: L1→L2, L2→L3, L3→L4, L4→L5, L5→L6
+// Mỗi transition cần 2 steps: GENERATE + JUDGE
+func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.ObjectID, currentTime int64) error {
+	// Lấy provider profile (nếu có)
+	providerProfileID, _ := h.getProviderProfileByName(ctx, systemOrgID, "OpenAI Default")
+
+	// Lấy prompt templates
+	generateSTPTemplate, err := h.getPromptTemplateByName(ctx, systemOrgID, "Tạo STP từ Layer")
+	if err != nil {
+		logrus.Warn("Generate STP template not found, skipping step creation")
+		return nil
+	}
+
+	generateInsightTemplate, err := h.getPromptTemplateByName(ctx, systemOrgID, "Tạo Insight từ STP")
+	if err != nil {
+		logrus.Warn("Generate Insight template not found, skipping step creation")
+		return nil
+	}
+
+	generateContentLineTemplate, err := h.getPromptTemplateByName(ctx, systemOrgID, "Tạo Content Line từ Insight")
+	if err != nil {
+		logrus.Warn("Generate Content Line template not found, skipping step creation")
+		return nil
+	}
+
+	generateGeneTemplate, err := h.getPromptTemplateByName(ctx, systemOrgID, "Tạo Gene từ Content Line")
+	if err != nil {
+		logrus.Warn("Generate Gene template not found, skipping step creation")
+		return nil
+	}
+
+	generateScriptTemplate, err := h.getPromptTemplateByName(ctx, systemOrgID, "Tạo Script từ Gene")
+	if err != nil {
+		logrus.Warn("Generate Script template not found, skipping step creation")
+		return nil
+	}
+
+	judgeTemplate, err := h.getPromptTemplateByName(ctx, systemOrgID, "Đánh Giá Phương Án Nội Dung")
+	if err != nil {
+		logrus.Warn("Judge prompt template not found, skipping step creation")
+		return nil
+	}
+
+	stepGenTemplate, err := h.getPromptTemplateByName(ctx, systemOrgID, "Tạo Workflow Steps - Động")
+	if err != nil {
+		logrus.Warn("Step generation prompt template not found, skipping step creation")
+		return nil
+	}
+
+	// Định nghĩa các steps cho từng level transition
+	defaultSteps := []struct {
+		name             string
+		description      string
+		type_            string
+		promptTemplateID *primitive.ObjectID
+		targetLevel      string
+		parentLevel      string
+		model            string
+		temperature      *float64
+		maxTokens        *int
+	}{
+		// L1 → L2: Generate STP
+		{
+			name:             "Tạo STP từ Layer",
+			description:      "Bước này tạo ra nhiều phương án STP (Segmentation, Targeting, Positioning) từ Layer. Mỗi phương án sẽ bao gồm đầy đủ 3 thành phần: phân khúc khách hàng, đối tượng mục tiêu và định vị sản phẩm/dịch vụ. Bước này giúp xác định chiến lược marketing cơ bản.",
+			type_:            models.AIStepTypeGenerate,
+			promptTemplateID: generateSTPTemplate,
+			targetLevel:      "L2",
+			parentLevel:      "L1",
+			model:            "gpt-4",
+			temperature:      func() *float64 { v := 0.7; return &v }(),
+			maxTokens:        func() *int { v := 2000; return &v }(),
+		},
+		{
+			name:             "Đánh Giá Phương Án STP",
+			description:      "Bước này đánh giá và chấm điểm các phương án STP đã được tạo ra, dựa trên các tiêu chí: độ liên quan, độ rõ ràng, độ hấp dẫn và độ chính xác. Bước này giúp chọn ra phương án STP tốt nhất để tiếp tục phát triển.",
+			type_:            models.AIStepTypeJudge,
+			promptTemplateID: judgeTemplate,
+			targetLevel:      "L2",
+			parentLevel:      "L1",
+			model:            "gpt-4",
+			temperature:      func() *float64 { v := 0.3; return &v }(), // Lower temperature cho judging
+			maxTokens:        func() *int { v := 1500; return &v }(),
+		},
+		// L2 → L3: Generate Insight
+		{
+			name:             "Generate Insight from STP",
+			description:      "Step để generate Insight (L3) candidates từ STP (L2)",
+			type_:            models.AIStepTypeGenerate,
+			promptTemplateID: generateInsightTemplate,
+			targetLevel:      "L3",
+			parentLevel:      "L2",
+			model:            "gpt-4",
+			temperature:      func() *float64 { v := 0.7; return &v }(),
+			maxTokens:        func() *int { v := 2000; return &v }(),
+		},
+		{
+			name:             "Đánh Giá Phương Án Insight",
+			description:      "Bước này đánh giá và chấm điểm các phương án Insight đã được tạo ra, dựa trên các tiêu chí: độ liên quan, độ rõ ràng, độ hấp dẫn và độ chính xác. Bước này giúp chọn ra phương án Insight tốt nhất, có giá trị thực tế cao nhất.",
+			type_:            models.AIStepTypeJudge,
+			promptTemplateID: judgeTemplate,
+			targetLevel:      "L3",
+			parentLevel:      "L2",
+			model:            "gpt-4",
+			temperature:      func() *float64 { v := 0.3; return &v }(), // Lower temperature cho judging
+			maxTokens:        func() *int { v := 1500; return &v }(),
+		},
+		// L3 → L4: Generate Content Line
+		{
+			name:             "Tạo Content Line từ Insight",
+			description:      "Bước này tạo ra nhiều phương án Content Line (dòng nội dung) từ Insight đã được chọn. Content Line là những dòng nội dung cụ thể, có thể triển khai trực tiếp thành content thực tế. Bước này giúp biến insights thành nội dung có thể sử dụng ngay.",
+			type_:            models.AIStepTypeGenerate,
+			promptTemplateID: generateContentLineTemplate,
+			targetLevel:      "L4",
+			parentLevel:      "L3",
+			model:            "gpt-4",
+			temperature:      func() *float64 { v := 0.7; return &v }(),
+			maxTokens:        func() *int { v := 2000; return &v }(),
+		},
+		{
+			name:             "Judge Content Line Candidates",
+			description:      "Step để đánh giá và chấm điểm các Content Line candidates",
+			type_:            models.AIStepTypeJudge,
+			promptTemplateID: judgeTemplate,
+			targetLevel:      "L4",
+			parentLevel:      "L3",
+			model:            "gpt-4",
+			temperature:      func() *float64 { v := 0.3; return &v }(), // Lower temperature cho judging
+			maxTokens:        func() *int { v := 1500; return &v }(),
+		},
+		// L4 → L5: Generate Gene
+		{
+			name:             "Tạo Gene từ Content Line",
+			description:      "Bước này tạo ra nhiều phương án Gene (DNA của nội dung) từ Content Line đã được chọn. Gene định nghĩa tone (giọng điệu), style (phong cách) và các đặc điểm đặc trưng của nội dung. Bước này giúp đảm bảo tính nhất quán về phong cách trong tất cả các nội dung được tạo ra.",
+			type_:            models.AIStepTypeGenerate,
+			promptTemplateID: generateGeneTemplate,
+			targetLevel:      "L5",
+			parentLevel:      "L4",
+			model:            "gpt-4",
+			temperature:      func() *float64 { v := 0.7; return &v }(),
+			maxTokens:        func() *int { v := 2000; return &v }(),
+		},
+		{
+			name:             "Judge Gene Candidates",
+			description:      "Step để đánh giá và chấm điểm các Gene candidates",
+			type_:            models.AIStepTypeJudge,
+			promptTemplateID: judgeTemplate,
+			targetLevel:      "L5",
+			parentLevel:      "L4",
+			model:            "gpt-4",
+			temperature:      func() *float64 { v := 0.3; return &v }(), // Lower temperature cho judging
+			maxTokens:        func() *int { v := 1500; return &v }(),
+		},
+		// L5 → L6: Generate Script
+		{
+			name:             "Tạo Script từ Gene",
+			description:      "Bước này tạo ra nhiều phương án Script (kịch bản) từ Gene đã được chọn. Script là kịch bản chi tiết cho video hoặc nội dung đa phương tiện, bao gồm Hook (3 giây đầu thu hút), Body (nội dung chính) và Call-to-Action (lời kêu gọi hành động). Bước này giúp tạo ra kịch bản sẵn sàng để quay video hoặc tạo nội dung.",
+			type_:            models.AIStepTypeGenerate,
+			promptTemplateID: generateScriptTemplate,
+			targetLevel:      "L6",
+			parentLevel:      "L5",
+			model:            "gpt-4",
+			temperature:      func() *float64 { v := 0.7; return &v }(),
+			maxTokens:        func() *int { v := 2500; return &v }(),
+		},
+		{
+			name:             "Đánh Giá Phương Án Script",
+			description:      "Bước này đánh giá và chấm điểm các phương án Script đã được tạo ra, dựa trên các tiêu chí: độ liên quan, độ rõ ràng, độ hấp dẫn và độ chính xác. Bước này giúp chọn ra phương án Script tốt nhất, có tính hấp dẫn và khả thi cao nhất.",
+			type_:            models.AIStepTypeJudge,
+			promptTemplateID: judgeTemplate,
+			targetLevel:      "L6",
+			parentLevel:      "L5",
+			model:            "gpt-4",
+			temperature:      func() *float64 { v := 0.3; return &v }(), // Lower temperature cho judging
+			maxTokens:        func() *int { v := 1500; return &v }(),
+		},
+		// STEP_GENERATION
+		{
+			name:             "Tạo Workflow Steps - Động",
+			description:      "Bước này tạo ra các bước (steps) động cho workflow dựa trên yêu cầu và context. Bước này giúp tự động thiết kế workflow phù hợp với từng tình huống cụ thể, bao gồm số lượng steps, loại steps, dependencies và cấu trúc workflow.",
+			type_:            models.AIStepTypeStepGeneration,
+			promptTemplateID: stepGenTemplate,
+			targetLevel:      "",
+			parentLevel:      "",
+			model:            "gpt-4",
+			temperature:      func() *float64 { v := 0.8; return &v }(), // Higher temperature cho creativity
+			maxTokens:        func() *int { v := 3000; return &v }(),
+		},
+	}
+
+	for _, stepData := range defaultSteps {
+		// Kiểm tra step đã tồn tại chưa
+		stepFilter := bson.M{
+			"ownerOrganizationId": systemOrgID,
+			"name":                stepData.name,
+		}
+		_, err := h.aiStepService.FindOne(ctx, stepFilter, nil)
+		if err != nil && err != common.ErrNotFound {
+			continue // Lỗi khác, bỏ qua
+		}
+
+		if err == common.ErrNotFound {
+			// Lấy standard schemas
+			inputSchema := models.GetStandardInputSchema(stepData.type_)
+			outputSchema := models.GetStandardOutputSchema(stepData.type_)
+
+			// Chưa có, tạo mới
+			step := models.AIStep{
+				OwnerOrganizationID: systemOrgID,
+				Name:                stepData.name,
+				Description:         stepData.description,
+				Type:                stepData.type_,
+				PromptTemplateID:    stepData.promptTemplateID,
+				InputSchema:         inputSchema,
+				OutputSchema:        outputSchema,
+				TargetLevel:         stepData.targetLevel,
+				ParentLevel:         stepData.parentLevel,
+				ProviderProfileID:   providerProfileID,
+				Model:               stepData.model,
+				Temperature:         stepData.temperature,
+				MaxTokens:           stepData.maxTokens,
+				Status:              "active",
+				CreatedAt:           currentTime,
+				UpdatedAt:           currentTime,
+			}
+			_, err = h.aiStepService.InsertOne(ctx, step)
+			if err != nil {
+				logrus.WithError(err).Warnf("Failed to create step: %s", stepData.name)
+				continue
+			}
+		}
+	}
+
+	return nil
+}
+
+// initAIWorkflows khởi tạo các AI workflows mẫu
+// Tạo nhiều workflows cho từng starting level: L1→L6, L2→L6, L3→L6, L4→L6, L5→L6
+// Mỗi workflow chỉ chứa steps từ starting level đến L6, đảm bảo RootRefType match với starting level
+func (h *InitService) initAIWorkflows(ctx context.Context, systemOrgID primitive.ObjectID, currentTime int64) error {
+	logrus.Infof("Starting AI workflows initialization for organization: %s", systemOrgID.Hex())
+
+	// Lấy tất cả các steps cần thiết
+	stepNames := []string{
+		"Tạo STP từ Layer",
+		"Đánh Giá Phương Án STP",
+		"Tạo Insight từ STP",
+		"Đánh Giá Phương Án Insight",
+		"Tạo Content Line từ Insight",
+		"Đánh Giá Phương Án Content Line",
+		"Tạo Gene từ Content Line",
+		"Đánh Giá Phương Án Gene",
+		"Tạo Script từ Gene",
+		"Đánh Giá Phương Án Script",
+	}
+
+	steps := make(map[string]*models.AIStep)
+	missingSteps := []string{}
+	for _, stepName := range stepNames {
+		step, err := h.getStepByName(ctx, systemOrgID, stepName)
+		if err != nil {
+			logrus.WithError(err).Warnf("Step '%s' not found", stepName)
+			missingSteps = append(missingSteps, stepName)
+			continue // Tiếp tục tìm các steps khác, không return ngay
+		}
+		steps[stepName] = step
+		logrus.Debugf("Found step: %s (ID: %s)", stepName, step.ID.Hex())
+	}
+
+	// Nếu thiếu quá nhiều steps, không tạo workflows
+	if len(missingSteps) > 0 {
+		logrus.Warnf("Missing %d steps, will skip workflows that require them. Missing: %v", len(missingSteps), missingSteps)
+		// Không return, vẫn tiếp tục tạo workflows với các steps có sẵn
+	}
+
+	// Nếu không có step nào, return
+	if len(steps) == 0 {
+		logrus.Error("No steps found, cannot create workflows")
+		return fmt.Errorf("no steps found, cannot create workflows")
+	}
+
+	logrus.Infof("Found %d/%d steps, proceeding to create workflows", len(steps), len(stepNames))
+
+	// Định nghĩa các workflows cho từng starting level
+	workflowDefinitions := []struct {
+		name        string
+		description string
+		version     string
+		rootRefType string
+		targetLevel string
+		stepNames   []string // Tên các steps theo thứ tự
+	}{
+		// L1 → L6: layer → stp → insight → contentLine → gene → script
+		{
+			name:        "Quy Trình Tạo Nội Dung - Từ Layer (L1 đến L6)",
+			description: "Workflow đầy đủ để tạo và đánh giá nội dung từ Layer (L1) đến Script (L6) theo quy trình tuần tự. Workflow này bao gồm 10 bước: tạo và đánh giá STP, Insight, Content Line, Gene, và Script. Phù hợp khi bạn đã có Layer và muốn tạo ra Script hoàn chỉnh.",
+			version:     "1.0.0",
+			rootRefType: "layer",
+			targetLevel: "L6",
+			stepNames: []string{
+				"Tạo STP từ Layer",
+				"Đánh Giá Phương Án STP",
+				"Tạo Insight từ STP",
+				"Đánh Giá Phương Án Insight",
+				"Tạo Content Line từ Insight",
+				"Đánh Giá Phương Án Content Line",
+				"Tạo Gene từ Content Line",
+				"Đánh Giá Phương Án Gene",
+				"Tạo Script từ Gene",
+				"Đánh Giá Phương Án Script",
+			},
+		},
+		// L2 → L6: stp → insight → contentLine → gene → script
+		{
+			name:        "Quy Trình Tạo Nội Dung - Từ STP (L2 đến L6)",
+			description: "Workflow để tạo và đánh giá nội dung từ STP (L2) đến Script (L6) theo quy trình tuần tự. Workflow này bao gồm 8 bước: tạo và đánh giá Insight, Content Line, Gene, và Script. Phù hợp khi bạn đã có STP và muốn tạo ra Script hoàn chỉnh.",
+			version:     "1.0.0",
+			rootRefType: "stp",
+			targetLevel: "L6",
+			stepNames: []string{
+				"Tạo Insight từ STP",
+				"Đánh Giá Phương Án Insight",
+				"Tạo Content Line từ Insight",
+				"Đánh Giá Phương Án Content Line",
+				"Tạo Gene từ Content Line",
+				"Đánh Giá Phương Án Gene",
+				"Tạo Script từ Gene",
+				"Đánh Giá Phương Án Script",
+			},
+		},
+		// L3 → L6: insight → contentLine → gene → script
+		{
+			name:        "Quy Trình Tạo Nội Dung - Từ Insight (L3 đến L6)",
+			description: "Workflow để tạo và đánh giá nội dung từ Insight (L3) đến Script (L6) theo quy trình tuần tự. Workflow này bao gồm 6 bước: tạo và đánh giá Content Line, Gene, và Script. Phù hợp khi bạn đã có Insight và muốn tạo ra Script hoàn chỉnh.",
+			version:     "1.0.0",
+			rootRefType: "insight",
+			targetLevel: "L6",
+			stepNames: []string{
+				"Tạo Content Line từ Insight",
+				"Đánh Giá Phương Án Content Line",
+				"Tạo Gene từ Content Line",
+				"Đánh Giá Phương Án Gene",
+				"Tạo Script từ Gene",
+				"Đánh Giá Phương Án Script",
+			},
+		},
+		// L4 → L6: contentLine → gene → script
+		{
+			name:        "Quy Trình Tạo Nội Dung - Từ Content Line (L4 đến L6)",
+			description: "Workflow để tạo và đánh giá nội dung từ Content Line (L4) đến Script (L6) theo quy trình tuần tự. Workflow này bao gồm 4 bước: tạo và đánh giá Gene và Script. Phù hợp khi bạn đã có Content Line và muốn tạo ra Script hoàn chỉnh.",
+			version:     "1.0.0",
+			rootRefType: "contentLine",
+			targetLevel: "L6",
+			stepNames: []string{
+				"Tạo Gene từ Content Line",
+				"Đánh Giá Phương Án Gene",
+				"Tạo Script từ Gene",
+				"Đánh Giá Phương Án Script",
+			},
+		},
+		// L5 → L6: gene → script
+		{
+			name:        "Quy Trình Tạo Nội Dung - Từ Gene (L5 đến L6)",
+			description: "Workflow để tạo và đánh giá nội dung từ Gene (L5) đến Script (L6) theo quy trình tuần tự. Workflow này bao gồm 2 bước: tạo và đánh giá Script. Phù hợp khi bạn đã có Gene và muốn tạo ra Script hoàn chỉnh.",
+			version:     "1.0.0",
+			rootRefType: "gene",
+			targetLevel: "L6",
+			stepNames: []string{
+				"Tạo Script từ Gene",
+				"Đánh Giá Phương Án Script",
+			},
+		},
+	}
+
+	// Tạo từng workflow
+	createdCount := 0
+	skippedCount := 0
+	for _, wfDef := range workflowDefinitions {
+		logrus.Debugf("Processing workflow: %s", wfDef.name)
+
+		// Kiểm tra workflow đã tồn tại chưa
+		workflowFilter := bson.M{
+			"ownerOrganizationId": systemOrgID,
+			"name":                wfDef.name,
+			"version":             wfDef.version,
+		}
+		_, err := h.aiWorkflowService.FindOne(ctx, workflowFilter, nil)
+		if err != nil && err != common.ErrNotFound {
+			logrus.WithError(err).Warnf("Failed to check existing workflow: %s", wfDef.name)
+			skippedCount++
+			continue
+		}
+
+		if err == common.ErrNotFound {
+			logrus.Debugf("Workflow '%s' not found, creating new one", wfDef.name)
+			// Tạo workflow steps từ step names
+			workflowSteps := make([]models.AIWorkflowStepReference, 0, len(wfDef.stepNames))
+			for order, stepName := range wfDef.stepNames {
+				step, exists := steps[stepName]
+				if !exists {
+					logrus.Warnf("Step '%s' not found in steps map, skipping workflow: %s", stepName, wfDef.name)
+					continue
+				}
+				workflowSteps = append(workflowSteps, models.AIWorkflowStepReference{
+					StepID: step.ID.Hex(), // StepID là string
+					Order:  order,
+					Policy: &models.AIWorkflowStepPolicy{
+						RetryCount: 2,
+						Timeout:    300, // 5 minutes
+						OnFailure:  "stop",
+						OnSuccess:  "continue",
+						Parallel:   false, // Phải chạy tuần tự
+					},
+				})
+			}
+
+			if len(workflowSteps) == 0 {
+				logrus.Warnf("No valid steps found for workflow: %s (required %d steps, found 0)", wfDef.name, len(wfDef.stepNames))
+				skippedCount++
+				continue
+			}
+
+			if len(workflowSteps) < len(wfDef.stepNames) {
+				logrus.Warnf("Workflow '%s' missing some steps: required %d, found %d", wfDef.name, len(wfDef.stepNames), len(workflowSteps))
+			}
+
+			// Chưa có, tạo mới
+			workflow := models.AIWorkflow{
+				OwnerOrganizationID: systemOrgID,
+				Name:                wfDef.name,
+				Description:         wfDef.description,
+				Version:             wfDef.version,
+				Steps:               workflowSteps,
+				RootRefType:         wfDef.rootRefType,
+				TargetLevel:         wfDef.targetLevel,
+				DefaultPolicy: &models.AIWorkflowStepPolicy{
+					RetryCount: 2,
+					Timeout:    300,
+					OnFailure:  "stop",
+					OnSuccess:  "continue",
+					Parallel:   false, // Đảm bảo tuần tự
+				},
+				Status:    "active",
+				CreatedAt: currentTime,
+				UpdatedAt: currentTime,
+			}
+			_, err = h.aiWorkflowService.InsertOne(ctx, workflow)
+			if err != nil {
+				logrus.WithError(err).Errorf("Failed to create workflow: %s", wfDef.name)
+				skippedCount++
+				continue
+			}
+			logrus.Infof("✅ Created workflow: %s (RootRefType: %s, TargetLevel: %s, Steps: %d)",
+				wfDef.name, wfDef.rootRefType, wfDef.targetLevel, len(workflowSteps))
+			createdCount++
+		} else {
+			logrus.Debugf("Workflow '%s' already exists, skipping", wfDef.name)
+			skippedCount++
+		}
+	}
+
+	logrus.Infof("AI workflows initialization completed: %d created, %d skipped", createdCount, skippedCount)
+	return nil
+}
+
+// initAIWorkflowCommands khởi tạo các AI workflow commands mẫu
+// Tạo các command ví dụ để demo cách sử dụng workflow commands
+// Lưu ý: RootRefID sử dụng ObjectID mẫu (vì đây chỉ là init data mẫu, không cần content node thực tế)
+func (h *InitService) initAIWorkflowCommands(ctx context.Context, systemOrgID primitive.ObjectID, currentTime int64) error {
+	logrus.Infof("Starting AI workflow commands initialization for organization: %s", systemOrgID.Hex())
+
+	// Lấy một vài workflows và steps để tạo command ví dụ
+	workflowNames := []string{
+		"Quy Trình Tạo Nội Dung - Từ Layer (L1 đến L6)",
+		"Quy Trình Tạo Nội Dung - Từ STP (L2 đến L6)",
+		"Quy Trình Tạo Nội Dung - Từ Insight (L3 đến L6)",
+	}
+
+	stepNames := []string{
+		"Tạo STP từ Layer",
+		"Tạo Insight từ STP",
+		"Tạo Content Line từ Insight",
+	}
+
+	// Lấy workflows
+	workflows := make(map[string]*models.AIWorkflow)
+	for _, workflowName := range workflowNames {
+		workflow, err := h.getWorkflowByName(ctx, systemOrgID, workflowName)
+		if err != nil {
+			logrus.Debugf("Workflow '%s' not found, skipping", workflowName)
+			continue
+		}
+		workflows[workflowName] = workflow
+		logrus.Debugf("Found workflow: %s (ID: %s)", workflowName, workflow.ID.Hex())
+	}
+
+	// Lấy steps
+	steps := make(map[string]*models.AIStep)
+	for _, stepName := range stepNames {
+		step, err := h.getStepByName(ctx, systemOrgID, stepName)
+		if err != nil {
+			logrus.Debugf("Step '%s' not found, skipping", stepName)
+			continue
+		}
+		steps[stepName] = step
+		logrus.Debugf("Found step: %s (ID: %s)", stepName, step.ID.Hex())
+	}
+
+	// Nếu không có workflow hoặc step nào, không tạo commands
+	if len(workflows) == 0 && len(steps) == 0 {
+		logrus.Warn("No workflows or steps found, cannot create workflow commands")
+		return nil // Không phải lỗi, chỉ là không có data để tạo
+	}
+
+	logrus.Infof("Found %d workflows and %d steps, proceeding to create commands", len(workflows), len(steps))
+
+	// Log chi tiết workflows và steps đã tìm thấy
+	if len(workflows) > 0 {
+		logrus.Infof("Workflows found: %v", func() []string {
+			names := make([]string, 0, len(workflows))
+			for name := range workflows {
+				names = append(names, name)
+			}
+			return names
+		}())
+	}
+	if len(steps) > 0 {
+		logrus.Infof("Steps found: %v", func() []string {
+			names := make([]string, 0, len(steps))
+			for name := range steps {
+				names = append(names, name)
+			}
+			return names
+		}())
+	}
+
+	// Định nghĩa các commands ví dụ
+	commandDefinitions := []struct {
+		commandType string
+		description string
+		workflowID  *primitive.ObjectID
+		stepID      *primitive.ObjectID
+		rootRefType string
+		params      map[string]interface{}
+	}{
+		// START_WORKFLOW commands
+		{
+			commandType: models.AIWorkflowCommandTypeStartWorkflow,
+			description: "Command ví dụ: Bắt đầu workflow từ Layer (L1) để tạo nội dung đến Script (L6)",
+			workflowID: func() *primitive.ObjectID {
+				if wf, ok := workflows["Quy Trình Tạo Nội Dung - Từ Layer (L1 đến L6)"]; ok {
+					return &wf.ID
+				} else {
+					return nil
+				}
+			}(),
+			stepID:      nil,
+			rootRefType: "layer",
+			params: map[string]interface{}{
+				"priority":    "high",
+				"description": "Tạo nội dung marketing từ Layer mẫu",
+			},
+		},
+		{
+			commandType: models.AIWorkflowCommandTypeStartWorkflow,
+			description: "Command ví dụ: Bắt đầu workflow từ STP (L2) để tạo nội dung đến Script (L6)",
+			workflowID: func() *primitive.ObjectID {
+				if wf, ok := workflows["Quy Trình Tạo Nội Dung - Từ STP (L2 đến L6)"]; ok {
+					return &wf.ID
+				} else {
+					return nil
+				}
+			}(),
+			stepID:      nil,
+			rootRefType: "stp",
+			params: map[string]interface{}{
+				"priority":    "medium",
+				"description": "Tạo nội dung từ STP đã có sẵn",
+			},
+		},
+		{
+			commandType: models.AIWorkflowCommandTypeStartWorkflow,
+			description: "Command ví dụ: Bắt đầu workflow từ Insight (L3) để tạo nội dung đến Script (L6)",
+			workflowID: func() *primitive.ObjectID {
+				if wf, ok := workflows["Quy Trình Tạo Nội Dung - Từ Insight (L3 đến L6)"]; ok {
+					return &wf.ID
+				} else {
+					return nil
+				}
+			}(),
+			stepID:      nil,
+			rootRefType: "insight",
+			params: map[string]interface{}{
+				"priority":    "low",
+				"description": "Tạo nội dung từ Insight đã có sẵn",
+			},
+		},
+		// EXECUTE_STEP commands
+		{
+			commandType: models.AIWorkflowCommandTypeExecuteStep,
+			description: "Command ví dụ: Chạy step tạo STP từ Layer",
+			workflowID:  nil,
+			stepID: func() *primitive.ObjectID {
+				if step, ok := steps["Tạo STP từ Layer"]; ok {
+					return &step.ID
+				} else {
+					return nil
+				}
+			}(),
+			rootRefType: "layer",
+			params: map[string]interface{}{
+				"generateCount": 3, // Tạo 3 phương án STP
+				"description":   "Tạo STP từ Layer mẫu",
+			},
+		},
+		{
+			commandType: models.AIWorkflowCommandTypeExecuteStep,
+			description: "Command ví dụ: Chạy step tạo Insight từ STP",
+			workflowID:  nil,
+			stepID: func() *primitive.ObjectID {
+				if step, ok := steps["Tạo Insight từ STP"]; ok {
+					return &step.ID
+				} else {
+					return nil
+				}
+			}(),
+			rootRefType: "stp",
+			params: map[string]interface{}{
+				"generateCount": 5, // Tạo 5 phương án Insight
+				"description":   "Tạo Insight từ STP mẫu",
+			},
+		},
+		{
+			commandType: models.AIWorkflowCommandTypeExecuteStep,
+			description: "Command ví dụ: Chạy step tạo Content Line từ Insight",
+			workflowID:  nil,
+			stepID: func() *primitive.ObjectID {
+				if step, ok := steps["Tạo Content Line từ Insight"]; ok {
+					return &step.ID
+				} else {
+					return nil
+				}
+			}(),
+			rootRefType: "insight",
+			params: map[string]interface{}{
+				"generateCount": 4, // Tạo 4 phương án Content Line
+				"description":   "Tạo Content Line từ Insight mẫu",
+			},
+		},
+	}
+
+	// Tạo từng command
+	createdCount := 0
+	skippedCount := 0
+	for _, cmdDef := range commandDefinitions {
+		// Bỏ qua nếu không có workflowID hoặc stepID tương ứng
+		if cmdDef.commandType == models.AIWorkflowCommandTypeStartWorkflow && cmdDef.workflowID == nil {
+			logrus.Warnf("Skipping START_WORKFLOW command: workflow not found for description: %s", cmdDef.description)
+			skippedCount++
+			continue
+		}
+		if cmdDef.commandType == models.AIWorkflowCommandTypeExecuteStep && cmdDef.stepID == nil {
+			logrus.Warnf("Skipping EXECUTE_STEP command: step not found for description: %s", cmdDef.description)
+			skippedCount++
+			continue
+		}
+
+		// Validate: Đảm bảo có đủ thông tin trước khi tạo command
+		if cmdDef.commandType == "" {
+			logrus.Errorf("Invalid command definition: missing commandType for: %s", cmdDef.description)
+			skippedCount++
+			continue
+		}
+		if cmdDef.commandType == models.AIWorkflowCommandTypeStartWorkflow {
+			if cmdDef.workflowID == nil {
+				logrus.Warnf("Skipping START_WORKFLOW command: workflowID is nil for: %s", cmdDef.description)
+				skippedCount++
+				continue
+			}
+			if cmdDef.workflowID.IsZero() {
+				logrus.Warnf("Skipping START_WORKFLOW command: workflowID is zero for: %s", cmdDef.description)
+				skippedCount++
+				continue
+			}
+		}
+		if cmdDef.commandType == models.AIWorkflowCommandTypeExecuteStep {
+			if cmdDef.stepID == nil {
+				logrus.Warnf("Skipping EXECUTE_STEP command: stepID is nil for: %s", cmdDef.description)
+				skippedCount++
+				continue
+			}
+			if cmdDef.stepID.IsZero() {
+				logrus.Warnf("Skipping EXECUTE_STEP command: stepID is zero for: %s", cmdDef.description)
+				skippedCount++
+				continue
+			}
+		}
+
+		// Tạo ObjectID mẫu cho RootRefID (mỗi command có một RootRefID khác nhau để demo)
+		// Trong thực tế, RootRefID sẽ là ID của content node thực tế
+		sampleRootRefID := primitive.NewObjectID()
+
+		// Kiểm tra command đã tồn tại chưa (dựa trên commandType, workflowID/stepID, và rootRefID)
+		commandFilter := bson.M{
+			"commandType": cmdDef.commandType,
+			"rootRefType": cmdDef.rootRefType,
+		}
+		if cmdDef.workflowID != nil {
+			commandFilter["workflowId"] = cmdDef.workflowID
+		}
+		if cmdDef.stepID != nil {
+			commandFilter["stepId"] = cmdDef.stepID
+		}
+
+		// Kiểm tra xem đã có command tương tự chưa (không kiểm tra rootRefID vì mỗi command có rootRefID khác nhau)
+		_, err := h.aiWorkflowCommandService.FindOne(ctx, commandFilter, nil)
+		if err != nil && err != common.ErrNotFound {
+			logrus.WithError(err).Warnf("Failed to check existing command")
+			skippedCount++
+			continue
+		}
+
+		// Chỉ tạo command nếu chưa có command tương tự (cùng commandType, workflowID/stepID, rootRefType)
+		// Lưu ý: Trong thực tế, có thể có nhiều command với cùng workflow/step nhưng khác rootRefID
+		// Nhưng vì đây là init data mẫu, chúng ta chỉ tạo một command cho mỗi workflow/step
+		if err == common.ErrNotFound {
+			// Chưa có, tạo mới
+			command := models.AIWorkflowCommand{
+				OwnerOrganizationID: systemOrgID, // Thuộc về System Organization (dữ liệu hệ thống) - Phân quyền dữ liệu
+				CommandType:         cmdDef.commandType,
+				Status:              models.AIWorkflowCommandStatusPending, // Mặc định là pending, chờ agent xử lý
+				WorkflowID:          cmdDef.workflowID,
+				StepID:              cmdDef.stepID,
+				RootRefID:           &sampleRootRefID,
+				RootRefType:         cmdDef.rootRefType,
+				Params:              cmdDef.params,
+				CreatedAt:           currentTime,
+				Metadata: map[string]interface{}{
+					"description": cmdDef.description,
+					"initData":    true, // Đánh dấu là init data
+				},
+			}
+
+			_, err = h.aiWorkflowCommandService.InsertOne(ctx, command)
+			if err != nil {
+				logrus.WithError(err).Errorf("Failed to create command: %s", cmdDef.description)
+				skippedCount++
+				continue
+			}
+
+			// Log chi tiết thông tin command đã tạo
+			workflowIDStr := "nil"
+			if cmdDef.workflowID != nil {
+				workflowIDStr = cmdDef.workflowID.Hex()
+			}
+			stepIDStr := "nil"
+			if cmdDef.stepID != nil {
+				stepIDStr = cmdDef.stepID.Hex()
+			}
+			logrus.Infof("✅ Created command: %s (Type: %s, WorkflowID: %s, StepID: %s, RootRefType: %s)",
+				cmdDef.description, cmdDef.commandType, workflowIDStr, stepIDStr, cmdDef.rootRefType)
+			createdCount++
+		} else {
+			logrus.Debugf("Command already exists, skipping: %s", cmdDef.description)
+			skippedCount++
+		}
+	}
+
+	logrus.Infof("AI workflow commands initialization completed: %d created, %d skipped", createdCount, skippedCount)
+	return nil
+}
+
+// Helper functions
+func (h *InitService) getPromptTemplateByName(ctx context.Context, systemOrgID primitive.ObjectID, name string) (*primitive.ObjectID, error) {
+	filter := bson.M{
+		"ownerOrganizationId": systemOrgID,
+		"name":                name,
+	}
+	template, err := h.aiPromptTemplateService.FindOne(ctx, filter, nil)
+	if err != nil {
+		return nil, err
+	}
+	var templateModel models.AIPromptTemplate
+	bsonBytes, _ := bson.Marshal(template)
+	if err := bson.Unmarshal(bsonBytes, &templateModel); err != nil {
+		return nil, err
+	}
+	return &templateModel.ID, nil
+}
+
+func (h *InitService) getStepByName(ctx context.Context, systemOrgID primitive.ObjectID, name string) (*models.AIStep, error) {
+	filter := bson.M{
+		"ownerOrganizationId": systemOrgID,
+		"name":                name,
+	}
+	step, err := h.aiStepService.FindOne(ctx, filter, nil)
+	if err != nil {
+		return nil, err
+	}
+	var stepModel models.AIStep
+	bsonBytes, _ := bson.Marshal(step)
+	if err := bson.Unmarshal(bsonBytes, &stepModel); err != nil {
+		return nil, err
+	}
+	return &stepModel, nil
+}
+
+func (h *InitService) getWorkflowByName(ctx context.Context, systemOrgID primitive.ObjectID, name string) (*models.AIWorkflow, error) {
+	filter := bson.M{
+		"ownerOrganizationId": systemOrgID,
+		"name":                name,
+	}
+	workflow, err := h.aiWorkflowService.FindOne(ctx, filter, nil)
+	if err != nil {
+		return nil, err
+	}
+	var workflowModel models.AIWorkflow
+	bsonBytes, _ := bson.Marshal(workflow)
+	if err := bson.Unmarshal(bsonBytes, &workflowModel); err != nil {
+		return nil, err
+	}
+	return &workflowModel, nil
+}
+
+func (h *InitService) getProviderProfileByName(ctx context.Context, systemOrgID primitive.ObjectID, name string) (*primitive.ObjectID, error) {
+	filter := bson.M{
+		"ownerOrganizationId": systemOrgID,
+		"name":                name,
+	}
+	profile, err := h.aiProviderProfileService.FindOne(ctx, filter, nil)
+	if err != nil {
+		return nil, err
+	}
+	var profileModel models.AIProviderProfile
+	bsonBytes, _ := bson.Marshal(profile)
+	if err := bson.Unmarshal(bsonBytes, &profileModel); err != nil {
+		return nil, err
+	}
+	return &profileModel.ID, nil
 }

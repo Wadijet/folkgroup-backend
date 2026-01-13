@@ -60,6 +60,27 @@ func NewUserRoleHandler() (*UserRoleHandler, error) {
 // Các hàm đặc thù của UserRole (nếu có) sẽ được thêm vào đây
 
 // HandleUpdateUserRoles xử lý cập nhật vai trò cho người dùng
+//
+// LÝ DO PHẢI TẠO ENDPOINT ĐẶC BIỆT (không thể dùng CRUD chuẩn):
+// 1. Logic nghiệp vụ phức tạp trong service:
+//    - Gọi UserRoleService.UpdateUserRoles (service method đặc biệt)
+//    - Service method này xử lý toàn bộ logic: validation, xóa roles cũ, tạo roles mới
+//    - Có thể có validation đặc biệt: check role tồn tại, check scope, etc.
+// 2. Atomic operation:
+//    - Service method đảm bảo atomic: xóa tất cả user roles cũ rồi tạo mới
+//    - Không có trạng thái trung gian (một phần roles cũ, một phần mới)
+// 3. Input format đặc biệt:
+//    - Input: {userId, roleIds: [...]}
+//    - Output: Array các UserRole đã được tạo
+//    - Không phải format CRUD chuẩn (update một document)
+// 4. Service layer abstraction:
+//    - Logic nghiệp vụ được đóng gói trong service method
+//    - Handler chỉ là wrapper, gọi service method
+//    - Service method có thể có validation và logic phức tạp
+//
+// KẾT LUẬN: Cần giữ endpoint đặc biệt vì logic nghiệp vụ phức tạp được đóng gói trong service method
+//           và đây là atomic "replace all" operation
+//
 // Parameters:
 //   - c: Context của Fiber chứa thông tin request
 //

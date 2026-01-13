@@ -58,6 +58,27 @@ type TriggerNotificationRequest struct {
 }
 
 // HandleTriggerNotification xử lý request trigger notification
+//
+// LÝ DO PHẢI TẠO ENDPOINT ĐẶC BIỆT (không thể dùng CRUD chuẩn):
+// 1. Logic nghiệp vụ phức tạp (workflow trigger notification):
+//    - Tìm routing rules cho eventType, domain, severity
+//    - Tìm channels phù hợp với rules
+//    - Tạo notification queue items cho từng channel
+//    - Có thể trigger nhiều notifications cùng lúc (một event → nhiều channels)
+// 2. Cross-service operations:
+//    - Sử dụng NotificationRoutingService để tìm rules
+//    - Sử dụng NotificationChannelService để tìm channels
+//    - Sử dụng NotificationQueueService để tạo queue items
+//    - Logic phức tạp: infer domain và severity từ eventType
+// 3. Response format đặc biệt:
+//    - Trả về thông tin về eventType, số lượng queue items đã tạo
+//    - Không phải format CRUD chuẩn (tạo một document)
+// 4. Tracking và logging:
+//    - Lấy requestID, clientIP, userID để tracking
+//    - Log chi tiết quá trình trigger notification
+//
+// KẾT LUẬN: Cần giữ endpoint đặc biệt vì đây là workflow action (trigger) với logic nghiệp vụ phức tạp,
+//           cross-service operations, và có thể tạo nhiều queue items từ một event
 func (h *NotificationTriggerHandler) HandleTriggerNotification(c fiber.Ctx) error {
 	return SafeHandlerWrapper(c, func() error {
 		// Lấy thông tin request để tracking

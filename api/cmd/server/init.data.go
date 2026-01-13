@@ -82,6 +82,16 @@ func InitDefaultData() {
 	} else {
 		log.Info("✅ [INIT] Step 7: CTA library initialized successfully")
 	}
+
+	// 8. Khởi tạo dữ liệu mặc định cho hệ thống AI workflow (Module 2)
+	// Tạo provider profiles, prompt templates, steps, và workflows mẫu
+	log.Info("🔄 [INIT] Step 8: Initializing AI workflow data...")
+	if err := initService.InitAIData(); err != nil {
+		log.WithError(err).Error("❌ [INIT] Step 8: Failed to initialize AI workflow data")
+		log.Warnf("Failed to initialize AI workflow data: %v", err)
+	} else {
+		log.Info("✅ [INIT] Step 8: AI workflow data initialized successfully")
+	}
 	
 	log.Info("✅ [INIT] InitDefaultData completed successfully")
 }

@@ -32,6 +32,26 @@ func NewNotificationTrackHandler() (*NotificationTrackHandler, error) {
 }
 
 // HandleTrackOpen xử lý tracking khi email được mở (tracking pixel)
+//
+// LÝ DO PHẢI TẠO ENDPOINT ĐẶC BIỆT (không thể dùng CRUD chuẩn):
+// 1. Public endpoint (không cần authentication):
+//    - Email client mở email → load tracking pixel (1x1 transparent PNG)
+//    - Không có authentication token, chỉ có historyId trong URL
+//    - Phải return image/png content, không phải JSON response
+// 2. Response format đặc biệt:
+//    - Trả về 1x1 transparent PNG image (hardcoded bytes)
+//    - Luôn return pixel ngay cả khi có lỗi (để email client không hiển thị broken image)
+//    - Không phải format CRUD chuẩn (JSON response)
+// 3. Update operation đặc biệt:
+//    - Sử dụng MongoDB $inc operator để tăng openCount
+//    - Set openedAt chỉ khi chưa có (first open)
+//    - Update operation phải không block response (async-friendly)
+// 4. Error handling đặc biệt:
+//    - Không return error response, luôn return pixel
+//    - Log error nhưng vẫn return pixel để email client không bị lỗi
+//
+// KẾT LUẬN: Cần giữ endpoint đặc biệt vì đây là public endpoint trả về image content,
+//           không phải JSON, và có error handling đặc biệt (luôn return pixel)
 func (h *NotificationTrackHandler) HandleTrackOpen(c fiber.Ctx) error {
 	return SafeHandlerWrapper(c, func() error {
 		historyIDStr := c.Params("historyId")
@@ -83,6 +103,27 @@ func (h *NotificationTrackHandler) HandleTrackOpen(c fiber.Ctx) error {
 }
 
 // HandleTrackClick xử lý tracking khi CTA được click
+//
+// LÝ DO PHẢI TẠO ENDPOINT ĐẶC BIỆT (không thể dùng CRUD chuẩn):
+// 1. Public endpoint (không cần authentication):
+//    - User click CTA trong email → redirect qua tracking URL
+//    - Không có authentication token, chỉ có historyId và ctaIndex trong URL
+//    - Phải redirect về original URL sau khi track
+// 2. Logic nghiệp vụ phức tạp:
+//    - Parse ctaIndex từ URL params (số nguyên)
+//    - Lấy original URL từ query params (encoded)
+//    - Update clickCount cho CTA tại index cụ thể (array update)
+//    - Set clickedAt cho CTA tại index cụ thể (array update)
+//    - Redirect về original URL (HTTP redirect, không phải JSON response)
+// 3. Response format đặc biệt:
+//    - Trả về HTTP redirect (302) về original URL
+//    - Không phải format CRUD chuẩn (JSON response)
+// 4. Update operation đặc biệt:
+//    - Sử dụng MongoDB array update operators ($set với dot notation)
+//    - Update nested field trong array: ctaClicks[index].clickCount, ctaClicks[index].clickedAt
+//
+// KẾT LUẬN: Cần giữ endpoint đặc biệt vì đây là public endpoint với redirect logic,
+//           update nested array fields, và response format đặc biệt (HTTP redirect)
 func (h *NotificationTrackHandler) HandleTrackClick(c fiber.Ctx) error {
 	return SafeHandlerWrapper(c, func() error {
 		historyIDStr := c.Params("historyId")

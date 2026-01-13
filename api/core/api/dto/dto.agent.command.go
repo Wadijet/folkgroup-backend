@@ -15,3 +15,15 @@ type AgentCommandUpdateInput struct {
 	Result *map[string]interface{} `json:"result,omitempty"` // Kết quả thực thi
 	Error  *string                 `json:"error,omitempty"`  // Lỗi nếu có
 }
+
+// AgentCommandClaimInput dữ liệu đầu vào khi claim pending commands
+type AgentCommandClaimInput struct {
+	AgentID string `json:"agentId" validate:"required"` // ID của agent đang claim commands (bắt buộc)
+	Limit   int    `json:"limit,omitempty"`             // Số lượng commands tối đa muốn claim (mặc định: 1, tối đa: 100)
+}
+
+// AgentCommandHeartbeatInput dữ liệu đầu vào khi update heartbeat/progress
+type AgentCommandHeartbeatInput struct {
+	CommandID string                 `json:"commandId" validate:"required" transform:"str_objectid_ptr"` // ID của command (dạng string ObjectID)
+	Progress  map[string]interface{} `json:"progress,omitempty"`                                           // Tiến độ chi tiết (ví dụ: {"step": "stopping", "percentage": 50, "message": "Đang dừng bot..."})
+}

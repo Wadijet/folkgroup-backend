@@ -406,14 +406,8 @@ func (r *Router) registerRBACRoutes(router fiber.Router) error {
 	if err != nil {
 		return fmt.Errorf("failed to create permission handler: %v", err)
 	}
-	// Đã tắt log để giảm log khi khởi động
-	// Route đặc biệt cho lấy permissions theo category
-	// FIX: Dùng registerRouteWithMiddleware với .Use() method (cách đúng) thay vì cách trực tiếp có bug trong Fiber v3
-	permReadMiddleware := middleware.AuthMiddleware("Permission.Read")
-	registerRouteWithMiddleware(router, "/permission", "GET", "/by-category/:category", []fiber.Handler{permReadMiddleware}, permHandler.HandleGetPermissionsByCategory)
-	// Route đặc biệt cho lấy permissions theo group
-	registerRouteWithMiddleware(router, "/permission", "GET", "/by-group/:group", []fiber.Handler{permReadMiddleware}, permHandler.HandleGetPermissionsByGroup)
-	// CRUD routes
+	// CRUD routes - có thể dùng filter để lấy permissions theo category/group
+	// Ví dụ: GET /api/v1/permission/find?filter={"category":"..."} hoặc filter={"group":"..."}
 	r.registerCRUDRoutes(router, "/permission", permHandler, permConfig, "Permission")
 
 	// Role routes
@@ -852,6 +846,21 @@ func (r *Router) registerAgentManagementRoutes(router fiber.Router) error {
 	}
 	r.registerCRUDRoutes(router, "/agent-management/command", agentCommandHandler, readWriteConfig, "AgentCommand")
 
+	// Endpoint đặc biệt: Claim pending commands (atomic operation)
+	claimAgentCommandsMiddleware := middleware.AuthMiddleware("AgentCommand.Update")
+	orgContextMiddleware := middleware.OrganizationContextMiddleware()
+	registerRouteWithMiddleware(router, "/agent-management/command", "POST", "/claim-pending", []fiber.Handler{claimAgentCommandsMiddleware, orgContextMiddleware}, agentCommandHandler.ClaimPendingCommands)
+
+	// Endpoint đặc biệt: Update heartbeat/progress (agent gọi định kỳ)
+	updateAgentHeartbeatMiddleware := middleware.AuthMiddleware("AgentCommand.Update")
+	registerRouteWithMiddleware(router, "/agent-management/command", "POST", "/update-heartbeat", []fiber.Handler{updateAgentHeartbeatMiddleware, orgContextMiddleware}, agentCommandHandler.UpdateHeartbeat)
+	// Hỗ trợ cả URL params: /update-heartbeat/:commandId
+	registerRouteWithMiddleware(router, "/agent-management/command", "POST", "/update-heartbeat/:commandId", []fiber.Handler{updateAgentHeartbeatMiddleware, orgContextMiddleware}, agentCommandHandler.UpdateHeartbeat)
+
+	// Endpoint đặc biệt: Release stuck commands (admin/background job)
+	releaseStuckAgentCommandsMiddleware := middleware.AuthMiddleware("AgentCommand.Update")
+	registerRouteWithMiddleware(router, "/agent-management/command", "POST", "/release-stuck", []fiber.Handler{releaseStuckAgentCommandsMiddleware, orgContextMiddleware}, agentCommandHandler.ReleaseStuckCommands)
+
 	// Lưu ý: Agent Status đã được ghép vào Agent Registry, không cần route riêng nữa
 	// Status có thể được xem/update qua Agent Registry endpoints
 
@@ -957,6 +966,7 @@ func (r *Router) registerContentStorageRoutes(router fiber.Router) error {
 // - Workflows: /api/v1/ai/workflows/*
 // - Steps: /api/v1/ai/steps/*
 // - Prompt Templates: /api/v1/ai/prompt-templates/*
+// - Provider Profiles: /api/v1/ai/provider-profiles/*
 // - Workflow Runs: /api/v1/ai/workflow-runs/*
 // - Step Runs: /api/v1/ai/step-runs/*
 // - Generation Batches: /api/v1/ai/generation-batches/*
@@ -986,6 +996,13 @@ func (r *Router) registerAIServiceRoutes(router fiber.Router) error {
 		return fmt.Errorf("failed to create AI prompt template handler: %v", err)
 	}
 	r.registerCRUDRoutes(router, "/ai/prompt-templates", aiPromptTemplateHandler, readWriteConfig, "AIPromptTemplates")
+
+	// ===== PROVIDER PROFILES =====
+	aiProviderProfileHandler, err := handler.NewAIProviderProfileHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create AI provider profile handler: %v", err)
+	}
+	r.registerCRUDRoutes(router, "/ai/provider-profiles", aiProviderProfileHandler, readWriteConfig, "AIProviderProfiles")
 
 	// ===== WORKFLOW RUNS =====
 	aiWorkflowRunHandler, err := handler.NewAIWorkflowRunHandler()
@@ -1028,6 +1045,24 @@ func (r *Router) registerAIServiceRoutes(router fiber.Router) error {
 		return fmt.Errorf("failed to create AI workflow command handler: %v", err)
 	}
 	r.registerCRUDRoutes(router, "/ai/workflow-commands", aiWorkflowCommandHandler, readWriteConfig, "AIWorkflowCommands")
+
+	// Endpoint đặc biệt: Claim pending commands (atomic operation)
+	// FIX: Dùng registerRouteWithMiddleware với .Use() method (cách đúng) thay vì cách trực tiếp có bug trong Fiber v3
+	claimCommandsMiddleware := middleware.AuthMiddleware("AIWorkflowCommands.Update")
+	orgContextMiddleware := middleware.OrganizationContextMiddleware()
+	registerRouteWithMiddleware(router, "/ai/workflow-commands", "POST", "/claim-pending", []fiber.Handler{claimCommandsMiddleware, orgContextMiddleware}, aiWorkflowCommandHandler.ClaimPendingCommands)
+
+	// Endpoint đặc biệt: Update heartbeat/progress (agent gọi định kỳ)
+	// Lưu ý: Endpoint này có thể không cần auth nếu agent có cách xác thực khác (ví dụ: agentId trong header)
+	// Tạm thời dùng auth middleware, sau này có thể thay bằng agent authentication
+	updateHeartbeatMiddleware := middleware.AuthMiddleware("AIWorkflowCommands.Update")
+	registerRouteWithMiddleware(router, "/ai/workflow-commands", "POST", "/update-heartbeat", []fiber.Handler{updateHeartbeatMiddleware, orgContextMiddleware}, aiWorkflowCommandHandler.UpdateHeartbeat)
+	// Hỗ trợ cả URL params: /update-heartbeat/:commandId
+	registerRouteWithMiddleware(router, "/ai/workflow-commands", "POST", "/update-heartbeat/:commandId", []fiber.Handler{updateHeartbeatMiddleware, orgContextMiddleware}, aiWorkflowCommandHandler.UpdateHeartbeat)
+
+	// Endpoint đặc biệt: Release stuck commands (admin/background job)
+	releaseStuckMiddleware := middleware.AuthMiddleware("AIWorkflowCommands.Update")
+	registerRouteWithMiddleware(router, "/ai/workflow-commands", "POST", "/release-stuck", []fiber.Handler{releaseStuckMiddleware, orgContextMiddleware}, aiWorkflowCommandHandler.ReleaseStuckCommands)
 
 	return nil
 }

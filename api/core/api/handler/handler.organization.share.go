@@ -37,6 +37,27 @@ func NewOrganizationShareHandler() (*OrganizationShareHandler, error) {
 
 // CreateShare tạo sharing giữa 2 organizations
 // POST /api/v1/organization-shares
+//
+// LÝ DO PHẢI TẠO ENDPOINT ĐẶC BIỆT (không thể dùng CRUD chuẩn):
+// 1. Validation nghiệp vụ phức tạp:
+//    - Validate ownerOrgID không được có trong ToOrgIDs (business rule)
+//    - Validate user có quyền share data của ownerOrg (authorization check)
+//    - Validate share đã tồn tại chưa (check duplicate với logic phức tạp)
+// 2. Logic check duplicate phức tạp:
+//    - So sánh ToOrgIDs không quan tâm thứ tự (set comparison)
+//    - So sánh PermissionNames không quan tâm thứ tự (set comparison)
+//    - Xử lý trường hợp đặc biệt: share với tất cả (ToOrgIDs rỗng)
+//    - Query tất cả shares của ownerOrg và so sánh thủ công
+// 3. Logic nghiệp vụ đặc biệt:
+//    - Set CreatedBy tự động từ context (user_id)
+//    - Set CreatedAt tự động (timestamp hiện tại)
+//    - Xử lý share với tất cả: ToOrgIDs rỗng = share với tất cả organizations
+// 4. Authorization check:
+//    - Validate user có quyền với ownerOrg (sử dụng GetUserAllowedOrganizationIDs)
+//    - Không cho phép share data của organization mà user không có quyền
+//
+// KẾT LUẬN: Cần giữ endpoint đặc biệt vì validation và logic nghiệp vụ rất phức tạp
+//           (check duplicate với set comparison, validate quyền, xử lý share với tất cả)
 func (h *OrganizationShareHandler) CreateShare(c fiber.Ctx) error {
 	return h.SafeHandler(c, func() error {
 		var input dto.OrganizationShareCreateInput
@@ -206,6 +227,20 @@ func (h *OrganizationShareHandler) CreateShare(c fiber.Ctx) error {
 
 // DeleteShare xóa sharing
 // DELETE /api/v1/organization-shares/:id
+//
+// LÝ DO PHẢI TẠO ENDPOINT ĐẶC BIỆT (không thể dùng CRUD chuẩn):
+// 1. Authorization check phức tạp:
+//    - Validate user có quyền xóa share này
+//    - User phải là người tạo share HOẶC có quyền với ownerOrg
+//    - Sử dụng GetUserAllowedOrganizationIDs để check quyền
+// 2. Logic nghiệp vụ:
+//    - Query share từ database để lấy thông tin (CreatedBy, OwnerOrganizationID)
+//    - Check quyền dựa trên thông tin share (không phải chỉ dựa trên ID)
+// 3. Response format:
+//    - Trả về message thành công (không phải document đã xóa)
+//
+// KẾT LUẬN: Cần giữ endpoint đặc biệt vì authorization check phức tạp
+//           (check user là người tạo hoặc có quyền với ownerOrg)
 func (h *OrganizationShareHandler) DeleteShare(c fiber.Ctx) error {
 	return h.SafeHandler(c, func() error {
 		id := c.Params("id")
@@ -284,6 +319,23 @@ func (h *OrganizationShareHandler) DeleteShare(c fiber.Ctx) error {
 
 // ListShares liệt kê các shares của organization
 // GET /api/v1/organization-shares?ownerOrganizationId=xxx hoặc ?toOrgId=xxx
+//
+// LÝ DO PHẢI TẠO ENDPOINT ĐẶC BIỆT (không thể dùng CRUD chuẩn):
+// 1. Query phức tạp với nhiều điều kiện:
+//    - Filter theo ownerOrganizationId: query shares có ownerOrganizationId = xxx
+//    - Filter theo toOrgId: query shares có toOrgId trong mảng ToOrgIDs HOẶC share với tất cả (ToOrgIDs rỗng)
+//    - Query đặc biệt: sử dụng $or để check cả 2 trường hợp (toOrgId trong array hoặc share với tất cả)
+// 2. Authorization check:
+//    - Validate user có quyền xem shares của ownerOrg (nếu filter theo ownerOrganizationId)
+//    - Sử dụng GetUserAllowedOrganizationIDs để check quyền
+// 3. Query logic đặc biệt:
+//    - Filter theo toOrgId: cần check cả shares có toOrgId trong ToOrgIDs và shares share với tất cả
+//    - Sử dụng MongoDB $or operator với nhiều điều kiện phức tạp
+// 4. Validation:
+//    - Phải có ít nhất một filter (ownerOrganizationId hoặc toOrgId)
+//    - Validate ObjectID format cho cả 2 tham số
+//
+// KẾT LUẬN: Cần giữ endpoint đặc biệt vì query phức tạp với $or operator và authorization check
 func (h *OrganizationShareHandler) ListShares(c fiber.Ctx) error {
 	return h.SafeHandler(c, func() error {
 		ownerOrgIDStr := c.Query("ownerOrganizationId")

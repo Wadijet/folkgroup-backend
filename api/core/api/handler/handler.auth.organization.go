@@ -57,6 +57,34 @@ func NewOrganizationHandler() (*OrganizationHandler, error) {
 }
 
 // InsertOne override method InsertOne để chuyển đổi từ DTO sang Model và tính toán Path, Level
+//
+// LÝ DO PHẢI OVERRIDE (không thể dùng CRUD chuẩn):
+// 1. Tính toán Path và Level dựa trên parent (logic nghiệp vụ phức tạp):
+//    - Nếu có ParentID:
+//      + Query parent organization từ database để lấy Path và Level
+//      + Tính Path mới: parent.Path + "/" + code
+//      + Tính Level mới: dựa trên Type và parent.Level (sử dụng calculateLevel)
+//    - Nếu không có ParentID:
+//      + Chỉ có thể là "system" (Level = -1, Path = "/" + code) hoặc "group" (Level = 0, Path = "/" + code)
+//      + Validate: các Type khác phải có parent
+// 2. Validation nghiệp vụ đặc biệt:
+//    - Validate ParentID tồn tại trong database (nếu có)
+//    - Validate Type: chỉ "system" và "group" mới có thể không có parent
+//    - Validate Type khác phải có parent
+// 3. Logic tính toán Level phức tạp:
+//    - System: Level = -1
+//    - Group: Level = 0
+//    - Company: Level = 1
+//    - Department: Level = 2
+//    - Division: Level = 3
+//    - Team: Level = parentLevel + 1 (có thể là 4+)
+//    - Các Type khác: Level = parentLevel + 1
+// 4. Query database để lấy parent:
+//    - Cần query parent organization để lấy Path và Level
+//    - Validate parent tồn tại trước khi tính toán
+//
+// KẾT LUẬN: Cần giữ override vì logic nghiệp vụ phức tạp (tính toán Path/Level dựa trên parent,
+//           query database để lấy parent, validate Type và parent relationship)
 func (h *OrganizationHandler) InsertOne(c fiber.Ctx) error {
 	return h.SafeHandler(c, func() error {
 		// Parse request body thành DTO

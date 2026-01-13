@@ -34,12 +34,6 @@ type AIPromptTemplate struct {
 	Prompt      string `json:"prompt" bson:"prompt"`                            // Nội dung prompt (có thể chứa variables: {{variableName}})
 	Variables   []AIPromptTemplateVariable `json:"variables,omitempty" bson:"variables,omitempty"` // Danh sách biến trong prompt
 
-	// ===== AI CONFIG =====
-	ProviderProfileID *primitive.ObjectID `json:"providerProfileId,omitempty" bson:"providerProfileId,omitempty" index:"single:1"` // ID của AI provider profile (tùy chọn, có thể override trong workflow run)
-	Model            string               `json:"model,omitempty" bson:"model,omitempty"` // Model name (ví dụ: "gpt-4", "claude-3-opus") (tùy chọn, có thể override)
-	Temperature      *float64             `json:"temperature,omitempty" bson:"temperature,omitempty"` // Temperature (tùy chọn)
-	MaxTokens        *int                 `json:"maxTokens,omitempty" bson:"maxTokens,omitempty"` // Max tokens (tùy chọn)
-
 	// ===== STATUS =====
 	Status string `json:"status" bson:"status" index:"single:1"` // Trạng thái: "active", "archived", "draft"
 

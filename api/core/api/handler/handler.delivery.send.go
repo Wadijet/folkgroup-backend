@@ -62,6 +62,28 @@ type DeliverySendResponse struct {
 }
 
 // HandleSend xử lý request gửi notification trực tiếp
+//
+// LÝ DO PHẢI TẠO ENDPOINT ĐẶC BIỆT (không thể dùng CRUD chuẩn):
+// 1. Logic nghiệp vụ phức tạp (gửi notification trực tiếp):
+//    - Tìm sender cho channelType
+//    - Convert CTAs sang JSON strings
+//    - Tạo DeliveryHistory record
+//    - Gửi notification qua sender (email/telegram/webhook)
+//    - Update DeliveryHistory với kết quả gửi
+// 2. Cross-service operations:
+//    - Sử dụng NotificationSenderService để tìm sender
+//    - Sử dụng DeliveryHistoryService để tạo history
+//    - Gọi sender.Send() để gửi notification thực tế
+// 3. Real-time operation:
+//    - Gửi notification ngay lập tức (không queue)
+//    - Có thể block cho đến khi gửi xong
+//    - Update history với status và kết quả
+// 4. Response format đặc biệt:
+//    - Trả về thông tin về notification đã gửi
+//    - Có thể có error nếu gửi thất bại
+//
+// KẾT LUẬN: Cần giữ endpoint đặc biệt vì đây là workflow action (send) với logic nghiệp vụ phức tạp,
+//           cross-service operations, và real-time gửi notification
 func (h *DeliverySendHandler) HandleSend(c fiber.Ctx) error {
 	return SafeHandlerWrapper(c, func() error {
 		var req DeliverySendRequest

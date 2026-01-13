@@ -7,12 +7,14 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 
 	"meta_commerce/core/delivery"
 	"meta_commerce/core/global"
 	"meta_commerce/core/logger"
+	"meta_commerce/core/worker"
 )
 
 // initLogger khởi tạo và cấu hình logger cho toàn bộ ứng dụng
@@ -174,6 +176,62 @@ func main() {
 		}()
 
 		log.Info("📦 [DELIVERY] Delivery Processor started successfully")
+	}
+
+	// Khởi tạo và chạy Command Cleanup Worker (background worker - Module 2)
+	// Worker này tự động giải phóng các AI workflow commands bị stuck
+	commandCleanupWorker, err := worker.NewCommandCleanupWorker(1*time.Minute, 300) // Chạy mỗi 1 phút, timeout 5 phút
+	if err != nil {
+		log.WithError(err).Error("Failed to create command cleanup worker, continuing without cleanup worker")
+	} else {
+		// Tạo context với cancel để có thể dừng worker khi cần
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// Chạy worker trong goroutine riêng với recover
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.WithFields(map[string]interface{}{
+						"panic": r,
+					}).Error("🔄 [COMMAND_CLEANUP] Worker goroutine panic, worker sẽ tự khởi động lại")
+				}
+			}()
+
+			log.Info("🔄 [COMMAND_CLEANUP] Starting Command Cleanup Worker...")
+			commandCleanupWorker.Start(ctx)
+			log.Warn("🔄 [COMMAND_CLEANUP] Worker đã dừng (có thể do context cancelled)")
+		}()
+
+		log.Info("🔄 [COMMAND_CLEANUP] Command Cleanup Worker started successfully")
+	}
+
+	// Khởi tạo và chạy Agent Command Cleanup Worker (background worker - Agent Management)
+	// Worker này tự động giải phóng các agent commands bị stuck
+	agentCommandCleanupWorker, err := worker.NewAgentCommandCleanupWorker(1*time.Minute, 300) // Chạy mỗi 1 phút, timeout 5 phút
+	if err != nil {
+		log.WithError(err).Error("Failed to create agent command cleanup worker, continuing without cleanup worker")
+	} else {
+		// Tạo context với cancel để có thể dừng worker khi cần
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// Chạy worker trong goroutine riêng với recover
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.WithFields(map[string]interface{}{
+						"panic": r,
+					}).Error("🔄 [AGENT_COMMAND_CLEANUP] Worker goroutine panic, worker sẽ tự khởi động lại")
+				}
+			}()
+
+			log.Info("🔄 [AGENT_COMMAND_CLEANUP] Starting Agent Command Cleanup Worker...")
+			agentCommandCleanupWorker.Start(ctx)
+			log.Warn("🔄 [AGENT_COMMAND_CLEANUP] Worker đã dừng (có thể do context cancelled)")
+		}()
+
+		log.Info("🔄 [AGENT_COMMAND_CLEANUP] Agent Command Cleanup Worker started successfully")
 	}
 
 	// Chạy Fiber server trên main thread

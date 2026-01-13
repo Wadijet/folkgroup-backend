@@ -57,6 +57,23 @@ func NewDraftApprovalHandler() (*DraftApprovalHandler, error) {
 }
 
 // InsertOne override method InsertOne để chuyển đổi từ DTO sang Model
+//
+// LÝ DO PHẢI OVERRIDE (không thể dùng CRUD chuẩn):
+// 1. Validation nghiệp vụ phức tạp:
+//   - Phải có ít nhất một target: workflowRunId, draftNodeId, draftVideoId, hoặc draftPublicationId
+//   - Đây là validation cross-field (kiểm tra nhiều field cùng lúc), không thể dùng validate tag đơn giản
+//
+// 2. Logic nghiệp vụ đặc biệt:
+//   - Set RequestedBy tự động từ context (user_id) - không cho phép client chỉ định
+//   - Set RequestedAt tự động (timestamp hiện tại)
+//   - Set Status = "pending" mặc định (không cho phép client chỉ định status khi tạo)
+//
+// 3. Convert nhiều optional ObjectID fields:
+//   - WorkflowRunID, DraftNodeID, DraftVideoID, DraftPublicationID đều là optional
+//   - Cần validate từng field riêng biệt và convert string → *ObjectID
+//   - Transform tag có thể hỗ trợ, nhưng validation "ít nhất một target" vẫn cần logic đặc biệt
+//
+// KẾT LUẬN: Cần giữ override vì validation cross-field và logic nghiệp vụ đặc biệt (set RequestedBy từ context)
 func (h *DraftApprovalHandler) InsertOne(c fiber.Ctx) error {
 	return h.SafeHandler(c, func() error {
 		// Parse request body thành DTO
@@ -176,8 +193,25 @@ func (h *DraftApprovalHandler) InsertOne(c fiber.Ctx) error {
 
 // ApproveDraftWorkflowRun approve tất cả drafts của một workflow run
 // Endpoint: POST /api/v1/content/drafts/approvals/:id/approve
+//
+// LÝ DO PHẢI TẠO ENDPOINT ĐẶC BIỆT (không thể dùng CRUD chuẩn):
+// 1. Logic nghiệp vụ phức tạp:
+//   - Không chỉ update status, mà còn set decidedBy (từ context), decidedAt (timestamp hiện tại)
+//   - Validate status hiện tại phải là "pending" (không cho approve/reject approval đã xử lý)
+//   - Có thể trigger logic commit drafts sau khi approve (TODO: implement sau)
+//
+// 2. Workflow đặc biệt:
+//   - Đây là action nghiệp vụ (approve), không phải update đơn giản
+//   - Có thể có side effects (commit drafts, send notifications, etc.)
+//   - Cần validate quyền đặc biệt (chỉ người có quyền mới được approve)
+//
+// 3. Response format đặc biệt:
+//   - Trả về approval đã được update với thông tin quyết định
+//   - Có thể trả về thêm thông tin về drafts đã được commit (khi implement)
+//
 // Tham số:
 //   - id: ID của approval request
+//
 // Body:
 //   - decisionNote: Ghi chú về quyết định (tùy chọn)
 func (h *DraftApprovalHandler) ApproveDraftWorkflowRun(c fiber.Ctx) error {
@@ -261,9 +295,9 @@ func (h *DraftApprovalHandler) ApproveDraftWorkflowRun(c fiber.Ctx) error {
 
 		// Update approval status
 		updateData := map[string]interface{}{
-			"status":     models.ApprovalRequestStatusApproved,
-			"decidedBy":  userID,
-			"decidedAt":  time.Now().UnixMilli(),
+			"status":       models.ApprovalRequestStatusApproved,
+			"decidedBy":    userID,
+			"decidedAt":    time.Now().UnixMilli(),
 			"decisionNote": body.DecisionNote,
 		}
 		updatedApproval, err := h.DraftApprovalService.UpdateById(c.Context(), approvalID, &services.UpdateData{
@@ -274,8 +308,102 @@ func (h *DraftApprovalHandler) ApproveDraftWorkflowRun(c fiber.Ctx) error {
 			return nil
 		}
 
-		// TODO: Nếu có workflowRunID, commit tất cả drafts của workflow run
-		// Logic này sẽ được implement sau khi có service commit drafts
+		// Nếu có workflowRunID, commit tất cả drafts của workflow run tuần tự theo level
+		if approval.WorkflowRunID != nil {
+			// Lấy draft content node service
+			draftContentNodeService, err := services.NewDraftContentNodeService()
+			if err != nil {
+				h.HandleResponse(c, nil, common.NewError(
+					common.ErrCodeInternalServer,
+					fmt.Sprintf("Lỗi khi khởi tạo draft content node service: %v", err),
+					common.StatusInternalServerError,
+					err,
+				))
+				return nil
+			}
+
+			// Lấy tất cả drafts của workflow run
+			drafts, err := draftContentNodeService.GetDraftsByWorkflowRunID(c.Context(), *approval.WorkflowRunID)
+			if err != nil {
+				h.HandleResponse(c, nil, common.NewError(
+					common.ErrCodeDatabaseQuery,
+					fmt.Sprintf("Lỗi khi lấy drafts của workflow run: %v", err),
+					common.StatusInternalServerError,
+					err,
+				))
+				return nil
+			}
+
+			// Sắp xếp drafts theo level (L1 → L2 → ... → L6)
+			// Tạo map level → drafts
+			levelDrafts := make(map[int][]models.DraftContentNode)
+			for _, draft := range drafts {
+				level := utility.GetContentLevel(draft.Type)
+				if level > 0 {
+					levelDrafts[level] = append(levelDrafts[level], draft)
+				}
+			}
+
+			// Commit tuần tự từ L1 → L2 → ... → L6
+			var committedNodes []models.ContentNode
+			for level := 1; level <= 6; level++ {
+				draftsAtLevel, exists := levelDrafts[level]
+				if !exists {
+					continue // Không có draft ở level này
+				}
+
+				// Commit tất cả drafts ở level này
+				for _, draft := range draftsAtLevel {
+					// Kiểm tra draft đã được approve chưa
+					if draft.ApprovalStatus != models.DraftApprovalStatusApproved {
+						// Update approval status của draft
+						updateData := map[string]interface{}{
+							"approvalStatus": models.DraftApprovalStatusApproved,
+						}
+						_, err := draftContentNodeService.UpdateById(c.Context(), draft.ID, &services.UpdateData{
+							Set: updateData,
+						})
+						if err != nil {
+							h.HandleResponse(c, nil, common.NewError(
+								common.ErrCodeDatabaseQuery,
+								fmt.Sprintf("Lỗi khi update approval status của draft %s: %v", draft.ID.Hex(), err),
+								common.StatusInternalServerError,
+								err,
+							))
+							return nil
+						}
+						draft.ApprovalStatus = models.DraftApprovalStatusApproved
+					}
+
+					// Commit draft → production
+					contentNode, err := draftContentNodeService.CommitDraftNode(c.Context(), draft.ID)
+					if err != nil {
+						h.HandleResponse(c, nil, common.NewError(
+							common.ErrCodeBusinessOperation,
+							fmt.Sprintf("Lỗi khi commit draft %s (type: %s, L%d): %v. Đã commit thành công %d nodes trước đó.",
+								draft.ID.Hex(), draft.Type, level, err, len(committedNodes)),
+							common.StatusBadRequest,
+							err,
+						))
+						return nil
+					}
+					committedNodes = append(committedNodes, *contentNode)
+				}
+			}
+
+			// Trả về approval với thông tin đã commit
+			// Có thể thêm metadata về committed nodes nếu cần
+			updatedApproval.Metadata = map[string]interface{}{
+				"committedNodesCount": len(committedNodes),
+				"committedNodeIds": func() []string {
+					ids := make([]string, len(committedNodes))
+					for i, node := range committedNodes {
+						ids[i] = node.ID.Hex()
+					}
+					return ids
+				}(),
+			}
+		}
 
 		h.HandleResponse(c, updatedApproval, nil)
 		return nil
@@ -284,8 +412,25 @@ func (h *DraftApprovalHandler) ApproveDraftWorkflowRun(c fiber.Ctx) error {
 
 // RejectDraftWorkflowRun reject approval request
 // Endpoint: POST /api/v1/content/drafts/approvals/:id/reject
+//
+// LÝ DO PHẢI TẠO ENDPOINT ĐẶC BIỆT (không thể dùng CRUD chuẩn):
+// 1. Logic nghiệp vụ phức tạp:
+//   - Không chỉ update status, mà còn set decidedBy (từ context), decidedAt (timestamp hiện tại)
+//   - Validate status hiện tại phải là "pending" (không cho reject approval đã xử lý)
+//   - DecisionNote là BẮT BUỘC khi reject (validation đặc biệt)
+//
+// 2. Workflow đặc biệt:
+//   - Đây là action nghiệp vụ (reject), không phải update đơn giản
+//   - Có thể có side effects (send notifications, update draft status, etc.)
+//   - Cần validate quyền đặc biệt (chỉ người có quyền mới được reject)
+//
+// 3. Validation đặc biệt:
+//   - DecisionNote phải có giá trị (bắt buộc khi reject) - khác với approve (optional)
+//   - Đây là business rule: khi reject phải có lý do
+//
 // Tham số:
 //   - id: ID của approval request
+//
 // Body:
 //   - decisionNote: Ghi chú về quyết định (bắt buộc khi reject)
 func (h *DraftApprovalHandler) RejectDraftWorkflowRun(c fiber.Ctx) error {
@@ -374,9 +519,9 @@ func (h *DraftApprovalHandler) RejectDraftWorkflowRun(c fiber.Ctx) error {
 
 		// Update approval status
 		updateData := map[string]interface{}{
-			"status":      models.ApprovalRequestStatusRejected,
-			"decidedBy":   userID,
-			"decidedAt":   time.Now().UnixMilli(),
+			"status":       models.ApprovalRequestStatusRejected,
+			"decidedBy":    userID,
+			"decidedAt":    time.Now().UnixMilli(),
 			"decisionNote": body.DecisionNote,
 		}
 		updatedApproval, err := h.DraftApprovalService.UpdateById(c.Context(), approvalID, &services.UpdateData{

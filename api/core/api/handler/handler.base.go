@@ -1046,3 +1046,136 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) ParsePagination(c fiber.Ctx) 
 func (h *BaseHandler[T, CreateInput, UpdateInput]) GetIDFromContext(c fiber.Ctx) string {
 	return c.Params("id")
 }
+
+// transformCreateInputToModel transform CreateInput (DTO) sang Model (T)
+// Sử dụng struct tag `transform` để tự động convert các field (ví dụ: string → ObjectID)
+// Hỗ trợ map field từ DTO sang Model với tên khác nhau thông qua option `map=<field_name>`
+//
+// Parameters:
+// - input: CreateInput (DTO) cần transform
+//
+// Returns:
+// - *T: Model đã được transform
+// - error: Lỗi nếu có trong quá trình transform
+func (h *BaseHandler[T, CreateInput, UpdateInput]) transformCreateInputToModel(input *CreateInput) (*T, error) {
+	// Tạo Model mới
+	model := new(T)
+
+	// Lấy reflect value và type của DTO và Model
+	inputVal := reflect.ValueOf(input)
+	if inputVal.Kind() == reflect.Ptr {
+		inputVal = inputVal.Elem()
+	}
+	if inputVal.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("CreateInput phải là struct hoặc pointer đến struct")
+	}
+
+	modelVal := reflect.ValueOf(model)
+	if modelVal.Kind() == reflect.Ptr {
+		modelVal = modelVal.Elem()
+	}
+	if modelVal.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("Model phải là struct hoặc pointer đến struct")
+	}
+
+	inputType := inputVal.Type()
+	modelType := modelVal.Type()
+
+	// Duyệt qua tất cả các field trong DTO
+	for i := 0; i < inputVal.NumField(); i++ {
+		inputField := inputVal.Field(i)
+		inputFieldType := inputType.Field(i)
+
+		// Bỏ qua field không export được
+		if !inputField.CanInterface() {
+			continue
+		}
+
+		// Lấy giá trị field
+		fieldValue := inputField.Interface()
+
+		// Kiểm tra có transform tag không
+		transformTag := inputFieldType.Tag.Get("transform")
+		if transformTag != "" {
+			// Parse transform tag
+			transformConfig, err := utility.ParseTransformTag(transformTag)
+			if err != nil {
+				return nil, fmt.Errorf("lỗi parse transform tag cho field %s: %w", inputFieldType.Name, err)
+			}
+
+			// Xác định field target trong Model
+			targetFieldName := inputFieldType.Name // Mặc định: cùng tên
+			if transformConfig.MapTo != "" {
+				// Có map option → dùng tên field từ map
+				targetFieldName = transformConfig.MapTo
+			}
+
+			// Tìm field trong Model
+			modelField, found := modelType.FieldByName(targetFieldName)
+			if !found {
+				// Không tìm thấy field trong Model
+				if transformConfig.Optional {
+					// Optional field → bỏ qua
+					continue
+				}
+				return nil, fmt.Errorf("không tìm thấy field '%s' trong Model (map từ field '%s' trong DTO)", targetFieldName, inputFieldType.Name)
+			}
+
+			// Transform giá trị
+			transformedValue, err := utility.TransformFieldValue(fieldValue, transformConfig, modelField.Type)
+			if err != nil {
+				if transformConfig.Optional {
+					// Optional field → bỏ qua lỗi
+					continue
+				}
+				return nil, fmt.Errorf("lỗi transform field '%s' sang '%s': %w", inputFieldType.Name, targetFieldName, err)
+			}
+
+			// Set giá trị vào Model field
+			modelFieldVal := modelVal.FieldByName(targetFieldName)
+			if !modelFieldVal.IsValid() || !modelFieldVal.CanSet() {
+				return nil, fmt.Errorf("không thể set giá trị vào field '%s' trong Model", targetFieldName)
+			}
+
+			// Convert và set giá trị
+			if transformedValue != nil {
+				transformedVal := reflect.ValueOf(transformedValue)
+				if transformedVal.Type().AssignableTo(modelFieldVal.Type()) {
+					modelFieldVal.Set(transformedVal)
+				} else if transformedVal.Type().ConvertibleTo(modelFieldVal.Type()) {
+					modelFieldVal.Set(transformedVal.Convert(modelFieldVal.Type()))
+				} else {
+					return nil, fmt.Errorf("không thể convert giá trị từ type %v sang type %v cho field '%s'", transformedVal.Type(), modelFieldVal.Type(), targetFieldName)
+				}
+			} else if transformConfig.Optional {
+				// Optional field với giá trị nil → giữ nguyên zero value
+				continue
+			}
+		} else {
+			// Không có transform tag → copy trực tiếp nếu field cùng tên và type tương thích
+			targetFieldName := inputFieldType.Name
+			_, found := modelType.FieldByName(targetFieldName)
+			if !found {
+				// Không có field cùng tên trong Model → bỏ qua
+				continue
+			}
+
+			// Kiểm tra type tương thích
+			modelFieldVal := modelVal.FieldByName(targetFieldName)
+			if !modelFieldVal.IsValid() || !modelFieldVal.CanSet() {
+				continue
+			}
+
+			// Copy giá trị nếu type tương thích
+			inputValReflect := reflect.ValueOf(fieldValue)
+			if inputValReflect.Type().AssignableTo(modelFieldVal.Type()) {
+				modelFieldVal.Set(inputValReflect)
+			} else if inputValReflect.Type().ConvertibleTo(modelFieldVal.Type()) {
+				modelFieldVal.Set(inputValReflect.Convert(modelFieldVal.Type()))
+			}
+			// Nếu không tương thích → bỏ qua (có thể cần transform tag)
+		}
+	}
+
+	return model, nil
+}

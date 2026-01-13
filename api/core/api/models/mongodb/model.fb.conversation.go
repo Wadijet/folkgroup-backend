@@ -16,6 +16,9 @@ type FbConversation struct {
 	PanCakeData      map[string]interface{} `json:"panCakeData" bson:"panCakeData"`                                                                                                        // Dữ liệu API
 	PanCakeUpdatedAt int64                  `json:"panCakeUpdatedAt" bson:"panCakeUpdatedAt" extract:"PanCakeData\\.updated_at,converter=time,format=2006-01-02T15:04:05.000000,optional"` // Thời gian cập nhật dữ liệu API (extract từ PanCakeData["updated_at"])
 
+	// ===== SYNC FLAGS =====
+	NeedsPrioritySync bool `json:"needsPrioritySync" bson:"needsPrioritySync" index:"single:1"` // Đánh dấu hội thoại này cần ưu tiên đồng bộ lại ngay
+
 	// ===== ORGANIZATION =====
 	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1"` // Tổ chức sở hữu dữ liệu (phân quyền)
 

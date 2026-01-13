@@ -19,6 +19,26 @@ func NewCTATrackHandler() *CTATrackHandler {
 }
 
 // TrackCTAClick xử lý click vào CTA (public endpoint, không cần auth)
+//
+// LÝ DO PHẢI TẠO ENDPOINT ĐẶC BIỆT (không thể dùng CRUD chuẩn):
+// 1. Public endpoint (không cần authentication):
+//    - User click CTA trong email → redirect qua tracking URL
+//    - Không có authentication token, chỉ có historyId và ctaIndex trong URL
+//    - Phải redirect về original URL sau khi track
+// 2. Logic nghiệp vụ:
+//    - Decode tracking URL từ query params (sử dụng cta.DecodeTrackingURL)
+//    - Lấy IP address và User Agent từ request
+//    - Gọi cta.TrackCTAClick để ghi lại click (có thể tạo CTA click record)
+//    - Redirect về original URL (HTTP redirect, không phải JSON response)
+// 3. Response format đặc biệt:
+//    - Trả về HTTP redirect (302) về original URL
+//    - Không phải format CRUD chuẩn (JSON response)
+// 4. Cross-module operation:
+//    - Sử dụng cta package để decode URL và track click
+//    - Có thể tạo record trong CTA click collection
+//
+// KẾT LUẬN: Cần giữ endpoint đặc biệt vì đây là public endpoint với redirect logic,
+//           decode tracking URL, và response format đặc biệt (HTTP redirect)
 func (h *CTATrackHandler) TrackCTAClick(c fiber.Ctx) error {
 	// Lấy historyId và ctaIndex từ params
 	historyIDStr := c.Params("historyId")

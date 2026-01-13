@@ -86,6 +86,7 @@ func initColNames() {
 	global.MongoDB_ColNames.AIWorkflows = "ai_workflows"
 	global.MongoDB_ColNames.AISteps = "ai_steps"
 	global.MongoDB_ColNames.AIPromptTemplates = "ai_prompt_templates"
+	global.MongoDB_ColNames.AIProviderProfiles = "ai_provider_profiles"
 	global.MongoDB_ColNames.AIWorkflowRuns = "ai_workflow_runs"
 	global.MongoDB_ColNames.AIStepRuns = "ai_step_runs"
 	global.MongoDB_ColNames.AIGenerationBatches = "ai_generation_batches"
@@ -182,6 +183,7 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AIWorkflows), models.AIWorkflow{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AISteps), models.AIStep{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AIPromptTemplates), models.AIPromptTemplate{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AIProviderProfiles), models.AIProviderProfile{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AIWorkflowRuns), models.AIWorkflowRun{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AIStepRuns), models.AIStepRun{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AIGenerationBatches), models.AIGenerationBatch{})

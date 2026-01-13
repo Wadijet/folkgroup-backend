@@ -5,10 +5,6 @@ import (
 	"meta_commerce/core/api/dto"
 	models "meta_commerce/core/api/models/mongodb"
 	"meta_commerce/core/api/services"
-	"meta_commerce/core/common"
-	"meta_commerce/core/utility"
-
-	"github.com/gofiber/fiber/v3"
 )
 
 // PermissionHandler xử lý các route liên quan đến permission cho Fiber
@@ -55,126 +51,10 @@ func NewPermissionHandler() (*PermissionHandler, error) {
 	return handler, nil
 }
 
-// HandleCreatePermission xử lý tạo mới permission
-func (h *PermissionHandler) HandleCreatePermission(c fiber.Ctx) error {
-	input := new(dto.PermissionCreateInput)
-	if err := h.ParseRequestBody(c, input); err != nil {
-		h.HandleResponse(c, nil, err)
-		return nil
-	}
-
-	// Chuyển đổi từ PermissionCreateInput sang Permission
-	permission := models.Permission{
-		Name:     input.Name,
-		Describe: input.Describe,
-		Category: input.Category,
-		Group:    input.Group,
-	}
-
-	data, err := h.BaseService.InsertOne(c.Context(), permission)
-	h.HandleResponse(c, data, err)
-	return nil
-}
-
-// HandleUpdatePermission xử lý cập nhật permission
-func (h *PermissionHandler) HandleUpdatePermission(c fiber.Ctx) error {
-	id := h.GetIDFromContext(c)
-	if id == "" {
-		h.HandleResponse(c, nil, common.NewError(common.ErrCodeValidationFormat, "ID không hợp lệ", common.StatusBadRequest, nil))
-		return nil
-	}
-
-	input := new(dto.PermissionUpdateInput)
-	if err := h.ParseRequestBody(c, input); err != nil {
-		h.HandleResponse(c, nil, err)
-		return nil
-	}
-
-	// Chuyển đổi từ PermissionUpdateInput sang Permission
-	permission := models.Permission{
-		Name:     input.Name,
-		Describe: input.Describe,
-		Category: input.Category,
-		Group:    input.Group,
-	}
-
-	data, err := h.BaseService.UpdateById(c.Context(), utility.String2ObjectID(id), permission)
-	h.HandleResponse(c, data, err)
-	return nil
-}
-
-// HandleGetPermissionById xử lý lấy thông tin permission theo ID
-func (h *PermissionHandler) HandleGetPermissionById(c fiber.Ctx) error {
-	id := h.GetIDFromContext(c)
-	if id == "" {
-		h.HandleResponse(c, nil, common.NewError(common.ErrCodeValidationFormat, "ID không hợp lệ", common.StatusBadRequest, nil))
-		return nil
-	}
-
-	data, err := h.BaseService.FindOneById(c.Context(), utility.String2ObjectID(id))
-	h.HandleResponse(c, data, err)
-	return nil
-}
-
-// HandleGetPermissions xử lý lấy danh sách permission với phân trang
-func (h *PermissionHandler) HandleGetPermissions(c fiber.Ctx) error {
-	// Parse filter từ query params
-	var filter map[string]interface{}
-	if err := c.Bind().Query(&filter); err != nil {
-		filter = make(map[string]interface{})
-	}
-
-	// Lấy thông tin phân trang
-	page, limit := h.ParsePagination(c)
-
-	data, err := h.BaseService.FindWithPagination(c.Context(), filter, page, limit, nil)
-	h.HandleResponse(c, data, err)
-	return nil
-}
-
-// HandleDeletePermission xử lý xóa permission
-func (h *PermissionHandler) HandleDeletePermission(c fiber.Ctx) error {
-	id := h.GetIDFromContext(c)
-	if id == "" {
-		h.HandleResponse(c, nil, common.NewError(common.ErrCodeValidationFormat, "ID không hợp lệ", common.StatusBadRequest, nil))
-		return nil
-	}
-
-	err := h.BaseService.DeleteById(c.Context(), utility.String2ObjectID(id))
-	h.HandleResponse(c, nil, err)
-	return nil
-}
-
-// HandleGetPermissionsByCategory xử lý lấy danh sách permission theo category
-func (h *PermissionHandler) HandleGetPermissionsByCategory(c fiber.Ctx) error {
-	category := c.Params("category")
-	if category == "" {
-		h.HandleResponse(c, nil, common.NewError(common.ErrCodeValidationFormat, "Category không hợp lệ", common.StatusBadRequest, nil))
-		return nil
-	}
-
-	filter := map[string]interface{}{
-		"category": category,
-	}
-
-	data, err := h.BaseService.Find(c.Context(), filter, nil)
-	h.HandleResponse(c, data, err)
-	return nil
-}
-
-// HandleGetPermissionsByGroup xử lý lấy danh sách permission theo group
-func (h *PermissionHandler) HandleGetPermissionsByGroup(c fiber.Ctx) error {
-	group := c.Params("group")
-	if group == "" {
-		h.HandleResponse(c, nil, common.NewError(common.ErrCodeValidationFormat, "Group không hợp lệ", common.StatusBadRequest, nil))
-		return nil
-	}
-
-	filter := map[string]interface{}{
-		"group": group,
-	}
-
-	data, err := h.BaseService.Find(c.Context(), filter, nil)
-	h.HandleResponse(c, data, err)
-	return nil
-}
+// Tất cả các CRUD operations đã được cung cấp bởi BaseHandler:
+// - InsertOne: Tạo mới permission
+// - UpdateById: Cập nhật permission theo ID
+// - FindOneById: Lấy permission theo ID
+// - FindWithPagination: Lấy danh sách permission với phân trang
+// - DeleteById: Xóa permission theo ID
+// - Find: Lấy danh sách permission với filter (có thể dùng cho category/group)

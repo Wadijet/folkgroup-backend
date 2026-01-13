@@ -2,8 +2,8 @@ package dto
 
 // AIWorkflowRunCreateInput dữ liệu đầu vào khi tạo AI workflow run
 type AIWorkflowRunCreateInput struct {
-	WorkflowID  string                 `json:"workflowId" validate:"required"`  // ID của workflow definition (dạng string ObjectID)
-	RootRefID   string                 `json:"rootRefId,omitempty"`               // ID của root content (dạng string ObjectID)
+	WorkflowID  string                 `json:"workflowId" validate:"required" transform:"str_objectid"`  // ID của workflow definition (dạng string ObjectID) - tự động convert sang primitive.ObjectID
+	RootRefID   string                 `json:"rootRefId,omitempty" transform:"str_objectid_ptr,optional"`               // ID của root content (dạng string ObjectID) - tự động convert sang *primitive.ObjectID
 	RootRefType string                 `json:"rootRefType,omitempty"`             // Loại root reference: "layer", "stp", etc.
 	Params      map[string]interface{} `json:"params,omitempty"`                 // Tham số bổ sung cho workflow run
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`                // Metadata bổ sung

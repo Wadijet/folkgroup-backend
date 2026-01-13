@@ -60,6 +60,27 @@ func NewRolePermissionHandler() (*RolePermissionHandler, error) {
 }
 
 // HandleUpdateRolePermissions xử lý cập nhật quyền cho vai trò
+//
+// LÝ DO PHẢI TẠO ENDPOINT ĐẶC BIỆT (không thể dùng CRUD chuẩn):
+// 1. Atomic operation (xóa rồi tạo mới):
+//    - Xóa TẤT CẢ role permissions cũ của role (DeleteMany với filter roleId)
+//    - Tạo mới TẤT CẢ role permissions từ danh sách mới (InsertMany)
+//    - Đảm bảo atomic: không có trạng thái trung gian (một phần permissions cũ, một phần mới)
+// 2. Logic nghiệp vụ đặc biệt:
+//    - Đây là "replace all" operation, không phải update từng item
+//    - Client gửi danh sách permissions mới, hệ thống thay thế toàn bộ
+//    - Set CreatedAt và UpdatedAt tự động cho tất cả permissions mới
+// 3. Input format đặc biệt:
+//    - Input: {roleId, permissions: [{permissionId, scope}]}
+//    - Output: Array các RolePermission đã được tạo
+//    - Không phải format CRUD chuẩn (update một document)
+// 4. Performance:
+//    - Sử dụng DeleteMany và InsertMany (batch operations) thay vì update từng item
+//    - Hiệu quả hơn khi có nhiều permissions
+//
+// KẾT LUẬN: Cần giữ endpoint đặc biệt vì đây là atomic "replace all" operation
+//           (xóa tất cả rồi tạo mới) để đảm bảo consistency
+//
 // Parameters:
 //   - c: Context của Fiber chứa thông tin request
 //

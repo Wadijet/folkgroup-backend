@@ -9,6 +9,7 @@ import (
 	"meta_commerce/core/common"
 
 	"github.com/gofiber/fiber/v3"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // AIWorkflowHandler xử lý các request liên quan đến AI Workflow (Module 2)
@@ -36,6 +37,22 @@ func NewAIWorkflowHandler() (*AIWorkflowHandler, error) {
 }
 
 // InsertOne override method InsertOne để chuyển đổi từ DTO sang Model
+//
+// LÝ DO PHẢI OVERRIDE (không thể dùng CRUD chuẩn):
+// 1. Convert nested structures phức tạp:
+//    - Steps: Convert từ []dto.AIWorkflowStepReferenceInput (DTO) sang []models.AIWorkflowStepReference (Model)
+//    - Mỗi Step có Policy nested: Convert từ dto.AIWorkflowStepPolicyInput sang models.AIWorkflowStepPolicy
+//    - DefaultPolicy: Convert từ dto.AIWorkflowStepPolicyInput sang *models.AIWorkflowStepPolicy
+// 2. Logic nghiệp vụ đặc biệt:
+//    - Validate Status với danh sách giá trị hợp lệ: "active", "archived", "draft"
+//    - Set default Status = "active" nếu không có
+//    - Set CreatedAt và UpdatedAt tự động (timestamp milliseconds)
+// 3. Transform tag không hỗ trợ nested structures:
+//    - Transform tag hiện tại chỉ hỗ trợ convert primitive types (string → ObjectID, etc.)
+//    - Không hỗ trợ convert nested struct arrays và nested pointer structs
+//    - Cần logic đặc biệt để map từng field trong nested structures
+//
+// KẾT LUẬN: Cần giữ override vì logic convert nested structures quá phức tạp, không thể dùng transform tag
 func (h *AIWorkflowHandler) InsertOne(c fiber.Ctx) error {
 	return h.SafeHandler(c, func() error {
 		// Parse request body thành DTO
@@ -121,8 +138,39 @@ func (h *AIWorkflowHandler) InsertOne(c fiber.Ctx) error {
 			}
 		}
 
-		// Thực hiện insert
+		// ✅ Xử lý ownerOrganizationId: Cho phép chỉ định từ request hoặc dùng context
+		// Lấy organization ID từ role context (vì OrganizationContextMiddleware đã set active_role_id)
+		if activeRoleIDStr, ok := c.Locals("active_role_id").(string); ok && activeRoleIDStr != "" {
+			if activeRoleID, err := primitive.ObjectIDFromHex(activeRoleIDStr); err == nil {
+				// Lấy role để suy ra organization ID
+				roleService, err := services.NewRoleService()
+				if err == nil {
+					if role, err := roleService.FindOneById(c.Context(), activeRoleID); err == nil {
+						if !role.OwnerOrganizationID.IsZero() {
+							aiWorkflow.OwnerOrganizationID = role.OwnerOrganizationID
+						}
+					}
+				}
+			}
+		}
+		
+		// Fallback: Nếu vẫn chưa có, thử lấy từ active_organization_id trong context
+		if aiWorkflow.OwnerOrganizationID.IsZero() {
+			activeOrgID := h.getActiveOrganizationID(c)
+			if activeOrgID != nil && !activeOrgID.IsZero() {
+				aiWorkflow.OwnerOrganizationID = *activeOrgID
+			}
+		}
+
+		// ✅ Lưu userID vào context để service có thể check admin
 		ctx := c.Context()
+		if userIDStr, ok := c.Locals("user_id").(string); ok && userIDStr != "" {
+			if userID, err := primitive.ObjectIDFromHex(userIDStr); err == nil {
+				ctx = services.SetUserIDToContext(ctx, userID)
+			}
+		}
+
+		// Thực hiện insert
 		data, err := h.BaseService.InsertOne(ctx, aiWorkflow)
 		h.HandleResponse(c, data, err)
 		return nil

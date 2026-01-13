@@ -56,99 +56,28 @@ func NewContentNodeHandler() (*ContentNodeHandler, error) {
 	return handler, nil
 }
 
-// InsertOne override method InsertOne để chuyển đổi từ DTO sang Model
-func (h *ContentNodeHandler) InsertOne(c fiber.Ctx) error {
-	return h.SafeHandler(c, func() error {
-		// Parse request body thành DTO
-		var input dto.ContentNodeCreateInput
-		if err := h.ParseRequestBody(c, &input); err != nil {
-			h.HandleResponse(c, nil, common.NewError(
-				common.ErrCodeValidationFormat,
-				fmt.Sprintf("Dữ liệu gửi lên không đúng định dạng JSON hoặc không khớp với cấu trúc yêu cầu. Chi tiết: %v", err),
-				common.StatusBadRequest,
-				err,
-			))
-			return nil
-		}
-
-		// Validate type
-		validTypes := []string{
-			models.ContentNodeTypeLayer,
-			models.ContentNodeTypeSTP,
-			models.ContentNodeTypeInsight,
-			models.ContentNodeTypeContentLine,
-			models.ContentNodeTypeGene,
-			models.ContentNodeTypeScript,
-		}
-		typeValid := false
-		for _, validType := range validTypes {
-			if input.Type == validType {
-				typeValid = true
-				break
-			}
-		}
-		if !typeValid {
-			h.HandleResponse(c, nil, common.NewError(
-				common.ErrCodeValidationFormat,
-				fmt.Sprintf("Type '%s' không hợp lệ. Các giá trị hợp lệ: %v", input.Type, validTypes),
-				common.StatusBadRequest,
-				nil,
-			))
-			return nil
-		}
-
-		// Chuyển đổi DTO sang Model
-		contentNode := models.ContentNode{
-			Type:     input.Type,
-			Name:     input.Name,
-			Text:     input.Text,
-			Metadata: input.Metadata,
-		}
-
-		// Xử lý ParentID nếu có
-		if input.ParentID != "" {
-			if !primitive.IsValidObjectID(input.ParentID) {
-				h.HandleResponse(c, nil, common.NewError(
-					common.ErrCodeValidationFormat,
-					fmt.Sprintf("ParentID '%s' không đúng định dạng MongoDB ObjectID", input.ParentID),
-					common.StatusBadRequest,
-					nil,
-				))
-				return nil
-			}
-			parentID := utility.String2ObjectID(input.ParentID)
-			contentNode.ParentID = &parentID
-		}
-
-		// Set creator type và creation method (mặc định: human, manual)
-		if input.CreatorType == "" {
-			contentNode.CreatorType = models.CreatorTypeHuman
-		} else {
-			contentNode.CreatorType = input.CreatorType
-		}
-		if input.CreationMethod == "" {
-			contentNode.CreationMethod = models.CreationMethodManual
-		} else {
-			contentNode.CreationMethod = input.CreationMethod
-		}
-
-		// Set status (mặc định: active)
-		if input.Status == "" {
-			contentNode.Status = "active"
-		} else {
-			contentNode.Status = input.Status
-		}
-
-		// Thực hiện insert
-		ctx := c.Context()
-		data, err := h.BaseService.InsertOne(ctx, contentNode)
-		h.HandleResponse(c, data, err)
-		return nil
-	})
-}
-
 // GetTree lấy cây content nodes từ một root node (recursive)
 // Endpoint: GET /api/v1/content/nodes/tree/:id
+//
+// LÝ DO PHẢI TẠO ENDPOINT ĐẶC BIỆT (không thể dùng CRUD chuẩn):
+// 1. Logic đệ quy phức tạp:
+//    - Lấy root node từ ID
+//    - Query children của root node (sử dụng GetChildren service method)
+//    - Đệ quy build tree cho từng child (gọi buildTree đệ quy)
+//    - Trả về cấu trúc tree với children nested trong parent
+// 2. Query đặc biệt:
+//    - Sử dụng service method GetChildren (không phải Find đơn giản)
+//    - Cần query đệ quy nhiều lần để lấy toàn bộ tree
+// 3. Response format đặc biệt:
+//    - Trả về cấu trúc tree (nested structure) thay vì flat array
+//    - Mỗi node có field "children" chứa array các child nodes
+//    - Format: {id, type, name, text, status, metadata, createdAt, updatedAt, children: [...]}
+// 4. Performance optimization:
+//    - Có thể optimize bằng cách query tất cả nodes cùng lúc rồi build tree trong memory
+//    - Nhưng hiện tại dùng recursive query để đơn giản
+//
+// KẾT LUẬN: Cần giữ endpoint đặc biệt vì logic đệ quy phức tạp và response format đặc biệt (tree structure)
+//
 // Tham số:
 //   - id: ID của root node
 // Trả về:

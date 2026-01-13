@@ -54,6 +54,20 @@ func NewUserHandler() (*UserHandler, error) {
 }
 
 // HandleLogout xử lý đăng xuất người dùng
+//
+// LÝ DO PHẢI TẠO ENDPOINT ĐẶC BIỆT (không thể dùng CRUD chuẩn):
+// 1. Logic nghiệp vụ đặc biệt (authentication workflow):
+//    - Đây là action nghiệp vụ (logout), không phải CRUD đơn giản
+//    - Có thể invalidate tokens, clear sessions, etc.
+//    - Gọi UserService.Logout với logic nghiệp vụ phức tạp
+// 2. Security operations:
+//    - Có thể xóa tokens, clear refresh tokens
+//    - Có thể log logout event cho security audit
+// 3. Input format:
+//    - Input: UserLogoutInput (có thể có deviceId, tokenId, etc.)
+//    - Không phải format CRUD chuẩn (update một document)
+//
+// KẾT LUẬN: Cần giữ endpoint đặc biệt vì đây là authentication workflow action với logic nghiệp vụ đặc biệt
 func (h *UserHandler) HandleLogout(c fiber.Ctx) error {
 	userID := c.Locals("user_id")
 	if userID == nil {
@@ -83,6 +97,18 @@ func (h *UserHandler) HandleLogout(c fiber.Ctx) error {
 // --------------------------------
 
 // HandleGetProfile lấy thông tin profile của người dùng
+//
+// LÝ DO PHẢI TẠO ENDPOINT ĐẶC BIỆT (không thể dùng CRUD chuẩn):
+// 1. Security: Loại bỏ thông tin nhạy cảm:
+//    - Xóa Password, Salt, Tokens trước khi trả về
+//    - CRUD chuẩn sẽ trả về toàn bộ document (bao gồm sensitive data)
+// 2. User context:
+//    - Lấy userID từ context (user_id), không phải từ URL params
+//    - User chỉ có thể xem profile của chính mình
+// 3. Response format:
+//    - Trả về User object đã được sanitize (không có sensitive fields)
+//
+// KẾT LUẬN: Cần giữ endpoint đặc biệt vì cần sanitize sensitive data và lấy userID từ context
 func (h *UserHandler) HandleGetProfile(c fiber.Ctx) error {
 	userID := c.Locals("user_id")
 	if userID == nil {
@@ -112,6 +138,23 @@ func (h *UserHandler) HandleGetProfile(c fiber.Ctx) error {
 }
 
 // HandleUpdateProfile cập nhật thông tin profile của người dùng
+//
+// LÝ DO PHẢI TẠO ENDPOINT ĐẶC BIỆT (không thể dùng CRUD chuẩn):
+// 1. Security: Loại bỏ thông tin nhạy cảm:
+//    - Xóa Password, Salt, Tokens trước khi trả về
+//    - CRUD chuẩn sẽ trả về toàn bộ document (bao gồm sensitive data)
+// 2. User context:
+//    - Lấy userID từ context (user_id), không phải từ URL params
+//    - User chỉ có thể update profile của chính mình
+// 3. Limited fields:
+//    - Chỉ cho phép update một số fields nhất định (name, etc.)
+//    - Không cho phép update sensitive fields (password, tokens, etc.)
+// 4. Input format:
+//    - Input: UserChangeInfoInput (chỉ có các fields được phép update)
+//    - Không phải format CRUD chuẩn (update toàn bộ document)
+//
+// KẾT LUẬN: Cần giữ endpoint đặc biệt vì cần sanitize sensitive data, lấy userID từ context,
+//           và giới hạn fields được phép update
 func (h *UserHandler) HandleUpdateProfile(c fiber.Ctx) error {
 	userID := c.Locals("user_id")
 	if userID == nil {
@@ -155,6 +198,26 @@ func (h *UserHandler) HandleUpdateProfile(c fiber.Ctx) error {
 }
 
 // HandleGetUserRoles lấy danh sách tất cả các role của người dùng với thông tin organization
+//
+// LÝ DO PHẢI TẠO ENDPOINT ĐẶC BIỆT (không thể dùng CRUD chuẩn):
+// 1. Cross-collection join và aggregation:
+//    - Query UserRole collection với filter userId
+//    - Join với Role collection để lấy thông tin role
+//    - Join với Organization collection để lấy thông tin organization
+//    - CRUD chuẩn chỉ query một collection, không hỗ trợ join
+// 2. Response format đặc biệt:
+//    - Trả về array các object có format: {roleId, roleName, ownerOrganizationId, organizationName, ...}
+//    - Đây là aggregated data từ nhiều collections, không phải document đơn lẻ
+// 3. Business logic:
+//    - CHỈ trả về các role trực tiếp của user (không bao gồm children/parents organizations)
+//    - Validate OwnerOrganizationID không được zero
+//    - Filter và transform data trước khi trả về
+// 4. User context:
+//    - Lấy userID từ context (user_id), không phải từ URL params
+//
+// KẾT LUẬN: Cần giữ endpoint đặc biệt vì cần cross-collection join, aggregated response format,
+//           và business logic đặc biệt (chỉ role trực tiếp, validate OwnerOrganizationID)
+//
 // @Summary Lấy danh sách role của người dùng
 // @Description Trả về danh sách các role mà người dùng hiện có kèm thông tin organization.
 // @Description QUAN TRỌNG: Context làm việc là ROLE, không phải organization.
@@ -286,6 +349,27 @@ func (h *UserHandler) HandleGetUserRoles(c fiber.Ctx) error {
 }
 
 // HandleLoginWithFirebase xử lý đăng nhập bằng Firebase ID token
+//
+// LÝ DO PHẢI TẠO ENDPOINT ĐẶC BIỆT (không thể dùng CRUD chuẩn):
+// 1. Authentication workflow phức tạp:
+//    - Verify Firebase ID token với Firebase service
+//    - Tìm hoặc tạo user từ Firebase UID
+//    - Tạo JWT token cho user
+//    - Có thể có logic đặc biệt: first login, update user info từ Firebase, etc.
+// 2. External service integration:
+//    - Gọi Firebase API để verify token
+//    - Xử lý Firebase user claims và metadata
+// 3. Security operations:
+//    - Validate Firebase token
+//    - Tạo JWT token
+//    - Có thể set refresh token
+// 4. Response format:
+//    - Trả về User object đã được sanitize (không có sensitive data)
+//    - Có thể có thêm JWT token trong response
+//
+// KẾT LUẬN: Cần giữ endpoint đặc biệt vì đây là authentication workflow với external service integration
+//           (Firebase), verify token, và tạo JWT token
+//
 // @Summary Đăng nhập bằng Firebase
 // @Description Xác thực Firebase ID token và trả về JWT token nếu thành công
 // @Accept json

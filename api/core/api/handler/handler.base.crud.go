@@ -19,7 +19,8 @@ import (
 )
 
 // InsertOne thêm mới một document vào database.
-// Dữ liệu được parse từ request body và validate trước khi thêm vào DB.
+// Dữ liệu được parse từ request body (DTO CreateInput) và transform sang Model trước khi thêm vào DB.
+// Sử dụng struct tag `transform` trong DTO để tự động convert các field (ví dụ: string → ObjectID).
 //
 // Parameters:
 // - c: Fiber context
@@ -28,9 +29,9 @@ import (
 // - error: Lỗi nếu có
 func (h *BaseHandler[T, CreateInput, UpdateInput]) InsertOne(c fiber.Ctx) error {
 	return h.SafeHandler(c, func() error {
-		// Parse request body thành struct T
-		input := new(T)
-		if err := h.ParseRequestBody(c, input); err != nil {
+		// Parse request body thành DTO (CreateInput)
+		var input CreateInput
+		if err := h.ParseRequestBody(c, &input); err != nil {
 			h.HandleResponse(c, nil, common.NewError(
 				common.ErrCodeValidationFormat,
 				fmt.Sprintf("Dữ liệu gửi lên không đúng định dạng JSON hoặc không khớp với cấu trúc yêu cầu. Chi tiết: %v", err),
@@ -40,8 +41,20 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) InsertOne(c fiber.Ctx) error 
 			return nil
 		}
 
+		// Transform DTO sang Model sử dụng struct tag `transform`
+		model, err := h.transformCreateInputToModel(&input)
+		if err != nil {
+			h.HandleResponse(c, nil, common.NewError(
+				common.ErrCodeValidationFormat,
+				fmt.Sprintf("Lỗi transform dữ liệu: %v", err),
+				common.StatusBadRequest,
+				err,
+			))
+			return nil
+		}
+
 		// ✅ Xử lý ownerOrganizationId: Cho phép chỉ định từ request hoặc dùng context
-		ownerOrgIDFromRequest := h.getOwnerOrganizationIDFromModel(input)
+		ownerOrgIDFromRequest := h.getOwnerOrganizationIDFromModel(model)
 		if ownerOrgIDFromRequest != nil && !ownerOrgIDFromRequest.IsZero() {
 			// Có ownerOrganizationId trong request → Validate quyền
 			if err := h.validateUserHasAccessToOrg(c, *ownerOrgIDFromRequest); err != nil {
@@ -53,7 +66,7 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) InsertOne(c fiber.Ctx) error 
 			// Không có trong request → Dùng context (backward compatible)
 			activeOrgID := h.getActiveOrganizationID(c)
 			if activeOrgID != nil && !activeOrgID.IsZero() {
-				h.setOrganizationID(input, *activeOrgID)
+				h.setOrganizationID(model, *activeOrgID)
 			}
 		}
 
@@ -65,7 +78,7 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) InsertOne(c fiber.Ctx) error 
 			}
 		}
 
-		data, err := h.BaseService.InsertOne(ctx, *input)
+		data, err := h.BaseService.InsertOne(ctx, *model)
 		h.HandleResponse(c, data, err)
 		return nil
 	})

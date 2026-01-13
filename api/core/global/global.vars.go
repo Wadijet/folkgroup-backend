@@ -70,6 +70,7 @@ type MongoDB_Auth_CollectionName struct {
 	AIWorkflows         string // Tên collection cho workflows: ai_workflows
 	AISteps             string // Tên collection cho steps: ai_steps
 	AIPromptTemplates   string // Tên collection cho prompt templates: ai_prompt_templates
+	AIProviderProfiles  string // Tên collection cho provider profiles: ai_provider_profiles
 	AIWorkflowRuns      string // Tên collection cho workflow runs: ai_workflow_runs
 	AIStepRuns          string // Tên collection cho step runs: ai_step_runs
 	AIGenerationBatches string // Tên collection cho generation batches: ai_generation_batches

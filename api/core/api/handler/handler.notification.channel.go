@@ -51,8 +51,30 @@ func NewNotificationChannelHandler() (*NotificationChannelHandler, error) {
 }
 
 // InsertOne override để thêm validation uniqueness
-// Mỗi organization chỉ có thể có 1 channel với cùng tên và channelType
-// Và không được có duplicate recipients (email/telegram) hoặc webhookUrl (webhook)
+//
+// LÝ DO PHẢI OVERRIDE (không thể dùng CRUD chuẩn):
+// 1. Validation uniqueness rất phức tạp với nhiều điều kiện:
+//    a) Name + ChannelType + OwnerOrganizationID: Mỗi organization chỉ có thể có 1 channel với cùng tên và channelType
+//    b) Email channels: Mỗi recipient trong mảng Recipients phải unique trong organization
+//       - Check duplicate bằng MongoDB $in operator: recipients: {$in: [recipient]}
+//       - Phải check tất cả channels (cả active và inactive) để tránh duplicate
+//    c) Telegram channels: Mỗi chatID trong mảng ChatIDs phải unique trong organization
+//       - Check duplicate bằng MongoDB $in operator: chatIds: {$in: [chatID]}
+//       - Phải check tất cả channels (cả active và inactive) để tránh duplicate
+//    d) Webhook channels: WebhookURL phải unique trong organization
+//       - Check duplicate webhookUrl + ownerOrganizationId + channelType
+//       - Phải check tất cả channels (cả active và inactive) để tránh duplicate
+// 2. Logic nghiệp vụ đặc biệt:
+//    - Validate quyền với ownerOrganizationId (nếu có trong request)
+//    - Set ownerOrganizationId từ context nếu không có trong request
+//    - Parse trực tiếp vào Model (không dùng DTO) vì cần validate uniqueness dựa trên Model fields
+// 3. Query phức tạp:
+//    - Cần query database nhiều lần để check duplicate cho từng loại channel
+//    - Sử dụng MongoDB $in operator để check duplicate trong arrays
+//    - Phải check cả active và inactive channels để tránh duplicate
+//
+// KẾT LUẬN: Cần giữ override vì validation uniqueness rất phức tạp với nhiều điều kiện khác nhau
+//           tùy theo channelType (email/telegram/webhook), và cần query database nhiều lần
 func (h *NotificationChannelHandler) InsertOne(c fiber.Ctx) error {
 	return h.SafeHandler(c, func() error {
 		// Parse request body thành struct T

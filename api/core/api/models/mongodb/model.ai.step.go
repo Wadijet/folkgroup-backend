@@ -38,6 +38,12 @@ type AIStep struct {
 	TargetLevel string `json:"targetLevel,omitempty" bson:"targetLevel,omitempty" index:"single:1"` // Level mục tiêu: "L1", "L2", ..., "L8" (tùy chọn)
 	ParentLevel string `json:"parentLevel,omitempty" bson:"parentLevel,omitempty" index:"single:1"` // Level của parent: "L1", "L2", ..., "L8" (tùy chọn)
 
+	// ===== AI CONFIG =====
+	ProviderProfileID *primitive.ObjectID `json:"providerProfileId,omitempty" bson:"providerProfileId,omitempty" index:"single:1"` // ID của AI provider profile (tùy chọn)
+	Model            string               `json:"model,omitempty" bson:"model,omitempty" index:"single:1"` // Model name (ví dụ: "gpt-4", "claude-3-opus") (tùy chọn)
+	Temperature      *float64             `json:"temperature,omitempty" bson:"temperature,omitempty"` // Temperature (tùy chọn)
+	MaxTokens        *int                 `json:"maxTokens,omitempty" bson:"maxTokens,omitempty"` // Max tokens (tùy chọn)
+
 	// ===== STATUS =====
 	Status string `json:"status" bson:"status" index:"single:1"` // Trạng thái: "active", "archived", "draft"
 

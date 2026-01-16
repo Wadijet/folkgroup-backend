@@ -6,7 +6,6 @@ import (
 	models "meta_commerce/core/api/models/mongodb"
 	"meta_commerce/core/api/services"
 	"meta_commerce/core/common"
-	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -36,14 +35,26 @@ func NewAIStepHandler() (*AIStepHandler, error) {
 	return handler, nil
 }
 
-// InsertOne override method InsertOne để validate schema theo standard schema
+// InsertOne override method InsertOne để xử lý ownerOrganizationId và gọi service
 //
-// LÝ DO PHẢI OVERRIDE:
-// 1. Validate input/output schema phải match với standard schema cho từng step type
-//    - Đảm bảo mapping chính xác giữa output của step này và input của step tiếp theo
-//    - Cho phép mở rộng thêm fields nhưng không được thiếu required fields
-// 2. Set CreatedAt và UpdatedAt tự động
-// 3. Set OwnerOrganizationID từ context
+// LÝ DO PHẢI OVERRIDE (không dùng BaseHandler.InsertOne trực tiếp):
+// 1. Xử lý ownerOrganizationId:
+//    - Cho phép chỉ định từ request hoặc dùng context
+//    - Validate quyền nếu có ownerOrganizationId trong request
+//    - BaseHandler.InsertOne không tự động xử lý ownerOrganizationId từ request body
+//
+// LƯU Ý:
+// - Validation enum (step type) đã được xử lý tự động bởi struct tag validate:"oneof=..." trong BaseHandler
+// - Default values (status = "active") đã được xử lý tự động bởi transform tag transform:"string,default=active"
+// - ObjectID conversion đã được xử lý tự động bởi transform tag trong DTO
+// - Business logic validation (schema validation) đã được chuyển xuống AIStepService.InsertOne
+// - Timestamps sẽ được xử lý tự động bởi BaseServiceMongoImpl.InsertOne trong service
+//
+// ĐẢM BẢO LOGIC CƠ BẢN:
+// ✅ Parse và validate input format (DTO validation)
+// ✅ Transform DTO → Model (transform tags)
+// ✅ Xử lý ownerOrganizationId (từ request hoặc context)
+// ✅ Gọi AIStepService.InsertOne (service sẽ validate schema và insert)
 func (h *AIStepHandler) InsertOne(c fiber.Ctx) error {
 	return h.SafeHandler(c, func() error {
 		// Parse request body thành DTO
@@ -58,88 +69,32 @@ func (h *AIStepHandler) InsertOne(c fiber.Ctx) error {
 			return nil
 		}
 
-		// Validate step type
-		validTypes := []string{models.AIStepTypeGenerate, models.AIStepTypeJudge, models.AIStepTypeStepGeneration}
-		typeValid := false
-		for _, validType := range validTypes {
-			if input.Type == validType {
-				typeValid = true
-				break
-			}
-		}
-		if !typeValid {
+		// Transform DTO sang Model sử dụng transform tag (tự động convert ObjectID, default values)
+		// Lưu ý: PromptTemplateID đã được convert tự động bởi transform tag transform:"str_objectid_ptr,optional"
+		model, err := h.transformCreateInputToModel(&input)
+		if err != nil {
 			h.HandleResponse(c, nil, common.NewError(
 				common.ErrCodeValidationFormat,
-				fmt.Sprintf("Type '%s' không hợp lệ. Các giá trị hợp lệ: %v", input.Type, validTypes),
+				fmt.Sprintf("Lỗi transform dữ liệu: %v", err),
 				common.StatusBadRequest,
-				nil,
+				err,
 			))
 			return nil
 		}
 
-		// ✅ Validate input/output schema với standard schema
-		isValid, errors := models.ValidateStepSchema(input.Type, input.InputSchema, input.OutputSchema)
-		if !isValid {
-			h.HandleResponse(c, nil, common.NewError(
-				common.ErrCodeValidationFormat,
-				fmt.Sprintf("Schema không hợp lệ. Chi tiết: %v", errors),
-				common.StatusBadRequest,
-				nil,
-			))
-			return nil
-		}
-
-		// Chuyển đổi DTO sang Model
-		now := time.Now().UnixMilli()
-		aiStep := models.AIStep{
-			Name:         input.Name,
-			Description:  input.Description,
-			Type:         input.Type,
-			InputSchema:  input.InputSchema,
-			OutputSchema: input.OutputSchema,
-			TargetLevel:  input.TargetLevel,
-			ParentLevel:  input.ParentLevel,
-			Status:       input.Status,
-			Metadata:     input.Metadata,
-			CreatedAt:    now,
-			UpdatedAt:    now,
-		}
-
-		// Convert PromptTemplateID từ string sang *ObjectID
-		if input.PromptTemplateID != "" {
-			promptTemplateID, err := primitive.ObjectIDFromHex(input.PromptTemplateID)
-			if err != nil {
-				h.HandleResponse(c, nil, common.NewError(
-					common.ErrCodeValidationFormat,
-					fmt.Sprintf("PromptTemplateID không đúng định dạng: %v", err),
-					common.StatusBadRequest,
-					err,
-				))
+		// ✅ Xử lý ownerOrganizationId: Cho phép chỉ định từ request hoặc dùng context (BaseHandler logic)
+		ownerOrgIDFromRequest := h.getOwnerOrganizationIDFromModel(model)
+		if ownerOrgIDFromRequest != nil && !ownerOrgIDFromRequest.IsZero() {
+			// Có ownerOrganizationId trong request → Validate quyền
+			if err := h.validateUserHasAccessToOrg(c, *ownerOrgIDFromRequest); err != nil {
+				h.HandleResponse(c, nil, err)
 				return nil
 			}
-			aiStep.PromptTemplateID = &promptTemplateID
-		}
-
-		// ✅ Xử lý ownerOrganizationId: Lấy từ role context
-		if activeRoleIDStr, ok := c.Locals("active_role_id").(string); ok && activeRoleIDStr != "" {
-			if activeRoleID, err := primitive.ObjectIDFromHex(activeRoleIDStr); err == nil {
-				// Lấy role để suy ra organization ID
-				roleService, err := services.NewRoleService()
-				if err == nil {
-					if role, err := roleService.FindOneById(c.Context(), activeRoleID); err == nil {
-						if !role.OwnerOrganizationID.IsZero() {
-							aiStep.OwnerOrganizationID = role.OwnerOrganizationID
-						}
-					}
-				}
-			}
-		}
-
-		// Fallback: Nếu vẫn chưa có, thử lấy từ active_organization_id trong context
-		if aiStep.OwnerOrganizationID.IsZero() {
+		} else {
+			// Không có trong request → Dùng context
 			activeOrgID := h.getActiveOrganizationID(c)
 			if activeOrgID != nil && !activeOrgID.IsZero() {
-				aiStep.OwnerOrganizationID = *activeOrgID
+				h.setOrganizationID(model, *activeOrgID)
 			}
 		}
 
@@ -151,9 +106,67 @@ func (h *AIStepHandler) InsertOne(c fiber.Ctx) error {
 			}
 		}
 
-		// Thực hiện insert
-		data, err := h.BaseService.InsertOne(ctx, aiStep)
+		// ✅ Gọi service để insert (service sẽ tự validate schema)
+		// Business logic validation đã được chuyển xuống AIStepService.InsertOne
+		data, err := h.AIStepService.InsertOne(ctx, *model)
 		h.HandleResponse(c, data, err)
+		return nil
+	})
+}
+
+// RenderPrompt render prompt template cho step với variables từ step input
+// Bot gọi API này để lấy prompt đã render và AI config trước khi gọi AI API
+// POST /api/v2/ai/steps/:id/render-prompt
+//
+// ĐƠN GIẢN HÓA VỚI VALIDATOR:
+// - URL params validation: Dùng DTO với validator để tự động validate và convert ObjectID
+// - Request body validation: Đã có validator trong ParseRequestBody
+// - Giảm ~15 dòng code validation thủ công
+func (h *AIStepHandler) RenderPrompt(c fiber.Ctx) error {
+	return h.SafeHandler(c, func() error {
+		// Parse và validate URL params (tự động validate ObjectID format và convert)
+		var params dto.AIStepRenderPromptParams
+		if err := h.ParseRequestParams(c, &params); err != nil {
+			h.HandleResponse(c, nil, err)
+			return nil
+		}
+		stepID, _ := primitive.ObjectIDFromHex(params.ID) // Đã được validate rồi, safe to convert
+
+		// Parse và validate request body (tự động validate với struct tag)
+		var input dto.AIStepRenderPromptInput
+		if err := h.ParseRequestBody(c, &input); err != nil {
+			h.HandleResponse(c, nil, err)
+			return nil
+		}
+
+		// Gọi service để render prompt và resolve config
+		renderedPrompt, providerProfileID, provider, model, temperature, maxTokens, err := h.AIStepService.RenderPromptForStep(
+			c.Context(),
+			stepID,
+			input.Variables,
+		)
+		if err != nil {
+			h.HandleResponse(c, nil, common.NewError(
+				common.ErrCodeInternalServer,
+				fmt.Sprintf("Lỗi khi render prompt: %v", err),
+				common.StatusInternalServerError,
+				err,
+			))
+			return nil
+		}
+
+		// Trả về kết quả
+		output := dto.AIStepRenderPromptOutput{
+			RenderedPrompt:    renderedPrompt,
+			ProviderProfileID: providerProfileID,
+			Provider:          provider,
+			Model:             model,
+			Temperature:       temperature,
+			MaxTokens:         maxTokens,
+			Variables:         input.Variables,
+		}
+
+		h.HandleResponse(c, output, nil)
 		return nil
 	})
 }

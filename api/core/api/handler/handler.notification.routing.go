@@ -8,7 +8,6 @@ import (
 	"meta_commerce/core/common"
 
 	"github.com/gofiber/fiber/v3"
-	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -50,29 +49,30 @@ func NewNotificationRoutingHandler() (*NotificationRoutingHandler, error) {
 	return handler, nil
 }
 
-// InsertOne override để thêm validation uniqueness
+// InsertOne override để xử lý ownerOrganizationId và gọi service
 //
-// LÝ DO PHẢI OVERRIDE (không thể dùng CRUD chuẩn):
-// 1. Validation uniqueness phức tạp:
-//    - Mỗi organization chỉ có thể có 1 rule cho mỗi eventType (eventType + ownerOrganizationId là unique)
-//    - Mỗi organization chỉ có thể có 1 rule cho mỗi domain (domain + ownerOrganizationId là unique)
-//    - Chỉ check rules đang active (isActive = true)
-//    - Cần query database để check duplicate trước khi insert
-// 2. Validation nghiệp vụ:
-//    - EventType là bắt buộc và không được để trống
-//    - Nếu có Domain, cũng phải validate uniqueness cho Domain
-// 3. Logic đặc biệt:
-//    - Parse trực tiếp vào Model (không dùng DTO) vì cần validate uniqueness dựa trên Model fields
-//    - Validate quyền với ownerOrganizationId (nếu có trong request)
-//    - Set ownerOrganizationId từ context nếu không có trong request
+// LÝ DO PHẢI OVERRIDE (không dùng BaseHandler.InsertOne trực tiếp):
+// 1. Xử lý ownerOrganizationId:
+//    - Cho phép chỉ định từ request hoặc dùng context
+//    - Validate quyền nếu có ownerOrganizationId trong request
+//    - BaseHandler.InsertOne không tự động xử lý ownerOrganizationId từ request body
 //
-// KẾT LUẬN: Cần giữ override vì validation uniqueness phức tạp (query database để check duplicate)
-//           và logic nghiệp vụ đặc biệt (chỉ check rules active, validate eventType bắt buộc)
+// LƯU Ý:
+// - Validation format (EventType required) đã được xử lý tự động bởi struct tag validate:"required" trong BaseHandler
+// - ObjectID conversion đã được xử lý tự động bởi transform tag trong DTO
+// - Business logic validation (uniqueness check) đã được chuyển xuống NotificationRoutingService.InsertOne
+// - Timestamps sẽ được xử lý tự động bởi BaseServiceMongoImpl.InsertOne trong service
+//
+// ĐẢM BẢO LOGIC CƠ BẢN:
+// ✅ Parse và validate input format (DTO validation)
+// ✅ Transform DTO → Model (transform tags)
+// ✅ Xử lý ownerOrganizationId (từ request hoặc context)
+// ✅ Gọi NotificationRoutingService.InsertOne (service sẽ validate uniqueness và insert)
 func (h *NotificationRoutingHandler) InsertOne(c fiber.Ctx) error {
 	return h.SafeHandler(c, func() error {
-		// Parse request body thành struct T
-		input := new(models.NotificationRoutingRule)
-		if err := h.ParseRequestBody(c, input); err != nil {
+		// Parse request body thành DTO
+		var input dto.NotificationRoutingRuleCreateInput
+		if err := h.ParseRequestBody(c, &input); err != nil {
 			h.HandleResponse(c, nil, common.NewError(
 				common.ErrCodeValidationFormat,
 				fmt.Sprintf("Dữ liệu gửi lên không đúng định dạng JSON hoặc không khớp với cấu trúc yêu cầu. Chi tiết: %v", err),
@@ -82,20 +82,31 @@ func (h *NotificationRoutingHandler) InsertOne(c fiber.Ctx) error {
 			return nil
 		}
 
+		// Transform DTO sang Model sử dụng transform tag (tự động convert ObjectID)
+		model, err := h.transformCreateInputToModel(&input)
+		if err != nil {
+			h.HandleResponse(c, nil, common.NewError(
+				common.ErrCodeValidationFormat,
+				fmt.Sprintf("Lỗi transform dữ liệu: %v", err),
+				common.StatusBadRequest,
+				err,
+			))
+			return nil
+		}
+
 		// ✅ Xử lý ownerOrganizationId: Cho phép chỉ định từ request hoặc dùng context
-		ownerOrgIDFromRequest := h.getOwnerOrganizationIDFromModel(input)
+		ownerOrgIDFromRequest := h.getOwnerOrganizationIDFromModel(model)
 		if ownerOrgIDFromRequest != nil && !ownerOrgIDFromRequest.IsZero() {
 			// Có ownerOrganizationId trong request → Validate quyền
 			if err := h.validateUserHasAccessToOrg(c, *ownerOrgIDFromRequest); err != nil {
 				h.HandleResponse(c, nil, err)
 				return nil
 			}
-			// ✅ Có quyền → Giữ nguyên ownerOrganizationId từ request
 		} else {
-			// Không có trong request → Dùng context (backward compatible)
+			// Không có trong request → Dùng context
 			activeOrgID := h.getActiveOrganizationID(c)
 			if activeOrgID != nil && !activeOrgID.IsZero() {
-				h.setOrganizationID(input, *activeOrgID)
+				h.setOrganizationID(model, *activeOrgID)
 			} else {
 				h.HandleResponse(c, nil, common.NewError(
 					common.ErrCodeValidationInput,
@@ -107,65 +118,6 @@ func (h *NotificationRoutingHandler) InsertOne(c fiber.Ctx) error {
 			}
 		}
 
-		// ✅ Validate EventType: EventType là bắt buộc
-		if input.EventType == "" {
-			h.HandleResponse(c, nil, common.NewError(
-				common.ErrCodeValidationInput,
-				"EventType là bắt buộc và không được để trống",
-				common.StatusBadRequest,
-				nil,
-			))
-			return nil
-		}
-
-		// ✅ Validate uniqueness: Kiểm tra đã có rule cho eventType và ownerOrganizationId chưa
-		ownerOrgID := h.getOwnerOrganizationIDFromModel(input)
-		if ownerOrgID != nil && !ownerOrgID.IsZero() {
-			// Kiểm tra rule với eventType (EventType là bắt buộc)
-			filter := bson.M{
-				"eventType":           input.EventType, // EventType giờ là string, không phải *string
-				"ownerOrganizationId": *ownerOrgID,
-				"isActive":            true, // Chỉ check rules đang active
-			}
-			_, err := h.routingService.FindOne(c.Context(), filter, nil)
-			if err == nil {
-				h.HandleResponse(c, nil, common.NewError(
-					common.ErrCodeBusinessOperation,
-					fmt.Sprintf("Đã tồn tại routing rule cho eventType '%s' và organization này. Mỗi organization chỉ có thể có 1 rule cho mỗi eventType", input.EventType),
-					common.StatusConflict,
-					nil,
-				))
-				return nil
-			}
-			if err != common.ErrNotFound {
-				h.HandleResponse(c, nil, err)
-				return nil
-			}
-
-			// Kiểm tra rule với domain (nếu có)
-			if input.Domain != nil && *input.Domain != "" {
-				filter := bson.M{
-					"domain":              *input.Domain,
-					"ownerOrganizationId": *ownerOrgID,
-					"isActive":            true, // Chỉ check rules đang active
-				}
-				_, err := h.routingService.FindOne(c.Context(), filter, nil)
-				if err == nil {
-					h.HandleResponse(c, nil, common.NewError(
-						common.ErrCodeBusinessOperation,
-						fmt.Sprintf("Đã tồn tại routing rule cho domain '%s' và organization này. Mỗi organization chỉ có thể có 1 rule cho mỗi domain", *input.Domain),
-						common.StatusConflict,
-						nil,
-					))
-					return nil
-				}
-				if err != common.ErrNotFound {
-					h.HandleResponse(c, nil, err)
-					return nil
-				}
-			}
-		}
-
 		// ✅ Lưu userID vào context để service có thể check admin
 		ctx := c.Context()
 		if userIDStr, ok := c.Locals("user_id").(string); ok && userIDStr != "" {
@@ -174,7 +126,9 @@ func (h *NotificationRoutingHandler) InsertOne(c fiber.Ctx) error {
 			}
 		}
 
-		data, err := h.BaseService.InsertOne(ctx, *input)
+		// ✅ Gọi service để insert (service sẽ tự validate uniqueness)
+		// Business logic validation đã được chuyển xuống NotificationRoutingService.InsertOne
+		data, err := h.routingService.InsertOne(ctx, *model)
 		h.HandleResponse(c, data, err)
 		return nil
 	})

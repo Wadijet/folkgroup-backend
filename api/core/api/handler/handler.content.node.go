@@ -6,11 +6,9 @@ import (
 	"meta_commerce/core/api/dto"
 	models "meta_commerce/core/api/models/mongodb"
 	"meta_commerce/core/api/services"
-	"meta_commerce/core/common"
 	"meta_commerce/core/utility"
 
 	"github.com/gofiber/fiber/v3"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // ContentNodeHandler xử lý các request liên quan đến Content Node (L1-L6)
@@ -84,26 +82,13 @@ func NewContentNodeHandler() (*ContentNodeHandler, error) {
 //   - Cây content nodes với children được populate đệ quy
 func (h *ContentNodeHandler) GetTree(c fiber.Ctx) error {
 	return h.SafeHandler(c, func() error {
-		id := c.Params("id")
-		if id == "" {
-			h.HandleResponse(c, nil, common.NewError(
-				common.ErrCodeValidationFormat,
-				"ID không được để trống trong URL params",
-				common.StatusBadRequest,
-				nil,
-			))
+		// Parse và validate URL params (tự động validate ObjectID format và convert)
+		var params dto.ContentNodeTreeParams
+		if err := h.ParseRequestParams(c, &params); err != nil {
+			h.HandleResponse(c, nil, err)
 			return nil
 		}
-
-		if !primitive.IsValidObjectID(id) {
-			h.HandleResponse(c, nil, common.NewError(
-				common.ErrCodeValidationFormat,
-				fmt.Sprintf("ID '%s' không đúng định dạng MongoDB ObjectID", id),
-				common.StatusBadRequest,
-				nil,
-			))
-			return nil
-		}
+		id := params.ID // Đã được validate rồi
 
 		// Validate quyền truy cập
 		if err := h.validateOrganizationAccess(c, id); err != nil {
@@ -111,7 +96,7 @@ func (h *ContentNodeHandler) GetTree(c fiber.Ctx) error {
 			return nil
 		}
 
-		// Lấy root node
+		// Lấy root node (id đã được validate và convert sang ObjectID format)
 		rootID := utility.String2ObjectID(id)
 		root, err := h.ContentNodeService.FindOneById(c.Context(), rootID)
 		if err != nil {

@@ -40,6 +40,7 @@ func main() {
 
 	fmt.Printf("✓ Đã kết nối với MongoDB\n\n")
 
+	// Sử dụng database auth (hầu hết collections nằm ở đây)
 	db := client.Database(cfg.MongoDB_DBName_Auth)
 
 	// Tạo thư mục output (từ thư mục gốc dự án)
@@ -48,28 +49,97 @@ func main() {
 	if filepath.Base(currentDir) == "api" {
 		currentDir = filepath.Dir(currentDir)
 	}
-	outputDir := filepath.Join(currentDir, "docs", "09-ai-context", "sample-data")
+	outputDir := filepath.Join(currentDir, "docs-shared", "ai-context", "folkform", "sample-data")
 	os.MkdirAll(outputDir, 0755)
 	fmt.Printf("Output directory: %s\n\n", outputDir)
 
+	// Danh sách tất cả các collections cần export
 	collections := []string{
-		"customers",
-		"pc_pos_orders",
-		"pc_pos_products",
-		"pc_pos_variations",
-		"pc_pos_shops",
-		"pc_pos_warehouses",
-		"pc_pos_categories",
+		// Auth & RBAC
+		"auth_users",
+		"auth_roles",
+		"auth_permissions",
+		"auth_role_permissions",
+		"auth_user_roles",
+		"auth_organizations",
+		"auth_organization_shares",
+
+		// Facebook Integration
+		"fb_pages",
+		"fb_posts",
 		"fb_conversations",
 		"fb_messages",
 		"fb_message_items",
-		"fb_posts",
-		"fb_pages",
+		"fb_customers",
+
+		// Customers
+		"customers",
+		"pc_pos_customers",
+
+		// Pancake POS
+		"pc_pos_shops",
+		"pc_pos_warehouses",
+		"pc_pos_products",
+		"pc_pos_variations",
+		"pc_pos_categories",
+		"pc_pos_orders",
+		"pc_orders",
+
+		// Content Storage (Module 1)
+		"content_nodes",
+		"content_videos",
+		"content_publications",
+		"content_draft_nodes",
+		"content_draft_videos",
+		"content_draft_publications",
+		"content_draft_approvals",
+
+		// AI Service (Module 2)
+		"ai_workflows",
+		"ai_steps",
+		"ai_prompt_templates",
+		"ai_provider_profiles",
+		"ai_workflow_runs",
+		"ai_step_runs",
+		"ai_generation_batches",
+		"ai_candidates",
+		"ai_workflow_commands",
+
+		// Notification System
+		"notification_channels",
+		"notification_templates",
+		"notification_senders",
+		"notification_routing_rules",
+
+		// Delivery System
+		"delivery_history",
+		"delivery_queue",
+
+		// CTA Module
+		"cta_library",
+		"cta_tracking",
+
+		// Agent Management
+		"agent_registry",
+		"agent_configs",
+		"agent_commands",
+		"agent_activity_logs",
+
+		// Webhook Logs
+		"webhook_logs",
+
+		// Access Tokens
+		"access_tokens",
 	}
 
+	// Export từ database auth
 	for _, collName := range collections {
 		exportCollection(ctx, db, collName, outputDir)
 	}
+
+	// Có thể export từ các database khác nếu cần
+	// dbStaging := client.Database(cfg.MongoDB_DBName_Staging)
+	// dbData := client.Database(cfg.MongoDB_DBName_Data)
 
 	fmt.Println("\n✓ Hoàn thành export documents mẫu")
 }
@@ -88,9 +158,9 @@ func exportCollection(ctx context.Context, db *mongo.Database, collName string, 
 		return
 	}
 
-	// Lấy 2 documents mẫu
+	// Lấy 10 documents mẫu
 	var samples []bson.M
-	cursor, err := collection.Find(ctx, bson.M{}, options.Find().SetLimit(2))
+	cursor, err := collection.Find(ctx, bson.M{}, options.Find().SetLimit(10))
 	if err != nil {
 		fmt.Printf("⚠ %s: Không thể lấy documents\n", collName)
 		return
@@ -124,6 +194,3 @@ func exportCollection(ctx context.Context, db *mongo.Database, collName string, 
 
 	fmt.Printf("✓ %s: %d documents → %s\n", collName, count, outputFile)
 }
-
-
-

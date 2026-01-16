@@ -59,6 +59,18 @@ func (s *RoleService) validateBeforeDelete(ctx context.Context, roleID primitive
 }
 
 // DeleteOne override method DeleteOne để kiểm tra trước khi xóa
+//
+// LÝ DO PHẢI OVERRIDE (không dùng BaseServiceMongoImpl.DeleteOne trực tiếp):
+// 1. Business logic validation:
+//    - Validate trước khi xóa: Kiểm tra role có đang được sử dụng không (có user roles, permissions)
+//    - Không cho phép xóa role đang được sử dụng
+//    - Đảm bảo data integrity
+//
+// ĐẢM BẢO LOGIC CƠ BẢN:
+// ✅ Validate trước khi xóa bằng validateBeforeDelete()
+// ✅ Gọi BaseServiceMongoImpl.DeleteOne để đảm bảo:
+//   - Xóa document từ MongoDB
+//   - Xử lý errors đúng cách
 func (s *RoleService) DeleteOne(ctx context.Context, filter interface{}) error {
 	// Lấy thông tin role cần xóa
 	role, err := s.BaseServiceMongoImpl.FindOne(ctx, filter, nil)
@@ -83,6 +95,18 @@ func (s *RoleService) DeleteOne(ctx context.Context, filter interface{}) error {
 }
 
 // DeleteById override method DeleteById để kiểm tra trước khi xóa
+//
+// LÝ DO PHẢI OVERRIDE (không dùng BaseServiceMongoImpl.DeleteById trực tiếp):
+// 1. Business logic validation:
+//    - Validate trước khi xóa: Kiểm tra role có đang được sử dụng không (có user roles, permissions)
+//    - Không cho phép xóa role đang được sử dụng
+//    - Đảm bảo data integrity
+//
+// ĐẢM BẢO LOGIC CƠ BẢN:
+// ✅ Validate trước khi xóa bằng validateBeforeDelete()
+// ✅ Gọi BaseServiceMongoImpl.DeleteById để đảm bảo:
+//   - Xóa document từ MongoDB
+//   - Xử lý errors đúng cách
 func (s *RoleService) DeleteById(ctx context.Context, id primitive.ObjectID) error {
 	// Kiểm tra trước khi xóa
 	if err := s.validateBeforeDelete(ctx, id); err != nil {
@@ -120,6 +144,19 @@ func (s *RoleService) DeleteMany(ctx context.Context, filter interface{}) (int64
 }
 
 // FindOneAndDelete override method FindOneAndDelete để kiểm tra trước khi xóa
+//
+// LÝ DO PHẢI OVERRIDE (không dùng BaseServiceMongoImpl.FindOneAndDelete trực tiếp):
+// 1. Business logic validation:
+//    - Validate trước khi xóa: Kiểm tra role có đang được sử dụng không (có user roles, permissions)
+//    - Không cho phép xóa role đang được sử dụng
+//    - Đảm bảo data integrity
+//
+// ĐẢM BẢO LOGIC CƠ BẢN:
+// ✅ Validate trước khi xóa bằng validateBeforeDelete()
+// ✅ Gọi BaseServiceMongoImpl.FindOneAndDelete để đảm bảo:
+//   - Tìm và xóa document từ MongoDB
+//   - Trả về document đã bị xóa
+//   - Xử lý errors đúng cách
 func (s *RoleService) FindOneAndDelete(ctx context.Context, filter interface{}, opts *mongoopts.FindOneAndDeleteOptions) (models.Role, error) {
 	var zero models.Role
 

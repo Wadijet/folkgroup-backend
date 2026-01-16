@@ -5,6 +5,7 @@ type AIStepRunCreateInput struct {
 	WorkflowRunID string                 `json:"workflowRunId" validate:"required" transform:"str_objectid"` // ID của workflow run (dạng string ObjectID) - tự động convert sang primitive.ObjectID
 	StepID        string                 `json:"stepId" validate:"required" transform:"str_objectid"`        // ID của step definition (dạng string ObjectID) - tự động convert sang primitive.ObjectID
 	Order         int                    `json:"order" validate:"required"`         // Thứ tự trong workflow (0-based)
+	Status        string                 `json:"status,omitempty" transform:"string,default=pending" validate:"omitempty,oneof=pending running completed failed skipped"` // Trạng thái: pending, running, completed, failed, skipped (mặc định: pending)
 	Input         map[string]interface{} `json:"input,omitempty"`                  // Input data cho step
 	Metadata      map[string]interface{} `json:"metadata,omitempty"`                // Metadata bổ sung
 }

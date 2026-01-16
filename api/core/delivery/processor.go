@@ -303,6 +303,16 @@ func (p *Processor) StartCleanupJob(ctx context.Context) {
 	batchSize := 50                     // Xử lý tối đa 50 items mỗi lần
 
 	go func() {
+		// ✅ THÊM RECOVER để đảm bảo cleanup job goroutine không crash server
+		defer func() {
+			if r := recover(); r != nil {
+				log := logger.GetAppLogger()
+				log.WithFields(map[string]interface{}{
+					"panic": r,
+				}).Error("📦 [CLEANUP] Cleanup job goroutine panic recovered, job sẽ tiếp tục chạy")
+			}
+		}()
+
 		ticker := time.NewTicker(cleanupInterval)
 		defer ticker.Stop()
 

@@ -1,7 +1,10 @@
 package logger
 
 import (
+	"fmt"
 	"io"
+	"os"
+	"runtime/debug"
 	"sync"
 
 	"github.com/sirupsen/logrus"
@@ -96,41 +99,71 @@ func (h *AsyncHook) Fire(entry *logrus.Entry) error {
 }
 
 // processEntries xử lý log entries trong một goroutine riêng
+// ⚠️ QUAN TRỌNG: Hàm này có recover để đảm bảo logger goroutine không crash server
 func (h *AsyncHook) processEntries() {
 	defer h.wg.Done()
 
 	for entry := range h.entries {
-		// Format entry thành bytes sử dụng formatter của logger
-		// entry.Logger.Formatter sẽ format entry với formatter đã được set
-		var data []byte
-		var err error
+		// ✅ THÊM RECOVER để bắt panic và không làm crash server
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					// Không thể dùng logger ở đây vì sẽ tạo vòng lặp
+					// Ghi trực tiếp vào stderr để báo lỗi
+					fmt.Fprintf(os.Stderr, "[LOGGER PANIC] Logger goroutine panic recovered: %v\n", r)
+					debug.PrintStack()
+					// Tiếp tục xử lý entry tiếp theo, không crash server
+				}
+			}()
 
-		if entry.Logger.Formatter != nil {
-			// Dùng formatter của logger để format entry
-			data, err = entry.Logger.Formatter.Format(entry)
-		} else {
-			// Fallback: dùng String() nếu không có formatter
-			line, strErr := entry.String()
-			if strErr != nil {
-				continue
+			// Kiểm tra xem entry có bị filter không
+			// FilterHook đã đánh dấu entry bị filter bằng field "_filtered"
+			if filtered, ok := entry.Data["_filtered"].(bool); ok && filtered {
+				// Entry bị filter, bỏ qua không ghi log
+				return
 			}
-			data = []byte(line)
-		}
 
-		if err != nil {
-			continue // Bỏ qua nếu không format được
-		}
+			// Loại bỏ field "_filtered" khỏi entry trước khi format
+			// (field này chỉ dùng để đánh dấu, không cần ghi vào log)
+			filteredEntry := entry
+			if _, ok := entry.Data["_filtered"]; ok {
+				// Tạo entry mới không có field "_filtered"
+				filteredEntry = entry.Dup()
+				delete(filteredEntry.Data, "_filtered")
+			}
 
-		// Ghi vào tất cả writers (có thể block ở đây, nhưng không ảnh hưởng request handling)
-		// Nếu một writer chậm, nó sẽ không block các writers khác
-		for _, writer := range h.writers {
-			_, err = writer.Write(data)
+			// Format entry thành bytes sử dụng formatter của logger
+			// entry.Logger.Formatter sẽ format entry với formatter đã được set
+			var data []byte
+			var err error
+
+			if filteredEntry.Logger.Formatter != nil {
+				// Dùng formatter của logger để format entry
+				data, err = filteredEntry.Logger.Formatter.Format(filteredEntry)
+			} else {
+				// Fallback: dùng String() nếu không có formatter
+				line, strErr := filteredEntry.String()
+				if strErr != nil {
+					return // Bỏ qua entry này nếu không format được
+				}
+				data = []byte(line)
+			}
+
 			if err != nil {
-				// Không thể log lỗi ở đây vì sẽ tạo vòng lặp
-				// Tiếp tục với writer tiếp theo
-				continue
+				return // Bỏ qua nếu không format được
 			}
-		}
+
+			// Ghi vào tất cả writers (có thể block ở đây, nhưng không ảnh hưởng request handling)
+			// Nếu một writer chậm, nó sẽ không block các writers khác
+			for _, writer := range h.writers {
+				_, err = writer.Write(data)
+				if err != nil {
+					// Không thể log lỗi ở đây vì sẽ tạo vòng lặp
+					// Tiếp tục với writer tiếp theo
+					continue
+				}
+			}
+		}()
 	}
 }
 

@@ -19,11 +19,21 @@ type AgentCommandUpdateInput struct {
 // AgentCommandClaimInput dữ liệu đầu vào khi claim pending commands
 type AgentCommandClaimInput struct {
 	AgentID string `json:"agentId" validate:"required"` // ID của agent đang claim commands (bắt buộc)
-	Limit   int    `json:"limit,omitempty"`             // Số lượng commands tối đa muốn claim (mặc định: 1, tối đa: 100)
+	Limit   int    `json:"limit,omitempty" validate:"omitempty,min=1,max=100" transform:"int,default=1"` // Số lượng commands tối đa muốn claim (mặc định: 1, tối đa: 100)
 }
 
 // AgentCommandHeartbeatInput dữ liệu đầu vào khi update heartbeat/progress
 type AgentCommandHeartbeatInput struct {
-	CommandID string                 `json:"commandId" validate:"required" transform:"str_objectid_ptr"` // ID của command (dạng string ObjectID)
+	CommandID string                 `json:"commandId,omitempty" transform:"str_objectid_ptr,optional"` // ID của command (dạng string ObjectID) - có thể từ URL params hoặc body
 	Progress  map[string]interface{} `json:"progress,omitempty"`                                           // Tiến độ chi tiết (ví dụ: {"step": "stopping", "percentage": 50, "message": "Đang dừng bot..."})
+}
+
+// UpdateHeartbeatParams params từ URL khi update heartbeat (nếu có commandId trong URL)
+type UpdateHeartbeatParams struct {
+	CommandID string `uri:"commandId,omitempty" validate:"omitempty" transform:"str_objectid,optional"` // Command ID từ URL params (tùy chọn) - tự động validate và convert sang ObjectID
+}
+
+// ReleaseStuckCommandsQuery query params khi release stuck commands
+type ReleaseStuckCommandsQuery struct {
+	TimeoutSeconds int64 `query:"timeoutSeconds" validate:"omitempty,min=60"` // Timeout seconds (tối thiểu 60, mặc định 300 - xử lý trong handler)
 }

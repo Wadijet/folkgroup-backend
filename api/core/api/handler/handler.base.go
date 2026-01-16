@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v3"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -388,7 +389,81 @@ func NewBaseHandler[T any, CreateInput any, UpdateInput any](baseService service
 func (h *BaseHandler[T, CreateInput, UpdateInput]) validateInput(input interface{}) error {
 	// Validate với validator từ global
 	if err := global.Validate.Struct(input); err != nil {
-		return common.NewError(common.ErrCodeValidationInput, common.MsgValidationError, common.StatusBadRequest, err)
+		// Format error messages từ validator để user-friendly hơn
+		validationErrors, ok := err.(validator.ValidationErrors)
+		if !ok {
+			// Nếu không phải ValidationErrors, trả về lỗi gốc
+			return common.NewError(common.ErrCodeValidationInput, common.MsgValidationError, common.StatusBadRequest, err)
+		}
+
+		var errorMessages []string
+
+		for _, fieldError := range validationErrors {
+			fieldName := fieldError.Field()
+			tag := fieldError.Tag()
+			param := fieldError.Param()
+
+			// Lấy tên field từ JSON tag nếu có (user-friendly hơn)
+			field := reflect.TypeOf(input)
+			if field.Kind() == reflect.Ptr {
+				field = field.Elem()
+			}
+			if field.Kind() == reflect.Struct {
+				for i := 0; i < field.NumField(); i++ {
+					structField := field.Field(i)
+					if structField.Name == fieldName {
+						if jsonTag := structField.Tag.Get("json"); jsonTag != "" {
+							// Lấy tên field từ JSON tag (bỏ qua omitempty, etc.)
+							jsonName := strings.Split(jsonTag, ",")[0]
+							if jsonName != "" && jsonName != "-" {
+								fieldName = jsonName
+							}
+						}
+						break
+					}
+				}
+			}
+
+			// Format message theo từng loại validation
+			var message string
+			switch tag {
+			case "required":
+				message = fmt.Sprintf("Trường '%s' là bắt buộc", fieldName)
+			case "oneof":
+				message = fmt.Sprintf("Trường '%s' phải là một trong các giá trị: %s", fieldName, param)
+			case "email":
+				message = fmt.Sprintf("Trường '%s' phải là email hợp lệ", fieldName)
+			case "min":
+				message = fmt.Sprintf("Trường '%s' phải có giá trị tối thiểu là %s", fieldName, param)
+			case "max":
+				message = fmt.Sprintf("Trường '%s' phải có giá trị tối đa là %s", fieldName, param)
+			case "len":
+				message = fmt.Sprintf("Trường '%s' phải có độ dài chính xác là %s", fieldName, param)
+			case "gte":
+				message = fmt.Sprintf("Trường '%s' phải lớn hơn hoặc bằng %s", fieldName, param)
+			case "lte":
+				message = fmt.Sprintf("Trường '%s' phải nhỏ hơn hoặc bằng %s", fieldName, param)
+			case "gt":
+				message = fmt.Sprintf("Trường '%s' phải lớn hơn %s", fieldName, param)
+			case "lt":
+				message = fmt.Sprintf("Trường '%s' phải nhỏ hơn %s", fieldName, param)
+			case "omitempty":
+				// Bỏ qua omitempty (không phải lỗi)
+				continue
+			default:
+				// Fallback: format message mặc định
+				message = fmt.Sprintf("Trường '%s' không hợp lệ (validation tag: %s)", fieldName, tag)
+			}
+			errorMessages = append(errorMessages, message)
+		}
+
+		// Kết hợp tất cả error messages
+		errorMsg := strings.Join(errorMessages, "; ")
+		if errorMsg == "" {
+			errorMsg = common.MsgValidationError
+		}
+
+		return common.NewError(common.ErrCodeValidationInput, errorMsg, common.StatusBadRequest, err)
 	}
 
 	// Kiểm tra các trường đặc biệt
@@ -485,6 +560,7 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) ParseRequestBody(c fiber.Ctx,
 
 // ParseRequestQuery parse và validate dữ liệu từ query string.
 // Query string phải được encode dưới dạng JSON.
+// Hỗ trợ transform tag để tự động convert ObjectID, default values, etc.
 //
 // Parameters:
 // - c: Fiber context
@@ -503,9 +579,147 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) ParseRequestQuery(c fiber.Ctx
 		return common.NewError(common.ErrCodeValidationFormat, common.MsgValidationError, common.StatusBadRequest, err)
 	}
 
-	// Validate struct
-	if err := global.Validate.Struct(input); err != nil {
-		return common.NewError(common.ErrCodeValidationInput, common.MsgValidationError, common.StatusBadRequest, err)
+	// Transform với struct tag (tự động convert ObjectID, default values, etc.)
+	inputVal := reflect.ValueOf(input)
+	if inputVal.Kind() == reflect.Ptr {
+		inputVal = inputVal.Elem()
+	}
+	if inputVal.Kind() == reflect.Struct {
+		inputType := inputVal.Type()
+		for i := 0; i < inputVal.NumField(); i++ {
+			field := inputVal.Field(i)
+			fieldType := inputType.Field(i)
+
+			if !field.CanSet() {
+				continue
+			}
+
+			// Kiểm tra có transform tag không
+			transformTag := fieldType.Tag.Get("transform")
+			if transformTag != "" {
+				// Parse transform tag
+				transformConfig, err := utility.ParseTransformTag(transformTag)
+				if err != nil {
+					return common.NewError(
+						common.ErrCodeValidationFormat,
+						fmt.Sprintf("Lỗi parse transform tag cho field %s: %v", fieldType.Name, err),
+						common.StatusBadRequest,
+						err,
+					)
+				}
+
+				// Transform giá trị
+				fieldValue := field.Interface()
+				transformedValue, err := utility.TransformFieldValue(fieldValue, transformConfig, fieldType.Type)
+				if err != nil {
+					if transformConfig.Optional {
+						continue // Optional field → bỏ qua lỗi
+					}
+					return common.NewError(
+						common.ErrCodeValidationFormat,
+						fmt.Sprintf("Lỗi transform field '%s': %v", fieldType.Name, err),
+						common.StatusBadRequest,
+						err,
+					)
+				}
+
+				// Set giá trị đã transform
+				if transformedValue != nil {
+					transformedVal := reflect.ValueOf(transformedValue)
+					if transformedVal.Type().AssignableTo(field.Type()) {
+						field.Set(transformedVal)
+					} else if transformedVal.Type().ConvertibleTo(field.Type()) {
+						field.Set(transformedVal.Convert(field.Type()))
+					}
+				}
+			}
+		}
+	}
+
+	// Validate struct với validator
+	if err := h.validateInput(input); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// ParseQueryParams parse và validate query parameters từ URL.
+// Sử dụng Fiber's query binding để parse các query parameters.
+// Hỗ trợ transform tag để tự động convert ObjectID, default values, etc.
+//
+// Parameters:
+// - c: Fiber context
+// - input: Con trỏ tới struct sẽ chứa dữ liệu được parse
+//
+// Returns:
+// - error: Lỗi nếu có trong quá trình parse hoặc validate
+func (h *BaseHandler[T, CreateInput, UpdateInput]) ParseQueryParams(c fiber.Ctx, input interface{}) error {
+	// Parse query params
+	if err := c.Bind().Query(input); err != nil {
+		return common.NewError(common.ErrCodeValidationFormat, common.MsgValidationError, common.StatusBadRequest, err)
+	}
+
+	// Transform với struct tag (tự động convert ObjectID, default values, etc.)
+	inputVal := reflect.ValueOf(input)
+	if inputVal.Kind() == reflect.Ptr {
+		inputVal = inputVal.Elem()
+	}
+	if inputVal.Kind() == reflect.Struct {
+		inputType := inputVal.Type()
+		for i := 0; i < inputVal.NumField(); i++ {
+			field := inputVal.Field(i)
+			fieldType := inputType.Field(i)
+
+			if !field.CanSet() {
+				continue
+			}
+
+			// Kiểm tra có transform tag không
+			transformTag := fieldType.Tag.Get("transform")
+			if transformTag != "" {
+				// Parse transform tag
+				transformConfig, err := utility.ParseTransformTag(transformTag)
+				if err != nil {
+					return common.NewError(
+						common.ErrCodeValidationFormat,
+						fmt.Sprintf("Lỗi parse transform tag cho field %s: %v", fieldType.Name, err),
+						common.StatusBadRequest,
+						err,
+					)
+				}
+
+				// Transform giá trị
+				fieldValue := field.Interface()
+				transformedValue, err := utility.TransformFieldValue(fieldValue, transformConfig, fieldType.Type)
+				if err != nil {
+					if transformConfig.Optional {
+						continue // Optional field → bỏ qua lỗi
+					}
+					return common.NewError(
+						common.ErrCodeValidationFormat,
+						fmt.Sprintf("Lỗi transform field '%s': %v", fieldType.Name, err),
+						common.StatusBadRequest,
+						err,
+					)
+				}
+
+				// Set giá trị đã transform
+				if transformedValue != nil {
+					transformedVal := reflect.ValueOf(transformedValue)
+					if transformedVal.Type().AssignableTo(field.Type()) {
+						field.Set(transformedVal)
+					} else if transformedVal.Type().ConvertibleTo(field.Type()) {
+						field.Set(transformedVal.Convert(field.Type()))
+					}
+				}
+			}
+		}
+	}
+
+	// Validate struct với validator
+	if err := h.validateInput(input); err != nil {
+		return err
 	}
 
 	return nil
@@ -513,6 +727,7 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) ParseRequestQuery(c fiber.Ctx
 
 // ParseRequestParams parse và validate các tham số từ URI.
 // Sử dụng Fiber's URI binding để parse các tham số.
+// Hỗ trợ transform tag để tự động convert ObjectID, default values, etc.
 //
 // Parameters:
 // - c: Fiber context
@@ -526,9 +741,67 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) ParseRequestParams(c fiber.Ct
 		return common.NewError(common.ErrCodeValidationFormat, common.MsgValidationError, common.StatusBadRequest, err)
 	}
 
-	// Validate struct
-	if err := global.Validate.Struct(input); err != nil {
-		return common.NewError(common.ErrCodeValidationInput, common.MsgValidationError, common.StatusBadRequest, err)
+	// Transform với struct tag (tự động convert ObjectID, default values, etc.)
+	// Áp dụng transform tag cho chính struct params (không map sang model khác)
+	inputVal := reflect.ValueOf(input)
+	if inputVal.Kind() == reflect.Ptr {
+		inputVal = inputVal.Elem()
+	}
+	if inputVal.Kind() == reflect.Struct {
+		inputType := inputVal.Type()
+		for i := 0; i < inputVal.NumField(); i++ {
+			field := inputVal.Field(i)
+			fieldType := inputType.Field(i)
+
+			if !field.CanSet() {
+				continue
+			}
+
+			// Kiểm tra có transform tag không
+			transformTag := fieldType.Tag.Get("transform")
+			if transformTag != "" {
+				// Parse transform tag
+				transformConfig, err := utility.ParseTransformTag(transformTag)
+				if err != nil {
+					return common.NewError(
+						common.ErrCodeValidationFormat,
+						fmt.Sprintf("Lỗi parse transform tag cho field %s: %v", fieldType.Name, err),
+						common.StatusBadRequest,
+						err,
+					)
+				}
+
+				// Transform giá trị
+				fieldValue := field.Interface()
+				transformedValue, err := utility.TransformFieldValue(fieldValue, transformConfig, fieldType.Type)
+				if err != nil {
+					if transformConfig.Optional {
+						continue // Optional field → bỏ qua lỗi
+					}
+					return common.NewError(
+						common.ErrCodeValidationFormat,
+						fmt.Sprintf("Lỗi transform field '%s': %v", fieldType.Name, err),
+						common.StatusBadRequest,
+						err,
+					)
+				}
+
+				// Set giá trị đã transform
+				if transformedValue != nil {
+					transformedVal := reflect.ValueOf(transformedValue)
+					if transformedVal.Type().AssignableTo(field.Type()) {
+						field.Set(transformedVal)
+					} else if transformedVal.Type().ConvertibleTo(field.Type()) {
+						field.Set(transformedVal.Convert(field.Type()))
+					}
+				}
+			}
+		}
+	}
+
+	// Validate struct với validator
+	if err := h.validateInput(input); err != nil {
+		return err
 	}
 
 	return nil
@@ -1119,6 +1392,356 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) transformCreateInputToModel(i
 					continue
 				}
 				return nil, fmt.Errorf("không tìm thấy field '%s' trong Model (map từ field '%s' trong DTO)", targetFieldName, inputFieldType.Name)
+			}
+
+			// Xử lý nested struct transform
+			if transformConfig.Type == "nested_struct" {
+				// Recursive transform nested struct
+				nestedModel, err := h.transformNestedStruct(inputField, modelField.Type)
+				if err != nil {
+					if transformConfig.Optional {
+						// Optional field → bỏ qua lỗi
+						continue
+					}
+					return nil, fmt.Errorf("lỗi transform nested struct field '%s': %w", inputFieldType.Name, err)
+				}
+
+				// Set giá trị vào Model field
+				modelFieldVal := modelVal.FieldByName(targetFieldName)
+				if !modelFieldVal.IsValid() || !modelFieldVal.CanSet() {
+					if transformConfig.Optional {
+						continue
+					}
+					return nil, fmt.Errorf("không thể set giá trị vào field '%s' trong Model", targetFieldName)
+				}
+
+				if nestedModel.IsValid() {
+					// Set nested struct
+					if nestedModel.Type().AssignableTo(modelFieldVal.Type()) {
+						modelFieldVal.Set(nestedModel)
+					} else if nestedModel.Type().ConvertibleTo(modelFieldVal.Type()) {
+						modelFieldVal.Set(nestedModel.Convert(modelFieldVal.Type()))
+					} else {
+						return nil, fmt.Errorf("không thể convert nested struct từ type %v sang type %v cho field '%s'", nestedModel.Type(), modelFieldVal.Type(), targetFieldName)
+					}
+				} else if transformConfig.Optional {
+					// Optional field với giá trị nil → giữ nguyên zero value
+					continue
+				}
+				continue
+			}
+
+			// Transform giá trị
+			transformedValue, err := utility.TransformFieldValue(fieldValue, transformConfig, modelField.Type)
+			if err != nil {
+				if transformConfig.Optional {
+					// Optional field → bỏ qua lỗi
+					continue
+				}
+				return nil, fmt.Errorf("lỗi transform field '%s' sang '%s': %w", inputFieldType.Name, targetFieldName, err)
+			}
+
+			// Set giá trị vào Model field
+			modelFieldVal := modelVal.FieldByName(targetFieldName)
+			if !modelFieldVal.IsValid() || !modelFieldVal.CanSet() {
+				return nil, fmt.Errorf("không thể set giá trị vào field '%s' trong Model", targetFieldName)
+			}
+
+			// Convert và set giá trị
+			if transformedValue != nil {
+				transformedVal := reflect.ValueOf(transformedValue)
+				if transformedVal.Type().AssignableTo(modelFieldVal.Type()) {
+					modelFieldVal.Set(transformedVal)
+				} else if transformedVal.Type().ConvertibleTo(modelFieldVal.Type()) {
+					modelFieldVal.Set(transformedVal.Convert(modelFieldVal.Type()))
+				} else {
+					return nil, fmt.Errorf("không thể convert giá trị từ type %v sang type %v cho field '%s'", transformedVal.Type(), modelFieldVal.Type(), targetFieldName)
+				}
+			} else if transformConfig.Optional {
+				// Optional field với giá trị nil → giữ nguyên zero value
+				continue
+			}
+		} else {
+			// Không có transform tag → copy trực tiếp nếu field cùng tên và type tương thích
+			targetFieldName := inputFieldType.Name
+			_, found := modelType.FieldByName(targetFieldName)
+			if !found {
+				// Không có field cùng tên trong Model → bỏ qua
+				continue
+			}
+
+			// Kiểm tra type tương thích
+			modelFieldVal := modelVal.FieldByName(targetFieldName)
+			if !modelFieldVal.IsValid() || !modelFieldVal.CanSet() {
+				continue
+			}
+
+			// Copy giá trị nếu type tương thích
+			inputValReflect := reflect.ValueOf(fieldValue)
+			if inputValReflect.Type().AssignableTo(modelFieldVal.Type()) {
+				modelFieldVal.Set(inputValReflect)
+			} else if inputValReflect.Type().ConvertibleTo(modelFieldVal.Type()) {
+				modelFieldVal.Set(inputValReflect.Convert(modelFieldVal.Type()))
+			}
+			// Nếu không tương thích → bỏ qua (có thể cần transform tag)
+		}
+	}
+
+	return model, nil
+}
+
+// transformNestedStruct transform nested struct từ DTO sang Model (recursive)
+// Hàm này xử lý recursive transform cho nested struct với transform tags
+func (h *BaseHandler[T, CreateInput, UpdateInput]) transformNestedStruct(inputVal reflect.Value, targetType reflect.Type) (reflect.Value, error) {
+	// Xử lý pointer
+	if inputVal.Kind() == reflect.Ptr {
+		if inputVal.IsNil() {
+			// Nil pointer → return zero value
+			return reflect.Zero(targetType), nil
+		}
+		inputVal = inputVal.Elem()
+	}
+
+	// Kiểm tra input phải là struct
+	if inputVal.Kind() != reflect.Struct {
+		return reflect.Value{}, fmt.Errorf("input không phải là struct: %v", inputVal.Kind())
+	}
+
+	// Tạo instance của target type
+	var targetVal reflect.Value
+	if targetType.Kind() == reflect.Ptr {
+		// Target là pointer → tạo pointer mới
+		targetVal = reflect.New(targetType.Elem())
+	} else {
+		// Target là value → tạo value mới
+		targetVal = reflect.New(targetType)
+	}
+
+	// Lấy struct value (không phải pointer)
+	targetStructVal := targetVal.Elem()
+	if targetStructVal.Kind() != reflect.Struct {
+		return reflect.Value{}, fmt.Errorf("target type không phải là struct: %v", targetType)
+	}
+
+	// Duyệt qua các field của input struct
+	inputType := inputVal.Type()
+	for i := 0; i < inputVal.NumField(); i++ {
+		inputField := inputVal.Field(i)
+		inputFieldType := inputType.Field(i)
+
+		// Bỏ qua field không export được
+		if !inputField.CanInterface() {
+			continue
+		}
+
+		// Lấy giá trị field
+		fieldValue := inputField.Interface()
+
+		// Kiểm tra có transform tag không
+		transformTag := inputFieldType.Tag.Get("transform")
+		if transformTag != "" {
+			// Parse transform tag
+			transformConfig, err := utility.ParseTransformTag(transformTag)
+			if err != nil {
+				return reflect.Value{}, fmt.Errorf("lỗi parse transform tag cho field %s: %w", inputFieldType.Name, err)
+			}
+
+			// Tìm field trong target struct (cùng tên)
+			targetFieldName := inputFieldType.Name
+			targetField, found := targetStructVal.Type().FieldByName(targetFieldName)
+			if !found {
+				// Không tìm thấy field trong target
+				if transformConfig.Optional {
+					continue
+				}
+				return reflect.Value{}, fmt.Errorf("không tìm thấy field '%s' trong target struct", targetFieldName)
+			}
+
+			// Xử lý nested struct (recursive)
+			if transformConfig.Type == "nested_struct" {
+				nestedModel, err := h.transformNestedStruct(inputField, targetField.Type)
+				if err != nil {
+					if transformConfig.Optional {
+						continue
+					}
+					return reflect.Value{}, err
+				}
+
+				targetFieldVal := targetStructVal.FieldByName(targetFieldName)
+				if nestedModel.IsValid() {
+					if nestedModel.Type().AssignableTo(targetFieldVal.Type()) {
+						targetFieldVal.Set(nestedModel)
+					} else if nestedModel.Type().ConvertibleTo(targetFieldVal.Type()) {
+						targetFieldVal.Set(nestedModel.Convert(targetFieldVal.Type()))
+					}
+				}
+				continue
+			}
+
+			// Transform giá trị
+			transformedValue, err := utility.TransformFieldValue(fieldValue, transformConfig, targetField.Type)
+			if err != nil {
+				if transformConfig.Optional {
+					continue
+				}
+				return reflect.Value{}, fmt.Errorf("lỗi transform field '%s': %w", inputFieldType.Name, err)
+			}
+
+			// Set giá trị vào target field
+			targetFieldVal := targetStructVal.FieldByName(targetFieldName)
+			if !targetFieldVal.IsValid() || !targetFieldVal.CanSet() {
+				if transformConfig.Optional {
+					continue
+				}
+				return reflect.Value{}, fmt.Errorf("không thể set giá trị vào field '%s'", targetFieldName)
+			}
+
+			if transformedValue != nil {
+				transformedVal := reflect.ValueOf(transformedValue)
+				if transformedVal.Type().AssignableTo(targetFieldVal.Type()) {
+					targetFieldVal.Set(transformedVal)
+				} else if transformedVal.Type().ConvertibleTo(targetFieldVal.Type()) {
+					targetFieldVal.Set(transformedVal.Convert(targetFieldVal.Type()))
+				}
+			}
+		} else {
+			// Không có transform tag → copy trực tiếp nếu type tương thích
+			targetFieldName := inputFieldType.Name
+			targetFieldVal := targetStructVal.FieldByName(targetFieldName)
+			if !targetFieldVal.IsValid() || !targetFieldVal.CanSet() {
+				continue
+			}
+
+			inputValReflect := reflect.ValueOf(fieldValue)
+			if inputValReflect.Type().AssignableTo(targetFieldVal.Type()) {
+				targetFieldVal.Set(inputValReflect)
+			} else if inputValReflect.Type().ConvertibleTo(targetFieldVal.Type()) {
+				targetFieldVal.Set(inputValReflect.Convert(targetFieldVal.Type()))
+			}
+		}
+	}
+
+	// Return target value (pointer nếu targetType là pointer)
+	if targetType.Kind() == reflect.Ptr {
+		return targetVal, nil
+	}
+	return targetStructVal, nil
+}
+
+// transformUpdateInputToModel transform UpdateInput (DTO) sang Model (T)
+// Tương tự transformCreateInputToModel nhưng dùng cho UpdateInput
+// Sử dụng struct tag `transform` để tự động convert các field (ví dụ: string → ObjectID)
+//
+// Parameters:
+//   - input: UpdateInput (DTO) cần transform
+//
+// Returns:
+//   - *T: Model đã được transform
+//   - error: Lỗi nếu có trong quá trình transform
+func (h *BaseHandler[T, CreateInput, UpdateInput]) transformUpdateInputToModel(input *UpdateInput) (*T, error) {
+	// Tạo Model mới
+	model := new(T)
+
+	// Lấy reflect value và type của DTO và Model
+	inputVal := reflect.ValueOf(input)
+	if inputVal.Kind() == reflect.Ptr {
+		inputVal = inputVal.Elem()
+	}
+	if inputVal.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("UpdateInput phải là struct hoặc pointer đến struct")
+	}
+
+	modelVal := reflect.ValueOf(model)
+	if modelVal.Kind() == reflect.Ptr {
+		modelVal = modelVal.Elem()
+	}
+	if modelVal.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("Model phải là struct hoặc pointer đến struct")
+	}
+
+	inputType := inputVal.Type()
+	modelType := modelVal.Type()
+
+	// Duyệt qua tất cả các field trong DTO
+	for i := 0; i < inputVal.NumField(); i++ {
+		inputField := inputVal.Field(i)
+		inputFieldType := inputType.Field(i)
+
+		// Bỏ qua field không export được
+		if !inputField.CanInterface() {
+			continue
+		}
+
+		// Lấy giá trị field
+		fieldValue := inputField.Interface()
+
+		// Bỏ qua zero values (vì đây là update, chỉ update các field có giá trị)
+		if reflect.DeepEqual(fieldValue, reflect.Zero(reflect.TypeOf(fieldValue)).Interface()) {
+			continue
+		}
+
+		// Kiểm tra có transform tag không
+		transformTag := inputFieldType.Tag.Get("transform")
+		if transformTag != "" {
+			// Parse transform tag
+			transformConfig, err := utility.ParseTransformTag(transformTag)
+			if err != nil {
+				return nil, fmt.Errorf("lỗi parse transform tag cho field %s: %w", inputFieldType.Name, err)
+			}
+
+			// Xác định field target trong Model
+			targetFieldName := inputFieldType.Name // Mặc định: cùng tên
+			if transformConfig.MapTo != "" {
+				// Có map option → dùng tên field từ map
+				targetFieldName = transformConfig.MapTo
+			}
+
+			// Tìm field trong Model
+			modelField, found := modelType.FieldByName(targetFieldName)
+			if !found {
+				// Không tìm thấy field trong Model
+				if transformConfig.Optional {
+					// Optional field → bỏ qua
+					continue
+				}
+				return nil, fmt.Errorf("không tìm thấy field '%s' trong Model (map từ field '%s' trong DTO)", targetFieldName, inputFieldType.Name)
+			}
+
+			// Xử lý nested struct transform
+			if transformConfig.Type == "nested_struct" {
+				// Recursive transform nested struct
+				nestedModel, err := h.transformNestedStruct(inputField, modelField.Type)
+				if err != nil {
+					if transformConfig.Optional {
+						// Optional field → bỏ qua lỗi
+						continue
+					}
+					return nil, fmt.Errorf("lỗi transform nested struct field '%s': %w", inputFieldType.Name, err)
+				}
+
+				// Set giá trị vào Model field
+				modelFieldVal := modelVal.FieldByName(targetFieldName)
+				if !modelFieldVal.IsValid() || !modelFieldVal.CanSet() {
+					if transformConfig.Optional {
+						continue
+					}
+					return nil, fmt.Errorf("không thể set giá trị vào field '%s' trong Model", targetFieldName)
+				}
+
+				if nestedModel.IsValid() {
+					// Set nested struct
+					if nestedModel.Type().AssignableTo(modelFieldVal.Type()) {
+						modelFieldVal.Set(nestedModel)
+					} else if nestedModel.Type().ConvertibleTo(modelFieldVal.Type()) {
+						modelFieldVal.Set(nestedModel.Convert(modelFieldVal.Type()))
+					} else {
+						return nil, fmt.Errorf("không thể convert nested struct từ type %v sang type %v cho field '%s'", nestedModel.Type(), modelFieldVal.Type(), targetFieldName)
+					}
+				} else if transformConfig.Optional {
+					// Optional field với giá trị nil → giữ nguyên zero value
+					continue
+				}
+				continue
 			}
 
 			// Transform giá trị

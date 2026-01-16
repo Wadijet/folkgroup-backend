@@ -178,14 +178,15 @@ func (r *Renderer) RenderCTAs(ctx context.Context, req CTARenderRequest) (*CTARe
 }
 
 // createTrackingURL tạo tracking URL
-// Format: /api/v1/cta/track/:historyId/:ctaIndex?url=<base64_encoded_original_url>
+// Format: /api/v1/track/:action/:historyId?ctaIndex=...&url=<base64_encoded_original_url>
+// Action: "cta" (đã gộp vào unified tracking endpoint)
 func (r *Renderer) createTrackingURL(baseURL string, historyID primitive.ObjectID, ctaIndex int, originalURL string) (string, error) {
 	// Encode original URL thành base64
 	encodedURL := base64.URLEncoding.EncodeToString([]byte(originalURL))
 
-	// Tạo tracking URL
-	trackingPath := fmt.Sprintf("/api/v1/cta/track/%s/%d", historyID.Hex(), ctaIndex)
-	trackingURL := fmt.Sprintf("%s%s?url=%s", baseURL, trackingPath, url.QueryEscape(encodedURL))
+	// Tạo tracking URL với unified endpoint (action="cta", ctaIndex trong query param)
+	trackingPath := fmt.Sprintf("/api/v1/track/cta/%s", historyID.Hex())
+	trackingURL := fmt.Sprintf("%s%s?ctaIndex=%d&url=%s", baseURL, trackingPath, ctaIndex, url.QueryEscape(encodedURL))
 
 	return trackingURL, nil
 }

@@ -12,8 +12,8 @@ import (
 	"path/filepath"
 	"time"
 
+	validator "github.com/go-playground/validator/v10"
 	"github.com/sirupsen/logrus"
-	validator "gopkg.in/go-playground/validator.v9"
 )
 
 // Hàm khởi tạo các biến toàn cục

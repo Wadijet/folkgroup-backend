@@ -44,33 +44,54 @@ func (s *PcOrderService) IsPancakeOrderIdExist(ctx context.Context, pancakeOrder
 	return true, nil
 }
 
-// FindOne tìm một document theo ObjectId
-func (s *PcOrderService) FindOne(ctx context.Context, id primitive.ObjectID) (models.PcOrder, error) {
-	filter := bson.M{"_id": id}
-	var result models.PcOrder
-	err := s.BaseServiceMongoImpl.collection.FindOne(ctx, filter).Decode(&result)
-	if err != nil {
-		return models.PcOrder{}, err
-	}
-	return result, nil
-}
-
 // Delete xóa một document theo ObjectId
+//
+// LÝ DO PHẢI TẠO METHOD NÀY (không dùng BaseServiceMongoImpl.DeleteById trực tiếp):
+// 1. Backward compatibility:
+//    - Method này có thể được gọi từ các nơi khác trong codebase
+//    - Giữ nguyên interface để không phá vỡ existing code
+//
+// LƯU Ý:
+// - Method này chỉ là wrapper đơn giản, không có business logic đặc biệt
+// - Đã refactor để dùng BaseServiceMongoImpl.DeleteById() để nhất quán với base service
+//
+// ĐẢM BẢO LOGIC CƠ BẢN:
+// ✅ Xóa document theo ID bằng BaseServiceMongoImpl.DeleteById()
+// ✅ Trả về error nếu có
 func (s *PcOrderService) Delete(ctx context.Context, id primitive.ObjectID) error {
-	filter := bson.M{"_id": id}
-	_, err := s.BaseServiceMongoImpl.collection.DeleteOne(ctx, filter)
-	return err
+	return s.BaseServiceMongoImpl.DeleteById(ctx, id)
 }
 
 // Update cập nhật một document theo ObjectId
+//
+// LÝ DO PHẢI TẠO METHOD NÀY (không dùng BaseServiceMongoImpl.UpdateById trực tiếp):
+// 1. Backward compatibility:
+//    - Method này có thể được gọi từ các nơi khác trong codebase
+//    - Giữ nguyên interface để không phá vỡ existing code
+// 2. Return updated document:
+//    - Method này trả về document đã được update
+//    - BaseServiceMongoImpl.UpdateById() trả về UpdateResult, không trả về document
+//
+// LƯU Ý:
+// - Method này chỉ là wrapper đơn giản, không có business logic đặc biệt
+// - Đã refactor để dùng BaseServiceMongoImpl.UpdateById() với UpdateData struct để nhất quán
+//
+// ĐẢM BẢO LOGIC CƠ BẢN:
+// ✅ Update document theo ID bằng BaseServiceMongoImpl.UpdateById()
+// ✅ Trả về document đã được update bằng FindOneById()
+// ✅ Trả về error nếu có
 func (s *PcOrderService) Update(ctx context.Context, id primitive.ObjectID, pcOrder models.PcOrder) (models.PcOrder, error) {
-	filter := bson.M{"_id": id}
-	update := bson.M{"$set": pcOrder}
+	// Convert PcOrder sang UpdateData để dùng base method
+	updateData, err := ToUpdateData(pcOrder)
+	if err != nil {
+		return models.PcOrder{}, fmt.Errorf("failed to convert to UpdateData: %w", err)
+	}
 
-	_, err := s.BaseServiceMongoImpl.collection.UpdateOne(ctx, filter, update)
+	_, err = s.BaseServiceMongoImpl.UpdateById(ctx, id, *updateData)
 	if err != nil {
 		return models.PcOrder{}, err
 	}
 
-	return s.FindOne(ctx, id)
+	// Trả về document đã được update
+	return s.BaseServiceMongoImpl.FindOneById(ctx, id)
 }

@@ -449,19 +449,12 @@ func (r *Router) registerRBACRoutes(router fiber.Router) error {
 	// Đã tắt log để giảm log khi khởi động
 	r.registerCRUDRoutes(router, "/organization", organizationHandler, readWriteConfig, "Organization")
 
-	// Organization Share routes
+	// Organization Share routes - dùng CRUD chuẩn
+	// Logic nghiệp vụ (duplicate check, validation) đã được đưa vào service.InsertOne override
 	organizationShareHandler, err := handler.NewOrganizationShareHandler()
 	if err != nil {
 		return fmt.Errorf("failed to create organization share handler: %v", err)
 	}
-	// Route đặc biệt với logic riêng cho CreateShare và DeleteShare (có validation đặc biệt về quyền với fromOrg)
-	// FIX: Dùng registerRouteWithMiddleware với .Use() method (cách đúng) thay vì cách trực tiếp có bug trong Fiber v3
-	orgShareCreateMiddleware := middleware.AuthMiddleware("OrganizationShare.Create")
-	orgShareDeleteMiddleware := middleware.AuthMiddleware("OrganizationShare.Delete")
-	orgContextMiddleware := middleware.OrganizationContextMiddleware()
-	registerRouteWithMiddleware(router, "/organization-share", "POST", "", []fiber.Handler{orgShareCreateMiddleware, orgContextMiddleware}, organizationShareHandler.CreateShare)
-	registerRouteWithMiddleware(router, "/organization-share", "DELETE", "/:id", []fiber.Handler{orgShareDeleteMiddleware, orgContextMiddleware}, organizationShareHandler.DeleteShare)
-	// CRUD routes - đăng ký đầy đủ các operation CRUD (Find, FindById, Update, v.v.)
 	r.registerCRUDRoutes(router, "/organization-share", organizationShareHandler, organizationShareConfig, "OrganizationShare")
 
 	return nil
@@ -741,14 +734,19 @@ func (r *Router) registerNotificationRoutes(router fiber.Router) error {
 	orgContextMiddleware := middleware.OrganizationContextMiddleware()
 	registerRouteWithMiddleware(router, "/notification", "POST", "/trigger", []fiber.Handler{notificationTriggerMiddleware, orgContextMiddleware}, triggerHandler.HandleTriggerNotification)
 
-	// Notification Tracking routes (public, không cần auth)
-	trackHandler, err := handler.NewNotificationTrackHandler()
+	// Tracking routes (public, không cần auth) - gộp tất cả tracking actions vào 1 endpoint
+	// Format: /api/v1/track/:action/:historyId?ctaIndex=...
+	// Actions: "open", "click", "confirm", "cta"
+	// - "open": Track email open (không cần ctaIndex) - trả về 1x1 PNG pixel
+	// - "click": Track notification click (cần ctaIndex trong query) - redirect về original URL
+	// - "confirm": Track notification confirm (không cần ctaIndex) - trả về JSON
+	// - "cta": Track CTA click (cần ctaIndex trong query) - redirect về original URL
+	trackingHandler, err := handler.NewTrackingHandler()
 	if err != nil {
-		return fmt.Errorf("failed to create notification track handler: %v", err)
+		return fmt.Errorf("failed to create tracking handler: %v", err)
 	}
-	router.Get("/notification/track/open/:historyId", trackHandler.HandleTrackOpen)
-	router.Get("/notification/track/:historyId/:ctaIndex", trackHandler.HandleTrackClick)
-	router.Get("/notification/confirm/:historyId", trackHandler.HandleTrackConfirm)
+	// Chỉ 1 route duy nhất, ctaIndex lấy từ query param
+	router.Get("/track/:action/:historyId", trackingHandler.HandleAction)
 
 	return nil
 }
@@ -766,9 +764,7 @@ func (r *Router) registerCTARoutes(router fiber.Router) error {
 	ctaLibraryConfig := readWriteConfig
 	r.registerCRUDRoutes(router, "/cta/library", ctaLibraryHandler, ctaLibraryConfig, "CTALibrary")
 
-	// CTA Tracking route (public, không cần auth) - endpoint đặc biệt cần thiết cho tracking clicks
-	ctaTrackHandler := handler.NewCTATrackHandler()
-	router.Get("/cta/track/:historyId/:ctaIndex", ctaTrackHandler.TrackCTAClick)
+	// CTA Action route đã được gộp vào /api/v1/track/:action/:historyId với action="cta"
 
 	// Lưu ý: CTA Render không có endpoint riêng vì được gọi trực tiếp từ code (internal)
 	// Hệ thống 1 và 2 sẽ gọi trực tiếp cta.Renderer.RenderCTAs() thay vì qua HTTP
@@ -800,7 +796,7 @@ func (r *Router) registerDeliveryRoutes(router fiber.Router) error {
 
 	// Lưu ý: Delivery Sender và Tracking routes
 	// - Sender: Dùng /notification/sender (cùng resource, thuộc Notification System)
-	// - Tracking: Dùng /notification/track/* (cùng chức năng)
+	// - Tracking: Dùng /track/:action/:historyId/:ctaIndex? (unified tracking endpoint cho tất cả actions)
 
 	return nil
 }
@@ -989,6 +985,10 @@ func (r *Router) registerAIServiceRoutes(router fiber.Router) error {
 		return fmt.Errorf("failed to create AI step handler: %v", err)
 	}
 	r.registerCRUDRoutes(router, "/ai/steps", aiStepHandler, readWriteConfig, "AISteps")
+	// Custom endpoint: Render prompt cho step (bot gọi để lấy prompt đã render và AI config)
+	authMiddleware := middleware.AuthMiddleware("AISteps.Read")
+	orgContextMiddleware := middleware.OrganizationContextMiddleware()
+	registerRouteWithMiddleware(router, "/api/v2", "POST", "/ai/steps/:id/render-prompt", []fiber.Handler{authMiddleware, orgContextMiddleware}, aiStepHandler.RenderPrompt)
 
 	// ===== PROMPT TEMPLATES =====
 	aiPromptTemplateHandler, err := handler.NewAIPromptTemplateHandler()
@@ -1049,14 +1049,14 @@ func (r *Router) registerAIServiceRoutes(router fiber.Router) error {
 	// Endpoint đặc biệt: Claim pending commands (atomic operation)
 	// FIX: Dùng registerRouteWithMiddleware với .Use() method (cách đúng) thay vì cách trực tiếp có bug trong Fiber v3
 	claimCommandsMiddleware := middleware.AuthMiddleware("AIWorkflowCommands.Update")
-	orgContextMiddleware := middleware.OrganizationContextMiddleware()
-	registerRouteWithMiddleware(router, "/ai/workflow-commands", "POST", "/claim-pending", []fiber.Handler{claimCommandsMiddleware, orgContextMiddleware}, aiWorkflowCommandHandler.ClaimPendingCommands)
+	orgContextMiddlewareCmd := middleware.OrganizationContextMiddleware()
+	registerRouteWithMiddleware(router, "/ai/workflow-commands", "POST", "/claim-pending", []fiber.Handler{claimCommandsMiddleware, orgContextMiddlewareCmd}, aiWorkflowCommandHandler.ClaimPendingCommands)
 
 	// Endpoint đặc biệt: Update heartbeat/progress (agent gọi định kỳ)
 	// Lưu ý: Endpoint này có thể không cần auth nếu agent có cách xác thực khác (ví dụ: agentId trong header)
 	// Tạm thời dùng auth middleware, sau này có thể thay bằng agent authentication
 	updateHeartbeatMiddleware := middleware.AuthMiddleware("AIWorkflowCommands.Update")
-	registerRouteWithMiddleware(router, "/ai/workflow-commands", "POST", "/update-heartbeat", []fiber.Handler{updateHeartbeatMiddleware, orgContextMiddleware}, aiWorkflowCommandHandler.UpdateHeartbeat)
+	registerRouteWithMiddleware(router, "/ai/workflow-commands", "POST", "/update-heartbeat", []fiber.Handler{updateHeartbeatMiddleware, orgContextMiddlewareCmd}, aiWorkflowCommandHandler.UpdateHeartbeat)
 	// Hỗ trợ cả URL params: /update-heartbeat/:commandId
 	registerRouteWithMiddleware(router, "/ai/workflow-commands", "POST", "/update-heartbeat/:commandId", []fiber.Handler{updateHeartbeatMiddleware, orgContextMiddleware}, aiWorkflowCommandHandler.UpdateHeartbeat)
 

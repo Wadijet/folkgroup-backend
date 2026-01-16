@@ -5,9 +5,9 @@ import (
 	"meta_commerce/config"
 	"meta_commerce/core/registry"
 
+	validator "github.com/go-playground/validator/v10"
 	_ "github.com/go-sql-driver/mysql"
 	"go.mongodb.org/mongo-driver/mongo"
-	validator "gopkg.in/go-playground/validator.v9"
 )
 
 // MongoDB_Auth_CollectionName chứa tên các collection trong MongoDB
@@ -58,13 +58,13 @@ type MongoDB_Auth_CollectionName struct {
 	WebhookLogs string // Tên collection cho webhook logs (để debug)
 
 	// Module 1: Content Storage Collections (tất cả đều có prefix "content_" để nhất quán)
-	ContentNodes        string // Tên collection cho content nodes (L1-L6): content_nodes
-	Videos              string // Tên collection cho videos (L7): content_videos
-	Publications        string // Tên collection cho publications (L8): content_publications
-	DraftContentNodes   string // Tên collection cho draft content nodes: content_draft_nodes
-	DraftVideos         string // Tên collection cho draft videos: content_draft_videos
-	DraftPublications   string // Tên collection cho draft publications: content_draft_publications
-	DraftApprovals      string // Tên collection cho draft approvals: content_draft_approvals
+	ContentNodes      string // Tên collection cho content nodes (L1-L6): content_nodes
+	Videos            string // Tên collection cho videos (L7): content_videos
+	Publications      string // Tên collection cho publications (L8): content_publications
+	DraftContentNodes string // Tên collection cho draft content nodes: content_draft_nodes
+	DraftVideos       string // Tên collection cho draft videos: content_draft_videos
+	DraftPublications string // Tên collection cho draft publications: content_draft_publications
+	DraftApprovals    string // Tên collection cho draft approvals: content_draft_approvals
 
 	// Module 2: AI Service Collections (tất cả đều có prefix "ai_" để nhất quán)
 	AIWorkflows         string // Tên collection cho workflows: ai_workflows

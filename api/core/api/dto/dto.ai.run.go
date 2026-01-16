@@ -2,7 +2,8 @@ package dto
 
 // AIRunCreateInput dữ liệu đầu vào khi tạo AI run
 type AIRunCreateInput struct {
-	Type              string                 `json:"type" validate:"required"`     // Loại: GENERATE, JUDGE
+	Type              string                 `json:"type" validate:"required,oneof=GENERATE JUDGE"`     // Loại: GENERATE, JUDGE
+	Status            string                 `json:"status,omitempty" transform:"string,default=pending" validate:"omitempty,oneof=pending running completed failed"` // Trạng thái: pending, running, completed, failed (mặc định: pending)
 	PromptTemplateID  string                 `json:"promptTemplateId,omitempty" transform:"str_objectid_ptr,optional"`   // ID của prompt template (dạng string ObjectID) - tự động convert sang *primitive.ObjectID
 	ProviderProfileID string                 `json:"providerProfileId,omitempty" transform:"str_objectid_ptr,optional"`  // ID của AI provider profile (dạng string ObjectID) - tự động convert sang *primitive.ObjectID
 	Provider          string                 `json:"provider" validate:"required"` // Provider name: "openai", "anthropic", "google", etc.

@@ -50,9 +50,9 @@ func NewAIWorkflowCommandService() (*AIWorkflowCommandService, error) {
 //   - error: Lỗi nếu có trong quá trình claim
 //
 // Logic:
-//   1. Tìm các commands có status = "pending" và agentId không tồn tại hoặc rỗng
-//   2. Atomic update: Set status = "executing", agentId = agentId, assignedAt = now
-//   3. Trả về danh sách commands đã được claim
+//  1. Tìm các commands có status = "pending" và agentId không tồn tại hoặc rỗng
+//  2. Atomic update: Set status = "executing", agentId = agentId, assignedAt = now
+//  3. Trả về danh sách commands đã được claim
 //
 // Lưu ý:
 //   - Operation này là atomic, đảm bảo không có race condition
@@ -79,7 +79,7 @@ func (s *AIWorkflowCommandService) ClaimPendingCommands(ctx context.Context, age
 		"status": models.AIWorkflowCommandStatusPending,
 		"$or": []bson.M{
 			{"agentId": bson.M{"$exists": false}}, // agentId không tồn tại
-			{"agentId": ""},                        // agentId rỗng
+			{"agentId": ""},                       // agentId rỗng
 		},
 	}
 
@@ -186,7 +186,7 @@ func (s *AIWorkflowCommandService) UpdateHeartbeat(ctx context.Context, commandI
 // Tham số:
 //   - ctx: Context
 //   - timeoutSeconds: Thời gian timeout (giây) - nếu lastHeartbeatAt cũ hơn (now - timeoutSeconds) thì coi là stuck
-//                      Mặc định: 300 giây (5 phút)
+//     Mặc định: 300 giây (5 phút)
 //
 // Trả về:
 //   - int64: Số lượng commands đã được giải phóng

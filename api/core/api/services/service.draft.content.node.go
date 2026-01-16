@@ -36,8 +36,26 @@ func NewDraftContentNodeService() (*DraftContentNodeService, error) {
 	}, nil
 }
 
-// InsertOne override để thêm validation sequential level constraint
-// Kiểm tra parent phải tồn tại và đã được commit (production) hoặc là draft đã được approve
+// InsertOne override để thêm validation sequential level constraint trước khi insert
+//
+// LÝ DO PHẢI OVERRIDE (không dùng BaseServiceMongoImpl.InsertOne trực tiếp):
+// 1. Business logic validation - Sequential level constraint:
+//    - Kiểm tra parent phải tồn tại trong production (ContentNode) hoặc draft (DraftContentNode)
+//    - Kiểm tra parent đã được commit (production) hoặc là draft đã được approve
+//    - Validate sequential level constraint: parent phải có level thấp hơn child đúng 1 level
+//    - Đảm bảo cấu trúc content hierarchy hợp lệ (L1 → L2 → L3 → ... → L6)
+//
+// 2. Cross-collection validation:
+//    - Query parent từ ContentNode collection (production)
+//    - Query parent từ DraftContentNode collection (draft)
+//    - Xử lý cả ParentID và ParentDraftID
+//
+// ĐẢM BẢO LOGIC CƠ BẢN:
+// ✅ Validate sequential level constraint bằng ValidateSequentialLevelConstraint()
+// ✅ Gọi BaseServiceMongoImpl.InsertOne để đảm bảo:
+//   - Set timestamps (CreatedAt, UpdatedAt)
+//   - Generate ID nếu chưa có
+//   - Insert vào MongoDB
 func (s *DraftContentNodeService) InsertOne(ctx context.Context, data models.DraftContentNode) (models.DraftContentNode, error) {
 	// Validate sequential level constraint
 	var parentType string

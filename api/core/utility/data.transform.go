@@ -162,6 +162,10 @@ func applyTransform(value interface{}, config *transformTagConfig, targetFieldTy
 	case "str_bool":
 		// Convert string → bool
 		return transformToBool(value)
+	case "nested_struct":
+		// Nested struct transform - sẽ được xử lý ở level cao hơn (trong transformCreateInputToModel)
+		// Return giá trị gốc để xử lý recursive ở handler level
+		return value, nil
 	case "":
 		fallthrough
 	default:

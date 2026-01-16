@@ -2,10 +2,10 @@ package dto
 
 // DraftApprovalCreateInput dữ liệu đầu vào khi tạo approval request
 type DraftApprovalCreateInput struct {
-	WorkflowRunID     string `json:"workflowRunId,omitempty"`        // ID của workflow run (nếu approve cho workflow run, dạng string ObjectID)
-	DraftNodeID       string `json:"draftNodeId,omitempty"`          // ID của draft node (nếu approve cho individual draft, dạng string ObjectID)
-	DraftVideoID      string `json:"draftVideoId,omitempty"`         // ID của draft video (nếu approve cho individual draft, dạng string ObjectID)
-	DraftPublicationID string `json:"draftPublicationId,omitempty"`  // ID của draft publication (nếu approve cho individual draft, dạng string ObjectID)
+	WorkflowRunID     string                 `json:"workflowRunId,omitempty" transform:"str_objectid_ptr,optional"`        // ID của workflow run (nếu approve cho workflow run, dạng string ObjectID)
+	DraftNodeID       string                 `json:"draftNodeId,omitempty" transform:"str_objectid_ptr,optional"`          // ID của draft node (nếu approve cho individual draft, dạng string ObjectID)
+	DraftVideoID      string                 `json:"draftVideoId,omitempty" transform:"str_objectid_ptr,optional"`         // ID của draft video (nếu approve cho individual draft, dạng string ObjectID)
+	DraftPublicationID string                `json:"draftPublicationId,omitempty" transform:"str_objectid_ptr,optional"`  // ID của draft publication (nếu approve cho individual draft, dạng string ObjectID)
 	Metadata          map[string]interface{} `json:"metadata,omitempty"` // Metadata bổ sung (tùy chọn)
 }
 
@@ -14,4 +14,24 @@ type DraftApprovalUpdateInput struct {
 	Status      string `json:"status,omitempty"`                      // Trạng thái: pending, approved, rejected
 	DecisionNote string `json:"decisionNote,omitempty"`              // Ghi chú về quyết định (tùy chọn)
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`    // Metadata bổ sung
+}
+
+// ApproveDraftParams params từ URL khi approve draft
+type ApproveDraftParams struct {
+	ID string `uri:"id" validate:"required" transform:"str_objectid"` // Approval ID từ URL params - tự động validate và convert sang ObjectID
+}
+
+// ApproveDraftInput dữ liệu đầu vào khi approve draft (body)
+type ApproveDraftInput struct {
+	DecisionNote string `json:"decisionNote,omitempty"` // Ghi chú về quyết định (tùy chọn)
+}
+
+// RejectDraftParams params từ URL khi reject draft
+type RejectDraftParams struct {
+	ID string `uri:"id" validate:"required" transform:"str_objectid"` // Approval ID từ URL params - tự động validate và convert sang ObjectID
+}
+
+// RejectDraftInput dữ liệu đầu vào khi reject draft (body)
+type RejectDraftInput struct {
+	DecisionNote string `json:"decisionNote" validate:"required"` // Ghi chú về quyết định (bắt buộc khi reject)
 }

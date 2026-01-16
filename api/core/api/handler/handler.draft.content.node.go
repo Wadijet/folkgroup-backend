@@ -5,11 +5,9 @@ import (
 	"meta_commerce/core/api/dto"
 	models "meta_commerce/core/api/models/mongodb"
 	"meta_commerce/core/api/services"
-	"meta_commerce/core/common"
 	"meta_commerce/core/utility"
 
 	"github.com/gofiber/fiber/v3"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // DraftContentNodeHandler xử lý các request liên quan đến Draft Content Node (L1-L6)
@@ -82,26 +80,13 @@ func NewDraftContentNodeHandler() (*DraftContentNodeHandler, error) {
 //   - ContentNode: Content node đã được tạo từ draft
 func (h *DraftContentNodeHandler) CommitDraftNode(c fiber.Ctx) error {
 	return h.SafeHandler(c, func() error {
-		id := c.Params("id")
-		if id == "" {
-			h.HandleResponse(c, nil, common.NewError(
-				common.ErrCodeValidationFormat,
-				"ID không được để trống trong URL params",
-				common.StatusBadRequest,
-				nil,
-			))
+		// Parse và validate URL params (tự động validate ObjectID format và convert)
+		var params dto.CommitDraftNodeParams
+		if err := h.ParseRequestParams(c, &params); err != nil {
+			h.HandleResponse(c, nil, err)
 			return nil
 		}
-
-		if !primitive.IsValidObjectID(id) {
-			h.HandleResponse(c, nil, common.NewError(
-				common.ErrCodeValidationFormat,
-				fmt.Sprintf("ID '%s' không đúng định dạng MongoDB ObjectID", id),
-				common.StatusBadRequest,
-				nil,
-			))
-			return nil
-		}
+		id := params.ID // Đã được validate rồi
 
 		// Validate quyền truy cập
 		if err := h.validateOrganizationAccess(c, id); err != nil {

@@ -33,8 +33,8 @@ Hệ thống Content Strategy OS có tổng cộng **25 collections** được c
 | Collection | Tác Dụng | Mô Tả |
 |------------|----------|-------|
 | `ai_workflows` | Định nghĩa workflows | Workflow definitions với steps, policies, rootRefType, targetLevel |
-| `ai_steps` | Định nghĩa steps | Step definitions với input/output schemas, prompt template IDs, targetLevel |
-| `ai_prompt_templates` | Quản lý prompts | Prompt templates với versioning, variables, types (generate, judge, step_generation) |
+| `ai_steps` | Định nghĩa steps | Step definitions với input/output schemas, prompt template IDs, targetLevel - **KHÔNG có provider config** (config lưu trong prompt template) |
+| `ai_prompt_templates` | Quản lý prompts | Prompt templates với versioning, variables, types (generate, judge, step_generation), **providerProfileId, model, temperature, maxTokens (override từ provider profile)** |
 | `ai_provider_profiles` | Quản lý AI providers | Provider profiles với API keys, config, models, pricing, rate limits |
 | `ai_workflow_runs` | Lịch sử workflow runs | **1 workflow run = 1 lần chạy workflow** - Status, rootRefId, stepRunIDs[], result - Quản lý toàn bộ workflow execution |
 | `ai_step_runs` | Lịch sử step runs | **1 step run = 1 lần chạy 1 step trong workflow** - Link về workflowRunId, stepId - Input/Output (structured data flow giữa các steps) - Quản lý data flow và execution của từng step |
@@ -391,8 +391,8 @@ Human approve/reject → Module 1 commit drafts → production (nếu approve)
 | Collection | Nhiệm Vụ | Mô Tả Chi Tiết |
 |------------|----------|----------------|
 | `workflows` | Định nghĩa workflows | Workflow definitions với steps, policies |
-| `steps` | Định nghĩa steps | Step definitions với input/output schemas, prompt template IDs |
-| `prompt_templates` | Quản lý prompts | Prompt templates với versioning, variables, types |
+| `steps` | Định nghĩa steps | Step definitions với input/output schemas, prompt template IDs - **KHÔNG có provider config** (config lưu trong prompt template) |
+| `prompt_templates` | Quản lý prompts | Prompt templates với versioning, variables, types, **providerProfileId, model, temperature, maxTokens (override từ provider profile)** |
 | `provider_profiles` | Quản lý AI providers | Provider profiles với API keys, config, models, pricing |
 | `workflow_runs` | Lịch sử workflow runs | Workflow execution history |
 | `step_runs` | Lịch sử step runs | Step execution history trong workflow runs |
@@ -461,8 +461,13 @@ Mỗi level transition (ví dụ: Layer → STP) phải có 2 bước riêng bi�
 ```
 1. Bot query workflow_commands queue (filter: status=pending)
 2. Bot tạo worker cho mỗi command
-3. Worker tạo workflow run → Module 2 execute workflow
-4. Module 2 execute workflow → Tạo drafts trong Module 1
+3. Worker execute từng step:
+   a. Bot chuẩn bị variables từ step input (từ workflow context, parent content, etc.)
+   b. Bot gọi POST /api/v2/ai/steps/:id/render-prompt với variables
+   c. Backend render prompt và resolve AI config → trả về rendered prompt + config
+   d. Bot gọi AI API với rendered prompt và config
+   e. Bot parse response và tạo candidates/AI runs
+4. Module 2 tạo drafts trong Module 1
 5. Bot update command status = completed
 ```
 
@@ -711,21 +716,28 @@ Body: {
 }
 ```
 
-**2. Sử dụng trong Prompt Template:**
+**2. Sử dụng trong Prompt Template (Override Layer):**
 ```
-Prompt Template có thể reference provider profile:
+Prompt Template có thể override config từ Provider Profile:
 {
-  providerProfileId: "provider-profile-id",
-  model: "gpt-4"  // Có thể override default model
+  providerProfileId: "provider-profile-id",  // Override provider (nếu không có thì dùng default)
+  model: "gpt-4",                             // Override defaultModel từ provider
+  temperature: 0.7,                          // Override defaultTemperature từ provider
+  maxTokens: 2000                            // Override defaultMaxTokens từ provider
 }
 ```
 
+**Logic 2 Lớp Config:**
+- **Lớp 1 (Provider Profile)**: Default config (defaultModel, defaultTemperature, defaultMaxTokens)
+- **Lớp 2 (Prompt Template)**: Override config (providerProfileId, model, temperature, maxTokens) - override từ lớp 1
+- **Step**: Chỉ có promptTemplateId, không có AI config - lấy config từ prompt template
+
 **3. Sử dụng trong AI Run:**
 ```
-Khi tạo AI run, có thể:
-- Dùng providerProfileId từ prompt template
-- Hoặc override providerProfileId trong workflow run
-- Hoặc chỉ định trực tiếp trong AI run
+Khi tạo AI run, lấy config theo thứ tự ưu tiên:
+1. Prompt Template config (nếu có) - override từ Provider Profile
+2. Provider Profile default config (nếu prompt template không có)
+3. System default (nếu không có cả 2)
 ```
 
 #### Lưu Ý Bảo Mật
@@ -733,6 +745,139 @@ Khi tạo AI run, có thể:
 - **API Key Encryption**: API key nên được encrypt trước khi lưu vào database
 - **Organization Isolation**: Mỗi organization chỉ thấy provider profiles của mình
 - **Access Control**: Chỉ admin của organization mới có thể tạo/update provider profiles
+
+### Prompt Template Rendering
+
+Prompt template chứa variables (ví dụ: `{{layerName}}`, `{{targetAudience}}`) cần được render (thay thế variables bằng giá trị thực tế) trước khi gọi AI API.
+
+#### Nơi Gọi Render
+
+**Prompt rendering được gọi trong Workflow Execution khi execute step:**
+
+```
+1. Load step definition từ ai_steps
+2. Load prompt template từ ai_prompt_templates
+3. Chuẩn bị variables từ step input data
+4. **Gọi AIPromptTemplateService.RenderPrompt(template, variables)** ← ĐÂY
+5. Nhận prompt TEXT đã được render
+6. Gọi AI API với prompt TEXT đã render
+```
+
+#### Service Method
+
+**AIPromptTemplateService.RenderPrompt()**
+
+```go
+// RenderPrompt render prompt template với variables từ step input
+func (s *AIPromptTemplateService) RenderPrompt(
+    template *models.AIPromptTemplate, 
+    variables map[string]interface{},
+) (string, error)
+```
+
+**Tham số:**
+- `template`: Prompt template cần render (đã load từ database)
+- `variables`: Map các biến và giá trị để thay thế (từ step input data)
+
+**Logic:**
+1. Lặp qua tất cả variables trong template
+2. Với mỗi variable:
+   - Lấy giá trị từ `variables` map
+   - Nếu không có và variable là `required` → lỗi
+   - Nếu không có và variable có `default` → dùng default value
+   - Nếu không có và variable là `optional` → để trống
+3. Thay thế `{{variableName}}` trong prompt bằng giá trị
+4. Trả về prompt TEXT đã được render
+
+**Ví dụ:**
+
+```go
+// Prompt template:
+prompt: "Generate 3 content candidates for layer '{{layerName}}' targeting {{targetAudience}}..."
+
+// Variables từ step input:
+variables := map[string]interface{}{
+    "layerName": "Target Audience",
+    "targetAudience": "B2C",
+}
+
+// Render:
+renderedPrompt, err := promptTemplateService.RenderPrompt(template, variables)
+// Kết quả: "Generate 3 content candidates for layer 'Target Audience' targeting B2C..."
+```
+
+#### Flow Trong Workflow Execution
+
+**Khi execute step:**
+
+```
+a. Load step definition → lấy promptTemplateId
+b. Load prompt template từ ai_prompt_templates
+c. Chuẩn bị variables từ step input data
+d. **Render prompt:**
+   renderedPrompt := promptTemplateService.RenderPrompt(template, variables)
+e. Resolve AI config (provider, model, temperature, maxTokens)
+f. Gọi AI API với:
+   - Prompt: renderedPrompt (TEXT đã render)
+   - Provider, Model, Temperature, MaxTokens: từ config đã resolve
+g. Lưu renderedPrompt vào AIRun.prompt (để trace/debug)
+```
+
+#### API Endpoint Cho Bot
+
+**Bot gọi API này để lấy prompt đã render và AI config trước khi gọi AI API:**
+
+```
+POST /api/v2/ai/steps/:id/render-prompt
+Body: {
+  variables: {
+    layerName: "Target Audience",
+    targetAudience: "B2C",
+    context: {...}
+  }
+}
+
+Response: {
+  renderedPrompt: "Generate 3 content candidates for layer 'Target Audience' targeting B2C...",
+  providerProfileId: "provider-profile-id",
+  provider: "openai",
+  model: "gpt-4",
+  temperature: 0.7,
+  maxTokens: 2000,
+  variables: {...}  // Variables đã được sử dụng (để trace/debug)
+}
+```
+
+**Flow Bot Sử Dụng:**
+```
+1. Bot có workflow command với stepId
+2. Bot chuẩn bị variables từ step input (từ workflow context, parent content, etc.)
+3. Bot gọi POST /api/v2/ai/steps/:id/render-prompt với variables
+4. Backend:
+   - Load step → lấy promptTemplateId
+   - Load prompt template
+   - Load provider profile (nếu có)
+   - Resolve AI config (prompt template override provider default)
+   - Render prompt với variables
+   - Trả về rendered prompt + AI config
+5. Bot nhận rendered prompt và AI config
+6. Bot gọi AI API với:
+   - Prompt: renderedPrompt (TEXT)
+   - Provider, Model, Temperature, MaxTokens: từ response
+7. Bot lưu AI run với prompt đã render
+```
+
+**Lưu Ý:**
+- **Bot không biết giá trị variables**: Bot chỉ biết stepId và stepInput (structured data), không biết cách render prompt
+- **Backend render prompt**: Backend có logic render và resolve config, bot chỉ cần gọi API
+- **Variables từ step input**: Bot cần map step input data thành variables map theo format của prompt template
+
+#### Lưu Ý
+
+- **Render chỉ làm việc với TEXT**: Chỉ thay thế `{{variableName}}` bằng giá trị, không parse JSON hay xử lý logic phức tạp
+- **Variables validation**: Kiểm tra required variables có đầy đủ không trước khi render
+- **Default values**: Sử dụng default value nếu variable không có trong input
+- **Error handling**: Trả về lỗi nếu required variable thiếu
 
 ### Thông Tin Một Lượt Gọi AI (AIRun)
 
@@ -1590,9 +1735,10 @@ Body: {
     {name: "layerName", required: true},
     {name: "targetAudience", required: true}
   ],
-  providerProfileId: "provider-profile-id",
-  model: "gpt-4",
-  ...
+  providerProfileId: "provider-profile-id",  // Override provider (tùy chọn)
+  model: "gpt-4",                            // Override defaultModel từ provider (tùy chọn)
+  temperature: 0.7,                          // Override defaultTemperature từ provider (tùy chọn)
+  maxTokens: 2000                            // Override defaultMaxTokens từ provider (tùy chọn)
 }
 ```
 
@@ -1605,10 +1751,12 @@ POST /api/v1/ai/steps
 Body: {
   name: "Generate Content - Layer L1",
   type: "GENERATE",
-  promptTemplateId: "prompt-template-id",
+  promptTemplateId: "prompt-template-id",  // Reference đến prompt template (chứa AI config)
   inputSchema: {...},  // Standard schema
   outputSchema: {...}, // Standard schema
-  ...
+  targetLevel: "L2",
+  parentLevel: "L1"
+  // KHÔNG có providerProfileId, model, temperature, maxTokens - lấy từ prompt template
 }
 ```
 
@@ -1673,27 +1821,39 @@ Body: {
 
 ```
 a. Load step definition từ ai_steps
-b. Load prompt template từ ai_prompt_templates
-c. Load provider profile từ ai_provider_profiles
-d. Chuẩn bị input data:
+b. Load prompt template từ ai_prompt_templates (chứa AI config: providerProfileId, model, temperature, maxTokens)
+c. Load provider profile từ ai_provider_profiles (dùng để lấy default config nếu prompt template không có)
+d. Resolve AI config (logic 2 lớp):
+   - Nếu prompt template có providerProfileId → dùng provider đó
+   - Nếu prompt template có model → dùng model đó (override từ provider defaultModel)
+   - Nếu prompt template có temperature → dùng temperature đó (override từ provider defaultTemperature)
+   - Nếu prompt template có maxTokens → dùng maxTokens đó (override từ provider defaultMaxTokens)
+   - Nếu prompt template không có → dùng default từ provider profile
+e. Chuẩn bị input data từ step input:
    {
      layerId: "layer-123",
      layerName: "Target Audience",
      targetAudience: "B2C",
      context: {...}
    }
-e. Generate prompt TEXT từ template + variables
-f. Tạo AIRun record (status: "pending")
+f. Render prompt TEXT:
+   - Gọi AIPromptTemplateService.RenderPrompt(template, variables)
+   - Variables lấy từ step input data (bước e)
+   - Thay thế {{variableName}} trong prompt template bằng giá trị thực tế
+   - Kết quả: Prompt TEXT đã được render (ví dụ: "Generate 3 content candidates for layer 'Target Audience'...")
+g. Tạo AIRun record (status: "pending")
    ↓
-g. Gọi AI API với prompt TEXT:
-   - Provider: OpenAI
-   - Model: GPT-4
+h. Gọi AI API với prompt TEXT:
+   - Provider: Từ providerProfileId (đã resolve ở bước d)
+   - Model: Từ prompt template hoặc provider default (đã resolve ở bước d)
+   - Temperature: Từ prompt template hoặc provider default (đã resolve ở bước d)
+   - MaxTokens: Từ prompt template hoặc provider default (đã resolve ở bước d)
    - Prompt: "Generate 3 content candidates..."
    ↓
-h. Nhận response TEXT từ AI:
+i. Nhận response TEXT từ AI:
    "{\"candidates\": [{\"content\": \"Gen Z, 18-25...\", ...}, ...]}"
    ↓
-i. HỆ THỐNG parse response text → parsedOutput:
+j. HỆ THỐNG parse response text → parsedOutput:
    {
      candidates: [
        {candidateId: "auto-id-1", content: "Gen Z, 18-25...", ...},
@@ -1702,11 +1862,11 @@ i. HỆ THỐNG parse response text → parsedOutput:
      ]
    }
    ↓
-j. Tạo generation_batch:
+k. Tạo generation_batch:
    - BatchID: new ObjectID
    - StepRunID: link đến step run
    ↓
-k. Tạo candidates trong ai_candidates:
+l. Tạo candidates trong ai_candidates:
    - GenerationBatchID: link đến batch
    - Text: candidate content
    - CreatedByAIRunID: link đến AI run
@@ -1737,11 +1897,17 @@ m. Tạo step run:
 
 ```
 a. Load step definition (type: "JUDGE")
-b. Load prompt template cho JUDGE
-c. Load provider profile
-d. Lấy candidates từ step GENERATE trước:
+b. Load prompt template cho JUDGE (chứa AI config: providerProfileId, model, temperature, maxTokens)
+c. Load provider profile (dùng để lấy default config nếu prompt template không có)
+d. Resolve AI config (logic 2 lớp):
+   - Nếu prompt template có providerProfileId → dùng provider đó
+   - Nếu prompt template có model → dùng model đó (override từ provider defaultModel)
+   - Nếu prompt template có temperature → dùng temperature đó (override từ provider defaultTemperature)
+   - Nếu prompt template có maxTokens → dùng maxTokens đó (override từ provider defaultMaxTokens)
+   - Nếu prompt template không có → dùng default từ provider profile
+e. Lấy candidates từ step GENERATE trước:
    - Query candidates theo GenerationBatchID
-e. Chuẩn bị input data:
+f. Chuẩn bị input data từ step input:
    {
      candidates: [
        {candidateId: "auto-id-1", content: "...", ...},
@@ -1755,18 +1921,24 @@ e. Chuẩn bị input data:
        accuracy: 10
      }
    }
-f. Generate prompt TEXT:
-   "Judge these candidates based on criteria..."
-g. Tạo AIRun record (status: "pending")
+g. Render prompt TEXT:
+   - Gọi AIPromptTemplateService.RenderPrompt(template, variables)
+   - Variables lấy từ step input data (bước f)
+   - Thay thế {{variableName}} trong prompt template bằng giá trị thực tế
+   - Kết quả: Prompt TEXT đã được render (ví dụ: "Judge these candidates based on criteria...")
+h. Tạo AIRun record (status: "pending")
    ↓
-h. Gọi AI API để judge:
+i. Gọi AI API để judge:
+   - Provider: Từ providerProfileId (đã resolve ở bước d)
+   - Model: Từ prompt template hoặc provider default (đã resolve ở bước d)
+   - Temperature: Từ prompt template hoặc provider default (đã resolve ở bước d)
+   - MaxTokens: Từ prompt template hoặc provider default (đã resolve ở bước d)
    - Prompt: judge prompt với candidates
-   - Model: GPT-4
    ↓
-i. Nhận response TEXT:
+j. Nhận response TEXT:
    "{\"scores\": [{\"candidateId\": \"auto-id-1\", \"score\": 0.95, ...}, ...]}"
    ↓
-j. HỆ THỐNG parse response text → parsedOutput:
+k. HỆ THỐNG parse response text → parsedOutput:
    {
      scores: [
        {candidateId: "auto-id-1", overallScore: 0.95, ...},
@@ -1777,13 +1949,13 @@ j. HỆ THỐNG parse response text → parsedOutput:
      bestCandidate: {candidateId: "auto-id-1", score: 0.95, ...}
    }
    ↓
-k. Update candidates:
+l. Update candidates:
    - Update JudgeScore cho từng candidate
    - Update JudgeReasoning
    - Update JudgedByAIRunID
    - Select candidate tốt nhất: Selected = true
    ↓
-l. Update AIRun:
+m. Update AIRun:
    - response: raw response text
    - parsedOutput: structured data
    - messages: conversation history
@@ -1791,7 +1963,7 @@ l. Update AIRun:
    - cost, latency, tokens
    - status: "completed"
    ↓
-m. Tạo step run:
+n. Tạo step run:
    - Status: "completed"
    - Output: judge results
 ```

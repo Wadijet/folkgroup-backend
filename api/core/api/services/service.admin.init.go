@@ -2203,13 +2203,15 @@ func (h *InitService) initAIProviderProfiles(ctx context.Context, systemOrgID pr
 				Status:              models.AIProviderProfileStatusInactive, // Inactive vì chưa có API key
 				APIKey:              "",                                     // Để trống, admin sẽ cập nhật sau
 				APIKeyEncrypted:     false,
-				DefaultModel:        providerData.defaultModel,
 				AvailableModels:     providerData.availableModels,
-				DefaultTemperature:  &defaultTemp,
-				DefaultMaxTokens:    &defaultMaxTokens,
-				PricingConfig:       providerData.pricingConfig,
-				CreatedAt:           currentTime,
-				UpdatedAt:           currentTime,
+				Config: &models.AIConfig{
+					Model:         providerData.defaultModel,
+					Temperature:   &defaultTemp,
+					MaxTokens:     &defaultMaxTokens,
+					PricingConfig: providerData.pricingConfig,
+				},
+				CreatedAt: currentTime,
+				UpdatedAt: currentTime,
 			}
 			_, err = h.aiProviderProfileService.InsertOne(ctx, profile)
 			if err != nil {
@@ -2241,6 +2243,8 @@ func (h *InitService) initAIProviderProfiles(ctx context.Context, systemOrgID pr
 // initAIPromptTemplates khởi tạo các AI prompt templates mẫu
 // Tạo templates cho GENERATE, JUDGE, STEP_GENERATION
 func (h *InitService) initAIPromptTemplates(ctx context.Context, systemOrgID primitive.ObjectID, currentTime int64) error {
+	// Lấy provider profile mặc định (OpenAI Production)
+	providerProfileID, _ := h.getProviderProfileByName(ctx, systemOrgID, "OpenAI Production")
 
 	defaultTemplates := []struct {
 		name        string
@@ -2249,6 +2253,7 @@ func (h *InitService) initAIPromptTemplates(ctx context.Context, systemOrgID pri
 		version     string
 		prompt      string
 		variables   []models.AIPromptTemplateVariable
+		provider    *models.AIPromptTemplateProvider // Provider info (profileId, config) - override từ provider profile defaultConfig
 	}{
 		// Template GENERATE chung (có thể dùng cho tất cả level transitions)
 		{
@@ -2312,6 +2317,14 @@ Mô tả bổ sung: {{parentDescription}}
 				{Name: "targetAudience", Required: false, Description: "Đối tượng mục tiêu (B2B, B2C, B2B2C)"},
 				{Name: "numberOfCandidates", Required: false, Default: "3", Description: "Số lượng candidates"},
 			},
+			provider: &models.AIPromptTemplateProvider{
+				ProfileID: providerProfileID,
+				Config: &models.AIConfig{
+					Model:       "gpt-4",
+					Temperature: func() *float64 { v := 0.7; return &v }(), // Temperature cho generation
+					MaxTokens:   func() *int { v := 2000; return &v }(),
+				},
+			},
 		},
 		// Template GENERATE cho từng level transition
 		{
@@ -2359,6 +2372,14 @@ Nội dung Layer:
 				{Name: "targetAudience", Required: false, Description: "Đối tượng mục tiêu (B2B, B2C, B2B2C)"},
 				{Name: "numberOfCandidates", Required: false, Default: "3", Description: "Số lượng candidates"},
 			},
+			provider: &models.AIPromptTemplateProvider{
+				ProfileID: providerProfileID,
+				Config: &models.AIConfig{
+					Model:       "gpt-4",
+					Temperature: func() *float64 { v := 0.7; return &v }(), // Temperature cho generation
+					MaxTokens:   func() *int { v := 2000; return &v }(),
+				},
+			},
 		},
 		{
 			name:        "Tạo Insight từ STP",
@@ -2403,6 +2424,14 @@ Nội dung STP:
 				{Name: "parentContent", Required: true, Description: "Nội dung của STP"},
 				{Name: "targetAudience", Required: false, Description: "Đối tượng mục tiêu"},
 				{Name: "numberOfCandidates", Required: false, Default: "3", Description: "Số lượng candidates"},
+			},
+			provider: &models.AIPromptTemplateProvider{
+				ProfileID: providerProfileID,
+				Config: &models.AIConfig{
+					Model:       "gpt-4",
+					Temperature: func() *float64 { v := 0.7; return &v }(), // Temperature cho generation
+					MaxTokens:   func() *int { v := 2000; return &v }(),
+				},
 			},
 		},
 		{
@@ -2452,6 +2481,14 @@ Nội dung Insight:
 				{Name: "targetAudience", Required: false, Description: "Đối tượng mục tiêu"},
 				{Name: "numberOfCandidates", Required: false, Default: "3", Description: "Số lượng candidates"},
 			},
+			provider: &models.AIPromptTemplateProvider{
+				ProfileID: providerProfileID,
+				Config: &models.AIConfig{
+					Model:       "gpt-4",
+					Temperature: func() *float64 { v := 0.7; return &v }(), // Temperature cho generation
+					MaxTokens:   func() *int { v := 2000; return &v }(),
+				},
+			},
 		},
 		{
 			name:        "Tạo Gene từ Content Line",
@@ -2498,6 +2535,14 @@ Nội dung Content Line:
 				{Name: "parentContent", Required: true, Description: "Nội dung của Content Line"},
 				{Name: "targetAudience", Required: false, Description: "Đối tượng mục tiêu"},
 				{Name: "numberOfCandidates", Required: false, Default: "3", Description: "Số lượng candidates"},
+			},
+			provider: &models.AIPromptTemplateProvider{
+				ProfileID: providerProfileID,
+				Config: &models.AIConfig{
+					Model:       "gpt-4",
+					Temperature: func() *float64 { v := 0.7; return &v }(), // Temperature cho generation
+					MaxTokens:   func() *int { v := 2000; return &v }(),
+				},
 			},
 		},
 		{
@@ -2546,6 +2591,14 @@ Nội dung Gene:
 				{Name: "parentContent", Required: true, Description: "Nội dung của Gene"},
 				{Name: "targetAudience", Required: false, Description: "Đối tượng mục tiêu"},
 				{Name: "numberOfCandidates", Required: false, Default: "3", Description: "Số lượng candidates"},
+			},
+			provider: &models.AIPromptTemplateProvider{
+				ProfileID: providerProfileID,
+				Config: &models.AIConfig{
+					Model:       "gpt-4",
+					Temperature: func() *float64 { v := 0.7; return &v }(), // Temperature cho generation
+					MaxTokens:   func() *int { v := 2500; return &v }(),    // Script cần nhiều tokens hơn
+				},
 			},
 		},
 		// Template JUDGE chung (dùng cho tất cả level transitions)
@@ -2629,6 +2682,14 @@ Bạn cần đánh giá từng phương án dựa trên 4 tiêu chí sau (thang 
 				{Name: "context", Required: false, Description: "Context để đánh giá"},
 				{Name: "parentContent", Required: false, Description: "Nội dung của parent node"},
 			},
+			provider: &models.AIPromptTemplateProvider{
+				ProfileID: providerProfileID,
+				Config: &models.AIConfig{
+					Model:       "gpt-4",
+					Temperature: func() *float64 { v := 0.3; return &v }(), // Temperature thấp hơn cho judging (chính xác hơn)
+					MaxTokens:   func() *int { v := 1500; return &v }(),
+				},
+			},
 		},
 		// Template STEP_GENERATION (giữ nguyên)
 		{
@@ -2695,6 +2756,14 @@ Format output (JSON):
 				{Name: "targetLevel", Required: true, Description: "Level mục tiêu (L1-L8)"},
 				{Name: "constraints", Required: false, Description: "Ràng buộc cho việc generate"},
 			},
+			provider: &models.AIPromptTemplateProvider{
+				ProfileID: providerProfileID,
+				Config: &models.AIConfig{
+					Model:       "gpt-4",
+					Temperature: func() *float64 { v := 0.8; return &v }(), // Temperature cao hơn cho creativity
+					MaxTokens:   func() *int { v := 3000; return &v }(),
+				},
+			},
 		},
 	}
 
@@ -2720,6 +2789,7 @@ Format output (JSON):
 				Version:             templateData.version,
 				Prompt:              templateData.prompt,
 				Variables:           templateData.variables,
+				Provider:            templateData.provider, // Provider info (profileId, config) - override từ provider profile defaultConfig
 				Status:              "active",
 				CreatedAt:           currentTime,
 				UpdatedAt:           currentTime,
@@ -2739,9 +2809,6 @@ Format output (JSON):
 // Tạo steps cho tất cả level transitions: L1→L2, L2→L3, L3→L4, L4→L5, L5→L6
 // Mỗi transition cần 2 steps: GENERATE + JUDGE
 func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.ObjectID, currentTime int64) error {
-	// Lấy provider profile (nếu có)
-	providerProfileID, _ := h.getProviderProfileByName(ctx, systemOrgID, "OpenAI Default")
-
 	// Lấy prompt templates
 	generateSTPTemplate, err := h.getPromptTemplateByName(ctx, systemOrgID, "Tạo STP từ Layer")
 	if err != nil {
@@ -2793,9 +2860,7 @@ func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.Obj
 		promptTemplateID *primitive.ObjectID
 		targetLevel      string
 		parentLevel      string
-		model            string
-		temperature      *float64
-		maxTokens        *int
+		// KHÔNG có model, temperature, maxTokens - config lưu trong prompt template
 	}{
 		// L1 → L2: Generate STP
 		{
@@ -2805,9 +2870,6 @@ func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.Obj
 			promptTemplateID: generateSTPTemplate,
 			targetLevel:      "L2",
 			parentLevel:      "L1",
-			model:            "gpt-4",
-			temperature:      func() *float64 { v := 0.7; return &v }(),
-			maxTokens:        func() *int { v := 2000; return &v }(),
 		},
 		{
 			name:             "Đánh Giá Phương Án STP",
@@ -2816,9 +2878,6 @@ func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.Obj
 			promptTemplateID: judgeTemplate,
 			targetLevel:      "L2",
 			parentLevel:      "L1",
-			model:            "gpt-4",
-			temperature:      func() *float64 { v := 0.3; return &v }(), // Lower temperature cho judging
-			maxTokens:        func() *int { v := 1500; return &v }(),
 		},
 		// L2 → L3: Generate Insight
 		{
@@ -2828,9 +2887,6 @@ func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.Obj
 			promptTemplateID: generateInsightTemplate,
 			targetLevel:      "L3",
 			parentLevel:      "L2",
-			model:            "gpt-4",
-			temperature:      func() *float64 { v := 0.7; return &v }(),
-			maxTokens:        func() *int { v := 2000; return &v }(),
 		},
 		{
 			name:             "Đánh Giá Phương Án Insight",
@@ -2839,9 +2895,6 @@ func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.Obj
 			promptTemplateID: judgeTemplate,
 			targetLevel:      "L3",
 			parentLevel:      "L2",
-			model:            "gpt-4",
-			temperature:      func() *float64 { v := 0.3; return &v }(), // Lower temperature cho judging
-			maxTokens:        func() *int { v := 1500; return &v }(),
 		},
 		// L3 → L4: Generate Content Line
 		{
@@ -2851,9 +2904,6 @@ func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.Obj
 			promptTemplateID: generateContentLineTemplate,
 			targetLevel:      "L4",
 			parentLevel:      "L3",
-			model:            "gpt-4",
-			temperature:      func() *float64 { v := 0.7; return &v }(),
-			maxTokens:        func() *int { v := 2000; return &v }(),
 		},
 		{
 			name:             "Judge Content Line Candidates",
@@ -2862,9 +2912,6 @@ func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.Obj
 			promptTemplateID: judgeTemplate,
 			targetLevel:      "L4",
 			parentLevel:      "L3",
-			model:            "gpt-4",
-			temperature:      func() *float64 { v := 0.3; return &v }(), // Lower temperature cho judging
-			maxTokens:        func() *int { v := 1500; return &v }(),
 		},
 		// L4 → L5: Generate Gene
 		{
@@ -2874,9 +2921,6 @@ func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.Obj
 			promptTemplateID: generateGeneTemplate,
 			targetLevel:      "L5",
 			parentLevel:      "L4",
-			model:            "gpt-4",
-			temperature:      func() *float64 { v := 0.7; return &v }(),
-			maxTokens:        func() *int { v := 2000; return &v }(),
 		},
 		{
 			name:             "Judge Gene Candidates",
@@ -2885,9 +2929,6 @@ func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.Obj
 			promptTemplateID: judgeTemplate,
 			targetLevel:      "L5",
 			parentLevel:      "L4",
-			model:            "gpt-4",
-			temperature:      func() *float64 { v := 0.3; return &v }(), // Lower temperature cho judging
-			maxTokens:        func() *int { v := 1500; return &v }(),
 		},
 		// L5 → L6: Generate Script
 		{
@@ -2897,9 +2938,6 @@ func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.Obj
 			promptTemplateID: generateScriptTemplate,
 			targetLevel:      "L6",
 			parentLevel:      "L5",
-			model:            "gpt-4",
-			temperature:      func() *float64 { v := 0.7; return &v }(),
-			maxTokens:        func() *int { v := 2500; return &v }(),
 		},
 		{
 			name:             "Đánh Giá Phương Án Script",
@@ -2908,9 +2946,6 @@ func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.Obj
 			promptTemplateID: judgeTemplate,
 			targetLevel:      "L6",
 			parentLevel:      "L5",
-			model:            "gpt-4",
-			temperature:      func() *float64 { v := 0.3; return &v }(), // Lower temperature cho judging
-			maxTokens:        func() *int { v := 1500; return &v }(),
 		},
 		// STEP_GENERATION
 		{
@@ -2920,9 +2955,6 @@ func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.Obj
 			promptTemplateID: stepGenTemplate,
 			targetLevel:      "",
 			parentLevel:      "",
-			model:            "gpt-4",
-			temperature:      func() *float64 { v := 0.8; return &v }(), // Higher temperature cho creativity
-			maxTokens:        func() *int { v := 3000; return &v }(),
 		},
 	}
 
@@ -2953,13 +2985,10 @@ func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.Obj
 				OutputSchema:        outputSchema,
 				TargetLevel:         stepData.targetLevel,
 				ParentLevel:         stepData.parentLevel,
-				ProviderProfileID:   providerProfileID,
-				Model:               stepData.model,
-				Temperature:         stepData.temperature,
-				MaxTokens:           stepData.maxTokens,
-				Status:              "active",
-				CreatedAt:           currentTime,
-				UpdatedAt:           currentTime,
+				// KHÔNG có ProviderProfileID, Model, Temperature, MaxTokens - config lưu trong prompt template
+				Status:    "active",
+				CreatedAt: currentTime,
+				UpdatedAt: currentTime,
 			}
 			_, err = h.aiStepService.InsertOne(ctx, step)
 			if err != nil {

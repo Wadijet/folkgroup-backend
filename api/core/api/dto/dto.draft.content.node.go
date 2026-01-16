@@ -26,3 +26,8 @@ type DraftContentNodeUpdateInput struct {
 	ApprovalStatus  string                 `json:"approvalStatus,omitempty"`                     // Trạng thái approval
 	Metadata        map[string]interface{} `json:"metadata,omitempty"`                        // Metadata bổ sung
 }
+
+// CommitDraftNodeParams params từ URL khi commit draft node
+type CommitDraftNodeParams struct {
+	ID string `uri:"id" validate:"required" transform:"str_objectid"` // Draft Node ID từ URL params - tự động validate và convert sang ObjectID
+}

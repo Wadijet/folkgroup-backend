@@ -92,3 +92,52 @@ func WithFields(fields map[string]interface{}) *logrus.Entry {
 func WithError(err error) *logrus.Entry {
 	return GetAppLogger().WithError(err)
 }
+
+// WithModule trả về logger entry với module name
+// Module: tên module (ví dụ: "auth", "notification", "delivery", "content", "ai")
+func WithModule(module string) *logrus.Entry {
+	return GetAppLogger().WithField("module", module)
+}
+
+// WithCollection trả về logger entry với collection name
+// Collection: tên collection MongoDB (ví dụ: "users", "orders", "notifications")
+func WithCollection(collection string) *logrus.Entry {
+	return GetAppLogger().WithField("collection", collection)
+}
+
+// WithEndpoint trả về logger entry với endpoint path
+// Endpoint: đường dẫn endpoint (ví dụ: "/api/v1/users", "/api/v1/orders")
+func WithEndpoint(endpoint string) *logrus.Entry {
+	return GetAppLogger().WithField("endpoint", endpoint)
+}
+
+// WithMethod trả về logger entry với HTTP method
+// Method: HTTP method (ví dụ: "GET", "POST", "PUT", "DELETE")
+func WithMethod(method string) *logrus.Entry {
+	return GetAppLogger().WithField("method", method)
+}
+
+// WithModuleAndCollection trả về logger entry với module và collection
+func WithModuleAndCollection(module, collection string) *logrus.Entry {
+	return GetAppLogger().WithFields(logrus.Fields{
+		"module":     module,
+		"collection": collection,
+	})
+}
+
+// WithRequestInfo trả về logger entry với đầy đủ thông tin request
+// Bao gồm: method, path (endpoint), IP, request_id
+// Có thể thêm module và collection nếu cần
+func WithRequestInfo(c fiber.Ctx, module, collection string) *logrus.Entry {
+	entry := WithRequest(c)
+	
+	// Thêm module và collection nếu có
+	if module != "" {
+		entry = entry.WithField("module", module)
+	}
+	if collection != "" {
+		entry = entry.WithField("collection", collection)
+	}
+	
+	return entry
+}

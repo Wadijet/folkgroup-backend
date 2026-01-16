@@ -62,6 +62,180 @@ func (s *NotificationChannelService) FindByOrganizationID(ctx context.Context, o
 	return channels, nil
 }
 
-// ✅ Các method InsertOne, DeleteById, UpdateById đã được xử lý bởi BaseServiceMongoImpl
+// ValidateUniqueness validate uniqueness của notification channel (business logic validation)
+//
+// LÝ DO PHẢI TẠO METHOD NÀY (không dùng CRUD base):
+// 1. Business rules - Uniqueness constraints phức tạp:
+//    a) Name + ChannelType + OwnerOrganizationID: Mỗi organization chỉ có thể có 1 channel với cùng tên và channelType
+//    b) Email channels: Mỗi recipient trong mảng Recipients phải unique trong organization
+//       - Check duplicate bằng MongoDB $in operator: recipients: {$in: [recipient]}
+//       - Phải check tất cả channels (cả active và inactive) để tránh duplicate
+//    c) Telegram channels: Mỗi chatID trong mảng ChatIDs phải unique trong organization
+//       - Check duplicate bằng MongoDB $in operator: chatIds: {$in: [chatID]}
+//       - Phải check tất cả channels (cả active và inactive) để tránh duplicate
+//    d) Webhook channels: WebhookURL phải unique trong organization
+//       - Check duplicate webhookUrl + ownerOrganizationId + channelType
+//       - Phải check tất cả channels (cả active và inactive) để tránh duplicate
+//
+// Tham số:
+//   - ctx: Context
+//   - channel: Notification channel cần validate
+//
+// Trả về:
+//   - error: Lỗi nếu validation thất bại (duplicate channel), nil nếu hợp lệ
+func (s *NotificationChannelService) ValidateUniqueness(ctx context.Context, channel models.NotificationChannel) error {
+	// 1. Validate Name + ChannelType + OwnerOrganizationID uniqueness
+	if channel.Name != "" && channel.ChannelType != "" && !channel.OwnerOrganizationID.IsZero() {
+		filter := bson.M{
+			"ownerOrganizationId": channel.OwnerOrganizationID,
+			"channelType":         channel.ChannelType,
+			"name":                channel.Name,
+			// Bỏ filter isActive - check tất cả channels (cả active và inactive) để tránh duplicate
+		}
+		
+		// Nếu đang update, exclude chính document đó
+		if !channel.ID.IsZero() {
+			filter["_id"] = bson.M{"$ne": channel.ID}
+		}
+
+		existing, err := s.FindOne(ctx, filter, nil)
+		if err == nil {
+			return common.NewError(
+				common.ErrCodeBusinessOperation,
+				fmt.Sprintf("Đã tồn tại channel với tên '%s' và channelType '%s' trong organization này. Mỗi organization chỉ có thể có 1 channel với cùng tên và channelType", channel.Name, channel.ChannelType),
+				common.StatusConflict,
+				nil,
+			)
+		}
+		if err != common.ErrNotFound {
+			return fmt.Errorf("lỗi khi kiểm tra uniqueness name: %v", err)
+		}
+		_ = existing // Tránh unused variable warning
+	}
+
+	// 2. Validate duplicate recipients/webhookUrl/chatIDs dựa trên channelType
+	if !channel.OwnerOrganizationID.IsZero() {
+		// Check duplicate recipients cho email
+		if channel.ChannelType == "email" && len(channel.Recipients) > 0 {
+			for _, recipient := range channel.Recipients {
+				// Check trong array recipients (MongoDB $in operator)
+				filter := bson.M{
+					"ownerOrganizationId": channel.OwnerOrganizationID,
+					"channelType":         "email",
+					"recipients":          bson.M{"$in": []string{recipient}},
+					// Bỏ filter isActive - check tất cả channels (cả active và inactive) để tránh duplicate
+				}
+				
+				// Nếu đang update, exclude chính document đó
+				if !channel.ID.IsZero() {
+					filter["_id"] = bson.M{"$ne": channel.ID}
+				}
+
+				existing, err := s.FindOne(ctx, filter, nil)
+				if err == nil {
+					return common.NewError(
+						common.ErrCodeBusinessOperation,
+						fmt.Sprintf("Đã tồn tại email channel với recipient '%s' trong organization này. Mỗi organization chỉ có thể có 1 channel cho mỗi recipient", recipient),
+						common.StatusConflict,
+						nil,
+					)
+				}
+				if err != common.ErrNotFound {
+					return fmt.Errorf("lỗi khi kiểm tra uniqueness recipient: %v", err)
+				}
+				_ = existing // Tránh unused variable warning
+			}
+		}
+
+		// Check duplicate chatIDs cho telegram
+		if channel.ChannelType == "telegram" && len(channel.ChatIDs) > 0 {
+			for _, chatID := range channel.ChatIDs {
+				// Check trong array chatIds (MongoDB $in operator)
+				filter := bson.M{
+					"ownerOrganizationId": channel.OwnerOrganizationID,
+					"channelType":         "telegram",
+					"chatIds":             bson.M{"$in": []string{chatID}},
+					// Bỏ filter isActive - check tất cả channels (cả active và inactive) để tránh duplicate
+				}
+				
+				// Nếu đang update, exclude chính document đó
+				if !channel.ID.IsZero() {
+					filter["_id"] = bson.M{"$ne": channel.ID}
+				}
+
+				existing, err := s.FindOne(ctx, filter, nil)
+				if err == nil {
+					return common.NewError(
+						common.ErrCodeBusinessOperation,
+						fmt.Sprintf("Đã tồn tại telegram channel với chatID '%s' trong organization này. Mỗi organization chỉ có thể có 1 channel cho mỗi chatID", chatID),
+						common.StatusConflict,
+						nil,
+					)
+				}
+				if err != common.ErrNotFound {
+					return fmt.Errorf("lỗi khi kiểm tra uniqueness chatID: %v", err)
+				}
+				_ = existing // Tránh unused variable warning
+			}
+		}
+
+		// Check duplicate webhookUrl cho webhook
+		if channel.ChannelType == "webhook" && channel.WebhookURL != "" {
+			filter := bson.M{
+				"ownerOrganizationId": channel.OwnerOrganizationID,
+				"channelType":         "webhook",
+				"webhookUrl":          channel.WebhookURL,
+				// Bỏ filter isActive - check tất cả channels (cả active và inactive) để tránh duplicate
+			}
+			
+			// Nếu đang update, exclude chính document đó
+			if !channel.ID.IsZero() {
+				filter["_id"] = bson.M{"$ne": channel.ID}
+			}
+
+			existing, err := s.FindOne(ctx, filter, nil)
+			if err == nil {
+				return common.NewError(
+					common.ErrCodeBusinessOperation,
+					fmt.Sprintf("Đã tồn tại webhook channel với webhookUrl '%s' trong organization này. Mỗi organization chỉ có thể có 1 channel cho mỗi webhookUrl", channel.WebhookURL),
+					common.StatusConflict,
+					nil,
+				)
+			}
+			if err != common.ErrNotFound {
+				return fmt.Errorf("lỗi khi kiểm tra uniqueness webhookUrl: %v", err)
+			}
+			_ = existing // Tránh unused variable warning
+		}
+	}
+
+	return nil
+}
+
+// InsertOne override để thêm business logic validation trước khi insert
+//
+// LÝ DO PHẢI OVERRIDE (không dùng BaseServiceMongoImpl.InsertOne trực tiếp):
+// 1. Business logic validation:
+//    - Validate uniqueness (Name + ChannelType + OwnerOrganizationID)
+//    - Validate uniqueness recipients (email), chatIDs (telegram), webhookUrl (webhook)
+//    - Đảm bảo không có duplicate channels trong cùng organization
+//
+// ĐẢM BẢO LOGIC CƠ BẢN:
+// ✅ Validate uniqueness bằng ValidateUniqueness()
+// ✅ Gọi BaseServiceMongoImpl.InsertOne để đảm bảo:
+//   - Set timestamps (CreatedAt, UpdatedAt)
+//   - Generate ID nếu chưa có
+//   - Insert vào MongoDB
+func (s *NotificationChannelService) InsertOne(ctx context.Context, data models.NotificationChannel) (models.NotificationChannel, error) {
+	// Validate uniqueness (business logic validation)
+	if err := s.ValidateUniqueness(ctx, data); err != nil {
+		return data, err
+	}
+
+	// Gọi InsertOne của base service
+	return s.BaseServiceMongoImpl.InsertOne(ctx, data)
+}
+
+// ✅ Các method DeleteById, UpdateById đã được xử lý bởi BaseServiceMongoImpl
 // với cơ chế bảo vệ dữ liệu hệ thống chung (IsSystem)
 

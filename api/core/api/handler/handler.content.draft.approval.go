@@ -56,24 +56,26 @@ func NewDraftApprovalHandler() (*DraftApprovalHandler, error) {
 	return handler, nil
 }
 
-// InsertOne override method InsertOne để chuyển đổi từ DTO sang Model
+// InsertOne override method InsertOne để xử lý ownerOrganizationId và gọi service
 //
-// LÝ DO PHẢI OVERRIDE (không thể dùng CRUD chuẩn):
-// 1. Validation nghiệp vụ phức tạp:
-//   - Phải có ít nhất một target: workflowRunId, draftNodeId, draftVideoId, hoặc draftPublicationId
-//   - Đây là validation cross-field (kiểm tra nhiều field cùng lúc), không thể dùng validate tag đơn giản
+// LÝ DO PHẢI OVERRIDE (không dùng BaseHandler.InsertOne trực tiếp):
+// 1. Xử lý ownerOrganizationId:
+//    - Cho phép chỉ định từ request hoặc dùng context
+//    - Validate quyền nếu có ownerOrganizationId trong request
+//    - BaseHandler.InsertOne không tự động xử lý ownerOrganizationId từ request body
 //
-// 2. Logic nghiệp vụ đặc biệt:
-//   - Set RequestedBy tự động từ context (user_id) - không cho phép client chỉ định
-//   - Set RequestedAt tự động (timestamp hiện tại)
-//   - Set Status = "pending" mặc định (không cho phép client chỉ định status khi tạo)
+// LƯU Ý:
+// - Validation format đã được xử lý tự động bởi struct tag validate:"required" trong BaseHandler
+// - ObjectID conversion đã được xử lý tự động bởi transform tag trong DTO
+// - Business logic validation (cross-field: ít nhất một target) đã được chuyển xuống DraftApprovalService.InsertOne
+// - Business logic (set RequestedBy, RequestedAt, Status) đã được chuyển xuống DraftApprovalService.PrepareForInsert
+// - Timestamps sẽ được xử lý tự động bởi BaseServiceMongoImpl.InsertOne trong service
 //
-// 3. Convert nhiều optional ObjectID fields:
-//   - WorkflowRunID, DraftNodeID, DraftVideoID, DraftPublicationID đều là optional
-//   - Cần validate từng field riêng biệt và convert string → *ObjectID
-//   - Transform tag có thể hỗ trợ, nhưng validation "ít nhất một target" vẫn cần logic đặc biệt
-//
-// KẾT LUẬN: Cần giữ override vì validation cross-field và logic nghiệp vụ đặc biệt (set RequestedBy từ context)
+// ĐẢM BẢO LOGIC CƠ BẢN:
+// ✅ Parse và validate input format (DTO validation)
+// ✅ Transform DTO → Model (transform tags)
+// ✅ Xử lý ownerOrganizationId (từ request hoặc context)
+// ✅ Gọi DraftApprovalService.InsertOne (service sẽ validate targets, prepare model và insert)
 func (h *DraftApprovalHandler) InsertOne(c fiber.Ctx) error {
 	return h.SafeHandler(c, func() error {
 		// Parse request body thành DTO
@@ -88,104 +90,45 @@ func (h *DraftApprovalHandler) InsertOne(c fiber.Ctx) error {
 			return nil
 		}
 
-		// Validate: Phải có ít nhất một target (workflowRunID, draftNodeID, draftVideoID, hoặc draftPublicationID)
-		hasTarget := input.WorkflowRunID != "" || input.DraftNodeID != "" || input.DraftVideoID != "" || input.DraftPublicationID != ""
-		if !hasTarget {
-			h.HandleResponse(c, nil, common.NewError(
-				common.ErrCodeValidationFormat,
-				"Phải có ít nhất một target: workflowRunId, draftNodeId, draftVideoId, hoặc draftPublicationId",
-				common.StatusBadRequest,
-				nil,
-			))
-			return nil
-		}
-
-		// Lấy user ID từ context
-		userIDStr, ok := c.Locals("user_id").(string)
-		if !ok || userIDStr == "" {
-			h.HandleResponse(c, nil, common.NewError(
-				common.ErrCodeAuthToken,
-				"Không tìm thấy user ID trong context",
-				common.StatusUnauthorized,
-				nil,
-			))
-			return nil
-		}
-		userID, err := primitive.ObjectIDFromHex(userIDStr)
+		// Transform DTO sang Model sử dụng transform tag (tự động convert ObjectID)
+		model, err := h.transformCreateInputToModel(&input)
 		if err != nil {
 			h.HandleResponse(c, nil, common.NewError(
 				common.ErrCodeValidationFormat,
-				fmt.Sprintf("User ID không hợp lệ: %v", err),
+				fmt.Sprintf("Lỗi transform dữ liệu: %v", err),
 				common.StatusBadRequest,
 				err,
 			))
 			return nil
 		}
 
-		// Chuyển đổi DTO sang Model
-		approval := models.DraftApproval{
-			Status:      models.ApprovalRequestStatusPending,
-			RequestedBy: userID,
-			RequestedAt: time.Now().UnixMilli(),
-			Metadata:    input.Metadata,
+		// ✅ Xử lý ownerOrganizationId: Cho phép chỉ định từ request hoặc dùng context
+		ownerOrgIDFromRequest := h.getOwnerOrganizationIDFromModel(model)
+		if ownerOrgIDFromRequest != nil && !ownerOrgIDFromRequest.IsZero() {
+			// Có ownerOrganizationId trong request → Validate quyền
+			if err := h.validateUserHasAccessToOrg(c, *ownerOrgIDFromRequest); err != nil {
+				h.HandleResponse(c, nil, err)
+				return nil
+			}
+		} else {
+			// Không có trong request → Dùng context
+			activeOrgID := h.getActiveOrganizationID(c)
+			if activeOrgID != nil && !activeOrgID.IsZero() {
+				h.setOrganizationID(model, *activeOrgID)
+			}
 		}
 
-		// Xử lý các target IDs
-		if input.WorkflowRunID != "" {
-			if !primitive.IsValidObjectID(input.WorkflowRunID) {
-				h.HandleResponse(c, nil, common.NewError(
-					common.ErrCodeValidationFormat,
-					fmt.Sprintf("WorkflowRunID '%s' không đúng định dạng MongoDB ObjectID", input.WorkflowRunID),
-					common.StatusBadRequest,
-					nil,
-				))
-				return nil
+		// ✅ Lưu userID vào context để service có thể check admin và set RequestedBy
+		ctx := c.Context()
+		if userIDStr, ok := c.Locals("user_id").(string); ok && userIDStr != "" {
+			if userID, err := primitive.ObjectIDFromHex(userIDStr); err == nil {
+				ctx = services.SetUserIDToContext(ctx, userID)
 			}
-			workflowRunID := utility.String2ObjectID(input.WorkflowRunID)
-			approval.WorkflowRunID = &workflowRunID
-		}
-		if input.DraftNodeID != "" {
-			if !primitive.IsValidObjectID(input.DraftNodeID) {
-				h.HandleResponse(c, nil, common.NewError(
-					common.ErrCodeValidationFormat,
-					fmt.Sprintf("DraftNodeID '%s' không đúng định dạng MongoDB ObjectID", input.DraftNodeID),
-					common.StatusBadRequest,
-					nil,
-				))
-				return nil
-			}
-			draftNodeID := utility.String2ObjectID(input.DraftNodeID)
-			approval.DraftNodeID = &draftNodeID
-		}
-		if input.DraftVideoID != "" {
-			if !primitive.IsValidObjectID(input.DraftVideoID) {
-				h.HandleResponse(c, nil, common.NewError(
-					common.ErrCodeValidationFormat,
-					fmt.Sprintf("DraftVideoID '%s' không đúng định dạng MongoDB ObjectID", input.DraftVideoID),
-					common.StatusBadRequest,
-					nil,
-				))
-				return nil
-			}
-			draftVideoID := utility.String2ObjectID(input.DraftVideoID)
-			approval.DraftVideoID = &draftVideoID
-		}
-		if input.DraftPublicationID != "" {
-			if !primitive.IsValidObjectID(input.DraftPublicationID) {
-				h.HandleResponse(c, nil, common.NewError(
-					common.ErrCodeValidationFormat,
-					fmt.Sprintf("DraftPublicationID '%s' không đúng định dạng MongoDB ObjectID", input.DraftPublicationID),
-					common.StatusBadRequest,
-					nil,
-				))
-				return nil
-			}
-			draftPublicationID := utility.String2ObjectID(input.DraftPublicationID)
-			approval.DraftPublicationID = &draftPublicationID
 		}
 
-		// Thực hiện insert
-		data, err := h.BaseService.InsertOne(c.Context(), approval)
+		// ✅ Gọi service để insert (service sẽ tự validate targets và prepare model)
+		// Business logic validation đã được chuyển xuống DraftApprovalService.InsertOne
+		data, err := h.DraftApprovalService.InsertOne(ctx, *model)
 		h.HandleResponse(c, data, err)
 		return nil
 	})
@@ -198,7 +141,7 @@ func (h *DraftApprovalHandler) InsertOne(c fiber.Ctx) error {
 // 1. Logic nghiệp vụ phức tạp:
 //   - Không chỉ update status, mà còn set decidedBy (từ context), decidedAt (timestamp hiện tại)
 //   - Validate status hiện tại phải là "pending" (không cho approve/reject approval đã xử lý)
-//   - Có thể trigger logic commit drafts sau khi approve (TODO: implement sau)
+//   - Trigger logic commit drafts sau khi approve (đã implement trong ApproveDraftWorkflowRun)
 //
 // 2. Workflow đặc biệt:
 //   - Đây là action nghiệp vụ (approve), không phải update đơn giản
@@ -216,34 +159,19 @@ func (h *DraftApprovalHandler) InsertOne(c fiber.Ctx) error {
 //   - decisionNote: Ghi chú về quyết định (tùy chọn)
 func (h *DraftApprovalHandler) ApproveDraftWorkflowRun(c fiber.Ctx) error {
 	return h.SafeHandler(c, func() error {
-		id := c.Params("id")
-		if id == "" {
-			h.HandleResponse(c, nil, common.NewError(
-				common.ErrCodeValidationFormat,
-				"ID không được để trống trong URL params",
-				common.StatusBadRequest,
-				nil,
-			))
+		// Parse và validate URL params (tự động validate ObjectID format và convert)
+		var params dto.ApproveDraftParams
+		if err := h.ParseRequestParams(c, &params); err != nil {
+			h.HandleResponse(c, nil, err)
 			return nil
 		}
+		id := params.ID // Đã được validate rồi
 
-		if !primitive.IsValidObjectID(id) {
-			h.HandleResponse(c, nil, common.NewError(
-				common.ErrCodeValidationFormat,
-				fmt.Sprintf("ID '%s' không đúng định dạng MongoDB ObjectID", id),
-				common.StatusBadRequest,
-				nil,
-			))
-			return nil
-		}
-
-		// Parse decision note từ body
-		var body struct {
-			DecisionNote string `json:"decisionNote,omitempty"`
-		}
-		if err := h.ParseRequestBody(c, &body); err != nil {
+		// Parse decision note từ body (tự động validate với struct tag)
+		var input dto.ApproveDraftInput
+		if err := h.ParseRequestBody(c, &input); err != nil {
 			// Không có body cũng OK, chỉ có decisionNote là tùy chọn
-			body.DecisionNote = ""
+			input.DecisionNote = ""
 		}
 
 		// Lấy user ID từ context
@@ -298,7 +226,7 @@ func (h *DraftApprovalHandler) ApproveDraftWorkflowRun(c fiber.Ctx) error {
 			"status":       models.ApprovalRequestStatusApproved,
 			"decidedBy":    userID,
 			"decidedAt":    time.Now().UnixMilli(),
-			"decisionNote": body.DecisionNote,
+			"decisionNote": input.DecisionNote,
 		}
 		updatedApproval, err := h.DraftApprovalService.UpdateById(c.Context(), approvalID, &services.UpdateData{
 			Set: updateData,
@@ -435,38 +363,18 @@ func (h *DraftApprovalHandler) ApproveDraftWorkflowRun(c fiber.Ctx) error {
 //   - decisionNote: Ghi chú về quyết định (bắt buộc khi reject)
 func (h *DraftApprovalHandler) RejectDraftWorkflowRun(c fiber.Ctx) error {
 	return h.SafeHandler(c, func() error {
-		id := c.Params("id")
-		if id == "" {
-			h.HandleResponse(c, nil, common.NewError(
-				common.ErrCodeValidationFormat,
-				"ID không được để trống trong URL params",
-				common.StatusBadRequest,
-				nil,
-			))
+		// Parse và validate URL params (tự động validate ObjectID format và convert)
+		var params dto.RejectDraftParams
+		if err := h.ParseRequestParams(c, &params); err != nil {
+			h.HandleResponse(c, nil, err)
 			return nil
 		}
+		id := params.ID // Đã được validate rồi
 
-		if !primitive.IsValidObjectID(id) {
-			h.HandleResponse(c, nil, common.NewError(
-				common.ErrCodeValidationFormat,
-				fmt.Sprintf("ID '%s' không đúng định dạng MongoDB ObjectID", id),
-				common.StatusBadRequest,
-				nil,
-			))
-			return nil
-		}
-
-		// Parse decision note từ body
-		var body struct {
-			DecisionNote string `json:"decisionNote" validate:"required"`
-		}
-		if err := h.ParseRequestBody(c, &body); err != nil || body.DecisionNote == "" {
-			h.HandleResponse(c, nil, common.NewError(
-				common.ErrCodeValidationFormat,
-				"decisionNote là bắt buộc khi reject",
-				common.StatusBadRequest,
-				err,
-			))
+		// Parse decision note từ body (tự động validate với struct tag - required)
+		var input dto.RejectDraftInput
+		if err := h.ParseRequestBody(c, &input); err != nil {
+			h.HandleResponse(c, nil, err)
 			return nil
 		}
 
@@ -522,7 +430,7 @@ func (h *DraftApprovalHandler) RejectDraftWorkflowRun(c fiber.Ctx) error {
 			"status":       models.ApprovalRequestStatusRejected,
 			"decidedBy":    userID,
 			"decidedAt":    time.Now().UnixMilli(),
-			"decisionNote": body.DecisionNote,
+			"decisionNote": input.DecisionNote,
 		}
 		updatedApproval, err := h.DraftApprovalService.UpdateById(c.Context(), approvalID, &services.UpdateData{
 			Set: updateData,

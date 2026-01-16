@@ -33,6 +33,16 @@ type LogConfig struct {
 	AuditFile       string `env:"LOG_AUDIT_FILE" envDefault:"audit.log"`
 	PerformanceFile string `env:"LOG_PERF_FILE" envDefault:"performance.log"`
 	ErrorFile       string `env:"LOG_ERROR_FILE" envDefault:"error.log"`
+
+	// Log Filters - Cho phép bật/tắt log theo các tiêu chí
+	// Format: comma-separated values, ví dụ: "auth,notification" hoặc "*" cho tất cả
+	// Nếu để trống hoặc "*", không filter (cho phép tất cả)
+	// Nếu có giá trị, chỉ log những entries khớp với filter
+	FilterModules    string `env:"LOG_FILTER_MODULES" envDefault:"*"`     // Ví dụ: "auth,notification,delivery" hoặc "*"
+	FilterCollections string `env:"LOG_FILTER_COLLECTIONS" envDefault:"*"` // Ví dụ: "users,orders" hoặc "*"
+	FilterEndpoints   string `env:"LOG_FILTER_ENDPOINTS" envDefault:"*"`   // Ví dụ: "/api/v1/users,/api/v1/orders" hoặc "*"
+	FilterMethods     string `env:"LOG_FILTER_METHODS" envDefault:"*"`     // Ví dụ: "GET,POST" hoặc "*"
+	FilterLogTypes    string `env:"LOG_FILTER_LOG_TYPES" envDefault:"*"`   // Ví dụ: "info,error" hoặc "*" (trace,debug,info,warn,error,fatal)
 }
 
 // getEnvPath trả về đường dẫn đến file env (tương tự như config.getEnvPath)
@@ -183,6 +193,23 @@ func DefaultConfig() *LogConfig {
 	}
 	if errorFile := os.Getenv("LOG_ERROR_FILE"); errorFile != "" {
 		config.ErrorFile = errorFile
+	}
+
+	// Override filter config từ environment variables
+	if filterModules := os.Getenv("LOG_FILTER_MODULES"); filterModules != "" {
+		config.FilterModules = filterModules
+	}
+	if filterCollections := os.Getenv("LOG_FILTER_COLLECTIONS"); filterCollections != "" {
+		config.FilterCollections = filterCollections
+	}
+	if filterEndpoints := os.Getenv("LOG_FILTER_ENDPOINTS"); filterEndpoints != "" {
+		config.FilterEndpoints = filterEndpoints
+	}
+	if filterMethods := os.Getenv("LOG_FILTER_METHODS"); filterMethods != "" {
+		config.FilterMethods = filterMethods
+	}
+	if filterLogTypes := os.Getenv("LOG_FILTER_LOG_TYPES"); filterLogTypes != "" {
+		config.FilterLogTypes = filterLogTypes
 	}
 
 	return config

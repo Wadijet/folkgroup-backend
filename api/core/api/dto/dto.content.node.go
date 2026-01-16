@@ -21,3 +21,8 @@ type ContentNodeUpdateInput struct {
 	Status   string                 `json:"status,omitempty"`                           // Trạng thái
 	Metadata map[string]interface{} `json:"metadata,omitempty"`                        // Metadata bổ sung
 }
+
+// ContentNodeTreeParams params từ URL khi lấy tree của content node
+type ContentNodeTreeParams struct {
+	ID string `uri:"id" validate:"required" transform:"str_objectid"` // Node ID từ URL params - tự động validate và convert sang ObjectID
+}

@@ -46,6 +46,114 @@ func NewOrganizationShareService() (*OrganizationShareService, error) {
 	}, nil
 }
 
+// InsertOne override để thêm duplicate check và validation trước khi insert
+//
+// LÝ DO PHẢI OVERRIDE (không dùng BaseServiceMongoImpl.InsertOne trực tiếp):
+// 1. Business logic validation:
+//    - Validate: ownerOrgID không được có trong ToOrgIDs (không thể share với chính mình)
+//    - Check duplicate: So sánh set-based (ToOrgIDs và PermissionNames) để tránh duplicate shares
+//    - Đảm bảo không có duplicate shares với cùng ToOrgIDs và PermissionNames
+//
+// 2. Set comparison logic:
+//    - So sánh ToOrgIDs và PermissionNames như sets (không quan tâm thứ tự)
+//    - Sử dụng helper functions: compareShareSets(), compareObjectIDSets(), compareStringSets()
+//
+// ĐẢM BẢO LOGIC CƠ BẢN:
+// ✅ Validate ownerOrgID không có trong ToOrgIDs
+// ✅ Check duplicate bằng set comparison
+// ✅ Gọi BaseServiceMongoImpl.InsertOne để đảm bảo:
+//   - Set timestamps (CreatedAt, UpdatedAt)
+//   - Generate ID nếu chưa có
+//   - Insert vào MongoDB
+func (s *OrganizationShareService) InsertOne(ctx context.Context, data models.OrganizationShare) (models.OrganizationShare, error) {
+	// 1. Validate: ownerOrgID không được có trong ToOrgIDs
+	for _, toOrgID := range data.ToOrgIDs {
+		if toOrgID == data.OwnerOrganizationID {
+			return data, common.NewError(
+				common.ErrCodeValidationInput,
+				"ownerOrganizationId không được có trong toOrgIds",
+				common.StatusBadRequest,
+				nil,
+			)
+		}
+	}
+
+	// 2. Check duplicate với set comparison
+	existingShares, err := s.Find(ctx, bson.M{
+		"ownerOrganizationId": data.OwnerOrganizationID,
+	}, nil)
+	if err != nil && err != common.ErrNotFound {
+		return data, err
+	}
+
+	// So sánh với shares hiện có (set comparison)
+	for _, existingShare := range existingShares {
+		if compareShareSets(data, existingShare) {
+			return data, common.NewError(
+				common.ErrCodeBusinessOperation,
+				"Share với các organizations này đã tồn tại với cùng permissions",
+				common.StatusConflict,
+				nil,
+			)
+		}
+	}
+
+	// 3. Gọi InsertOne của base service
+	return s.BaseServiceMongoImpl.InsertOne(ctx, data)
+}
+
+// compareShareSets so sánh 2 shares (set comparison cho ToOrgIDs và PermissionNames)
+func compareShareSets(share1, share2 models.OrganizationShare) bool {
+	// So sánh ToOrgIDs (không quan tâm thứ tự)
+	if !compareObjectIDSets(share1.ToOrgIDs, share2.ToOrgIDs) {
+		return false
+	}
+	// So sánh PermissionNames (không quan tâm thứ tự)
+	return compareStringSets(share1.PermissionNames, share2.PermissionNames)
+}
+
+// compareObjectIDSets so sánh 2 mảng ObjectID (không quan tâm thứ tự)
+func compareObjectIDSets(ids1, ids2 []primitive.ObjectID) bool {
+	if len(ids1) != len(ids2) {
+		return false
+	}
+	if len(ids1) == 0 {
+		return true // Cả 2 đều rỗng = giống nhau
+	}
+	// Tạo map để so sánh
+	ids1Map := make(map[primitive.ObjectID]bool)
+	for _, id := range ids1 {
+		ids1Map[id] = true
+	}
+	for _, id := range ids2 {
+		if !ids1Map[id] {
+			return false
+		}
+	}
+	return true
+}
+
+// compareStringSets so sánh 2 mảng string (không quan tâm thứ tự)
+func compareStringSets(strs1, strs2 []string) bool {
+	if len(strs1) != len(strs2) {
+		return false
+	}
+	if len(strs1) == 0 {
+		return true // Cả 2 đều rỗng = giống nhau
+	}
+	// Tạo map để so sánh
+	strs1Map := make(map[string]bool)
+	for _, s := range strs1 {
+		strs1Map[s] = true
+	}
+	for _, s := range strs2 {
+		if !strs1Map[s] {
+			return false
+		}
+	}
+	return true
+}
+
 // GetSharedOrganizationIDs lấy organizations được share với user's organizations
 // userOrgIDs: Danh sách organization IDs của user (từ scope)
 // permissionName: Permission name cụ thể (nếu rỗng = tất cả permissions)

@@ -211,6 +211,11 @@ func createLogger(name string) *logrus.Logger {
 		writers = append(writers, os.Stdout)
 	}
 
+	// Thêm FilterHook trước AsyncHook để filter trước khi ghi log
+	// FilterHook phải được thêm trước để filter entries trước khi đưa vào async queue
+	filterHook := NewFilterHook(config)
+	logger.AddHook(filterHook)
+
 	// Dùng async hook cho tất cả writers để tránh blocking
 	// Buffer size: 1000 entries (có thể config sau nếu cần)
 	if len(writers) > 0 {

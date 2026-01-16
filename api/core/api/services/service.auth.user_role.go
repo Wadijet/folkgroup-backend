@@ -308,6 +308,18 @@ func (s *UserRoleService) validateBeforeDeleteAdministratorRoleByFilter(ctx cont
 }
 
 // DeleteOne override method DeleteOne để kiểm tra trước khi xóa
+//
+// LÝ DO PHẢI OVERRIDE (không dùng BaseServiceMongoImpl.DeleteOne trực tiếp):
+// 1. Business logic validation:
+//    - Validate trước khi xóa: Không cho phép xóa Administrator role của user
+//    - Đảm bảo luôn có ít nhất 1 Administrator role trong hệ thống
+//    - Bảo vệ data integrity và security
+//
+// ĐẢM BẢO LOGIC CƠ BẢN:
+// ✅ Validate trước khi xóa bằng validateBeforeDeleteAdministratorRoleByFilter()
+// ✅ Gọi BaseServiceMongoImpl.DeleteOne để đảm bảo:
+//   - Xóa document từ MongoDB
+//   - Xử lý errors đúng cách
 func (s *UserRoleService) DeleteOne(ctx context.Context, filter interface{}) error {
 	// Chuyển filter sang bson.M để kiểm tra
 	var filterMap bson.M
@@ -338,6 +350,18 @@ func (s *UserRoleService) DeleteOne(ctx context.Context, filter interface{}) err
 }
 
 // DeleteById override method DeleteById để kiểm tra trước khi xóa
+//
+// LÝ DO PHẢI OVERRIDE (không dùng BaseServiceMongoImpl.DeleteById trực tiếp):
+// 1. Business logic validation:
+//    - Validate trước khi xóa: Không cho phép xóa Administrator role của user
+//    - Đảm bảo luôn có ít nhất 1 Administrator role trong hệ thống
+//    - Bảo vệ data integrity và security
+//
+// ĐẢM BẢO LOGIC CƠ BẢN:
+// ✅ Validate trước khi xóa bằng validateBeforeDeleteAdministratorRole()
+// ✅ Gọi BaseServiceMongoImpl.DeleteById để đảm bảo:
+//   - Xóa document từ MongoDB
+//   - Xử lý errors đúng cách
 func (s *UserRoleService) DeleteById(ctx context.Context, id primitive.ObjectID) error {
 	// Kiểm tra trước khi xóa
 	if err := s.validateBeforeDeleteAdministratorRole(ctx, id); err != nil {
@@ -349,6 +373,18 @@ func (s *UserRoleService) DeleteById(ctx context.Context, id primitive.ObjectID)
 }
 
 // DeleteMany override method DeleteMany để kiểm tra trước khi xóa
+//
+// LÝ DO PHẢI OVERRIDE (không dùng BaseServiceMongoImpl.DeleteMany trực tiếp):
+// 1. Business logic validation:
+//    - Validate từng user role trước khi xóa: Không cho phép xóa Administrator role của user
+//    - Đảm bảo luôn có ít nhất 1 Administrator role trong hệ thống
+//    - Bảo vệ data integrity và security
+//
+// ĐẢM BẢO LOGIC CƠ BẢN:
+// ✅ Validate từng user role trước khi xóa bằng validateBeforeDeleteAdministratorRoleByFilter()
+// ✅ Gọi BaseServiceMongoImpl.DeleteMany để đảm bảo:
+//   - Xóa documents từ MongoDB
+//   - Xử lý errors đúng cách
 func (s *UserRoleService) DeleteMany(ctx context.Context, filter interface{}) (int64, error) {
 	// Chuyển filter sang bson.M để kiểm tra
 	var filterMap bson.M

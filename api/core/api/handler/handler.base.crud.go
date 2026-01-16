@@ -10,10 +10,12 @@ import (
 	"meta_commerce/core/api/services"
 	"meta_commerce/core/common"
 	"meta_commerce/core/utility"
+	"reflect"
 	"strconv"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/sirupsen/logrus"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	mongoopts "go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -38,6 +40,12 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) InsertOne(c fiber.Ctx) error 
 				common.StatusBadRequest,
 				err,
 			))
+			return nil
+		}
+
+		// ✅ Validate input với struct tag (validate, oneof, etc.)
+		if err := h.validateInput(&input); err != nil {
+			h.HandleResponse(c, nil, err)
 			return nil
 		}
 
@@ -324,7 +332,7 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) Find(c fiber.Ctx) error {
 		"path":   c.Path(),
 		"method": c.Method(),
 	}).Info("🔵 Find handler called")
-	
+
 	return h.SafeHandler(c, func() error {
 		filter, err := h.processFilter(c)
 		if err != nil {
@@ -377,46 +385,82 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) UpdateOne(c fiber.Ctx) error 
 		// ✅ Tự động thêm filter ownerOrganizationId nếu model có field OwnerOrganizationID (phân quyền dữ liệu)
 		filter = h.applyOrganizationFilter(c, filter)
 
-		// Parse input thành map để chỉ update các trường được chỉ định
-		var updateData map[string]interface{}
-		if err := json.NewDecoder(bytes.NewReader(c.Body())).Decode(&updateData); err != nil {
-			h.HandleResponse(c, nil, common.NewError(common.ErrCodeValidationFormat, "Dữ liệu cập nhật không hợp lệ", common.StatusBadRequest, nil))
+		// Parse request body thành DTO (UpdateInput)
+		var input UpdateInput
+		if err := h.ParseRequestBody(c, &input); err != nil {
+			h.HandleResponse(c, nil, common.NewError(
+				common.ErrCodeValidationFormat,
+				fmt.Sprintf("Dữ liệu gửi lên không đúng định dạng JSON hoặc không khớp với cấu trúc yêu cầu. Chi tiết: %v", err),
+				common.StatusBadRequest,
+				err,
+			))
+			return nil
+		}
+
+		// ✅ Validate input với struct tag (validate, oneof, etc.)
+		if err := h.validateInput(&input); err != nil {
+			h.HandleResponse(c, nil, err)
+			return nil
+		}
+
+		// Transform DTO sang Model sử dụng struct tag `transform` (hỗ trợ nested struct)
+		model, err := h.transformUpdateInputToModel(&input)
+		if err != nil {
+			h.HandleResponse(c, nil, common.NewError(
+				common.ErrCodeValidationFormat,
+				fmt.Sprintf("Lỗi transform dữ liệu: %v", err),
+				common.StatusBadRequest,
+				err,
+			))
 			return nil
 		}
 
 		// ✅ Xử lý ownerOrganizationId: Cho phép update với validation quyền
 		// Lưu ý: UpdateOne không có document ID riêng, cần validate qua filter
-		// Nếu có ownerOrganizationId trong updateData, validate quyền với organization mới
-		if newOwnerOrgIDStr, ok := updateData["ownerOrganizationId"].(string); ok && newOwnerOrgIDStr != "" {
-			// Parse ObjectID
-			newOwnerOrgID, err := primitive.ObjectIDFromHex(newOwnerOrgIDStr)
-			if err != nil {
-				h.HandleResponse(c, nil, common.NewError(
-					common.ErrCodeValidationFormat,
-					"ownerOrganizationId không hợp lệ",
-					common.StatusBadRequest,
-					err,
-				))
-				return nil
-			}
-
+		// Nếu có ownerOrganizationId trong model, validate quyền với organization mới
+		ownerOrgIDFromModel := h.getOwnerOrganizationIDFromModel(model)
+		if ownerOrgIDFromModel != nil && !ownerOrgIDFromModel.IsZero() {
 			// Validate user có quyền với organization mới
-			if err := h.validateUserHasAccessToOrg(c, newOwnerOrgID); err != nil {
+			if err := h.validateUserHasAccessToOrg(c, *ownerOrgIDFromModel); err != nil {
 				h.HandleResponse(c, nil, err)
 				return nil
 			}
+		}
 
-			// ✅ Có quyền → Thay thế string bằng ObjectID trong updateData để MongoDB lưu đúng kiểu
-			updateData["ownerOrganizationId"] = newOwnerOrgID
-		} else {
-			// Không có ownerOrganizationId trong update → Xóa nếu có (giữ nguyên logic cũ)
-			delete(updateData, "ownerOrganizationId")
+		// Convert model sang UpdateData với $set operator
+		updateData := &services.UpdateData{
+			Set: make(map[string]interface{}),
+		}
+		// Convert model sang map để set vào $set
+		modelBytes, err := bson.Marshal(model)
+		if err != nil {
+			h.HandleResponse(c, nil, common.NewError(
+				common.ErrCodeInternalServer,
+				fmt.Sprintf("Lỗi convert model sang BSON: %v", err),
+				common.StatusInternalServerError,
+				err,
+			))
+			return nil
+		}
+		var modelMap map[string]interface{}
+		if err := bson.Unmarshal(modelBytes, &modelMap); err != nil {
+			h.HandleResponse(c, nil, common.NewError(
+				common.ErrCodeInternalServer,
+				fmt.Sprintf("Lỗi unmarshal BSON: %v", err),
+				common.StatusInternalServerError,
+				err,
+			))
+			return nil
+		}
+		// Set các field vào $set (loại bỏ zero values)
+		for k, v := range modelMap {
+			if !reflect.ValueOf(v).IsZero() {
+				updateData.Set[k] = v
+			}
 		}
 
 		// Tạo update data với $set operator
-		update := &services.UpdateData{
-			Set: updateData,
-		}
+		update := updateData
 
 		data, err := h.BaseService.UpdateOne(c.Context(), filter, update, nil)
 		h.HandleResponse(c, data, err)

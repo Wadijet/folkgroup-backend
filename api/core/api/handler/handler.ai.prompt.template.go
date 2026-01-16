@@ -30,3 +30,11 @@ func NewAIPromptTemplateHandler() (*AIPromptTemplateHandler, error) {
 
 	return handler, nil
 }
+
+// InsertOne: KHÔNG CẦN OVERRIDE - Dùng BaseHandler.InsertOne trực tiếp
+// Nested struct Provider đã được xử lý tự động bởi transform:"nested_struct" trong DTO
+// Tất cả logic (validation, transform, ownerOrganizationId, timestamps) đã được xử lý tự động bởi BaseHandler
+
+// UpdateOne: KHÔNG CẦN OVERRIDE - Dùng BaseHandler.UpdateOne trực tiếp
+// Nested struct Provider đã được xử lý tự động bởi transform:"nested_struct" trong DTO
+// Tất cả logic (validation, transform, ownerOrganizationId, timestamps) đã được xử lý tự động bởi BaseHandler

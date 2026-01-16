@@ -129,5 +129,108 @@ func (s *NotificationRoutingService) getSystemOrganizationID(ctx context.Context
 	return systemOrg.ID, nil
 }
 
-// ✅ Các method InsertOne, DeleteById, UpdateById đã được xử lý bởi BaseServiceMongoImpl
+// ValidateUniqueness validate uniqueness của routing rule (business logic validation)
+//
+// LÝ DO PHẢI TẠO METHOD NÀY (không dùng CRUD base):
+// 1. Business rules - Uniqueness constraints:
+//    - Mỗi organization chỉ có thể có 1 rule cho mỗi eventType (khi isActive = true)
+//    - Mỗi organization chỉ có thể có 1 rule cho mỗi domain (khi isActive = true)
+//    - Đảm bảo không có duplicate rules trong cùng organization
+//
+// Tham số:
+//   - ctx: Context
+//   - rule: Notification routing rule cần validate
+//
+// Trả về:
+//   - error: Lỗi nếu validation thất bại (duplicate rule), nil nếu hợp lệ
+func (s *NotificationRoutingService) ValidateUniqueness(ctx context.Context, rule models.NotificationRoutingRule) error {
+	// Validate EventType: EventType là bắt buộc
+	if rule.EventType == "" {
+		return common.NewError(
+			common.ErrCodeValidationInput,
+			"EventType là bắt buộc và không được để trống",
+			common.StatusBadRequest,
+			nil,
+		)
+	}
+
+	// Kiểm tra rule với eventType (EventType là bắt buộc)
+	filter := bson.M{
+		"eventType":           rule.EventType,
+		"ownerOrganizationId": rule.OwnerOrganizationID,
+		"isActive":            true, // Chỉ check rules đang active
+	}
+	
+	// Nếu đang update, exclude chính document đó
+	if !rule.ID.IsZero() {
+		filter["_id"] = bson.M{"$ne": rule.ID}
+	}
+
+	_, err := s.FindOne(ctx, filter, nil)
+	if err == nil {
+		return common.NewError(
+			common.ErrCodeBusinessOperation,
+			fmt.Sprintf("Đã tồn tại routing rule cho eventType '%s' và organization này. Mỗi organization chỉ có thể có 1 rule cho mỗi eventType", rule.EventType),
+			common.StatusConflict,
+			nil,
+		)
+	}
+	if err != common.ErrNotFound {
+		return fmt.Errorf("lỗi khi kiểm tra uniqueness: %v", err)
+	}
+
+	// Kiểm tra rule với domain (nếu có)
+	if rule.Domain != nil && *rule.Domain != "" {
+		domainFilter := bson.M{
+			"domain":              *rule.Domain,
+			"ownerOrganizationId": rule.OwnerOrganizationID,
+			"isActive":            true, // Chỉ check rules đang active
+		}
+		
+		// Nếu đang update, exclude chính document đó
+		if !rule.ID.IsZero() {
+			domainFilter["_id"] = bson.M{"$ne": rule.ID}
+		}
+
+		_, err := s.FindOne(ctx, domainFilter, nil)
+		if err == nil {
+			return common.NewError(
+				common.ErrCodeBusinessOperation,
+				fmt.Sprintf("Đã tồn tại routing rule cho domain '%s' và organization này. Mỗi organization chỉ có thể có 1 rule cho mỗi domain", *rule.Domain),
+				common.StatusConflict,
+				nil,
+			)
+		}
+		if err != common.ErrNotFound {
+			return fmt.Errorf("lỗi khi kiểm tra uniqueness domain: %v", err)
+		}
+	}
+
+	return nil
+}
+
+// InsertOne override để thêm business logic validation trước khi insert
+//
+// LÝ DO PHẢI OVERRIDE (không dùng BaseServiceMongoImpl.InsertOne trực tiếp):
+// 1. Business logic validation:
+//    - Validate uniqueness (eventType + ownerOrganizationId, domain + ownerOrganizationId)
+//    - Đảm bảo không có duplicate rules trong cùng organization
+//
+// ĐẢM BẢO LOGIC CƠ BẢN:
+// ✅ Validate uniqueness bằng ValidateUniqueness()
+// ✅ Gọi BaseServiceMongoImpl.InsertOne để đảm bảo:
+//   - Set timestamps (CreatedAt, UpdatedAt)
+//   - Generate ID nếu chưa có
+//   - Insert vào MongoDB
+func (s *NotificationRoutingService) InsertOne(ctx context.Context, data models.NotificationRoutingRule) (models.NotificationRoutingRule, error) {
+	// Validate uniqueness (business logic validation)
+	if err := s.ValidateUniqueness(ctx, data); err != nil {
+		return data, err
+	}
+
+	// Gọi InsertOne của base service
+	return s.BaseServiceMongoImpl.InsertOne(ctx, data)
+}
+
+// ✅ Các method DeleteById, UpdateById đã được xử lý bởi BaseServiceMongoImpl
 // với cơ chế bảo vệ dữ liệu hệ thống chung (IsSystem)

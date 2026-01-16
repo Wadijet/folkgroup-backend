@@ -43,8 +43,8 @@ func SendEmail(ctx context.Context, sender *models.NotificationChannelSender, re
 		htmlContent += "<div style='margin-top:20px;'>" + ctaHTML + "</div>"
 	}
 
-	// Thêm tracking pixel (để track open)
-	trackingPixel := fmt.Sprintf(`<img src="%s/api/v1/delivery/track/open/%s" width="1" height="1" style="display:none">`,
+	// Thêm tracking pixel (để track open) - dùng unified tracking endpoint
+	trackingPixel := fmt.Sprintf(`<img src="%s/api/v1/track/open/%s" width="1" height="1" style="display:none">`,
 		baseURL, historyID)
 	htmlContent += trackingPixel
 

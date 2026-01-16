@@ -256,3 +256,125 @@ func (s *OrganizationService) FindOneAndDelete(ctx context.Context, filter inter
 	// Thực hiện xóa nếu không có ràng buộc
 	return s.BaseServiceMongoImpl.FindOneAndDelete(ctx, filter, opts)
 }
+
+// CalculatePathAndLevel tính toán Path và Level cho organization dựa trên parent (business logic)
+//
+// LÝ DO PHẢI TẠO METHOD NÀY (không dùng CRUD base):
+// 1. Business rules - Tính toán Path và Level:
+//    - Nếu có ParentID: Query parent organization từ database để lấy Path và Level
+//      + Tính Path mới: parent.Path + "/" + code
+//      + Tính Level mới: dựa trên Type và parent.Level (sử dụng calculateLevel)
+//    - Nếu không có ParentID:
+//      + Chỉ có thể là "system" (Level = -1, Path = "/" + code) hoặc "group" (Level = 0, Path = "/" + code)
+//      + Validate: các Type khác phải có parent
+//
+// 2. Business rules - Level calculation:
+//    - System: Level = -1
+//    - Group: Level = 0
+//    - Company: Level = 1
+//    - Department: Level = 2
+//    - Division: Level = 3
+//    - Team: Level = parentLevel + 1 (có thể là 4+)
+//    - Các Type khác: Level = parentLevel + 1
+//
+// Tham số:
+//   - ctx: Context
+//   - org: Organization cần tính toán Path và Level
+//
+// Trả về:
+//   - path: Path đã được tính toán
+//   - level: Level đã được tính toán
+//   - error: Lỗi nếu validation thất bại, nil nếu hợp lệ
+func (s *OrganizationService) CalculatePathAndLevel(ctx context.Context, org models.Organization) (string, int, error) {
+	// Nếu có ParentID, query parent để lấy Path và Level
+	if org.ParentID != nil && !org.ParentID.IsZero() {
+		parent, err := s.FindOneById(ctx, *org.ParentID)
+		if err != nil {
+			return "", 0, common.NewError(
+				common.ErrCodeBusinessOperation,
+				fmt.Sprintf("Không tìm thấy tổ chức cha với ID: %s", org.ParentID.Hex()),
+				common.StatusBadRequest,
+				err,
+			)
+		}
+
+		var modelParent models.Organization
+		bsonBytes, _ := bson.Marshal(parent)
+		if err := bson.Unmarshal(bsonBytes, &modelParent); err != nil {
+			return "", 0, common.ErrInvalidFormat
+		}
+
+		// Tính Path: parent.Path + "/" + code
+		path := modelParent.Path + "/" + org.Code
+
+		// Tính Level dựa trên Type
+		level := s.calculateLevel(org.Type, modelParent.Level)
+
+		return path, level, nil
+	}
+
+	// Không có parent - chỉ có thể là system hoặc group
+	if org.Type == models.OrganizationTypeSystem {
+		return "/" + org.Code, -1, nil
+	} else if org.Type == models.OrganizationTypeGroup {
+		return "/" + org.Code, 0, nil
+	} else {
+		return "", 0, common.NewError(
+			common.ErrCodeBusinessOperation,
+			fmt.Sprintf("Loại tổ chức '%s' phải có parent. Chỉ 'system' và 'group' mới có thể không có parent.", org.Type),
+			common.StatusBadRequest,
+			nil,
+		)
+	}
+}
+
+// calculateLevel tính toán Level dựa trên Type và Level của parent (helper method)
+func (s *OrganizationService) calculateLevel(orgType string, parentLevel int) int {
+	switch orgType {
+	case models.OrganizationTypeSystem:
+		return -1
+	case models.OrganizationTypeGroup:
+		return 0
+	case models.OrganizationTypeCompany:
+		return 1
+	case models.OrganizationTypeDepartment:
+		return 2
+	case models.OrganizationTypeDivision:
+		return 3
+	case models.OrganizationTypeTeam:
+		// Team có thể là Level 4+ tùy thuộc vào parent
+		return parentLevel + 1
+	default:
+		// Mặc định tăng level lên 1 so với parent
+		return parentLevel + 1
+	}
+}
+
+// InsertOne override để thêm business logic validation và tính toán Path/Level trước khi insert
+//
+// LÝ DO PHẢI OVERRIDE (không dùng BaseServiceMongoImpl.InsertOne trực tiếp):
+// 1. Business logic:
+//    - Tính toán Path và Level dựa trên parent (business logic phức tạp)
+//    - Validate ParentID tồn tại trong database (nếu có)
+//    - Validate Type: chỉ "system" và "group" mới có thể không có parent
+//
+// ĐẢM BẢO LOGIC CƠ BẢN:
+// ✅ Tính toán Path và Level bằng CalculatePathAndLevel()
+// ✅ Gọi BaseServiceMongoImpl.InsertOne để đảm bảo:
+//   - Set timestamps (CreatedAt, UpdatedAt)
+//   - Generate ID nếu chưa có
+//   - Insert vào MongoDB
+func (s *OrganizationService) InsertOne(ctx context.Context, data models.Organization) (models.Organization, error) {
+	// Tính toán Path và Level (business logic)
+	path, level, err := s.CalculatePathAndLevel(ctx, data)
+	if err != nil {
+		return data, err
+	}
+
+	// Set Path và Level vào data
+	data.Path = path
+	data.Level = level
+
+	// Gọi InsertOne của base service
+	return s.BaseServiceMongoImpl.InsertOne(ctx, data)
+}

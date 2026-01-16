@@ -6,10 +6,8 @@ import (
 	models "meta_commerce/core/api/models/mongodb"
 	"meta_commerce/core/api/services"
 	"meta_commerce/core/common"
-	"meta_commerce/core/utility"
 
 	"github.com/gofiber/fiber/v3"
-	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -56,35 +54,25 @@ func NewOrganizationHandler() (*OrganizationHandler, error) {
 	return handler, nil
 }
 
-// InsertOne override method InsertOne để chuyển đổi từ DTO sang Model và tính toán Path, Level
+// InsertOne override method InsertOne để xử lý ownerOrganizationId và gọi service
 //
-// LÝ DO PHẢI OVERRIDE (không thể dùng CRUD chuẩn):
-// 1. Tính toán Path và Level dựa trên parent (logic nghiệp vụ phức tạp):
-//    - Nếu có ParentID:
-//      + Query parent organization từ database để lấy Path và Level
-//      + Tính Path mới: parent.Path + "/" + code
-//      + Tính Level mới: dựa trên Type và parent.Level (sử dụng calculateLevel)
-//    - Nếu không có ParentID:
-//      + Chỉ có thể là "system" (Level = -1, Path = "/" + code) hoặc "group" (Level = 0, Path = "/" + code)
-//      + Validate: các Type khác phải có parent
-// 2. Validation nghiệp vụ đặc biệt:
-//    - Validate ParentID tồn tại trong database (nếu có)
-//    - Validate Type: chỉ "system" và "group" mới có thể không có parent
-//    - Validate Type khác phải có parent
-// 3. Logic tính toán Level phức tạp:
-//    - System: Level = -1
-//    - Group: Level = 0
-//    - Company: Level = 1
-//    - Department: Level = 2
-//    - Division: Level = 3
-//    - Team: Level = parentLevel + 1 (có thể là 4+)
-//    - Các Type khác: Level = parentLevel + 1
-// 4. Query database để lấy parent:
-//    - Cần query parent organization để lấy Path và Level
-//    - Validate parent tồn tại trước khi tính toán
+// LÝ DO PHẢI OVERRIDE (không dùng BaseHandler.InsertOne trực tiếp):
+// 1. Xử lý ownerOrganizationId:
+//    - Cho phép chỉ định từ request hoặc dùng context
+//    - Validate quyền nếu có ownerOrganizationId trong request
+//    - BaseHandler.InsertOne không tự động xử lý ownerOrganizationId từ request body
 //
-// KẾT LUẬN: Cần giữ override vì logic nghiệp vụ phức tạp (tính toán Path/Level dựa trên parent,
-//           query database để lấy parent, validate Type và parent relationship)
+// LƯU Ý:
+// - Validation format đã được xử lý tự động bởi struct tag validate:"required" trong BaseHandler
+// - ObjectID conversion đã được xử lý tự động bởi transform tag trong DTO
+// - Business logic validation và tính toán (Path, Level) đã được chuyển xuống OrganizationService.InsertOne
+// - Timestamps sẽ được xử lý tự động bởi BaseServiceMongoImpl.InsertOne trong service
+//
+// ĐẢM BẢO LOGIC CƠ BẢN:
+// ✅ Parse và validate input format (DTO validation)
+// ✅ Transform DTO → Model (transform tags)
+// ✅ Xử lý ownerOrganizationId (từ request hoặc context)
+// ✅ Gọi OrganizationService.InsertOne (service sẽ tính toán Path/Level và insert)
 func (h *OrganizationHandler) InsertOne(c fiber.Ctx) error {
 	return h.SafeHandler(c, func() error {
 		// Parse request body thành DTO
@@ -99,96 +87,46 @@ func (h *OrganizationHandler) InsertOne(c fiber.Ctx) error {
 			return nil
 		}
 
-		// Chuyển đổi DTO sang Model
-		orgModel := models.Organization{
-			Name:     input.Name,
-			Code:     input.Code,
-			Type:     input.Type,
-			IsActive: input.IsActive,
+		// Transform DTO sang Model sử dụng transform tag (tự động convert ObjectID)
+		model, err := h.transformCreateInputToModel(&input)
+		if err != nil {
+			h.HandleResponse(c, nil, common.NewError(
+				common.ErrCodeValidationFormat,
+				fmt.Sprintf("Lỗi transform dữ liệu: %v", err),
+				common.StatusBadRequest,
+				err,
+			))
+			return nil
 		}
 
-		// Xử lý ParentID nếu có
-		if input.ParentID != "" {
-			if !primitive.IsValidObjectID(input.ParentID) {
-				h.HandleResponse(c, nil, common.NewError(
-					common.ErrCodeValidationFormat,
-					fmt.Sprintf("ParentID '%s' không đúng định dạng MongoDB ObjectID", input.ParentID),
-					common.StatusBadRequest,
-					nil,
-				))
+		// ✅ Xử lý ownerOrganizationId: Cho phép chỉ định từ request hoặc dùng context
+		ownerOrgIDFromRequest := h.getOwnerOrganizationIDFromModel(model)
+		if ownerOrgIDFromRequest != nil && !ownerOrgIDFromRequest.IsZero() {
+			// Có ownerOrganizationId trong request → Validate quyền
+			if err := h.validateUserHasAccessToOrg(c, *ownerOrgIDFromRequest); err != nil {
+				h.HandleResponse(c, nil, err)
 				return nil
 			}
-			parentID := utility.String2ObjectID(input.ParentID)
-			orgModel.ParentID = &parentID
-
-			// Lấy thông tin parent để tính Path và Level
-			parent, err := h.OrganizationService.FindOneById(c.Context(), parentID)
-			if err != nil {
-				h.HandleResponse(c, nil, common.NewError(
-					common.ErrCodeBusinessOperation,
-					fmt.Sprintf("Không tìm thấy tổ chức cha với ID: %s", input.ParentID),
-					common.StatusBadRequest,
-					err,
-				))
-				return nil
-			}
-
-			var modelParent models.Organization
-			bsonBytes, _ := bson.Marshal(parent)
-			if err := bson.Unmarshal(bsonBytes, &modelParent); err != nil {
-				h.HandleResponse(c, nil, common.ErrInvalidFormat)
-				return nil
-			}
-
-			// Tính Path: parent.Path + "/" + code
-			orgModel.Path = modelParent.Path + "/" + input.Code
-
-			// Tính Level dựa trên Type
-			orgModel.Level = h.calculateLevel(input.Type, modelParent.Level)
 		} else {
-			// Không có parent - chỉ có thể là system hoặc group
-			if input.Type == models.OrganizationTypeSystem {
-				orgModel.Path = "/" + input.Code
-				orgModel.Level = -1
-			} else if input.Type == models.OrganizationTypeGroup {
-				orgModel.Path = "/" + input.Code
-				orgModel.Level = 0
-			} else {
-				h.HandleResponse(c, nil, common.NewError(
-					common.ErrCodeBusinessOperation,
-					fmt.Sprintf("Loại tổ chức '%s' phải có parent. Chỉ 'system' và 'group' mới có thể không có parent.", input.Type),
-					common.StatusBadRequest,
-					nil,
-				))
-				return nil
+			// Không có trong request → Dùng context
+			activeOrgID := h.getActiveOrganizationID(c)
+			if activeOrgID != nil && !activeOrgID.IsZero() {
+				h.setOrganizationID(model, *activeOrgID)
 			}
 		}
 
-		// Thực hiện insert
-		data, err := h.BaseService.InsertOne(c.Context(), orgModel)
+		// ✅ Lưu userID vào context để service có thể check admin
+		ctx := c.Context()
+		if userIDStr, ok := c.Locals("user_id").(string); ok && userIDStr != "" {
+			if userID, err := primitive.ObjectIDFromHex(userIDStr); err == nil {
+				ctx = services.SetUserIDToContext(ctx, userID)
+			}
+		}
+
+		// ✅ Gọi service để insert (service sẽ tự tính toán Path và Level)
+		// Business logic validation và tính toán đã được chuyển xuống OrganizationService.InsertOne
+		data, err := h.OrganizationService.InsertOne(ctx, *model)
 		h.HandleResponse(c, data, err)
 		return nil
 	})
-}
-
-// calculateLevel tính toán Level dựa trên Type và Level của parent
-func (h *OrganizationHandler) calculateLevel(orgType string, parentLevel int) int {
-	switch orgType {
-	case models.OrganizationTypeSystem:
-		return -1
-	case models.OrganizationTypeGroup:
-		return 0
-	case models.OrganizationTypeCompany:
-		return 1
-	case models.OrganizationTypeDepartment:
-		return 2
-	case models.OrganizationTypeDivision:
-		return 3
-	case models.OrganizationTypeTeam:
-		// Team có thể là Level 4+ tùy thuộc vào parent
-		return parentLevel + 1
-	default:
-		// Mặc định tăng level lên 1 so với parent
-		return parentLevel + 1
-	}
 }

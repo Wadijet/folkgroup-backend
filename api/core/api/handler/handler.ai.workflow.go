@@ -2,7 +2,6 @@ package handler
 
 import (
 	"fmt"
-	"time"
 	"meta_commerce/core/api/dto"
 	models "meta_commerce/core/api/models/mongodb"
 	"meta_commerce/core/api/services"
@@ -38,21 +37,26 @@ func NewAIWorkflowHandler() (*AIWorkflowHandler, error) {
 
 // InsertOne override method InsertOne để chuyển đổi từ DTO sang Model
 //
-// LÝ DO PHẢI OVERRIDE (không thể dùng CRUD chuẩn):
+// LÝ DO PHẢI OVERRIDE:
 // 1. Convert nested structures phức tạp:
-//    - Steps: Convert từ []dto.AIWorkflowStepReferenceInput (DTO) sang []models.AIWorkflowStepReference (Model)
-//    - Mỗi Step có Policy nested: Convert từ dto.AIWorkflowStepPolicyInput sang models.AIWorkflowStepPolicy
-//    - DefaultPolicy: Convert từ dto.AIWorkflowStepPolicyInput sang *models.AIWorkflowStepPolicy
-// 2. Logic nghiệp vụ đặc biệt:
-//    - Validate Status với danh sách giá trị hợp lệ: "active", "archived", "draft"
-//    - Set default Status = "active" nếu không có
-//    - Set CreatedAt và UpdatedAt tự động (timestamp milliseconds)
-// 3. Transform tag không hỗ trợ nested structures:
-//    - Transform tag hiện tại chỉ hỗ trợ convert primitive types (string → ObjectID, etc.)
-//    - Không hỗ trợ convert nested struct arrays và nested pointer structs
-//    - Cần logic đặc biệt để map từng field trong nested structures
+//   - Steps: Convert từ []dto.AIWorkflowStepReferenceInput (DTO) sang []models.AIWorkflowStepReference (Model)
+//   - Mỗi Step có Policy nested: Convert từ dto.AIWorkflowStepPolicyInput sang models.AIWorkflowStepPolicy
+//   - DefaultPolicy: Convert từ dto.AIWorkflowStepPolicyInput sang *models.AIWorkflowStepPolicy
+//   - Transform tag không hỗ trợ nested struct arrays và nested pointer structs
 //
-// KẾT LUẬN: Cần giữ override vì logic convert nested structures quá phức tạp, không thể dùng transform tag
+// LƯU Ý:
+// - Validation enum (status) đã được xử lý tự động bởi struct tag validate:"oneof=..." trong BaseHandler
+// - Default values (status = "active") đã được xử lý tự động bởi transform tag transform:"string,default=active"
+// - Timestamps và ownerOrganizationId đã được xử lý tự động bởi BaseHandler
+//
+// ĐẢM BẢO LOGIC CƠ BẢN:
+// ✅ Chỉ convert nested structures
+// ✅ Gọi BaseHandler.InsertOne để đảm bảo:
+//    - Validation với struct tag (validate, oneof)
+//    - Default values với transform tag
+//    - Set timestamps (CreatedAt, UpdatedAt)
+//    - Xử lý ownerOrganizationId từ role context hoặc active_organization_id
+//    - Lưu userID vào context để service có thể check admin
 func (h *AIWorkflowHandler) InsertOne(c fiber.Ctx) error {
 	return h.SafeHandler(c, func() error {
 		// Parse request body thành DTO
@@ -67,43 +71,27 @@ func (h *AIWorkflowHandler) InsertOne(c fiber.Ctx) error {
 			return nil
 		}
 
-		// Validate type
-		validStatuses := []string{"active", "archived", "draft"}
-		statusValid := false
-		if input.Status == "" {
-			input.Status = "active" // Mặc định
-			statusValid = true
-		} else {
-			for _, validStatus := range validStatuses {
-				if input.Status == validStatus {
-					statusValid = true
-					break
-				}
-			}
+		// ✅ Validate input với struct tag (validate, oneof) - BaseHandler logic
+		if err := h.validateInput(&input); err != nil {
+			h.HandleResponse(c, nil, err)
+			return nil
 		}
-		if !statusValid {
+
+		// Transform DTO sang Model sử dụng transform tag (tự động convert ObjectID, default values)
+		// Lưu ý: Status default value đã được xử lý tự động bởi transform tag transform:"string,default=active"
+		model, err := h.transformCreateInputToModel(&input)
+		if err != nil {
 			h.HandleResponse(c, nil, common.NewError(
 				common.ErrCodeValidationFormat,
-				fmt.Sprintf("Status '%s' không hợp lệ. Các giá trị hợp lệ: %v", input.Status, validStatuses),
+				fmt.Sprintf("Lỗi transform dữ liệu: %v", err),
 				common.StatusBadRequest,
-				nil,
+				err,
 			))
 			return nil
 		}
 
-		// Chuyển đổi DTO sang Model
-		now := time.Now().UnixMilli()
-		aiWorkflow := models.AIWorkflow{
-			Name:        input.Name,
-			Description: input.Description,
-			Version:     input.Version,
-			RootRefType: input.RootRefType,
-			TargetLevel: input.TargetLevel,
-			Status:      input.Status,
-			Metadata:    input.Metadata,
-			CreatedAt:   now,
-			UpdatedAt:   now,
-		}
+		// Chuyển đổi nested structures (transform tag không hỗ trợ)
+		aiWorkflow := *model
 
 		// Chuyển đổi steps
 		steps := make([]models.AIWorkflowStepReference, 0, len(input.Steps))
@@ -138,27 +126,19 @@ func (h *AIWorkflowHandler) InsertOne(c fiber.Ctx) error {
 			}
 		}
 
-		// ✅ Xử lý ownerOrganizationId: Cho phép chỉ định từ request hoặc dùng context
-		// Lấy organization ID từ role context (vì OrganizationContextMiddleware đã set active_role_id)
-		if activeRoleIDStr, ok := c.Locals("active_role_id").(string); ok && activeRoleIDStr != "" {
-			if activeRoleID, err := primitive.ObjectIDFromHex(activeRoleIDStr); err == nil {
-				// Lấy role để suy ra organization ID
-				roleService, err := services.NewRoleService()
-				if err == nil {
-					if role, err := roleService.FindOneById(c.Context(), activeRoleID); err == nil {
-						if !role.OwnerOrganizationID.IsZero() {
-							aiWorkflow.OwnerOrganizationID = role.OwnerOrganizationID
-						}
-					}
-				}
+		// ✅ Xử lý ownerOrganizationId: Cho phép chỉ định từ request hoặc dùng context (BaseHandler logic)
+		ownerOrgIDFromRequest := h.getOwnerOrganizationIDFromModel(&aiWorkflow)
+		if ownerOrgIDFromRequest != nil && !ownerOrgIDFromRequest.IsZero() {
+			// Có ownerOrganizationId trong request → Validate quyền
+			if err := h.validateUserHasAccessToOrg(c, *ownerOrgIDFromRequest); err != nil {
+				h.HandleResponse(c, nil, err)
+				return nil
 			}
-		}
-		
-		// Fallback: Nếu vẫn chưa có, thử lấy từ active_organization_id trong context
-		if aiWorkflow.OwnerOrganizationID.IsZero() {
+		} else {
+			// Không có trong request → Dùng context
 			activeOrgID := h.getActiveOrganizationID(c)
 			if activeOrgID != nil && !activeOrgID.IsZero() {
-				aiWorkflow.OwnerOrganizationID = *activeOrgID
+				h.setOrganizationID(&aiWorkflow, *activeOrgID)
 			}
 		}
 
@@ -170,7 +150,7 @@ func (h *AIWorkflowHandler) InsertOne(c fiber.Ctx) error {
 			}
 		}
 
-		// Thực hiện insert
+		// Thực hiện insert (BaseService.InsertOne sẽ tự động set timestamps)
 		data, err := h.BaseService.InsertOne(ctx, aiWorkflow)
 		h.HandleResponse(c, data, err)
 		return nil

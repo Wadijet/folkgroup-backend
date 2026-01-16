@@ -4,10 +4,10 @@ package dto
 // Đây là contract/interface cho Frontend - định nghĩa cấu trúc dữ liệu cần gửi khi tạo share
 // Lưu ý: Backend parse trực tiếp vào Model, nhưng DTO này dùng để Frontend biết cấu trúc cần gửi
 type OrganizationShareCreateInput struct {
-	OwnerOrganizationID string   `json:"ownerOrganizationId" validate:"required"` // Tổ chức sở hữu dữ liệu (phân quyền) - Organization share data - BẮT BUỘC
-	ToOrgIDs            []string `json:"toOrgIds,omitempty"`                      // Organizations nhận data - [] hoặc null = share với tất cả organizations - Optional
-	PermissionNames     []string `json:"permissionNames,omitempty"`               // [] hoặc null = tất cả permissions, ["Order.Read", "Order.Create"] = chỉ share với permissions cụ thể - Optional
-	Description         string   `json:"description,omitempty"`                   // Mô tả về lệnh share để người dùng hiểu được mục đích - Optional
+	OwnerOrganizationID string   `json:"ownerOrganizationId" validate:"required" transform:"str_objectid"` // Tổ chức sở hữu dữ liệu (phân quyền) - Organization share data - BẮT BUỘC
+	ToOrgIDs            []string `json:"toOrgIds,omitempty" transform:"str_objectid_array,optional"`        // Organizations nhận data - [] hoặc null = share với tất cả organizations - Optional
+	PermissionNames     []string `json:"permissionNames,omitempty"`                                          // [] hoặc null = tất cả permissions, ["Order.Read", "Order.Create"] = chỉ share với permissions cụ thể - Optional
+	Description         string   `json:"description,omitempty"`                                              // Mô tả về lệnh share để người dùng hiểu được mục đích - Optional
 
 	// Lưu ý: KHÔNG cần gửi createdAt, createdBy - Backend tự động set
 	// Lưu ý: Nếu ToOrgIDs rỗng hoặc null → share với tất cả organizations

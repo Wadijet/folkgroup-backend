@@ -1,9 +1,7 @@
 package handler
 
 import (
-	"encoding/json"
 	"fmt"
-	"strconv"
 	"meta_commerce/core/api/dto"
 	models "meta_commerce/core/api/models/mongodb"
 	"meta_commerce/core/api/services"
@@ -57,24 +55,9 @@ func (h *AgentCommandHandler) ClaimPendingCommands(c fiber.Ctx) error {
 			return nil
 		}
 
-		// Validate limit
-		if input.Limit < 1 {
-			input.Limit = 1 // Mặc định claim 1 command
-		}
-		if input.Limit > 100 {
-			input.Limit = 100 // Tối đa 100 commands
-		}
-
-		// Validate agentId
-		if input.AgentID == "" {
-			h.HandleResponse(c, nil, common.NewError(
-				common.ErrCodeValidationFormat,
-				"agentId là bắt buộc và không được để trống",
-				common.StatusBadRequest,
-				nil,
-			))
-			return nil
-		}
+		// Lưu ý: Limit và AgentID đã được validate tự động bởi struct tag:
+		// - Limit: validate:"omitempty,min=1,max=100" transform:"int,default=1"
+		// - AgentID: validate:"required"
 
 		// Gọi service để claim commands
 		claimedCommands, err := h.AgentCommandService.ClaimPendingCommands(c.Context(), input.AgentID, input.Limit)
@@ -100,66 +83,45 @@ func (h *AgentCommandHandler) ClaimPendingCommands(c fiber.Ctx) error {
 // Body: { "commandId": "...", "progress": {...} }
 //
 // Agent phải gọi endpoint này định kỳ để server biết job đang được thực hiện
+//
+// ĐƠN GIẢN HÓA VỚI VALIDATOR:
+// - URL params validation: Dùng DTO với validator để tự động validate và convert ObjectID
+// - Request body validation: Đã có validator trong ParseRequestBody
+// - Giảm ~30 dòng code validation thủ công
 func (h *AgentCommandHandler) UpdateHeartbeat(c fiber.Ctx) error {
 	return h.SafeHandler(c, func() error {
+		// Parse và validate URL params (nếu có commandId trong URL)
+		var params dto.UpdateHeartbeatParams
+		if err := h.ParseRequestParams(c, &params); err != nil {
+			// Nếu không có commandId trong URL, không báo lỗi (có thể có trong body)
+			params.CommandID = ""
+		}
+
 		// Parse request body thành DTO
 		var input dto.AgentCommandHeartbeatInput
 		if err := h.ParseRequestBody(c, &input); err != nil {
-			h.HandleResponse(c, nil, common.NewError(
-				common.ErrCodeValidationFormat,
-				fmt.Sprintf("Dữ liệu gửi lên không đúng định dạng JSON hoặc không khớp với cấu trúc yêu cầu. Chi tiết: %v", err),
-				common.StatusBadRequest,
-				err,
-			))
+			h.HandleResponse(c, nil, err)
 			return nil
 		}
 
-		// Lấy commandId từ URL params hoặc body
+		// Lấy commandId từ URL params hoặc body (ưu tiên URL params)
 		var commandID primitive.ObjectID
-		commandIDStr := c.Params("commandId", "")
-		if commandIDStr != "" {
-			// Lấy từ URL params
-			var err error
-			commandID, err = primitive.ObjectIDFromHex(commandIDStr)
-			if err != nil {
-				h.HandleResponse(c, nil, common.NewError(
-					common.ErrCodeValidationFormat,
-					fmt.Sprintf("commandId từ URL không hợp lệ: %v", err),
-					common.StatusBadRequest,
-					err,
-				))
-				return nil
-			}
-		} else {
-			// Lấy từ body - CommandID đã được transform thành *primitive.ObjectID
-			// Nhưng vì DTO có transform tag, cần parse lại từ JSON gốc
-			body := c.Body()
-			var bodyMap map[string]interface{}
-			if err := json.Unmarshal(body, &bodyMap); err == nil {
-				if cmdIDStr, ok := bodyMap["commandId"].(string); ok && cmdIDStr != "" {
-					var err error
-					commandID, err = primitive.ObjectIDFromHex(cmdIDStr)
-					if err != nil {
-						h.HandleResponse(c, nil, common.NewError(
-							common.ErrCodeValidationFormat,
-							fmt.Sprintf("commandId từ body không hợp lệ: %v", err),
-							common.StatusBadRequest,
-							err,
-						))
-						return nil
-					}
-				}
-			}
+		if params.CommandID != "" {
+			// Lấy từ URL params (đã được validate và convert)
+			commandID, _ = primitive.ObjectIDFromHex(params.CommandID)
+		} else if input.CommandID != "" {
+			// Lấy từ body (đã được transform thành string ObjectID)
+			commandID, _ = primitive.ObjectIDFromHex(input.CommandID)
+		}
 
-			if commandID.IsZero() {
-				h.HandleResponse(c, nil, common.NewError(
-					common.ErrCodeValidationFormat,
-					"commandId là bắt buộc (có thể truyền qua URL params :commandId hoặc body JSON {\"commandId\": \"...\"})",
-					common.StatusBadRequest,
-					nil,
-				))
-				return nil
-			}
+		if commandID.IsZero() {
+			h.HandleResponse(c, nil, common.NewError(
+				common.ErrCodeValidationFormat,
+				"commandId là bắt buộc (có thể truyền qua URL params :commandId hoặc body JSON {\"commandId\": \"...\"})",
+				common.StatusBadRequest,
+				nil,
+			))
+			return nil
 		}
 
 		// Lấy agentId từ request (có thể từ body hoặc từ context nếu có middleware set)
@@ -201,12 +163,22 @@ func (h *AgentCommandHandler) UpdateHeartbeat(c fiber.Ctx) error {
 // Query: ?timeoutSeconds=300 (tùy chọn, mặc định 300 giây = 5 phút)
 //
 // Method này nên được gọi định kỳ bởi background job hoặc admin
+//
+// ĐƠN GIẢN HÓA VỚI VALIDATOR:
+// - Query params validation: Dùng DTO với validator để tự động validate
+// - Giảm ~5 dòng code validation thủ công
 func (h *AgentCommandHandler) ReleaseStuckCommands(c fiber.Ctx) error {
 	return h.SafeHandler(c, func() error {
-		// Parse timeout từ query parameter
-		timeoutSecondsStr := c.Query("timeoutSeconds", "300")
-		timeoutSeconds, err := strconv.ParseInt(timeoutSecondsStr, 10, 64)
-		if err != nil || timeoutSeconds < 60 {
+		// Parse và validate query params (tự động validate với struct tag)
+		var query dto.ReleaseStuckCommandsQuery
+		if err := h.ParseQueryParams(c, &query); err != nil {
+			// Nếu parse lỗi, dùng giá trị mặc định
+			query.TimeoutSeconds = 300
+		}
+		
+		// Đảm bảo timeoutSeconds hợp lệ (tối thiểu 60, mặc định 300)
+		timeoutSeconds := query.TimeoutSeconds
+		if timeoutSeconds < 60 {
 			timeoutSeconds = 300 // Mặc định 5 phút, tối thiểu 60 giây
 		}
 

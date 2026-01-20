@@ -10,6 +10,38 @@
 
 ---
 
+## 🎯 Tóm Tắt Nhanh
+
+**Content Strategy Operating System** là hệ thống quản lý và tạo nội dung tự động với:
+- **8 cấp độ nội dung** (L1-L8): Từ Layer đến Publication
+- **AI tự động generate và judge** content
+- **A/B testing** prompts và models
+- **Learning từ metrics** thực tế
+- **Kiến trúc 3 Modules độc lập**
+
+### 8 Cấp Độ Nội Dung (Content Levels)
+
+```
+L1: Layer (Lớp)
+  └─ L2: STP (Segmentation, Targeting, Positioning)
+      └─ L3: Insight (Thông tin chi tiết)
+          └─ L4: Content Line (Dòng nội dung)
+              └─ L5: Gene (Gen nội dung)
+                  └─ L6: Script (Kịch bản)
+                      └─ L7: Video (Video)
+                          └─ L8: Publication (Xuất bản)
+```
+
+### Kiến Trúc 3 Modules
+
+1. **Module 1: Content Storage** - Lưu trữ nội dung (7 collections)
+2. **Module 2: AI Service** - Điều phối AI (10 collections)
+3. **Module 3: Analytics/Learning** - Phân tích và học hỏi (8 collections)
+
+**👉 Xem chi tiết bên dưới để biết đầy đủ thông tin về từng module, collections, và workflow.**
+
+---
+
 ## 📊 Tổng Hợp Collections - Content Strategy OS
 
 ### Tổng Số: **25 Collections**

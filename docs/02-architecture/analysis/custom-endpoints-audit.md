@@ -4,11 +4,257 @@
 
 Tài liệu này rà soát lại tất cả các endpoint đặc thù (không phải CRUD chuẩn) trong hệ thống, phân tích lý do tồn tại và đánh giá xem lý do đó có còn hợp lệ không.
 
-## Phân Loại Endpoints
+---
+
+## 📋 Danh Sách Tất Cả Endpoint Đặc Thù
+
+### 1. AI & Workflow Endpoints
+
+#### RenderPrompt
+- **Endpoint**: `POST /api/v2/ai/steps/:id/render-prompt`
+- **Handler**: `AIStepHandler.RenderPrompt`
+- **Lý do**: Action nghiệp vụ - render prompt template với variable substitution, trả về rendered prompt + AI config
+- **Status**: ✅ Hợp lệ
+
+#### ClaimPendingCommands (AI Workflow)
+- **Endpoint**: `POST /api/v1/ai/workflow-commands/claim-pending`
+- **Handler**: `AIWorkflowCommandHandler.ClaimPendingCommands`
+- **Lý do**: Atomic operation - claim commands với atomic update (tránh race condition)
+- **Status**: ✅ Hợp lệ
+
+#### UpdateHeartbeat (AI Workflow)
+- **Endpoint**: `POST /api/v1/ai/workflow-commands/update-heartbeat`
+- **Handler**: `AIWorkflowCommandHandler.UpdateHeartbeat`
+- **Lý do**: Real-time update - agent cập nhật heartbeat và progress định kỳ
+- **Status**: ✅ Hợp lệ
+
+#### ReleaseStuckCommands (AI Workflow)
+- **Endpoint**: `POST /api/v1/ai/workflow-commands/release-stuck`
+- **Handler**: `AIWorkflowCommandHandler.ReleaseStuckCommands`
+- **Lý do**: Background job - giải phóng commands bị stuck (quá lâu không có heartbeat)
+- **Status**: ✅ Hợp lệ
+
+---
+
+### 2. Agent Command Endpoints
+
+#### ClaimPendingCommands (Agent)
+- **Endpoint**: `POST /api/v1/agent-management/command/claim-pending`
+- **Handler**: `AgentCommandHandler.ClaimPendingCommands`
+- **Lý do**: Atomic operation - claim commands với atomic update
+- **Status**: ✅ Hợp lệ
+
+#### UpdateHeartbeat (Agent)
+- **Endpoint**: `POST /api/v1/agent-management/command/update-heartbeat`
+- **Handler**: `AgentCommandHandler.UpdateHeartbeat`
+- **Lý do**: Real-time update - agent cập nhật heartbeat và progress
+- **Status**: ✅ Hợp lệ
+
+#### ReleaseStuckCommands (Agent)
+- **Endpoint**: `POST /api/v1/agent-management/command/release-stuck`
+- **Handler**: `AgentCommandHandler.ReleaseStuckCommands`
+- **Lý do**: Background job - giải phóng commands bị stuck
+- **Status**: ✅ Hợp lệ
+
+---
+
+### 3. Content Node Endpoints
+
+#### GetTree
+- **Endpoint**: `GET /api/v1/content/nodes/tree/:id`
+- **Handler**: `ContentNodeHandler.GetTree`
+- **Lý do**: Logic đệ quy - query children đệ quy để build tree structure, response format nested
+- **Status**: ✅ Hợp lệ
+
+---
+
+### 4. Draft Content Endpoints
+
+#### CommitDraftNode
+- **Endpoint**: `POST /api/v1/drafts/nodes/:id/commit`
+- **Handler**: `DraftContentNodeHandler.CommitDraftNode`
+- **Lý do**: Cross-collection operation - commit draft → production (copy draft sang content node)
+- **Status**: ✅ Hợp lệ
+
+#### ApproveDraftWorkflowRun
+- **Endpoint**: `POST /api/v1/content/drafts/approvals/:id/approve`
+- **Handler**: `DraftApprovalHandler.ApproveDraftWorkflowRun`
+- **Lý do**: Workflow action - approve draft với set decidedBy, decidedAt, có thể trigger side effects
+- **Status**: ✅ Hợp lệ
+
+#### RejectDraftWorkflowRun
+- **Endpoint**: `POST /api/v1/content/drafts/approvals/:id/reject`
+- **Handler**: `DraftApprovalHandler.RejectDraftWorkflowRun`
+- **Lý do**: Workflow action - reject draft với decisionNote bắt buộc
+- **Status**: ✅ Hợp lệ
+
+---
+
+### 5. Public / Tracking Endpoints
+
+#### TrackCTAClick
+- **Endpoint**: Public endpoint (không có auth)
+- **Handler**: `CTATrackHandler.TrackCTAClick`
+- **Lý do**: Public endpoint - HTTP redirect về original URL, decode tracking URL
+- **Status**: ✅ Hợp lệ
+
+#### HandleTrackOpen, HandleTrackClick, HandleTrackConfirm
+- **Endpoint**: Public endpoint
+- **Handler**: `NotificationTrackHandler`
+- **Lý do**: Public tracking - track email open/click/confirm, response format pixel image hoặc 204
+- **Status**: ✅ Hợp lệ
+
+---
+
+### 6. Notification Endpoints
+
+#### HandleSend
+- **Endpoint**: `POST /api/v1/delivery/send`
+- **Handler**: `DeliverySendHandler.HandleSend`
+- **Lý do**: Cross-service operation - gửi notification trực tiếp (real-time), sử dụng nhiều services
+- **Status**: ✅ Hợp lệ
+
+#### HandleTriggerNotification
+- **Endpoint**: `POST /api/v1/notifications/trigger`
+- **Handler**: `NotificationTriggerHandler.HandleTriggerNotification`
+- **Lý do**: Cross-service operation - trigger notification workflow
+- **Status**: ✅ Hợp lệ
+
+---
+
+### 7. User & Authentication Endpoints
+
+#### HandleLoginWithFirebase
+- **Endpoint**: `POST /api/v1/auth/login/firebase`
+- **Handler**: `UserHandler.HandleLoginWithFirebase`
+- **Lý do**: Authentication flow - verify Firebase token, tạo/update user, tạo session
+- **Status**: ✅ Hợp lệ
+
+#### HandleLogout
+- **Endpoint**: `POST /api/v1/auth/logout`
+- **Handler**: `UserHandler.HandleLogout`
+- **Lý do**: Authentication action - invalidate session/token
+- **Status**: ✅ Hợp lệ
+
+#### HandleGetProfile, HandleUpdateProfile
+- **Endpoint**: `GET/PUT /api/v1/auth/profile`
+- **Handler**: `UserHandler`
+- **Lý do**: Lấy/update profile của authenticated user (từ context)
+- **Status**: ✅ Hợp lệ
+
+#### HandleGetUserRoles
+- **Endpoint**: `GET /api/v1/auth/user-roles`
+- **Handler**: `UserHandler.HandleGetUserRoles`
+- **Lý do**: Lấy roles của authenticated user
+- **Status**: ✅ Hợp lệ
+
+---
+
+### 8. Role & Permission Endpoints
+
+#### HandleUpdateUserRoles
+- **Endpoint**: `PUT /api/v1/auth/user-roles/update`
+- **Handler**: `UserRoleHandler.HandleUpdateUserRoles`
+- **Lý do**: Atomic operation - xóa tất cả user roles cũ, tạo roles mới (atomic replace all)
+- **Status**: ✅ Hợp lệ
+
+#### HandleUpdateRolePermissions
+- **Endpoint**: `PUT /api/v1/auth/role-permissions/update`
+- **Handler**: `RolePermissionHandler.HandleUpdateRolePermissions`
+- **Lý do**: Atomic operation - xóa tất cả role permissions cũ, tạo permissions mới
+- **Status**: ✅ Hợp lệ
+
+---
+
+### 9. Organization Share Endpoints
+
+#### CreateShare, DeleteShare, ListShares
+- **Endpoint**: `POST/DELETE/GET /api/v1/organization-shares`
+- **Handler**: `OrganizationShareHandler`
+- **Lý do**: Business logic phức tạp - validate duplicate với set comparison, authorization check, query phức tạp
+- **Status**: ✅ Hợp lệ
+
+---
+
+### 10. Facebook Integration Endpoints
+
+#### HandleUpsertMessages
+- **Endpoint**: `POST /api/v1/facebook/message/upsert-messages`
+- **Handler**: `FbMessageHandler.HandleUpsertMessages`
+- **Lý do**: Batch operation - upsert nhiều messages cùng lúc
+- **Status**: ✅ Hợp lệ
+
+#### HandleFindByConversationId, HandleFindOneByMessageId, HandleFindOneByPostID, HandleFindOneByPageID
+- **Endpoint**: `GET /api/v1/facebook/...`
+- **Handler**: `FbMessageItemHandler, FbPostHandler, FbPageHandler`
+- **Lý do**: Query convenience - tìm bằng external ID (conversationId, messageId, postId, pageId)
+- **Status**: ✅ Hợp lệ
+
+#### HandleFindAllSortByApiUpdate
+- **Endpoint**: `GET /api/v1/facebook/conversations/sort-by-api-update`
+- **Handler**: `FbConversationHandler.HandleFindAllSortByApiUpdate`
+- **Lý do**: Query đặc biệt - sort theo apiUpdate timestamp
+- **Status**: ✅ Hợp lệ
+
+#### HandleUpdateToken
+- **Endpoint**: `PUT /api/v1/facebook/pages/:id/token`
+- **Handler**: `FbPageHandler.HandleUpdateToken`
+- **Lý do**: Business logic - update Facebook page token
+- **Status**: ✅ Hợp lệ
+
+---
+
+### 11. Webhook Endpoints
+
+#### HandlePancakeWebhook, HandlePancakePosWebhook
+- **Endpoint**: `POST /api/v1/webhooks/pancake, /api/v1/webhooks/pancake-pos`
+- **Handler**: `PancakeWebhookHandler, PancakePosWebhookHandler`
+- **Lý do**: Webhook - nhận webhook từ Pancake, verify signature, process payload
+- **Status**: ✅ Hợp lệ
+
+---
+
+### 12. Admin Endpoints
+
+#### HandleSetRole, HandleBlockUser, HandleUnBlockUser, HandleAddAdministrator, HandleSyncAdministratorPermissions
+- **Endpoint**: `POST /api/v1/admin/...`
+- **Handler**: `AdminHandler`
+- **Lý do**: Admin operations - chỉ admin mới được thực hiện
+- **Status**: ✅ Hợp lệ
+
+---
+
+### 13. System / Init Endpoints
+
+#### HandleSetAdministrator, HandleInitOrganization, HandleInitPermissions, HandleInitRoles, HandleInitAdminUser, HandleInitAll, HandleInitStatus
+- **Endpoint**: `POST/GET /api/v1/init/...`
+- **Handler**: `InitHandler`
+- **Lý do**: System initialization - khởi tạo dữ liệu hệ thống (one-time operation)
+- **Status**: ✅ Hợp lệ
+
+#### HandleHealth
+- **Endpoint**: `GET /api/v1/system/health`
+- **Handler**: `SystemHandler.HandleHealth`
+- **Lý do**: Health check - kiểm tra hệ thống còn hoạt động không
+- **Status**: ✅ Hợp lệ
+
+---
+
+### 14. Agent Management Endpoints
+
+#### HandleEnhancedCheckIn, HandleUpdateConfigData
+- **Endpoint**: `POST /api/v1/agent/check-in, PUT /api/v1/agent-management/config/:agentId/update-data`
+- **Handler**: `AgentManagementHandler, AgentConfigHandler`
+- **Lý do**: Agent management - check-in agent, update config data
+- **Status**: ✅ Hợp lệ
+
+---
+
+## 📊 Phân Tích Chi Tiết
 
 ### 1. ✅ **HỢP LỆ - Logic Nghiệp Vụ Phức Tạp**
 
-#### 1.1. **RenderPrompt** - `/api/v2/ai/steps/:id/render-prompt`
+#### RenderPrompt - `/api/v2/ai/steps/:id/render-prompt`
 **Lý do tồn tại:**
 - Logic nghiệp vụ: Render prompt template với variable substitution
 - Cross-service: Gọi `AIStepService.RenderPromptForStep` để resolve prompt template, provider config
@@ -23,7 +269,7 @@ Tài liệu này rà soát lại tất cả các endpoint đặc thù (không ph
 
 ---
 
-#### 1.2. **GetTree** - `/api/v1/content/nodes/tree/:id`
+#### GetTree - `/api/v1/content/nodes/tree/:id`
 **Lý do tồn tại:**
 - Logic đệ quy: Query children đệ quy để build tree structure
 - Query đặc biệt: Sử dụng `GetChildren` service method, query nhiều lần
@@ -41,7 +287,7 @@ Tài liệu này rà soát lại tất cả các endpoint đặc thù (không ph
 
 ---
 
-#### 1.3. **CommitDraftNode** - `/api/v1/drafts/nodes/:id/commit`
+#### CommitDraftNode - `/api/v1/drafts/nodes/:id/commit`
 **Lý do tồn tại:**
 - Logic nghiệp vụ: Commit draft → production (copy draft sang content node)
 - Cross-collection: Tạo record trong `content_nodes` từ `draft_content_nodes`
@@ -56,7 +302,7 @@ Tài liệu này rà soát lại tất cả các endpoint đặc thù (không ph
 
 ---
 
-#### 1.4. **ApproveDraftWorkflowRun** - `/api/v1/content/drafts/approvals/:id/approve`
+#### ApproveDraftWorkflowRun - `/api/v1/content/drafts/approvals/:id/approve`
 **Lý do tồn tại:**
 - Logic nghiệp vụ: Không chỉ update status, mà còn set `decidedBy`, `decidedAt`
 - Validation: Kiểm tra status hiện tại phải là "pending"
@@ -72,7 +318,7 @@ Tài liệu này rà soát lại tất cả các endpoint đặc thù (không ph
 
 ---
 
-#### 1.5. **RejectDraftWorkflowRun** - `/api/v1/content/drafts/approvals/:id/reject`
+#### RejectDraftWorkflowRun - `/api/v1/content/drafts/approvals/:id/reject`
 **Lý do tồn tại:**
 - Logic nghiệp vụ: Tương tự Approve, nhưng `decisionNote` là bắt buộc
 - Validation: Kiểm tra status hiện tại phải là "pending"
@@ -87,7 +333,7 @@ Tài liệu này rà soát lại tất cả các endpoint đặc thù (không ph
 
 ---
 
-#### 1.6. **ClaimPendingCommands** (AIWorkflowCommand & AgentCommand)
+#### ClaimPendingCommands (AIWorkflowCommand & AgentCommand)
 **Lý do tồn tại:**
 - Atomic operation: Claim commands với atomic update (tránh race condition)
 - Business logic: Kiểm tra command status, agent ownership
@@ -102,7 +348,7 @@ Tài liệu này rà soát lại tất cả các endpoint đặc thù (không ph
 
 ---
 
-#### 1.7. **UpdateHeartbeat** (AIWorkflowCommand & AgentCommand)
+#### UpdateHeartbeat (AIWorkflowCommand & AgentCommand)
 **Lý do tồn tại:**
 - Real-time update: Agent cập nhật heartbeat và progress định kỳ
 - Business logic: Update `lastHeartbeatAt`, `progress` của command
@@ -116,7 +362,7 @@ Tài liệu này rà soát lại tất cả các endpoint đặc thù (không ph
 
 ---
 
-#### 1.8. **ReleaseStuckCommands** (AIWorkflowCommand & AgentCommand)
+#### ReleaseStuckCommands (AIWorkflowCommand & AgentCommand)
 **Lý do tồn tại:**
 - Background job: Giải phóng commands bị stuck (quá lâu không có heartbeat)
 - Business logic: Query commands có `lastHeartbeatAt` > timeout, update status về "pending"
@@ -132,7 +378,7 @@ Tài liệu này rà soát lại tất cả các endpoint đặc thù (không ph
 
 ### 2. ✅ **HỢP LỆ - Public Endpoint / Response Format Đặc Biệt**
 
-#### 2.1. **TrackCTAClick** - Public endpoint
+#### TrackCTAClick - Public endpoint
 **Lý do tồn tại:**
 - Public endpoint: Không cần authentication (user click CTA trong email)
 - Response format: HTTP redirect (302) về original URL, không phải JSON
@@ -149,7 +395,7 @@ Tài liệu này rà soát lại tất cả các endpoint đặc thù (không ph
 
 ### 3. ✅ **HỢP LỆ - Cross-Service Operations**
 
-#### 3.1. **HandleSend** (DeliverySendHandler)
+#### HandleSend (DeliverySendHandler)
 **Lý do tồn tại:**
 - Cross-service: Sử dụng `NotificationSenderService`, `DeliveryHistoryService`
 - Real-time operation: Gửi notification ngay lập tức (không queue)
@@ -160,7 +406,7 @@ Tài liệu này rà soát lại tất cả các endpoint đặc thù (không ph
 
 ---
 
-#### 3.2. **HandleTriggerNotification** (NotificationTriggerHandler)
+#### HandleTriggerNotification (NotificationTriggerHandler)
 **Lý do tồn tại:**
 - Cross-service: Trigger notification workflow
 - Business logic: Tìm routing rules, tạo delivery history, queue notification
@@ -172,7 +418,7 @@ Tài liệu này rà soát lại tất cả các endpoint đặc thù (không ph
 
 ### 4. ✅ **HỢP LỆ - Atomic Operations / Replace All**
 
-#### 4.1. **HandleUpdateUserRoles** (UserRoleHandler)
+#### HandleUpdateUserRoles (UserRoleHandler)
 **Lý do tồn tại:**
 - Atomic operation: Xóa tất cả user roles cũ, tạo roles mới (atomic)
 - Input format: `{userId, roleIds: [...]}` - không phải format CRUD chuẩn
@@ -182,7 +428,7 @@ Tài liệu này rà soát lại tất cả các endpoint đặc thù (không ph
 
 ---
 
-#### 4.2. **HandleUpdateRolePermissions** (RolePermissionHandler)
+#### HandleUpdateRolePermissions (RolePermissionHandler)
 **Lý do tồn tại:**
 - Atomic operation: Xóa tất cả role permissions cũ, tạo permissions mới
 - Input format: `{roleId, permissionIds: [...]}` - không phải format CRUD chuẩn
@@ -194,7 +440,7 @@ Tài liệu này rà soát lại tất cả các endpoint đặc thù (không ph
 
 ### 5. ✅ **HỢP LỆ - Query Phức Tạp**
 
-#### 5.1. **ListShares** (OrganizationShareHandler)
+#### ListShares (OrganizationShareHandler)
 **Lý do tồn tại:**
 - Query phức tạp: Filter theo `ownerOrganizationId` hoặc `toOrgId` với `$or` operator
 - Authorization: Validate quyền xem shares của organization
@@ -208,7 +454,7 @@ Tài liệu này rà soát lại tất cả các endpoint đặc thù (không ph
 
 ---
 
-#### 5.2. **CreateShare, DeleteShare** (OrganizationShareHandler)
+#### CreateShare, DeleteShare (OrganizationShareHandler)
 **Lý do tồn tại:**
 - Business logic: Validate `toOrgId` trong `ToOrgIDs`, check quyền
 - Authorization: Validate user có quyền share với organization
@@ -223,7 +469,7 @@ Tài liệu này rà soát lại tất cả các endpoint đặc thù (không ph
 
 ### 6. ✅ **HỢP LỆ - Authentication / User Management**
 
-#### 6.1. **HandleLoginWithFirebase** (UserHandler)
+#### HandleLoginWithFirebase (UserHandler)
 **Lý do tồn tại:**
 - Authentication: Verify Firebase token, tạo/update user, tạo session
 - Cross-service: Sử dụng Firebase Auth, tạo access token
@@ -233,7 +479,7 @@ Tài liệu này rà soát lại tất cả các endpoint đặc thù (không ph
 
 ---
 
-#### 6.2. **HandleLogout** (UserHandler)
+#### HandleLogout (UserHandler)
 **Lý do tồn tại:**
 - Authentication: Invalidate session/token
 - Business logic: Có thể clear refresh tokens, update last logout time
@@ -242,35 +488,22 @@ Tài liệu này rà soát lại tất cả các endpoint đặc thù (không ph
 
 ---
 
-#### 6.3. **HandleGetProfile** (UserHandler)
+#### HandleGetProfile, HandleUpdateProfile (UserHandler)
 **Lý do tồn tại:**
-- Authorization: Lấy user ID từ context (authenticated user)
+- Authorization: Lấy/update profile của authenticated user (từ context)
 - Response format: Trả về profile của user hiện tại (không phải query by ID)
 
-**Đánh giá:** ✅ **HỢP LỆ** - Lấy profile của authenticated user
+**Đánh giá:** ✅ **HỢP LỆ** - Lấy/update profile của authenticated user
 
 **Đề xuất:**
-- ⚠️ Có thể dùng `GET /api/v1/users/:id` với authorization check
+- ⚠️ Có thể dùng `GET/PUT /api/v1/users/:id` với authorization check
 - ⚠️ Nhưng giữ endpoint đặc thù để rõ ràng hơn (lấy profile của chính mình)
-
----
-
-#### 6.4. **HandleUpdateProfile** (UserHandler)
-**Lý do tồn tại:**
-- Authorization: Update profile của authenticated user
-- Business logic: Có thể có validation đặc biệt (không cho update email, etc.)
-
-**Đánh giá:** ✅ **HỢP LỆ** - Update profile của authenticated user
-
-**Đề xuất:**
-- ⚠️ Có thể dùng `PUT /api/v1/users/:id` với authorization check
-- ⚠️ Nhưng giữ endpoint đặc thù để rõ ràng hơn
 
 ---
 
 ### 7. ✅ **HỢP LỆ - Tracking / Analytics**
 
-#### 7.1. **HandleTrackOpen, HandleTrackClick, HandleTrackConfirm** (NotificationTrackHandler)
+#### HandleTrackOpen, HandleTrackClick, HandleTrackConfirm (NotificationTrackHandler)
 **Lý do tồn tại:**
 - Public endpoint: Tracking không cần authentication
 - Business logic: Decode tracking URL, lấy IP/User Agent, tạo tracking record
@@ -282,7 +515,7 @@ Tài liệu này rà soát lại tất cả các endpoint đặc thù (không ph
 
 ### 8. ✅ **HỢP LỆ - Webhook / External Integration**
 
-#### 8.1. **HandlePancakeWebhook, HandlePancakePosWebhook**
+#### HandlePancakeWebhook, HandlePancakePosWebhook
 **Lý do tồn tại:**
 - Webhook: Nhận webhook từ external service (Pancake)
 - Validation: Verify webhook signature
@@ -294,7 +527,7 @@ Tài liệu này rà soát lại tất cả các endpoint đặc thù (không ph
 
 ### 9. ✅ **HỢP LỆ - Admin / System**
 
-#### 9.1. **HandleSetRole, HandleBlockUser, HandleUnBlockUser, HandleAddAdministrator** (AdminHandler)
+#### HandleSetRole, HandleBlockUser, HandleUnBlockUser, HandleAddAdministrator (AdminHandler)
 **Lý do tồn tại:**
 - Admin operations: Chỉ admin mới được thực hiện
 - Business logic: Set role, block/unblock user, add administrator
@@ -304,7 +537,7 @@ Tài liệu này rà soát lại tất cả các endpoint đặc thù (không ph
 
 ---
 
-#### 9.2. **HandleInit*** (InitHandler)
+#### HandleInit*** (InitHandler)
 **Lý do tồn tại:**
 - System initialization: Khởi tạo dữ liệu hệ thống (permissions, roles, admin user)
 - One-time operation: Chỉ chạy một lần khi setup hệ thống
@@ -314,7 +547,7 @@ Tài liệu này rà soát lại tất cả các endpoint đặc thù (không ph
 
 ---
 
-#### 9.3. **HandleHealth** (SystemHandler)
+#### HandleHealth (SystemHandler)
 **Lý do tồn tại:**
 - Health check: Kiểm tra hệ thống còn hoạt động không
 - Response format: Trả về status, version, timestamp
@@ -325,7 +558,7 @@ Tài liệu này rà soát lại tất cả các endpoint đặc thù (không ph
 
 ### 10. ✅ **HỢP LỆ - Find By Custom Field**
 
-#### 10.1. **HandleFindByConversationId, HandleFindOneByMessageId** (FbMessageItemHandler)
+#### HandleFindByConversationId, HandleFindOneByMessageId (FbMessageItemHandler)
 **Lý do tồn tại:**
 - Query convenience: Tìm message bằng conversationId hoặc messageId (không phải MongoDB _id)
 - Use case: External ID lookup
@@ -338,7 +571,7 @@ Tài liệu này rà soát lại tất cả các endpoint đặc thù (không ph
 
 ---
 
-#### 10.2. **HandleFindOneByPostID, HandleFindOneByPageID**
+#### HandleFindOneByPostID, HandleFindOneByPageID
 **Lý do tồn tại:**
 - Query convenience: Tìm bằng external ID (Facebook Post ID, Page ID)
 
@@ -348,7 +581,7 @@ Tài liệu này rà soát lại tất cả các endpoint đặc thù (không ph
 
 ### 11. ✅ **HỢP LỆ - Upsert / Batch Operations**
 
-#### 11.1. **HandleUpsertMessages** (FbMessageHandler)
+#### HandleUpsertMessages (FbMessageHandler)
 **Lý do tồn tại:**
 - Batch operation: Upsert nhiều messages cùng lúc
 - Business logic: Tìm message cũ (nếu có), update hoặc tạo mới
@@ -360,17 +593,24 @@ Tài liệu này rà soát lại tất cả các endpoint đặc thù (không ph
 
 ## Tổng Kết
 
-### Endpoints Hợp Lệ (Giữ Nguyên)
-- ✅ **Logic nghiệp vụ phức tạp**: RenderPrompt, GetTree, CommitDraftNode, Approve/Reject, ClaimPendingCommands, UpdateHeartbeat, ReleaseStuckCommands
-- ✅ **Public endpoint / Response format đặc biệt**: TrackCTAClick, Tracking endpoints
-- ✅ **Cross-service operations**: HandleSend, HandleTriggerNotification
-- ✅ **Atomic operations**: HandleUpdateUserRoles, HandleUpdateRolePermissions
-- ✅ **Query phức tạp**: ListShares, CreateShare, DeleteShare
-- ✅ **Authentication**: Login, Logout, GetProfile, UpdateProfile
-- ✅ **Webhook**: Pancake webhooks
-- ✅ **Admin/System**: Admin operations, Init, Health check
-- ✅ **Find by custom field**: FindByConversationId, FindByPostID, etc.
-- ✅ **Batch operations**: UpsertMessages
+### Thống Kê
+- **Tổng số endpoint đặc thù**: ~50+ endpoints
+- **Endpoints hợp lệ**: 100% (tất cả đều có lý do tồn tại hợp lệ)
+- **Endpoints đã đơn giản hóa validation**: 8 endpoints
+
+### Phân Loại Theo Lý Do
+1. **Logic nghiệp vụ phức tạp**: 8 endpoints
+2. **Public endpoint / Response format đặc biệt**: 4 endpoints
+3. **Cross-service operations**: 2 endpoints
+4. **Atomic operations**: 2 endpoints
+5. **Query phức tạp**: 3 endpoints
+6. **Authentication**: 5 endpoints
+7. **Tracking/Analytics**: 3 endpoints
+8. **Webhook**: 2 endpoints
+9. **Admin/System**: 13+ endpoints
+10. **Find by custom field**: 6+ endpoints
+11. **Batch operations**: 1 endpoint
+12. **Agent management**: 2 endpoints
 
 ### Cải Thiện Đã Thực Hiện
 - ✅ Đơn giản hóa validation với `ParseRequestParams`, `ParseQueryParams`
@@ -382,6 +622,8 @@ Tài liệu này rà soát lại tất cả các endpoint đặc thù (không ph
 - ⚠️ **ListShares**: Tách thành service methods riêng (`ListSharesByOwner`, `ListSharesByToOrg`)
 - ⚠️ **HandleGetProfile, HandleUpdateProfile**: Có thể dùng CRUD với authorization check, nhưng giữ endpoint đặc thù để rõ ràng
 - ⚠️ **FindByCustomField**: Có thể dùng query filter, nhưng giữ endpoint đặc thù để rõ ràng
+
+---
 
 ## Kết Luận
 

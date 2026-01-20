@@ -15,13 +15,18 @@ Tài liệu dành cho người mới bắt đầu:
 
 ### 2. 🏗️ Kiến Trúc (Architecture)
 
-Tài liệu về kiến trúc và thiết kế hệ thống:
+Tài liệu về kiến trúc và thiết kế hệ thống được tổ chức thành các danh mục:
 
-- [Tổng Quan Kiến Trúc](02-architecture/tong-quan.md) - Kiến trúc tổng thể
-- [Authentication Flow](02-architecture/authentication.md) - Luồng xác thực
-- [RBAC System](02-architecture/rbac.md) - Hệ thống phân quyền
-- [Database Schema](02-architecture/database.md) - Cấu trúc database
-- [Organization Structure](02-architecture/organization.md) - Cấu trúc tổ chức
+- **[Core Architecture](02-architecture/core/)** - Kiến trúc cốt lõi (Authentication, RBAC, Database, Organization)
+- **[Systems](02-architecture/systems/)** - Các hệ thống (Logging, Worker, Notification, AI & Content, Agent)
+- **[Design Proposals](02-architecture/design/)** - Đề xuất thiết kế và proposal
+- **[Analysis & Audits](02-architecture/analysis/)** - Phân tích, đánh giá và kiểm tra
+- **[Refactoring](02-architecture/refactoring/)** - Tài liệu tái cấu trúc
+- **[Business Logic](02-architecture/business-logic/)** - Logic nghiệp vụ và quy tắc xử lý
+- **[Solutions](02-architecture/solutions/)** - Giải pháp kỹ thuật cụ thể
+- **[Other](02-architecture/other/)** - Tài liệu hỗ trợ khác
+
+**👉 Xem chi tiết:** [02-architecture/README.md](02-architecture/README.md)
 
 ### 3. 🔌 API Reference
 
@@ -77,10 +82,11 @@ Hướng dẫn xử lý các vấn đề thường gặp:
 
 ### Tài Liệu Kỹ Thuật (Architecture)
 
-- [Firebase Authentication với Database](02-architecture/firebase-auth-voi-database.md)
-- [Multi-Provider Authentication](02-architecture/multi-provider-authentication.md)
-- [User Identifiers](02-architecture/user-identifiers.md)
-- [Xử Lý Trùng Lặp Tài Khoan](02-architecture/xu-ly-trung-lap-tai-khoan.md)
+Tài liệu kiến trúc đã được tổ chức lại theo danh mục. Xem [02-architecture/README.md](02-architecture/README.md) để tìm tài liệu cụ thể:
+
+- **Core:** [Firebase Authentication](02-architecture/core/firebase-auth-voi-database.md), [Multi-Provider Auth](02-architecture/core/multi-provider-authentication.md), [User Identifiers](02-architecture/core/user-identifiers.md)
+- **Systems:** [Logging System](02-architecture/systems/logging-system-usage.md), [Content & AI](02-architecture/systems/content-strategy-os-backend-design.md)
+- **Analysis:** [Project Review](02-architecture/analysis/comprehensive-project-review.md), [Code Audits](02-architecture/analysis/)
 
 ### Tài Liệu Deployment
 
@@ -113,11 +119,12 @@ Các tài liệu phân tích và báo cáo cũ được lưu trong [08-archive/]
 
 ### Theo Chủ Đề
 
-- **Authentication**: [Authentication Flow](02-architecture/authentication.md), [Firebase Auth](02-architecture/firebase-auth-voi-database.md)
-- **RBAC**: [RBAC System](02-architecture/rbac.md), [RBAC APIs](03-api/rbac.md)
-- **Firebase**: [Firebase Setup](04-deployment/firebase.md), [Firebase Auth](02-architecture/firebase-auth-voi-database.md)
+- **Authentication**: [Authentication Flow](02-architecture/core/authentication.md), [Firebase Auth](02-architecture/core/firebase-auth-voi-database.md)
+- **RBAC**: [RBAC System](02-architecture/core/rbac.md), [RBAC APIs](03-api/rbac.md)
+- **Firebase**: [Firebase Setup](04-deployment/firebase.md), [Firebase Auth](02-architecture/core/firebase-auth-voi-database.md)
 - **Testing**: [Testing Guide](06-testing/tong-quan.md), [README_TEST.md](../README_TEST.md)
 - **Deployment**: [Production Deployment](04-deployment/production.md), [MongoDB Setup](04-deployment/mongodb.md)
+- **Architecture**: Xem [02-architecture/README.md](02-architecture/README.md) để tìm tài liệu theo danh mục
 
 ### Theo Vai Trò
 
@@ -135,11 +142,13 @@ Các tài liệu phân tích và báo cáo cũ được lưu trong [08-archive/]
 
 ## 🔄 Cập Nhật Gần Đây
 
+- ✅ **2025-01-20**: Tổ chức lại 67 files trong 02-architecture/ thành 8 thư mục con theo chủ đề
+- ✅ **2025-01-20**: Tạo README.md cho mỗi thư mục con để dễ điều hướng
+- ✅ **2025-01-20**: Di chuyển analysis/ và solutions/ vào cấu trúc 02-architecture/
+- ✅ **2025-01-20**: Gộp các file trùng lặp và outdated - giảm từ ~76 files xuống còn 60 files
 - ✅ Tổ chức lại hệ thống tài liệu theo cấu trúc chuẩn
 - ✅ Tạo README.md chính và docs/README.md
-- ✅ Xóa các tài liệu trùng lặp và không cần thiết
 - ✅ Tạo đầy đủ tài liệu API Reference (7 files)
-- ✅ Tạo đầy đủ tài liệu Architecture (5 files)
 - ✅ Tạo đầy đủ tài liệu Deployment (5 files)
 - ✅ Tạo đầy đủ tài liệu Development (5 files)
 - ✅ Tạo đầy đủ tài liệu Testing (4 files)

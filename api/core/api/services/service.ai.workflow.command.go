@@ -36,6 +36,96 @@ func NewAIWorkflowCommandService() (*AIWorkflowCommandService, error) {
 	}, nil
 }
 
+// isStepCreatePillar trả về true nếu step tạo Pillar (L1), không cần parent (ParentLevel rỗng)
+func isStepCreatePillar(step *models.AIStep) bool {
+	if step == nil {
+		return false
+	}
+	return step.ParentLevel == "" && step.TargetLevel == "L1"
+}
+
+// resolveStepForCommand lấy step tương ứng với command: từ StepID (EXECUTE_STEP) hoặc step đầu tiên của workflow (START_WORKFLOW)
+func (s *AIWorkflowCommandService) resolveStepForCommand(ctx context.Context, data models.AIWorkflowCommand) (*models.AIStep, error) {
+	stepService, err := NewAIStepService()
+	if err != nil {
+		return nil, fmt.Errorf("lỗi khi khởi tạo step service: %w", err)
+	}
+
+	if data.CommandType == models.AIWorkflowCommandTypeExecuteStep {
+		if data.StepID == nil || data.StepID.IsZero() {
+			return nil, common.NewError(common.ErrCodeValidationFormat, "StepID bắt buộc khi CommandType = EXECUTE_STEP", common.StatusBadRequest, nil)
+		}
+		step, err := stepService.FindOneById(ctx, *data.StepID)
+		if err != nil {
+			return nil, fmt.Errorf("không tìm thấy step: %w", err)
+		}
+		return &step, nil
+	}
+
+	// START_WORKFLOW: lấy step đầu tiên của workflow
+	if data.WorkflowID == nil || data.WorkflowID.IsZero() {
+		return nil, common.NewError(common.ErrCodeValidationFormat, "WorkflowID bắt buộc khi CommandType = START_WORKFLOW", common.StatusBadRequest, nil)
+	}
+	workflowService, err := NewAIWorkflowService()
+	if err != nil {
+		return nil, fmt.Errorf("lỗi khi khởi tạo workflow service: %w", err)
+	}
+	workflow, err := workflowService.FindOneById(ctx, *data.WorkflowID)
+	if err != nil {
+		return nil, fmt.Errorf("không tìm thấy workflow: %w", err)
+	}
+	if len(workflow.Steps) == 0 {
+		return nil, common.NewError(common.ErrCodeBusinessOperation, "Workflow không có step nào", common.StatusBadRequest, nil)
+	}
+	firstStepIDStr := workflow.Steps[0].StepID
+	firstStepID, err := primitive.ObjectIDFromHex(firstStepIDStr)
+	if err != nil {
+		return nil, fmt.Errorf("workflow stepId không hợp lệ: %w", err)
+	}
+	step, err := stepService.FindOneById(ctx, firstStepID)
+	if err != nil {
+		return nil, fmt.Errorf("không tìm thấy step đầu tiên của workflow: %w", err)
+	}
+	return &step, nil
+}
+
+// InsertOne override để validate RootRefID/RootRefType theo step: bắt buộc khi step cần parent (L2-L6), không cần khi step tạo Pillar (L1)
+func (s *AIWorkflowCommandService) InsertOne(ctx context.Context, data models.AIWorkflowCommand) (models.AIWorkflowCommand, error) {
+	step, err := s.resolveStepForCommand(ctx, data)
+	if err != nil {
+		return data, err
+	}
+
+	if !isStepCreatePillar(step) {
+		// Step cần parent (L2-L6): RootRefID và RootRefType bắt buộc
+		if data.RootRefID == nil || data.RootRefID.IsZero() {
+			return data, common.NewError(
+				common.ErrCodeValidationFormat,
+				"RootRefID và RootRefType bắt buộc khi step cần parent (L2-L6). Chỉ khi tạo Pillar (L1) mới được để trống.",
+				common.StatusBadRequest,
+				nil,
+			)
+		}
+		if data.RootRefType == "" {
+			return data, common.NewError(
+				common.ErrCodeValidationFormat,
+				"RootRefType bắt buộc khi step cần parent (L2-L6). Ví dụ: pillar, stp, insight.",
+				common.StatusBadRequest,
+				nil,
+			)
+		}
+		runService, err := NewAIWorkflowRunService()
+		if err != nil {
+			return data, fmt.Errorf("lỗi khi khởi tạo workflow run service: %w", err)
+		}
+		if err := runService.ValidateRootRef(ctx, data.RootRefID, data.RootRefType); err != nil {
+			return data, err
+		}
+	}
+
+	return s.BaseServiceMongoImpl.InsertOne(ctx, data)
+}
+
 // ClaimPendingCommands claim các commands đang chờ (pending) với atomic operation
 // Đảm bảo các job khác không lấy lại commands đã được claim cho đến khi được giải phóng
 //

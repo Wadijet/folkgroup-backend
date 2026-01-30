@@ -200,7 +200,7 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) validateUserHasAccessToOrg(c 
 	// Lấy permission name từ context (đã được middleware set)
 	permissionName := h.getPermissionNameFromRoute(c)
 
-	// Lấy allowed organization IDs từ active role (đơn giản hơn, chỉ từ role context)
+	// Lấy allowed organization IDs từ active role (org của role + children nếu scope 1)
 	allowedOrgIDs, err := services.GetAllowedOrganizationIDsFromRole(c.Context(), activeRoleID, permissionName)
 	if err != nil {
 		return err

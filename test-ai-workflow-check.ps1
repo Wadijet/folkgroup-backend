@@ -83,7 +83,7 @@ $workflowData = @{
             order = 0
         }
     )
-    rootRefType = "layer"
+    rootRefType = "pillar"
     targetLevel = "L1"
     status = "active"
 }

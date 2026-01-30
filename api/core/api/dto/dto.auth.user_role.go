@@ -8,7 +8,7 @@ type UserRoleCreateInput struct {
 
 // UserRoleUpdateInput đại diện cho dữ liệu đầu vào khi cập nhật vai trò người dùng
 type UserRoleUpdateInput struct {
-	UserID  string   `json:"userId" validate:"required"`
+	UserID  string   `json:"userId" validate:"required" transform:"str_objectid"` // ID người dùng - transform sang Model primitive.ObjectID
 	RoleIDs []string `json:"roleIds" validate:"required,min=1"`
 }
 

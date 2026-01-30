@@ -877,7 +877,7 @@ func (r *Router) registerAgentManagementRoutes(router fiber.Router) error {
 // Cấu trúc routes:
 // - Production content: /api/v1/content/{nodes|videos|publications}/*
 // - Drafts: /api/v1/content/drafts/{nodes|videos|publications}/*
-// - Approvals: /api/v1/content/drafts/approvals/*
+// - Approve/Reject: POST /drafts/nodes/:id/approve|reject (với validation để bảo vệ luồng)
 //
 // Tất cả đều dùng prefix /content/ để tránh lẫn sang module khác (Module 2, Module 3)
 func (r *Router) registerContentStorageRoutes(router fiber.Router) error {
@@ -921,6 +921,12 @@ func (r *Router) registerContentStorageRoutes(router fiber.Router) error {
 	draftContentNodeCommitMiddleware := middleware.AuthMiddleware("ContentDraftNodes.Commit")
 	registerRouteWithMiddleware(router, "/content/drafts/nodes", "POST", "/:id/commit", []fiber.Handler{draftContentNodeCommitMiddleware}, draftContentNodeHandler.CommitDraftNode)
 
+	// Approve/Reject draft (với validation để bảo vệ luồng)
+	draftApproveMiddleware := middleware.AuthMiddleware("ContentDraftNodes.Approve")
+	draftRejectMiddleware := middleware.AuthMiddleware("ContentDraftNodes.Reject")
+	registerRouteWithMiddleware(router, "/content/drafts/nodes", "POST", "/:id/approve", []fiber.Handler{draftApproveMiddleware}, draftContentNodeHandler.ApproveDraft)
+	registerRouteWithMiddleware(router, "/content/drafts/nodes", "POST", "/:id/reject", []fiber.Handler{draftRejectMiddleware}, draftContentNodeHandler.RejectDraft)
+
 	// Draft Video CRUD routes - collection: content_draft_videos
 	draftVideoHandler, err := handler.NewDraftVideoHandler()
 	if err != nil {
@@ -934,22 +940,6 @@ func (r *Router) registerContentStorageRoutes(router fiber.Router) error {
 		return fmt.Errorf("failed to create draft publication handler: %v", err)
 	}
 	r.registerCRUDRoutes(router, "/content/drafts/publications", draftPublicationHandler, readWriteConfig, "ContentDraftPublications")
-
-	// ===== APPROVALS (quản lý approval workflow) =====
-
-	// Draft Approval CRUD routes - collection: content_draft_approvals
-	draftApprovalHandler, err := handler.NewDraftApprovalHandler()
-	if err != nil {
-		return fmt.Errorf("failed to create draft approval handler: %v", err)
-	}
-	r.registerCRUDRoutes(router, "/content/drafts/approvals", draftApprovalHandler, readWriteConfig, "ContentDraftApprovals")
-
-	// Custom endpoints: Approval workflows
-	draftApprovalApproveMiddleware := middleware.AuthMiddleware("ApprovalRequest.Approve")
-	registerRouteWithMiddleware(router, "/content/drafts/approvals", "POST", "/:id/approve", []fiber.Handler{draftApprovalApproveMiddleware}, draftApprovalHandler.ApproveDraftWorkflowRun)
-
-	draftApprovalRejectMiddleware := middleware.AuthMiddleware("ApprovalRequest.Reject")
-	registerRouteWithMiddleware(router, "/content/drafts/approvals", "POST", "/:id/reject", []fiber.Handler{draftApprovalRejectMiddleware}, draftApprovalHandler.RejectDraftWorkflowRun)
 
 	return nil
 }

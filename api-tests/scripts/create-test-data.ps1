@@ -48,7 +48,7 @@ Write-Host "`n=== TAO DATA TEST ===" -ForegroundColor Yellow
 # 1. Tao Content Node
 Write-Host "`n1. Tao Content Node..." -ForegroundColor Cyan
 $contentNodeBody = @{
-    type = "layer"
+    type = "pillar"
     text = "Test Content Node Text"
     name = "Test Content Node"
 } | ConvertTo-Json -Depth 10
@@ -86,7 +86,7 @@ catch {
 Write-Host "`n2. Tao Draft Content Node..." -ForegroundColor Cyan
 if ($nodeID) {
     $draftNodeBody = @{
-        type = "layer"
+        type = "pillar"
         text = "Test Draft Node Text"
         name = "Test Draft Node"
         parentId = $nodeID

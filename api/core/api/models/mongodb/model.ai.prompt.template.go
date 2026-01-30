@@ -13,7 +13,7 @@ const (
 
 // AIPromptTemplateVariable định nghĩa biến trong prompt template
 type AIPromptTemplateVariable struct {
-	Name        string `json:"name" bson:"name"`                                   // Tên biến (ví dụ: "layer", "parentContent")
+	Name        string `json:"name" bson:"name"`                                   // Tên biến (ví dụ: "pillar", "parentContent")
 	Description string `json:"description,omitempty" bson:"description,omitempty"` // Mô tả biến
 	Required    bool   `json:"required" bson:"required"`                           // Biến bắt buộc hay không
 	Default     string `json:"default,omitempty" bson:"default,omitempty"`         // Giá trị mặc định

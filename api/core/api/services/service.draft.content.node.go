@@ -121,6 +121,85 @@ func (s *DraftContentNodeService) InsertOne(ctx context.Context, data models.Dra
 	return s.BaseServiceMongoImpl.InsertOne(ctx, data)
 }
 
+// UpdateById override để validate approvalStatus: không cho phép update approvalStatus trực tiếp qua CRUD.
+// Chỉ cho phép update approvalStatus qua endpoint approve/reject riêng (có validation đầy đủ).
+//
+// LÝ DO:
+//   - Bảo vệ luồng approval: không cho user/bot set approvalStatus tùy ý
+//   - Chỉ cho phép chuyển draft → pending (user có thể gửi duyệt)
+//   - Các chuyển đổi khác (pending → approved, pending → rejected, etc.) phải qua endpoint riêng
+func (s *DraftContentNodeService) UpdateById(ctx context.Context, id primitive.ObjectID, data interface{}) (models.DraftContentNode, error) {
+	// Convert data thành UpdateData
+	updateData, err := ToUpdateData(data)
+	if err != nil {
+		var zero models.DraftContentNode
+		return zero, err
+	}
+
+	// Kiểm tra nếu có update approvalStatus
+	if updateData.Set != nil {
+		if approvalStatus, exists := updateData.Set["approvalStatus"]; exists {
+			approvalStatusStr, ok := approvalStatus.(string)
+			if !ok {
+				var zero models.DraftContentNode
+				return zero, common.NewError(
+					common.ErrCodeValidationFormat,
+					"approvalStatus phải là string",
+					common.StatusBadRequest,
+					nil,
+				)
+			}
+
+			// Lấy draft hiện tại để kiểm tra status
+			currentDraft, err := s.FindOneById(ctx, id)
+			if err != nil {
+				var zero models.DraftContentNode
+				return zero, err
+			}
+
+			// Chỉ cho phép chuyển draft → pending (user gửi duyệt)
+			// Các chuyển đổi khác phải qua endpoint approve/reject
+			if approvalStatusStr == models.DraftApprovalStatusPending {
+				if currentDraft.ApprovalStatus != models.DraftApprovalStatusDraft && currentDraft.ApprovalStatus != models.DraftApprovalStatusRejected {
+					var zero models.DraftContentNode
+					return zero, common.NewError(
+						common.ErrCodeBusinessOperation,
+						fmt.Sprintf("Chỉ có thể chuyển status sang pending từ draft hoặc rejected (hiện tại: %s). Để approve/reject, dùng endpoint /drafts/nodes/:id/approve hoặc /reject", currentDraft.ApprovalStatus),
+						common.StatusBadRequest,
+						nil,
+					)
+				}
+			} else {
+				// Không cho phép set approvalStatus = approved hoặc rejected qua CRUD
+				if approvalStatusStr == models.DraftApprovalStatusApproved || approvalStatusStr == models.DraftApprovalStatusRejected {
+					var zero models.DraftContentNode
+					return zero, common.NewError(
+						common.ErrCodeBusinessOperation,
+						"Không thể update approvalStatus = approved hoặc rejected qua CRUD. Dùng endpoint /drafts/nodes/:id/approve hoặc /reject",
+						common.StatusBadRequest,
+						nil,
+					)
+				}
+				// Cho phép set về draft (chỉnh sửa lại)
+				if approvalStatusStr == models.DraftApprovalStatusDraft {
+					if currentDraft.ApprovalStatus != models.DraftApprovalStatusRejected && currentDraft.ApprovalStatus != models.DraftApprovalStatusApproved {
+						var zero models.DraftContentNode
+						return zero, common.NewError(
+							common.ErrCodeBusinessOperation,
+							fmt.Sprintf("Chỉ có thể chuyển status về draft từ rejected hoặc approved (hiện tại: %s)", currentDraft.ApprovalStatus),
+							common.StatusBadRequest,
+							nil,
+						)
+					}
+				}
+			}
+		}
+	}
+
+	// Gọi UpdateById của base service
+	return s.BaseServiceMongoImpl.UpdateById(ctx, id, data)
+}
+
 // CommitDraftNode commit draft node → production content node
 // Tham số:
 //   - ctx: Context
@@ -231,4 +310,77 @@ func (s *DraftContentNodeService) GetDraftsByWorkflowRunID(ctx context.Context, 
 		"workflowRunId": workflowRunID,
 	}
 	return s.Find(ctx, filter, nil)
+}
+
+// ApproveDraft duyệt một draft: set approvalStatus = approved (chỉ khi status = pending hoặc draft).
+// Không tự động commit, user phải gọi CommitDraftNode riêng.
+//
+// Tham số:
+//   - ctx: Context
+//   - draftID: ID của draft cần approve
+//
+// Trả về:
+//   - *models.DraftContentNode: Draft đã được update
+//   - error: Lỗi nếu có (status không hợp lệ, draft không tồn tại, etc.)
+func (s *DraftContentNodeService) ApproveDraft(ctx context.Context, draftID primitive.ObjectID) (*models.DraftContentNode, error) {
+	draft, err := s.FindOneById(ctx, draftID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Validate: chỉ approve khi status = pending hoặc draft
+	if draft.ApprovalStatus != models.DraftApprovalStatusPending && draft.ApprovalStatus != models.DraftApprovalStatusDraft {
+		return nil, common.NewError(
+			common.ErrCodeBusinessOperation,
+			fmt.Sprintf("Chỉ có thể approve draft có status = pending hoặc draft (hiện tại: %s)", draft.ApprovalStatus),
+			common.StatusBadRequest,
+			nil,
+		)
+	}
+
+	// Update status
+	updated, err := s.UpdateById(ctx, draftID, &UpdateData{
+		Set: map[string]interface{}{"approvalStatus": models.DraftApprovalStatusApproved},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &updated, nil
+}
+
+// RejectDraft từ chối một draft: set approvalStatus = rejected (chỉ khi status = pending hoặc draft).
+//
+// Tham số:
+//   - ctx: Context
+//   - draftID: ID của draft cần reject
+//
+// Trả về:
+//   - *models.DraftContentNode: Draft đã được update
+//   - error: Lỗi nếu có (status không hợp lệ, draft không tồn tại, etc.)
+func (s *DraftContentNodeService) RejectDraft(ctx context.Context, draftID primitive.ObjectID) (*models.DraftContentNode, error) {
+	draft, err := s.FindOneById(ctx, draftID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Validate: chỉ reject khi status = pending hoặc draft
+	if draft.ApprovalStatus != models.DraftApprovalStatusPending && draft.ApprovalStatus != models.DraftApprovalStatusDraft {
+		return nil, common.NewError(
+			common.ErrCodeBusinessOperation,
+			fmt.Sprintf("Chỉ có thể reject draft có status = pending hoặc draft (hiện tại: %s)", draft.ApprovalStatus),
+			common.StatusBadRequest,
+			nil,
+		)
+	}
+
+	// Update status
+	updated, err := s.UpdateById(ctx, draftID, &UpdateData{
+		Set: map[string]interface{}{"approvalStatus": models.DraftApprovalStatusRejected},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &updated, nil
 }

@@ -36,8 +36,8 @@ type AIWorkflowCommand struct {
 	StepID *primitive.ObjectID `json:"stepId,omitempty" bson:"stepId,omitempty" index:"single:1"` // ID của step definition (bắt buộc nếu CommandType = EXECUTE_STEP)
 
 	// ===== ROOT REFERENCE =====
-	RootRefID   *primitive.ObjectID `json:"rootRefId,omitempty" bson:"rootRefId,omitempty" index:"single:1"` // ID của root content (ví dụ: Layer L1) - link về Module 1
-	RootRefType string              `json:"rootRefType,omitempty" bson:"rootRefType,omitempty" index:"single:1"` // Loại root reference: "layer", "stp", etc.
+	RootRefID   *primitive.ObjectID `json:"rootRefId,omitempty" bson:"rootRefId,omitempty" index:"single:1"` // ID của root content (ví dụ: Pillar L1) - link về Module 1
+	RootRefType string              `json:"rootRefType,omitempty" bson:"rootRefType,omitempty" index:"single:1"` // Loại root reference: "pillar", "stp", etc.
 
 	// ===== PARAMS =====
 	Params map[string]interface{} `json:"params,omitempty" bson:"params,omitempty"` // Tham số bổ sung cho command

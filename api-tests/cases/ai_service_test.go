@@ -61,7 +61,7 @@ func TestAIServiceModule(t *testing.T) {
 				"name":        fmt.Sprintf("Test Workflow %d", time.Now().UnixNano()),
 				"description": "Test workflow description",
 				"version":     "1.0.0",
-				"rootRefType": "layer",
+				"rootRefType": "pillar",
 				"targetLevel": "L8",
 				"status":      "active",
 				"steps": []map[string]interface{}{
@@ -183,7 +183,7 @@ func TestAIServiceModule(t *testing.T) {
 				"inputSchema": map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
-						"layer": map[string]interface{}{
+						"pillar": map[string]interface{}{
 							"type": "string",
 						},
 					},
@@ -309,7 +309,7 @@ func TestAIServiceModule(t *testing.T) {
 				"description": "Test prompt template description",
 				"type":        "generate",
 				"version":     "1.0.0",
-				"prompt":      "Generate content for {{layer}}",
+				"prompt":      "Generate content for {{pillar}}",
 				"provider":    "openai",
 				"model":       "gpt-4",
 				"status":      "active",
@@ -422,7 +422,7 @@ func TestAIServiceModule(t *testing.T) {
 			payload := map[string]interface{}{
 				"workflowId":  "000000000000000000000000", // Cần workflowId hợp lệ
 				"rootRefId":   "000000000000000000000000",
-				"rootRefType": "layer",
+				"rootRefType": "pillar",
 				"status":      "pending",
 			}
 
@@ -866,7 +866,7 @@ func TestAIServiceModule(t *testing.T) {
 				"type":     "GENERATE",
 				"provider": "openai",
 				"model":    "gpt-4",
-				"prompt":   "Generate content for layer",
+				"prompt":   "Generate content for pillar",
 				"status":   "pending",
 			}
 
@@ -981,7 +981,7 @@ func TestAIServiceModule(t *testing.T) {
 				"commandType": "START_WORKFLOW",
 				"workflowId":  "000000000000000000000000", // Cần workflowId hợp lệ
 				"rootRefId":   "000000000000000000000000",
-				"rootRefType": "layer",
+				"rootRefType": "pillar",
 				"status":      "pending",
 			}
 

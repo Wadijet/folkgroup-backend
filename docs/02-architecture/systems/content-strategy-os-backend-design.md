@@ -2705,11 +2705,9 @@ GET /api/v2/prompt-templates/:id
 **Draft Publications:**
 - `DraftPublication.Insert`, `DraftPublication.Read`, `DraftPublication.Update`, `DraftPublication.Delete`
 
-**Approval Requests:**
-- `ApprovalRequest.Read`
-- `ApprovalRequest.Request` (RequestApprovalForWorkflowRun)
-- `ApprovalRequest.Approve` (ApproveDraftWorkflowRun)
-- `ApprovalRequest.Reject` (RejectDraftWorkflowRun)
+**Duyệt/Từ chối draft node (ContentDraftNodes):**
+- `ContentDraftNodes.Approve` (ApproveDraft)
+- `ContentDraftNodes.Reject` (RejectDraft)
 
 ---
 

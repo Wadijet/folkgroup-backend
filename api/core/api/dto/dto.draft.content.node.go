@@ -2,7 +2,7 @@ package dto
 
 // DraftContentNodeCreateInput dữ liệu đầu vào khi tạo draft content node
 type DraftContentNodeCreateInput struct {
-	Type                string                 `json:"type" validate:"required"`                                                      // Loại content node: layer, stp, insight, contentLine, gene, script
+	Type                string                 `json:"type" validate:"required"`                                                      // Loại content node: pillar, stp, insight, contentLine, gene, script
 	ParentID            string                 `json:"parentId,omitempty" transform:"str_objectid_ptr,optional"`                    // ID của parent node (production) (tùy chọn, dạng string ObjectID)
 	ParentDraftID       string                 `json:"parentDraftId,omitempty" transform:"str_objectid_ptr,optional"`              // ID của parent draft node (tùy chọn, dạng string ObjectID)
 	Name                string                 `json:"name,omitempty"`                                                                // Tên content node (tùy chọn)
@@ -30,4 +30,19 @@ type DraftContentNodeUpdateInput struct {
 // CommitDraftNodeParams params từ URL khi commit draft node
 type CommitDraftNodeParams struct {
 	ID string `uri:"id" validate:"required" transform:"str_objectid"` // Draft Node ID từ URL params - tự động validate và convert sang ObjectID
+}
+
+// ApproveDraftParams params từ URL khi approve draft
+type ApproveDraftParams struct {
+	ID string `uri:"id" validate:"required" transform:"str_objectid"` // Draft Node ID từ URL params
+}
+
+// RejectDraftParams params từ URL khi reject draft
+type RejectDraftParams struct {
+	ID string `uri:"id" validate:"required" transform:"str_objectid"` // Draft Node ID từ URL params
+}
+
+// RejectDraftInput body khi reject (ghi chú tùy chọn)
+type RejectDraftInput struct {
+	DecisionNote string `json:"decisionNote,omitempty"` // Ghi chú từ chối (tùy chọn, có thể lưu vào Metadata)
 }

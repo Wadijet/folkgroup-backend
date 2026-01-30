@@ -3,7 +3,7 @@ package dto
 // AccessTokenCreateInput dữ liệu đầu vào khi tạo access token
 type AccessTokenCreateInput struct {
 	Name          string   `json:"name" validate:"required"`
-	Describe      string   `json:"describe" validate:"required"`
+	Describe      string   `json:"describe,omitempty"` // Mô tả (tùy chọn, để trống được)
 	System        string   `json:"system" validate:"required"`
 	Value         string   `json:"value" validate:"required"`
 	AssignedUsers []string `json:"assignedUsers"`

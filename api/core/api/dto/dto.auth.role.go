@@ -5,8 +5,9 @@ package dto
 // Lưu ý: Backend parse trực tiếp vào Model, nhưng DTO này dùng để Frontend biết cấu trúc cần gửi
 type RoleCreateInput struct {
 	Name                string `json:"name" validate:"required"`      // Tên của vai trò - BẮT BUỘC
-	Describe            string `json:"describe" validate:"required"`  // Mô tả vai trò - BẮT BUỘC
-	OwnerOrganizationID string `json:"ownerOrganizationId,omitempty"` // Tổ chức sở hữu dữ liệu (phân quyền) - Optional, nếu không có → dùng context
+	Describe            string `json:"describe,omitempty"`             // Mô tả vai trò (tùy chọn, để trống được)
+	// OwnerOrganizationID: optional. Cần transform để DTO→Model copy sang primitive.ObjectID
+	OwnerOrganizationID string `json:"ownerOrganizationId,omitempty" transform:"str_objectid,optional"`
 	// Lưu ý: Nếu có ownerOrganizationId trong request, backend sẽ validate quyền với organization đó
 }
 
@@ -16,6 +17,7 @@ type RoleCreateInput struct {
 type RoleUpdateInput struct {
 	Name                string `json:"name"`                          // Tên của vai trò - Optional
 	Describe            string `json:"describe"`                      // Mô tả vai trò - Optional
-	OwnerOrganizationID string `json:"ownerOrganizationId,omitempty"` // Tổ chức sở hữu dữ liệu (phân quyền) - Optional, có thể update với validation quyền
+	// OwnerOrganizationID: optional. Cần transform để copy sang Model primitive.ObjectID
+	OwnerOrganizationID string `json:"ownerOrganizationId,omitempty" transform:"str_objectid,optional"`
 	// Lưu ý: Nếu update ownerOrganizationId, backend sẽ validate quyền với organization mới và document hiện tại
 }

@@ -32,7 +32,7 @@ func InitCollections(client *mongo.Client, cfg *config.Configuration) error {
 		"webhook_logs",
 		// Module 1: Content Storage Collections (tất cả đều có prefix "content_" để nhất quán)
 		"content_nodes", "content_videos", "content_publications",
-		"content_draft_nodes", "content_draft_videos", "content_draft_publications", "content_draft_approvals",
+		"content_draft_nodes", "content_draft_videos", "content_draft_publications",
 		// Module 2: AI Service Collections (tất cả đều có prefix "ai_" để nhất quán)
 		"ai_workflows", "ai_steps", "ai_prompt_templates", "ai_provider_profiles", "ai_workflow_runs", "ai_step_runs",
 		"ai_generation_batches", "ai_candidates", "ai_runs", "ai_workflow_commands"}

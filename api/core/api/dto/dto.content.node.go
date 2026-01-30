@@ -2,7 +2,7 @@ package dto
 
 // ContentNodeCreateInput dữ liệu đầu vào khi tạo content node
 type ContentNodeCreateInput struct {
-	Type          string                 `json:"type" validate:"required"`                                    // Loại content node: layer, stp, insight, contentLine, gene, script
+	Type          string                 `json:"type" validate:"required"`                                    // Loại content node: pillar, stp, insight, contentLine, gene, script
 	ParentID      string                 `json:"parentId,omitempty" transform:"str_objectid_ptr,optional"`    // ID của parent node (tùy chọn, dạng string ObjectID) - tự động convert sang *primitive.ObjectID
 	Name          string                 `json:"name,omitempty"`                                                // Tên content node (tùy chọn)
 	Text          string                 `json:"text" validate:"required"`                                     // Nội dung text của node (bắt buộc)

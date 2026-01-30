@@ -41,7 +41,7 @@ func NewAIWorkflowRunService() (*AIWorkflowRunService, error) {
 //    - Đảm bảo workflow chỉ bắt đầu từ content đã sẵn sàng
 //
 // 2. Business rules:
-//    - RootRefType phải hợp lệ (layer, stp, insight, contentLine, gene, script)
+//    - RootRefType phải hợp lệ (pillar, stp, insight, contentLine, gene, script)
 //    - RootRefID phải tồn tại và đúng type
 //    - Draft phải đã được approve trước khi bắt đầu workflow
 //
@@ -142,7 +142,7 @@ func (s *AIWorkflowRunService) ValidateRootRef(ctx context.Context, rootRefID *p
 	if rootLevel == 0 {
 		return common.NewError(
 			common.ErrCodeValidationFormat,
-			fmt.Sprintf("RootRefType '%s' không hợp lệ. Các type hợp lệ: layer, stp, insight, contentLine, gene, script", rootType),
+			fmt.Sprintf("RootRefType '%s' không hợp lệ. Các type hợp lệ: pillar, stp, insight, contentLine, gene, script", rootType),
 			common.StatusBadRequest,
 			nil,
 		)

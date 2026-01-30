@@ -9,8 +9,8 @@ import (
 // Dựa trên standard schema để đảm bảo mapping chính xác
 //
 // Ví dụ:
-// - GENERATE step output "candidates" → JUDGE step input "candidates"
-// - GENERATE step output "context" → JUDGE step input "context"
+// - GENERATE step output "text" → JUDGE step input "text"
+// - Lớp AI: text in / text out. Lớp Logic: system tự map.
 //
 // Parameters:
 //   - fromStepType: Loại step nguồn (GENERATE, JUDGE, STEP_GENERATION)
@@ -35,51 +35,41 @@ func MapStepOutputToInput(fromStepType, toStepType string, fromOutput map[string
 	result := make(map[string]interface{})
 
 	// Mapping logic dựa trên từng cặp step types
+	// Lớp AI: text in / text out. Lớp Logic: system tự map output → input.
 	switch {
-	// GENERATE → JUDGE: Map "candidates" và "context"
+	// GENERATE → JUDGE: Map "text" (output schema: text, name, summary)
 	case fromStepType == models.AIStepTypeGenerate && toStepType == models.AIStepTypeJudge:
-		// Map candidates (bắt buộc)
-		if candidates, ok := fromOutput["candidates"].([]interface{}); ok {
-			result["candidates"] = candidates
+		if text, ok := fromOutput["text"].(string); ok {
+			result["text"] = text
 		} else {
-			return nil, fmt.Errorf("GENERATE step output thiếu field 'candidates' (bắt buộc cho JUDGE step)")
+			return nil, fmt.Errorf("GENERATE step output thiếu field 'text' (bắt buộc cho JUDGE step)")
 		}
-
-		// Map context nếu có
-		if context, ok := fromOutput["context"].(map[string]interface{}); ok {
-			result["context"] = context
-		}
-
-		// Criteria cần được cung cấp từ workflow config hoặc default
-		// Tạm thời set default criteria
 		result["criteria"] = map[string]interface{}{
 			"relevance":  10,
 			"clarity":    10,
 			"engagement": 10,
 			"accuracy":   10,
 		}
+		if metadata, ok := fromOutput["metadata"].(map[string]interface{}); ok {
+			result["metadata"] = metadata
+		}
 
-	// JUDGE → STEP_GENERATION: Map "bestCandidate" và "scores" vào "parentContext"
+	// JUDGE → STEP_GENERATION: Map "text" hoặc metadata.feedback vào parentContext
 	case fromStepType == models.AIStepTypeJudge && toStepType == models.AIStepTypeStepGeneration:
-		// Lấy bestCandidate để làm parentContext
-		if bestCandidate, ok := fromOutput["bestCandidate"].(map[string]interface{}); ok {
-			result["parentContext"] = map[string]interface{}{
-				"content": bestCandidate["reason"], // Hoặc có thể lấy từ candidate content
+		if text, ok := fromOutput["text"].(string); ok {
+			result["parentContext"] = map[string]interface{}{"content": text}
+		} else if meta, ok := fromOutput["metadata"].(map[string]interface{}); ok {
+			if feedback, ok := meta["feedback"].(string); ok {
+				result["parentContext"] = map[string]interface{}{"content": feedback}
 			}
 		}
 
-		// Requirements và targetLevel cần được cung cấp từ workflow config
-		// Tạm thời để empty, sẽ được fill từ workflow config
-
-	// GENERATE → STEP_GENERATION: Map output vào parentContext
+	// GENERATE → STEP_GENERATION: Map "text" vào parentContext
 	case fromStepType == models.AIStepTypeGenerate && toStepType == models.AIStepTypeStepGeneration:
-		// Lấy candidates đầu tiên làm parentContext
-		if candidates, ok := fromOutput["candidates"].([]interface{}); ok && len(candidates) > 0 {
-			if firstCandidate, ok := candidates[0].(map[string]interface{}); ok {
-				result["parentContext"] = map[string]interface{}{
-					"content": firstCandidate["content"],
-				}
-			}
+		if text, ok := fromOutput["text"].(string); ok {
+			result["parentContext"] = map[string]interface{}{"content": text}
+		} else {
+			return nil, fmt.Errorf("GENERATE step output thiếu field 'text' (bắt buộc cho STEP_GENERATION step)")
 		}
 
 	default:

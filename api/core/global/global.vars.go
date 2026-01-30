@@ -64,7 +64,6 @@ type MongoDB_Auth_CollectionName struct {
 	DraftContentNodes string // Tên collection cho draft content nodes: content_draft_nodes
 	DraftVideos       string // Tên collection cho draft videos: content_draft_videos
 	DraftPublications string // Tên collection cho draft publications: content_draft_publications
-	DraftApprovals    string // Tên collection cho draft approvals: content_draft_approvals
 
 	// Module 2: AI Service Collections (tất cả đều có prefix "ai_" để nhất quán)
 	AIWorkflows         string // Tên collection cho workflows: ai_workflows

@@ -4,7 +4,7 @@ package dto
 // Lưu ý: AgentActivityLog thường được tạo tự động khi bot log activity
 // Không nên tạo thủ công, để bot tự log
 type AgentActivityLogCreateInput struct {
-	AgentID string `json:"agentId" validate:"required"` // ObjectID của agent registry
+	AgentID string `json:"agentId" validate:"required" transform:"str_objectid"` // ObjectID agent registry - transform sang Model primitive.ObjectID
 }
 
 // AgentActivityLogUpdateInput là input để cập nhật agent activity log

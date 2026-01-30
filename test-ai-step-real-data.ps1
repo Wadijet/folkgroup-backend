@@ -91,24 +91,24 @@ Write-Host ""
 # Tạo Step GENERATE với schema chi tiết
 Write-Host "[2] Tạo Step GENERATE với input/output schema chi tiết..." -ForegroundColor Yellow
 $generateStepData = @{
-    name = "Generate Content - Layer L1"
-    description = "Step để generate content cho Layer L1 từ thông tin layer và context"
+    name = "Generate Content - Pillar L1"
+    description = "Step để generate content cho Pillar L1 từ thông tin pillar và context"
     type = "GENERATE"
     inputSchema = @{
         type = "object"
-        required = @("layerId", "layerName", "targetAudience")
+        required = @("pillarId", "pillarName", "targetAudience")
         properties = @{
-            layerId = @{
+            pillarId = @{
                 type = "string"
-                description = "ID của layer cần generate content"
+                description = "ID của pillar cần generate content"
             }
-            layerName = @{
+            pillarName = @{
                 type = "string"
-                description = "Tên của layer"
+                description = "Tên của pillar"
             }
-            layerDescription = @{
+            pillarDescription = @{
                 type = "string"
-                description = "Mô tả của layer"
+                description = "Mô tả của pillar"
             }
             targetAudience = @{
                 type = "string"
@@ -435,7 +435,7 @@ $workflowData = @{
             }
         }
     )
-    rootRefType = "layer"
+    rootRefType = "pillar"
     targetLevel = "L1"
     defaultPolicy = @{
         retryCount = 2
@@ -470,7 +470,7 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "TỔNG KẾT" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "✓ Generate Step ID: $generateStepId" -ForegroundColor Green
-Write-Host "  - Input: layerId, layerName, targetAudience, context, numberOfCandidates" -ForegroundColor Gray
+Write-Host "  - Input: pillarId, pillarName, targetAudience, context, numberOfCandidates" -ForegroundColor Gray
 Write-Host "  - Output: candidates[], generatedAt, model, tokens" -ForegroundColor Gray
 Write-Host ""
 Write-Host "✓ Judge Step ID: $judgeStepId" -ForegroundColor Green

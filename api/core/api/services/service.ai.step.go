@@ -182,32 +182,113 @@ func (s *AIStepService) ValidateSchema(stepType string, inputSchema map[string]i
 //
 // LÝ DO PHẢI OVERRIDE (không dùng BaseServiceMongoImpl.InsertOne trực tiếp):
 // 1. Business logic validation:
-//    - Validate input/output schema với standard schema
-//    - Đảm bảo schema hợp lệ trước khi insert
+//    - Tự động set schema từ standard schema theo (stepType + TargetLevel + ParentLevel)
+//    - Đảm bảo schema nhất quán, không cho phép custom schema phá vỡ rule giữa các level
+//    - Validate schema với standard schema
 //
 // ĐẢM BẢO LOGIC CƠ BẢN:
+// ✅ Tự động set schema từ GetStandardSchema() để đảm bảo consistency
 // ✅ Validate schema bằng ValidateSchema()
 // ✅ Gọi BaseServiceMongoImpl.InsertOne để đảm bảo:
 //   - Set timestamps (CreatedAt, UpdatedAt)
 //   - Generate ID nếu chưa có
 //   - Insert vào MongoDB
 func (s *AIStepService) InsertOne(ctx context.Context, data models.AIStep) (models.AIStep, error) {
-	// Validate schema (business logic validation)
-	// Convert InputSchema và OutputSchema từ bson.M sang map[string]interface{}
-	var inputSchema map[string]interface{}
-	var outputSchema map[string]interface{}
-	
-	if data.InputSchema != nil {
-		inputSchema = data.InputSchema
+	// FIX CỨNG SCHEMA: Tự động set schema từ standard theo (stepType + TargetLevel + ParentLevel)
+	// Đảm bảo schema nhất quán giữa các steps cùng level, tránh phá vỡ rule
+	stdInputSchema, stdOutputSchema, err := models.GetStandardSchema(data.Type, data.TargetLevel, data.ParentLevel)
+	if err != nil {
+		return data, common.NewError(
+			common.ErrCodeValidationFormat,
+			fmt.Sprintf("Không thể lấy standard schema: %v", err),
+			common.StatusBadRequest,
+			nil,
+		)
 	}
-	if data.OutputSchema != nil {
-		outputSchema = data.OutputSchema
-	}
-	
-	if err := s.ValidateSchema(data.Type, inputSchema, outputSchema); err != nil {
+
+	// Override schema từ standard (không cho phép custom schema)
+	data.InputSchema = stdInputSchema
+	data.OutputSchema = stdOutputSchema
+
+	// Validate schema (đảm bảo standard schema hợp lệ)
+	if err := s.ValidateSchema(data.Type, stdInputSchema, stdOutputSchema); err != nil {
 		return data, err
 	}
 
 	// Gọi InsertOne của base service
 	return s.BaseServiceMongoImpl.InsertOne(ctx, data)
+}
+
+// UpdateById override để enforce schema fix cứng khi update
+//
+// LÝ DO PHẢI OVERRIDE:
+// 1. Business logic validation:
+//    - Khi update Type/TargetLevel/ParentLevel, tự động set lại schema từ standard
+//    - Không cho phép custom schema phá vỡ rule giữa các level
+//    - Đảm bảo schema nhất quán
+//
+// ĐẢM BẢO LOGIC CƠ BẢN:
+// ✅ Lấy step hiện tại để biết Type/TargetLevel/ParentLevel
+// ✅ Nếu update Type/TargetLevel/ParentLevel, tự động set lại schema từ standard
+// ✅ Gọi BaseServiceMongoImpl.UpdateById để update
+func (s *AIStepService) UpdateById(ctx context.Context, id primitive.ObjectID, data interface{}) (models.AIStep, error) {
+	// Convert data thành UpdateData
+	updateData, err := ToUpdateData(data)
+	if err != nil {
+		var zero models.AIStep
+		return zero, err
+	}
+
+	// Lấy step hiện tại để biết Type/TargetLevel/ParentLevel
+	currentStep, err := s.FindOneById(ctx, id)
+	if err != nil {
+		var zero models.AIStep
+		return zero, err
+	}
+
+	// Xác định Type/TargetLevel/ParentLevel sau khi update
+	stepType := currentStep.Type
+	targetLevel := currentStep.TargetLevel
+	parentLevel := currentStep.ParentLevel
+
+	// Nếu có update Type/TargetLevel/ParentLevel, lấy giá trị mới
+	if updateData.Set != nil {
+		if newType, ok := updateData.Set["type"].(string); ok && newType != "" {
+			stepType = newType
+		}
+		if newTargetLevel, ok := updateData.Set["targetLevel"].(string); ok {
+			targetLevel = newTargetLevel
+		}
+		if newParentLevel, ok := updateData.Set["parentLevel"].(string); ok {
+			parentLevel = newParentLevel
+		}
+	}
+
+	// FIX CỨNG SCHEMA: Tự động set schema từ standard theo (stepType + TargetLevel + ParentLevel)
+	stdInputSchema, stdOutputSchema, err := models.GetStandardSchema(stepType, targetLevel, parentLevel)
+	if err != nil {
+		var zero models.AIStep
+		return zero, common.NewError(
+			common.ErrCodeValidationFormat,
+			fmt.Sprintf("Không thể lấy standard schema: %v", err),
+			common.StatusBadRequest,
+			nil,
+		)
+	}
+
+	// Override schema trong updateData (không cho phép custom schema)
+	if updateData.Set == nil {
+		updateData.Set = make(map[string]interface{})
+	}
+	updateData.Set["inputSchema"] = stdInputSchema
+	updateData.Set["outputSchema"] = stdOutputSchema
+
+	// Validate schema (đảm bảo standard schema hợp lệ)
+	if err := s.ValidateSchema(stepType, stdInputSchema, stdOutputSchema); err != nil {
+		var zero models.AIStep
+		return zero, err
+	}
+
+	// Gọi UpdateById của base service
+	return s.BaseServiceMongoImpl.UpdateById(ctx, id, *updateData)
 }

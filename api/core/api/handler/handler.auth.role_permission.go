@@ -117,7 +117,7 @@ func (h *RolePermissionHandler) HandleUpdateRolePermissions(c fiber.Ctx) error {
 	}
 
 	// Chuyển đổi roleId từ string sang ObjectID
-	roleId, err := primitive.ObjectIDFromHex(input.RoleId)
+	roleId, err := primitive.ObjectIDFromHex(input.RoleID)
 	if err != nil {
 		h.HandleResponse(c, nil, common.NewError(common.ErrCodeValidationFormat, "ID vai trò không hợp lệ", common.StatusBadRequest, err))
 		return nil

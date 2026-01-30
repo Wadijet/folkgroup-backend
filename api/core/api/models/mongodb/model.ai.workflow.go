@@ -35,7 +35,7 @@ type AIWorkflow struct {
 	Steps []AIWorkflowStepReference `json:"steps" bson:"steps"` // Danh sách steps trong workflow (theo thứ tự)
 
 	// ===== EXECUTION CONFIG =====
-	RootRefType string `json:"rootRefType" bson:"rootRefType" index:"single:1"` // Loại root reference: "layer", "stp", "insight", etc.
+	RootRefType string `json:"rootRefType" bson:"rootRefType" index:"single:1"` // Loại root reference: "pillar", "stp", "insight", etc.
 	TargetLevel string `json:"targetLevel,omitempty" bson:"targetLevel,omitempty" index:"single:1"` // Level mục tiêu: "L1", "L2", ..., "L8" (tùy chọn)
 
 	// ===== POLICIES =====

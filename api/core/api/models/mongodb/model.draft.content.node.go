@@ -18,7 +18,7 @@ type DraftContentNode struct {
 	ID primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"` // ID của draft node
 
 	// ===== CONTENT HIERARCHY =====
-	Type     string              `json:"type" bson:"type" index:"single:1"`                    // Loại content node: layer, stp, insight, contentLine, gene, script
+	Type     string              `json:"type" bson:"type" index:"single:1"`                    // Loại content node: pillar, stp, insight, contentLine, gene, script
 	ParentID *primitive.ObjectID `json:"parentId,omitempty" bson:"parentId,omitempty" index:"single:1"` // ID của parent node (có thể là draft hoặc production)
 	ParentDraftID *primitive.ObjectID `json:"parentDraftId,omitempty" bson:"parentDraftId,omitempty" index:"single:1"` // ID của parent draft node (nếu parent là draft)
 	Name     string              `json:"name,omitempty" bson:"name,omitempty" index:"text"`     // Tên content node (tùy chọn)

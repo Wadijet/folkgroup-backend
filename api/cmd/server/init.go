@@ -80,8 +80,6 @@ func initColNames() {
 	global.MongoDB_ColNames.DraftContentNodes = "content_draft_nodes"
 	global.MongoDB_ColNames.DraftVideos = "content_draft_videos"
 	global.MongoDB_ColNames.DraftPublications = "content_draft_publications"
-	global.MongoDB_ColNames.DraftApprovals = "content_draft_approvals"
-
 	// Module 2: AI Service Collections (tất cả đều có prefix "ai_" để nhất quán)
 	global.MongoDB_ColNames.AIWorkflows = "ai_workflows"
 	global.MongoDB_ColNames.AISteps = "ai_steps"
@@ -177,8 +175,6 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DraftContentNodes), models.DraftContentNode{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DraftVideos), models.DraftVideo{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DraftPublications), models.DraftPublication{})
-	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DraftApprovals), models.DraftApproval{})
-
 	// Module 2: AI Service Indexes
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AIWorkflows), models.AIWorkflow{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AISteps), models.AIStep{})

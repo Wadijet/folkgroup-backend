@@ -4,7 +4,7 @@ package dto
 type AIWorkflowRunCreateInput struct {
 	WorkflowID       string                 `json:"workflowId" validate:"required" transform:"str_objectid"`                                                                   // ID của workflow definition (dạng string ObjectID) - tự động convert sang primitive.ObjectID
 	RootRefID        string                 `json:"rootRefId,omitempty" transform:"str_objectid_ptr,optional"`                                                                 // ID của root content (dạng string ObjectID) - tự động convert sang *primitive.ObjectID
-	RootRefType      string                 `json:"rootRefType,omitempty"`                                                                                                     // Loại root reference: "layer", "stp", etc.
+	RootRefType      string                 `json:"rootRefType,omitempty"`                                                                                                     // Loại root reference: "pillar", "stp", etc.
 	Status           string                 `json:"status,omitempty" transform:"string,default=pending" validate:"omitempty,oneof=pending running completed failed cancelled"` // Trạng thái: pending, running, completed, failed, cancelled (mặc định: pending)
 	CurrentStepIndex int                    `json:"currentStepIndex,omitempty" transform:"int,default=0"`                                                                      // Index của step hiện tại đang chạy (0-based) - mặc định: 0
 	StepRunIDs       []string               `json:"stepRunIds,omitempty" transform:"str_objectid_array,default=[]"`                                                            // Danh sách ID của step runs (dạng string ObjectID) - mặc định: []

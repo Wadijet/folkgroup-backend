@@ -6,7 +6,7 @@ type AIWorkflowCreateInput struct {
 	Description string                        `json:"description,omitempty"`                      // Mô tả workflow
 	Version     string                        `json:"version" validate:"required"`                // Version của workflow (semver)
 	Steps       []AIWorkflowStepReferenceInput `json:"steps" validate:"required"`                  // Danh sách steps trong workflow
-	RootRefType string                        `json:"rootRefType" validate:"required"`             // Loại root reference: "layer", "stp", "insight", etc.
+	RootRefType string                        `json:"rootRefType" validate:"required"`             // Loại root reference: "pillar", "stp", "insight", etc.
 	TargetLevel string                        `json:"targetLevel,omitempty"`                      // Level mục tiêu: "L1", "L2", ..., "L8" (tùy chọn)
 	DefaultPolicy *AIWorkflowStepPolicyInput  `json:"defaultPolicy,omitempty"`                    // Policy mặc định cho tất cả steps
 	Status      string                        `json:"status,omitempty" transform:"string,default=active" validate:"omitempty,oneof=active archived draft"` // Trạng thái: "active", "archived", "draft" (mặc định: "active")

@@ -496,11 +496,9 @@ var InitialPermissions = []models.Permission{
 	{Name: "ContentDraftPublications.Update", Describe: "Quyền cập nhật draft publication", Group: "Content", Category: "ContentDraftPublications"},
 	{Name: "ContentDraftPublications.Delete", Describe: "Quyền xóa draft publication", Group: "Content", Category: "ContentDraftPublications"},
 
-	// Quản lý Draft Approvals (collection: content_draft_approvals): Thêm, xem, sửa, xóa
-	{Name: "ContentDraftApprovals.Insert", Describe: "Quyền tạo draft approval", Group: "Content", Category: "ContentDraftApprovals"},
-	{Name: "ContentDraftApprovals.Read", Describe: "Quyền xem danh sách draft approvals", Group: "Content", Category: "ContentDraftApprovals"},
-	{Name: "ContentDraftApprovals.Update", Describe: "Quyền cập nhật draft approval", Group: "Content", Category: "ContentDraftApprovals"},
-	{Name: "ContentDraftApprovals.Delete", Describe: "Quyền xóa draft approval", Group: "Content", Category: "ContentDraftApprovals"},
+	// Quyền phê duyệt/từ chối từng draft node (route: POST /content/drafts/nodes/:id/approve, POST /content/drafts/nodes/:id/reject)
+	{Name: "ContentDraftNodes.Approve", Describe: "Quyền phê duyệt draft content node", Group: "Content", Category: "ContentDraftNodes"},
+	{Name: "ContentDraftNodes.Reject", Describe: "Quyền từ chối draft content node", Group: "Content", Category: "ContentDraftNodes"},
 
 	// Quyền đặc biệt cho commit draft content node (commit draft → production)
 	{Name: "ContentDraftNodes.Commit", Describe: "Quyền commit draft content node sang production", Group: "Content", Category: "ContentDraftNodes"},
@@ -2256,66 +2254,45 @@ func (h *InitService) initAIPromptTemplates(ctx context.Context, systemOrgID pri
 		provider    *models.AIPromptTemplateProvider // Provider info (profileId, config) - override từ provider profile defaultConfig
 	}{
 		// Template GENERATE chung (có thể dùng cho tất cả level transitions)
+		// ĐƠN GIẢN HÓA: Mỗi step chỉ tạo 1 nội dung duy nhất (không còn candidates[])
 		{
 			name:        "Tạo Nội Dung - Mẫu Chung",
-			description: "Template mẫu chung để tạo nhiều phương án nội dung (candidates) cho bất kỳ cấp độ nào. Template này có thể tùy chỉnh để phù hợp với từng loại nội dung cụ thể (STP, Insight, Content Line, Gene, Script).",
+			description: "Template mẫu chung để tạo 1 nội dung cho bất kỳ cấp độ nào (STP, Insight, Content Line, Gene, Script). Mỗi lần chạy chỉ trả về 1 nội dung.",
 			type_:       models.AIPromptTemplateTypeGenerate,
 			version:     "1.0.0",
-			prompt: `Bạn là một chuyên gia content strategy với nhiều năm kinh nghiệm. Nhiệm vụ của bạn là tạo ra {{numberOfCandidates}} phương án nội dung (candidates) chất lượng cao cho {{targetTypeName}} dựa trên {{parentTypeName}}.
+			prompt: `Bạn là một chuyên gia content strategy với nhiều năm kinh nghiệm. Nhiệm vụ của bạn là tạo ra 1 nội dung chất lượng cao cho {{targetTypeName}} dựa trên {{parentTypeName}}.
 
 📋 THÔNG TIN ĐẦU VÀO:
 
 Nội dung {{parentTypeName}}:
-{{parentContent}}
-{{#if parentDescription}}
-
-Mô tả bổ sung: {{parentDescription}}
-{{/if}}
+{{parentText}}
 {{#if targetAudience}}
 
 🎯 Đối tượng mục tiêu: {{targetAudience}}
 {{/if}}
-{{#if context.industry}}
+{{#if metadata.industry}}
 
-🏢 Ngành nghề: {{context.industry}}
+🏢 Ngành nghề: {{metadata.industry}}
 {{/if}}
-{{#if context.productType}}
+{{#if metadata.productType}}
 
-📦 Loại sản phẩm: {{context.productType}}
+📦 Loại sản phẩm: {{metadata.productType}}
 {{/if}}
-{{#if context.tone}}
+{{#if metadata.tone}}
 
-💬 Tone mong muốn: {{context.tone}}
+💬 Tone mong muốn: {{metadata.tone}}
 {{/if}}
 
 ✅ YÊU CẦU:
 
-1. Tạo {{numberOfCandidates}} phương án {{targetTypeName}} khác nhau, mỗi phương án phải có góc tiếp cận riêng biệt
-2. Mỗi phương án phải bao gồm:
-   - **title**: Tiêu đề ngắn gọn, hấp dẫn (tối đa 100 ký tự)
-   - **content**: Nội dung chi tiết, đầy đủ thông tin
-   - **summary**: Tóm tắt ngắn gọn (2-3 câu) về điểm nổi bật của phương án
-3. Nội dung phải phù hợp với đối tượng mục tiêu và context đã cho
-4. Đảm bảo tính sáng tạo, độc đáo và thực tế
-5. Tuân thủ quy tắc: {{targetTypeName}} phải phát triển logic từ {{parentTypeName}}, không được tách rời
-
-📤 ĐỊNH DẠNG KẾT QUẢ (JSON):
-{
-  "candidates": [
-    {
-      "title": "Tiêu đề phương án 1",
-      "content": "Nội dung chi tiết của phương án 1...",
-      "summary": "Tóm tắt ngắn gọn về phương án này"
-    }
-  ]
-}`,
+1. Tạo 1 nội dung {{targetTypeName}} chất lượng: nội dung chính đầy đủ, có thể kèm tên ngắn gọn và tóm tắt nếu phù hợp.
+2. Nội dung phải phù hợp với đối tượng mục tiêu và context đã cho.
+3. Tuân thủ quy tắc: {{targetTypeName}} phải phát triển logic từ {{parentTypeName}}, không được tách rời.`,
 			variables: []models.AIPromptTemplateVariable{
-				{Name: "parentContent", Required: true, Description: "Nội dung của parent node"},
-				{Name: "parentDescription", Required: false, Description: "Mô tả của parent node"},
-				{Name: "parentTypeName", Required: true, Description: "Tên loại parent (Layer, STP, Insight, etc.)"},
+				{Name: "parentText", Required: true, Description: "Text của parent node (system tự lấy từ parentNode.Text)"},
+				{Name: "parentTypeName", Required: true, Description: "Tên loại parent (Pillar, STP, Insight, etc.)"},
 				{Name: "targetTypeName", Required: true, Description: "Tên loại target (STP, Insight, Content Line, etc.)"},
 				{Name: "targetAudience", Required: false, Description: "Đối tượng mục tiêu (B2B, B2C, B2B2C)"},
-				{Name: "numberOfCandidates", Required: false, Default: "3", Description: "Số lượng candidates"},
 			},
 			provider: &models.AIPromptTemplateProvider{
 				ProfileID: providerProfileID,
@@ -2326,51 +2303,79 @@ Mô tả bổ sung: {{parentDescription}}
 				},
 			},
 		},
-		// Template GENERATE cho từng level transition
+		// Template GENERATE cho Pillar (L1, cấp trên cùng, không có parent)
+		// ĐƠN GIẢN HÓA: Mỗi step chỉ tạo 1 Pillar duy nhất
 		{
-			name:        "Tạo STP từ Layer",
-			description: "Template để tạo các phương án STP (Segmentation, Targeting, Positioning) từ Layer. STP giúp xác định phân khúc khách hàng, đối tượng mục tiêu và định vị sản phẩm/dịch vụ. Mỗi phương án sẽ bao gồm đầy đủ 3 thành phần: Segmentation (phân khúc), Targeting (đối tượng), và Positioning (định vị).",
+			name:        "Tạo Pillar (L1)",
+			description: "Template để tạo 1 Pillar (L1 - cấp trên cùng) từ context (ngành, đối tượng, sản phẩm). Pillar là nền tảng chiến lược nội dung, không cần parent.",
 			type_:       models.AIPromptTemplateTypeGenerate,
 			version:     "1.0.0",
-			prompt: `Bạn là một chuyên gia marketing strategy với nhiều năm kinh nghiệm. Nhiệm vụ của bạn là tạo ra {{numberOfCandidates}} phương án STP (Segmentation, Targeting, Positioning) chất lượng cao từ Layer.
+			prompt: `Bạn là một chuyên gia content strategy với nhiều năm kinh nghiệm. Nhiệm vụ của bạn là tạo ra 1 Pillar (L1 - cấp nội dung trên cùng) chất lượng cao dựa trên context đã cho. Pillar là nền tảng chiến lược, định hướng toàn bộ chuỗi nội dung phía dưới.
 
 📋 THÔNG TIN ĐẦU VÀO:
 
-Nội dung Layer:
-{{parentContent}}
-{{#if targetAudience}}
-
-🎯 Đối tượng mục tiêu: {{targetAudience}}
+{{#if metadata.targetAudience}}
+🎯 Đối tượng mục tiêu: {{metadata.targetAudience}}
 {{/if}}
-{{#if context.industry}}
-
-🏢 Ngành nghề: {{context.industry}}
+{{#if metadata.industry}}
+🏢 Ngành nghề: {{metadata.industry}}
+{{/if}}
+{{#if metadata.productType}}
+📦 Loại sản phẩm/dịch vụ: {{metadata.productType}}
+{{/if}}
+{{#if metadata.tone}}
+💬 Tone mong muốn: {{metadata.tone}}
+{{/if}}
+{{#if metadata.brandName}}
+🏷️ Tên thương hiệu: {{metadata.brandName}}
 {{/if}}
 
 ✅ YÊU CẦU:
 
-1. Tạo {{numberOfCandidates}} phương án STP khác nhau, mỗi phương án phải có cách tiếp cận riêng biệt
-2. Mỗi STP phải bao gồm đầy đủ 3 thành phần:
-   - **Segmentation (Phân khúc)**: Xác định các nhóm khách hàng khác nhau dựa trên đặc điểm, nhu cầu, hành vi
-   - **Targeting (Đối tượng)**: Chọn phân khúc mục tiêu cụ thể để tập trung vào
-   - **Positioning (Định vị)**: Xác định vị trí của sản phẩm/dịch vụ trong tâm trí khách hàng so với đối thủ
-3. STP phải logic, phù hợp với Layer và đối tượng mục tiêu
-4. Đảm bảo tính thực tế, khả thi và có tính phân biệt rõ ràng
-
-📤 ĐỊNH DẠNG KẾT QUẢ (JSON):
-{
-  "candidates": [
-    {
-      "title": "STP: [Tên ngắn gọn mô tả phương án]",
-      "content": "Segmentation: Mô tả chi tiết về phân khúc...\n\nTargeting: Giải thích tại sao chọn phân khúc này...\n\nPositioning: Định vị cụ thể trong thị trường...",
-      "summary": "Tóm tắt ngắn gọn về điểm nổi bật của STP này"
-    }
-  ]
-}`,
+1. Tạo 1 Pillar chất lượng: mô tả chiến lược nội dung, phạm vi và định hướng; có thể kèm tên ngắn gọn và tóm tắt.
+2. Pillar phải phù hợp với đối tượng mục tiêu và context (ngành, sản phẩm).
+3. Đảm bảo tính khả thi, rõ ràng để có thể triển khai thành STP → Insight → Content Line → Gene → Script.`,
 			variables: []models.AIPromptTemplateVariable{
-				{Name: "parentContent", Required: true, Description: "Nội dung của Layer"},
 				{Name: "targetAudience", Required: false, Description: "Đối tượng mục tiêu (B2B, B2C, B2B2C)"},
-				{Name: "numberOfCandidates", Required: false, Default: "3", Description: "Số lượng candidates"},
+			},
+			provider: &models.AIPromptTemplateProvider{
+				ProfileID: providerProfileID,
+				Config: &models.AIConfig{
+					Model:       "gpt-4",
+					Temperature: func() *float64 { v := 0.7; return &v }(),
+					MaxTokens:   func() *int { v := 2000; return &v }(),
+				},
+			},
+		},
+		// Template GENERATE cho từng level transition - mỗi step chỉ tạo 1 nội dung
+		{
+			name:        "Tạo STP từ Pillar",
+			description: "Template để tạo 1 STP (Segmentation, Targeting, Positioning) từ Pillar. STP bao gồm 3 thành phần: Segmentation, Targeting, Positioning.",
+			type_:       models.AIPromptTemplateTypeGenerate,
+			version:     "1.0.0",
+			prompt: `Bạn là một chuyên gia marketing strategy với nhiều năm kinh nghiệm. Nhiệm vụ của bạn là tạo ra 1 STP (Segmentation, Targeting, Positioning) chất lượng cao từ Pillar.
+
+📋 THÔNG TIN ĐẦU VÀO:
+
+Nội dung Pillar:
+{{parentText}}
+{{#if targetAudience}}
+
+🎯 Đối tượng mục tiêu: {{targetAudience}}
+{{/if}}
+{{#if metadata.industry}}
+
+🏢 Ngành nghề: {{metadata.industry}}
+{{/if}}
+
+✅ YÊU CẦU:
+
+1. Tạo 1 STP đầy đủ 3 thành phần: Segmentation (Phân khúc), Targeting (Đối tượng), Positioning (Định vị).
+2. STP phải logic, phù hợp với Pillar và đối tượng mục tiêu.
+3. Đảm bảo tính thực tế, khả thi và có tính phân biệt rõ ràng.`,
+			variables: []models.AIPromptTemplateVariable{
+				{Name: "parentText", Required: true, Description: "Text của parent node (Pillar)"},
+				{Name: "targetAudience", Required: false, Description: "Đối tượng mục tiêu (B2B, B2C, B2B2C)"},
 			},
 			provider: &models.AIPromptTemplateProvider{
 				ProfileID: providerProfileID,
@@ -2383,15 +2388,15 @@ Nội dung Layer:
 		},
 		{
 			name:        "Tạo Insight từ STP",
-			description: "Template để tạo các phương án Insight (góc nhìn sâu sắc) từ STP. Insight là những thông tin chi tiết, góc nhìn sâu sắc về đối tượng mục tiêu, giúp hiểu rõ hơn về nhu cầu, hành vi và động cơ của khách hàng. Insight phải dựa trên STP và phù hợp với đối tượng mục tiêu.",
+			description: "Template để tạo 1 Insight (góc nhìn sâu sắc) từ STP. Insight là thông tin chi tiết về đối tượng mục tiêu, nhu cầu, hành vi và động cơ.",
 			type_:       models.AIPromptTemplateTypeGenerate,
 			version:     "1.0.0",
-			prompt: `Bạn là một chuyên gia consumer insights với khả năng phân tích sâu sắc về hành vi và tâm lý khách hàng. Nhiệm vụ của bạn là tạo ra {{numberOfCandidates}} phương án Insight (góc nhìn sâu sắc) chất lượng cao từ STP.
+			prompt: `Bạn là một chuyên gia consumer insights với khả năng phân tích sâu sắc về hành vi và tâm lý khách hàng. Nhiệm vụ của bạn là tạo ra 1 Insight (góc nhìn sâu sắc) chất lượng cao từ STP.
 
 📋 THÔNG TIN ĐẦU VÀO:
 
 Nội dung STP:
-{{parentContent}}
+{{parentText}}
 {{#if targetAudience}}
 
 🎯 Đối tượng mục tiêu: {{targetAudience}}
@@ -2399,31 +2404,14 @@ Nội dung STP:
 
 ✅ YÊU CẦU:
 
-1. Tạo {{numberOfCandidates}} phương án Insight khác nhau, mỗi phương án phải có góc nhìn riêng biệt
-2. Insight phải là:
-   - Thông tin chi tiết, sâu sắc về đối tượng mục tiêu
-   - Góc nhìn mới mẻ, có giá trị thực tế
-   - Dựa trên phân tích hành vi, nhu cầu, động cơ của khách hàng
-   - Có thể áp dụng để tạo nội dung hiệu quả
-3. Insight phải logic, phù hợp với STP và đối tượng mục tiêu
-4. Đảm bảo tính độc đáo, không trùng lặp và có tính ứng dụng cao
+1. Tạo 1 Insight: thông tin chi tiết, sâu sắc về đối tượng mục tiêu; góc nhìn mới mẻ, có giá trị thực tế; dựa trên hành vi, nhu cầu, động cơ khách hàng.
+2. Insight phải logic, phù hợp với STP và đối tượng mục tiêu.
+3. Đảm bảo tính độc đáo và có tính ứng dụng cao.
 
-💡 GỢI Ý: Insight tốt thường trả lời câu hỏi "Tại sao khách hàng lại hành động như vậy?" hoặc "Điều gì thực sự thúc đẩy họ?"
-
-📤 ĐỊNH DẠNG KẾT QUẢ (JSON):
-{
-  "candidates": [
-    {
-      "title": "Insight: [Tên ngắn gọn mô tả góc nhìn]",
-      "content": "Mô tả chi tiết về insight, bao gồm: bối cảnh, hành vi khách hàng, động cơ, và ý nghĩa cho content strategy...",
-      "summary": "Tóm tắt ngắn gọn về giá trị và ứng dụng của insight này"
-    }
-  ]
-}`,
+💡 GỢI Ý: Insight tốt thường trả lời "Tại sao khách hàng lại hành động như vậy?" hoặc "Điều gì thực sự thúc đẩy họ?"`,
 			variables: []models.AIPromptTemplateVariable{
-				{Name: "parentContent", Required: true, Description: "Nội dung của STP"},
+				{Name: "parentText", Required: true, Description: "Text của parent node (STP)"},
 				{Name: "targetAudience", Required: false, Description: "Đối tượng mục tiêu"},
-				{Name: "numberOfCandidates", Required: false, Default: "3", Description: "Số lượng candidates"},
 			},
 			provider: &models.AIPromptTemplateProvider{
 				ProfileID: providerProfileID,
@@ -2436,15 +2424,15 @@ Nội dung STP:
 		},
 		{
 			name:        "Tạo Content Line từ Insight",
-			description: "Template để tạo các phương án Content Line (dòng nội dung) từ Insight. Content Line là những dòng nội dung cụ thể, có thể triển khai trực tiếp thành content thực tế. Mỗi Content Line phải dựa trên Insight và phù hợp với đối tượng mục tiêu, có thể sử dụng ngay để tạo nội dung.",
+			description: "Template để tạo 1 Content Line (dòng nội dung) từ Insight. Content Line là dòng nội dung cụ thể, có thể triển khai thành content thực tế.",
 			type_:       models.AIPromptTemplateTypeGenerate,
 			version:     "1.0.0",
-			prompt: `Bạn là một chuyên gia content creation với khả năng biến insights thành nội dung hấp dẫn. Nhiệm vụ của bạn là tạo ra {{numberOfCandidates}} phương án Content Line (dòng nội dung) cụ thể, có thể triển khai ngay từ Insight.
+			prompt: `Bạn là một chuyên gia content creation với khả năng biến insights thành nội dung hấp dẫn. Nhiệm vụ của bạn là tạo ra 1 Content Line (dòng nội dung) cụ thể, có thể triển khai ngay từ Insight.
 
 📋 THÔNG TIN ĐẦU VÀO:
 
 Nội dung Insight:
-{{parentContent}}
+{{parentText}}
 {{#if targetAudience}}
 
 🎯 Đối tượng mục tiêu: {{targetAudience}}
@@ -2452,34 +2440,14 @@ Nội dung Insight:
 
 ✅ YÊU CẦU:
 
-1. Tạo {{numberOfCandidates}} phương án Content Line khác nhau, mỗi phương án phải có cách tiếp cận riêng biệt
-2. Content Line phải:
-   - Là dòng nội dung cụ thể, rõ ràng, có thể sử dụng ngay
-   - Dựa trên Insight đã cho, không được tách rời
-   - Phù hợp với đối tượng mục tiêu và có tính hấp dẫn
-   - Có thể triển khai thành content thực tế (bài viết, video, post, etc.)
-3. Mỗi Content Line phải có:
-   - Chủ đề rõ ràng
-   - Góc tiếp cận cụ thể
-   - Thông điệp chính
-4. Đảm bảo tính sáng tạo, độc đáo và thực tế
+1. Tạo 1 Content Line: dòng nội dung cụ thể, rõ ràng, có thể sử dụng ngay; dựa trên Insight đã cho; phù hợp đối tượng mục tiêu; có thể triển khai thành content thực tế.
+2. Content Line phải có chủ đề rõ ràng, góc tiếp cận cụ thể, thông điệp chính.
+3. Đảm bảo tính sáng tạo, độc đáo và thực tế.
 
-💡 GỢI Ý: Content Line tốt thường trả lời câu hỏi "Nội dung này sẽ nói gì với khách hàng?" và "Tại sao họ sẽ quan tâm?"
-
-📤 ĐỊNH DẠNG KẾT QUẢ (JSON):
-{
-  "candidates": [
-    {
-      "title": "Content Line: [Tên ngắn gọn mô tả dòng nội dung]",
-      "content": "Mô tả chi tiết về dòng nội dung, bao gồm: chủ đề, góc tiếp cận, thông điệp chính, và cách triển khai...",
-      "summary": "Tóm tắt ngắn gọn về giá trị và điểm nổi bật của content line này"
-    }
-  ]
-}`,
+💡 GỢI Ý: Content Line tốt trả lời "Nội dung này sẽ nói gì với khách hàng?" và "Tại sao họ sẽ quan tâm?"`,
 			variables: []models.AIPromptTemplateVariable{
-				{Name: "parentContent", Required: true, Description: "Nội dung của Insight"},
+				{Name: "parentText", Required: true, Description: "Text của parent node (Insight)"},
 				{Name: "targetAudience", Required: false, Description: "Đối tượng mục tiêu"},
-				{Name: "numberOfCandidates", Required: false, Default: "3", Description: "Số lượng candidates"},
 			},
 			provider: &models.AIPromptTemplateProvider{
 				ProfileID: providerProfileID,
@@ -2492,15 +2460,15 @@ Nội dung Insight:
 		},
 		{
 			name:        "Tạo Gene từ Content Line",
-			description: "Template để tạo các phương án Gene (DNA của nội dung) từ Content Line. Gene định nghĩa tone (giọng điệu), style (phong cách) và các đặc điểm đặc trưng của nội dung. Gene giúp đảm bảo tính nhất quán về phong cách và cảm xúc trong tất cả các nội dung được tạo ra. Mỗi Gene phải phù hợp với Content Line và đối tượng mục tiêu.",
+			description: "Template để tạo 1 Gene (DNA của nội dung) từ Content Line. Gene định nghĩa tone, style và đặc điểm đặc trưng của nội dung.",
 			type_:       models.AIPromptTemplateTypeGenerate,
 			version:     "1.0.0",
-			prompt: `Bạn là một chuyên gia brand voice và content style với khả năng định nghĩa DNA của nội dung. Nhiệm vụ của bạn là tạo ra {{numberOfCandidates}} phương án Gene (DNA của nội dung) từ Content Line.
+			prompt: `Bạn là một chuyên gia brand voice và content style với khả năng định nghĩa DNA của nội dung. Nhiệm vụ của bạn là tạo ra 1 Gene (DNA của nội dung) từ Content Line.
 
 📋 THÔNG TIN ĐẦU VÀO:
 
 Nội dung Content Line:
-{{parentContent}}
+{{parentText}}
 {{#if targetAudience}}
 
 🎯 Đối tượng mục tiêu: {{targetAudience}}
@@ -2508,33 +2476,14 @@ Nội dung Content Line:
 
 ✅ YÊU CẦU:
 
-1. Tạo {{numberOfCandidates}} phương án Gene khác nhau, mỗi phương án phải có phong cách riêng biệt
-2. Gene phải định nghĩa đầy đủ:
-   - **Tone (Giọng điệu)**: Cách nói chuyện với khách hàng (thân thiện, chuyên nghiệp, vui vẻ, nghiêm túc, etc.)
-   - **Style (Phong cách)**: Cách trình bày nội dung (ngắn gọn, chi tiết, hình ảnh, storytelling, etc.)
-   - **Characteristics (Đặc điểm)**: Các đặc trưng riêng biệt (từ ngữ thường dùng, cấu trúc, cảm xúc, etc.)
-3. Gene phải:
-   - Phù hợp với Content Line và đối tượng mục tiêu
-   - Tạo ra sự nhất quán trong tất cả nội dung
-   - Dễ nhận biết và phân biệt với đối thủ
-4. Đảm bảo tính sáng tạo, độc đáo và có thể áp dụng thực tế
+1. Tạo 1 Gene: Tone (Giọng điệu), Style (Phong cách), Characteristics (Đặc điểm đặc trưng).
+2. Gene phải phù hợp với Content Line và đối tượng mục tiêu, tạo sự nhất quán và dễ nhận biết.
+3. Đảm bảo tính sáng tạo, độc đáo và có thể áp dụng thực tế.
 
-💡 GỢI Ý: Gene tốt giống như "DNA" của thương hiệu - mọi nội dung đều mang đặc điểm này, tạo ra sự nhận diện mạnh mẽ.
-
-📤 ĐỊNH DẠNG KẾT QUẢ (JSON):
-{
-  "candidates": [
-    {
-      "title": "Gene: [Tên ngắn gọn mô tả phong cách]",
-      "content": "Tone: Mô tả chi tiết về giọng điệu...\n\nStyle: Mô tả chi tiết về phong cách trình bày...\n\nCharacteristics: Mô tả các đặc điểm đặc trưng...",
-      "summary": "Tóm tắt ngắn gọn về điểm nổi bật và ứng dụng của Gene này"
-    }
-  ]
-}`,
+💡 GỢI Ý: Gene tốt giống như "DNA" của thương hiệu - mọi nội dung đều mang đặc điểm này.`,
 			variables: []models.AIPromptTemplateVariable{
-				{Name: "parentContent", Required: true, Description: "Nội dung của Content Line"},
+				{Name: "parentText", Required: true, Description: "Text của parent node (Content Line)"},
 				{Name: "targetAudience", Required: false, Description: "Đối tượng mục tiêu"},
-				{Name: "numberOfCandidates", Required: false, Default: "3", Description: "Số lượng candidates"},
 			},
 			provider: &models.AIPromptTemplateProvider{
 				ProfileID: providerProfileID,
@@ -2547,15 +2496,15 @@ Nội dung Content Line:
 		},
 		{
 			name:        "Tạo Script từ Gene",
-			description: "Template để tạo các phương án Script (kịch bản) từ Gene. Script là kịch bản chi tiết cho video hoặc nội dung đa phương tiện, bao gồm Hook (3 giây đầu thu hút), Body (nội dung chính) và Call-to-Action (lời kêu gọi hành động). Script phải tuân theo tone và style đã được định nghĩa trong Gene, phù hợp với đối tượng mục tiêu và có tính hấp dẫn cao.",
+			description: "Template để tạo 1 Script (kịch bản) từ Gene. Script bao gồm Hook, Body và Call-to-Action.",
 			type_:       models.AIPromptTemplateTypeGenerate,
 			version:     "1.0.0",
-			prompt: `Bạn là một chuyên gia scriptwriting và video production với khả năng tạo ra kịch bản hấp dẫn. Nhiệm vụ của bạn là tạo ra {{numberOfCandidates}} phương án Script (kịch bản) chi tiết từ Gene.
+			prompt: `Bạn là một chuyên gia scriptwriting và video production với khả năng tạo ra kịch bản hấp dẫn. Nhiệm vụ của bạn là tạo ra 1 Script (kịch bản) chi tiết từ Gene.
 
 📋 THÔNG TIN ĐẦU VÀO:
 
 Nội dung Gene:
-{{parentContent}}
+{{parentText}}
 {{#if targetAudience}}
 
 🎯 Đối tượng mục tiêu: {{targetAudience}}
@@ -2563,34 +2512,14 @@ Nội dung Gene:
 
 ✅ YÊU CẦU:
 
-1. Tạo {{numberOfCandidates}} phương án Script khác nhau, mỗi phương án phải có cách tiếp cận riêng biệt
-2. Script phải là kịch bản chi tiết, đầy đủ với 3 phần chính:
-   - **Hook (3 giây đầu)**: Câu mở đầu cực kỳ hấp dẫn, thu hút ngay lập tức, khiến người xem không thể bỏ qua
-   - **Body (Nội dung chính)**: Phần nội dung chính, truyền tải thông điệp một cách logic, hấp dẫn và dễ hiểu
-   - **Call-to-Action (Lời kêu gọi)**: Lời kêu gọi hành động rõ ràng, cụ thể, thuyết phục
-3. Script phải:
-   - Tuân theo tone và style đã được định nghĩa trong Gene
-   - Phù hợp với đối tượng mục tiêu
-   - Có tính hấp dẫn cao, dễ hiểu và dễ nhớ
-   - Có thể sử dụng ngay để quay video hoặc tạo nội dung
-4. Đảm bảo tính sáng tạo, độc đáo và thực tế
+1. Tạo 1 Script kịch bản chi tiết với 3 phần: Hook (3 giây đầu), Body (Nội dung chính), Call-to-Action.
+2. Script phải tuân theo tone và style trong Gene, phù hợp đối tượng mục tiêu.
+3. Có tính hấp dẫn cao, dễ hiểu và có thể sử dụng ngay để quay video hoặc tạo nội dung.
 
-💡 GỢI Ý: Script tốt thường có Hook cực mạnh trong 3 giây đầu, Body logic và hấp dẫn, và CTA rõ ràng, dễ thực hiện.
-
-📤 ĐỊNH DẠNG KẾT QUẢ (JSON):
-{
-  "candidates": [
-    {
-      "title": "Script: [Tên ngắn gọn mô tả kịch bản]",
-      "content": "Hook (3 giây đầu): [Câu mở đầu cực hấp dẫn]\n\nBody: [Nội dung chính chi tiết, có thể chia thành các phần nhỏ]\n\nCall-to-Action: [Lời kêu gọi hành động rõ ràng, cụ thể]",
-      "summary": "Tóm tắt ngắn gọn về điểm nổi bật và mục tiêu của script này"
-    }
-  ]
-}`,
+💡 GỢI Ý: Script tốt có Hook cực mạnh 3 giây đầu, Body logic và hấp dẫn, CTA rõ ràng.`,
 			variables: []models.AIPromptTemplateVariable{
-				{Name: "parentContent", Required: true, Description: "Nội dung của Gene"},
+				{Name: "parentText", Required: true, Description: "Text của parent node (Gene)"},
 				{Name: "targetAudience", Required: false, Description: "Đối tượng mục tiêu"},
-				{Name: "numberOfCandidates", Required: false, Default: "3", Description: "Số lượng candidates"},
 			},
 			provider: &models.AIPromptTemplateProvider{
 				ProfileID: providerProfileID,
@@ -2603,32 +2532,32 @@ Nội dung Gene:
 		},
 		// Template JUDGE chung (dùng cho tất cả level transitions)
 		{
-			name:        "Đánh Giá Phương Án Nội Dung",
-			description: "Template để đánh giá và chấm điểm các phương án nội dung (candidates) dựa trên các tiêu chí: Relevance (độ liên quan), Clarity (độ rõ ràng), Engagement (độ hấp dẫn) và Accuracy (độ chính xác). Template này có thể sử dụng cho tất cả các cấp độ nội dung (STP, Insight, Content Line, Gene, Script) để chọn ra phương án tốt nhất.",
+			name:        "Đánh Giá Nội Dung",
+			description: "Template để đánh giá và chấm điểm 1 nội dung dựa trên các tiêu chí: Relevance, Clarity, Engagement và Accuracy. Mỗi lần chạy chỉ đánh giá 1 nội dung.",
 			type_:       models.AIPromptTemplateTypeJudge,
 			version:     "1.0.0",
-			prompt: `Bạn là một chuyên gia đánh giá content với khả năng phân tích sâu sắc và công bằng. Nhiệm vụ của bạn là đánh giá và chấm điểm các phương án nội dung (candidates) một cách khách quan và chi tiết.
+			prompt: `Bạn là một chuyên gia đánh giá content với khả năng phân tích sâu sắc và công bằng. Nhiệm vụ của bạn là đánh giá và chấm điểm nội dung sau một cách khách quan và chi tiết.
 
-📋 DANH SÁCH PHƯƠNG ÁN CẦN ĐÁNH GIÁ:
+📋 NỘI DUNG CẦN ĐÁNH GIÁ:
 
-{{#each candidates}}
-📌 Phương án {{@index}}:
-- Tiêu đề: {{title}}
-- Nội dung: {{content}}
-{{#if summary}}
-- Tóm tắt: {{summary}}
+{{#if metadata.title}}
+Tiêu đề: {{metadata.title}}
 {{/if}}
 
----
-{{/each}}
+Nội dung:
+{{text}}
+{{#if metadata.summary}}
+
+Tóm tắt: {{metadata.summary}}
+{{/if}}
 
 📊 TIÊU CHÍ ĐÁNH GIÁ:
 
-Bạn cần đánh giá từng phương án dựa trên 4 tiêu chí sau (thang điểm 0-10):
-- **Relevance (Độ liên quan)**: Phương án có liên quan chặt chẽ với parent content và mục tiêu không? ({{criteria.relevance}}/10)
-- **Clarity (Độ rõ ràng)**: Phương án có rõ ràng, dễ hiểu, không mơ hồ không? ({{criteria.clarity}}/10)
-- **Engagement (Độ hấp dẫn)**: Phương án có hấp dẫn, thu hút được sự chú ý không? ({{criteria.engagement}}/10)
-- **Accuracy (Độ chính xác)**: Phương án có chính xác, logic, khả thi không? ({{criteria.accuracy}}/10)
+Bạn cần đánh giá nội dung dựa trên 4 tiêu chí sau (thang điểm 0-10):
+- **Relevance (Độ liên quan)**: Nội dung có liên quan chặt chẽ với parent content và mục tiêu không? ({{criteria.relevance}}/10)
+- **Clarity (Độ rõ ràng)**: Nội dung có rõ ràng, dễ hiểu, không mơ hồ không? ({{criteria.clarity}}/10)
+- **Engagement (Độ hấp dẫn)**: Nội dung có hấp dẫn, thu hút được sự chú ý không? ({{criteria.engagement}}/10)
+- **Accuracy (Độ chính xác)**: Nội dung có chính xác, logic, khả thi không? ({{criteria.accuracy}}/10)
 {{#if context.targetAudience}}
 
 🎯 Đối tượng mục tiêu: {{context.targetAudience}}
@@ -2637,50 +2566,28 @@ Bạn cần đánh giá từng phương án dựa trên 4 tiêu chí sau (thang 
 
 🏢 Ngành nghề: {{context.industry}}
 {{/if}}
-{{#if parentContent}}
-
-📄 Nội dung gốc (parent): {{parentContent}}
-{{/if}}
 
 ✅ YÊU CẦU:
 
-1. Đánh giá từng phương án một cách công bằng, chi tiết theo từng tiêu chí
-2. Tính điểm tổng thể (overallScore) cho mỗi phương án (0-10), dựa trên trung bình có trọng số của các tiêu chí
-3. Xếp hạng các phương án theo điểm số từ cao xuống thấp
-4. Chọn phương án tốt nhất và giải thích rõ ràng lý do tại sao phương án đó tốt nhất
-5. Cung cấp feedback chi tiết cho từng phương án, bao gồm điểm mạnh và điểm cần cải thiện
-
-💡 LƯU Ý: Hãy đánh giá một cách khách quan, công bằng và chi tiết. Feedback của bạn sẽ giúp cải thiện chất lượng nội dung.
+1. Tính điểm cho từng tiêu chí (relevance, clarity, engagement, accuracy) - thang điểm 0-10
+2. Tính điểm tổng thể (score) - trung bình có trọng số của các tiêu chí (0-10)
+3. Cung cấp feedback chi tiết: điểm mạnh và điểm cần cải thiện
 
 📤 ĐỊNH DẠNG KẾT QUẢ (JSON):
 {
-  "scores": [
-    {
-      "candidateIndex": 0,
-      "overallScore": 8.5,
-      "criteriaScores": {
-        "relevance": 9,
-        "clarity": 8,
-        "engagement": 9,
-        "accuracy": 8
-      },
-      "feedback": "Phương án này có điểm mạnh về... Tuy nhiên cần cải thiện..."
-    }
-  ],
-  "rankings": [
-    {"rank": 1, "candidateIndex": 0, "score": 8.5}
-  ],
-  "bestCandidate": {
-    "candidateIndex": 0,
-    "score": 8.5,
-    "reason": "Giải thích chi tiết tại sao phương án này tốt nhất..."
-  }
+  "score": 8.5,
+  "criteriaScores": {
+    "relevance": 9,
+    "clarity": 8,
+    "engagement": 9,
+    "accuracy": 8
+  },
+  "feedback": "Nhận xét chi tiết về nội dung: điểm mạnh và điểm cần cải thiện..."
 }`,
 			variables: []models.AIPromptTemplateVariable{
-				{Name: "candidates", Required: true, Description: "Danh sách candidates cần đánh giá"},
+				{Name: "text", Required: true, Description: "Text cần đánh giá (từ GENERATE output)"},
 				{Name: "criteria", Required: true, Description: "Tiêu chí đánh giá (relevance, clarity, engagement, accuracy)"},
-				{Name: "context", Required: false, Description: "Context để đánh giá"},
-				{Name: "parentContent", Required: false, Description: "Nội dung của parent node"},
+				{Name: "metadata", Required: false, Description: "Metadata tùy chọn (title, summary, etc.)"},
 			},
 			provider: &models.AIPromptTemplateProvider{
 				ProfileID: providerProfileID,
@@ -2701,9 +2608,9 @@ Bạn cần đánh giá từng phương án dựa trên 4 tiêu chí sau (thang 
 
 Context từ parent:
 {{parentContext.content}}
-{{#if parentContext.layerType}}
+{{#if parentContext.type}}
 
-Loại: {{parentContext.layerType}}
+Loại: {{parentContext.type}}
 {{/if}}
 
 Yêu cầu:
@@ -2751,7 +2658,7 @@ Format output (JSON):
   }
 }`,
 			variables: []models.AIPromptTemplateVariable{
-				{Name: "parentContext", Required: true, Description: "Context từ parent layer/step"},
+				{Name: "parentContext", Required: true, Description: "Context từ parent pillar/step"},
 				{Name: "requirements", Required: true, Description: "Yêu cầu generate steps"},
 				{Name: "targetLevel", Required: true, Description: "Level mục tiêu (L1-L8)"},
 				{Name: "constraints", Required: false, Description: "Ràng buộc cho việc generate"},
@@ -2810,7 +2717,9 @@ Format output (JSON):
 // Mỗi transition cần 2 steps: GENERATE + JUDGE
 func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.ObjectID, currentTime int64) error {
 	// Lấy prompt templates
-	generateSTPTemplate, err := h.getPromptTemplateByName(ctx, systemOrgID, "Tạo STP từ Layer")
+	generatePillarTemplate, _ := h.getPromptTemplateByName(ctx, systemOrgID, "Tạo Pillar (L1)") // Tùy chọn: dùng cho step tạo Pillar (L1)
+
+	generateSTPTemplate, err := h.getPromptTemplateByName(ctx, systemOrgID, "Tạo STP từ Pillar")
 	if err != nil {
 		logrus.Warn("Generate STP template not found, skipping step creation")
 		return nil
@@ -2840,7 +2749,7 @@ func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.Obj
 		return nil
 	}
 
-	judgeTemplate, err := h.getPromptTemplateByName(ctx, systemOrgID, "Đánh Giá Phương Án Nội Dung")
+	judgeTemplate, err := h.getPromptTemplateByName(ctx, systemOrgID, "Đánh Giá Nội Dung")
 	if err != nil {
 		logrus.Warn("Judge prompt template not found, skipping step creation")
 		return nil
@@ -2862,10 +2771,27 @@ func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.Obj
 		parentLevel      string
 		// KHÔNG có model, temperature, maxTokens - config lưu trong prompt template
 	}{
+		// L0 → L1: Tạo Pillar (cấp trên cùng, không có parent)
+		{
+			name:             "Tạo Pillar (L1)",
+			description:      "Bước này tạo ra nhiều phương án Pillar (L1 - cấp nội dung trên cùng) từ context (ngành, đối tượng, sản phẩm). Pillar là nền tảng chiến lược, không cần parent. Dùng khi bắt đầu tạo nội dung từ đầu.",
+			type_:            models.AIStepTypeGenerate,
+			promptTemplateID: generatePillarTemplate,
+			targetLevel:      "L1",
+			parentLevel:      "",
+		},
+		{
+			name:             "Đánh Giá Phương Án Pillar",
+			description:      "Bước này đánh giá và chấm điểm nội dung Pillar đã được tạo ra, dựa trên các tiêu chí: độ rõ ràng, độ khả thi, độ phù hợp với context.",
+			type_:            models.AIStepTypeJudge,
+			promptTemplateID: judgeTemplate,
+			targetLevel:      "L1",
+			parentLevel:      "",
+		},
 		// L1 → L2: Generate STP
 		{
-			name:             "Tạo STP từ Layer",
-			description:      "Bước này tạo ra nhiều phương án STP (Segmentation, Targeting, Positioning) từ Layer. Mỗi phương án sẽ bao gồm đầy đủ 3 thành phần: phân khúc khách hàng, đối tượng mục tiêu và định vị sản phẩm/dịch vụ. Bước này giúp xác định chiến lược marketing cơ bản.",
+			name:             "Tạo STP từ Pillar",
+			description:      "Bước này tạo ra nhiều phương án STP (Segmentation, Targeting, Positioning) từ Pillar. Mỗi phương án sẽ bao gồm đầy đủ 3 thành phần: phân khúc khách hàng, đối tượng mục tiêu và định vị sản phẩm/dịch vụ. Bước này giúp xác định chiến lược marketing cơ bản.",
 			type_:            models.AIStepTypeGenerate,
 			promptTemplateID: generateSTPTemplate,
 			targetLevel:      "L2",
@@ -2873,7 +2799,7 @@ func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.Obj
 		},
 		{
 			name:             "Đánh Giá Phương Án STP",
-			description:      "Bước này đánh giá và chấm điểm các phương án STP đã được tạo ra, dựa trên các tiêu chí: độ liên quan, độ rõ ràng, độ hấp dẫn và độ chính xác. Bước này giúp chọn ra phương án STP tốt nhất để tiếp tục phát triển.",
+			description:      "Bước này đánh giá và chấm điểm nội dung STP đã được tạo ra, dựa trên các tiêu chí: độ liên quan, độ rõ ràng, độ hấp dẫn và độ chính xác.",
 			type_:            models.AIStepTypeJudge,
 			promptTemplateID: judgeTemplate,
 			targetLevel:      "L2",
@@ -2882,7 +2808,7 @@ func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.Obj
 		// L2 → L3: Generate Insight
 		{
 			name:             "Generate Insight from STP",
-			description:      "Step để generate Insight (L3) candidates từ STP (L2)",
+			description:      "Step để generate 1 Insight (L3) từ STP (L2)",
 			type_:            models.AIStepTypeGenerate,
 			promptTemplateID: generateInsightTemplate,
 			targetLevel:      "L3",
@@ -2890,7 +2816,7 @@ func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.Obj
 		},
 		{
 			name:             "Đánh Giá Phương Án Insight",
-			description:      "Bước này đánh giá và chấm điểm các phương án Insight đã được tạo ra, dựa trên các tiêu chí: độ liên quan, độ rõ ràng, độ hấp dẫn và độ chính xác. Bước này giúp chọn ra phương án Insight tốt nhất, có giá trị thực tế cao nhất.",
+			description:      "Bước này đánh giá và chấm điểm nội dung Insight đã được tạo ra, dựa trên các tiêu chí: độ liên quan, độ rõ ràng, độ hấp dẫn và độ chính xác.",
 			type_:            models.AIStepTypeJudge,
 			promptTemplateID: judgeTemplate,
 			targetLevel:      "L3",
@@ -2907,7 +2833,7 @@ func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.Obj
 		},
 		{
 			name:             "Judge Content Line Candidates",
-			description:      "Step để đánh giá và chấm điểm các Content Line candidates",
+			description:      "Step để đánh giá và chấm điểm 1 Content Line",
 			type_:            models.AIStepTypeJudge,
 			promptTemplateID: judgeTemplate,
 			targetLevel:      "L4",
@@ -2924,7 +2850,7 @@ func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.Obj
 		},
 		{
 			name:             "Judge Gene Candidates",
-			description:      "Step để đánh giá và chấm điểm các Gene candidates",
+			description:      "Step để đánh giá và chấm điểm 1 Gene",
 			type_:            models.AIStepTypeJudge,
 			promptTemplateID: judgeTemplate,
 			targetLevel:      "L5",
@@ -2941,7 +2867,7 @@ func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.Obj
 		},
 		{
 			name:             "Đánh Giá Phương Án Script",
-			description:      "Bước này đánh giá và chấm điểm các phương án Script đã được tạo ra, dựa trên các tiêu chí: độ liên quan, độ rõ ràng, độ hấp dẫn và độ chính xác. Bước này giúp chọn ra phương án Script tốt nhất, có tính hấp dẫn và khả thi cao nhất.",
+			description:      "Bước này đánh giá và chấm điểm nội dung Script đã được tạo ra, dựa trên các tiêu chí: độ liên quan, độ rõ ràng, độ hấp dẫn và độ chính xác.",
 			type_:            models.AIStepTypeJudge,
 			promptTemplateID: judgeTemplate,
 			targetLevel:      "L6",
@@ -2959,6 +2885,10 @@ func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.Obj
 	}
 
 	for _, stepData := range defaultSteps {
+		// Bỏ qua step nếu không có prompt template (ví dụ: "Tạo Pillar (L1)" khi template chưa init)
+		if stepData.promptTemplateID == nil {
+			continue
+		}
 		// Kiểm tra step đã tồn tại chưa
 		stepFilter := bson.M{
 			"ownerOrganizationId": systemOrgID,
@@ -2970,19 +2900,16 @@ func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.Obj
 		}
 
 		if err == common.ErrNotFound {
-			// Lấy standard schemas
-			inputSchema := models.GetStandardInputSchema(stepData.type_)
-			outputSchema := models.GetStandardOutputSchema(stepData.type_)
-
 			// Chưa có, tạo mới
+			// LƯU Ý: InputSchema và OutputSchema sẽ được tự động set từ standard schema trong InsertOne()
+			// Không cần set thủ công, đảm bảo schema nhất quán theo (stepType + TargetLevel + ParentLevel)
 			step := models.AIStep{
 				OwnerOrganizationID: systemOrgID,
 				Name:                stepData.name,
 				Description:         stepData.description,
 				Type:                stepData.type_,
 				PromptTemplateID:    stepData.promptTemplateID,
-				InputSchema:         inputSchema,
-				OutputSchema:        outputSchema,
+				// InputSchema và OutputSchema sẽ được tự động set từ GetStandardSchema() trong InsertOne()
 				TargetLevel:         stepData.targetLevel,
 				ParentLevel:         stepData.parentLevel,
 				// KHÔNG có ProviderProfileID, Model, Temperature, MaxTokens - config lưu trong prompt template
@@ -3007,9 +2934,11 @@ func (h *InitService) initAISteps(ctx context.Context, systemOrgID primitive.Obj
 func (h *InitService) initAIWorkflows(ctx context.Context, systemOrgID primitive.ObjectID, currentTime int64) error {
 	logrus.Infof("Starting AI workflows initialization for organization: %s", systemOrgID.Hex())
 
-	// Lấy tất cả các steps cần thiết
+	// Lấy tất cả các steps cần thiết (bao gồm step tạo Pillar L1)
 	stepNames := []string{
-		"Tạo STP từ Layer",
+		"Tạo Pillar (L1)",
+		"Đánh Giá Phương Án Pillar",
+		"Tạo STP từ Pillar",
 		"Đánh Giá Phương Án STP",
 		"Tạo Insight từ STP",
 		"Đánh Giá Phương Án Insight",
@@ -3057,15 +2986,27 @@ func (h *InitService) initAIWorkflows(ctx context.Context, systemOrgID primitive
 		targetLevel string
 		stepNames   []string // Tên các steps theo thứ tự
 	}{
-		// L1 → L6: layer → stp → insight → contentLine → gene → script
+		// L0 → L1: Tạo Pillar (không cần root, rootRefType rỗng)
 		{
-			name:        "Quy Trình Tạo Nội Dung - Từ Layer (L1 đến L6)",
-			description: "Workflow đầy đủ để tạo và đánh giá nội dung từ Layer (L1) đến Script (L6) theo quy trình tuần tự. Workflow này bao gồm 10 bước: tạo và đánh giá STP, Insight, Content Line, Gene, và Script. Phù hợp khi bạn đã có Layer và muốn tạo ra Script hoàn chỉnh.",
+			name:        "Tạo Pillar (L1)",
+			description: "Workflow tạo Pillar (L1 - cấp nội dung trên cùng) từ context (ngành, đối tượng, sản phẩm). Không cần root content. Dùng khi bắt đầu tạo nội dung từ đầu.",
 			version:     "1.0.0",
-			rootRefType: "layer",
+			rootRefType: "",
+			targetLevel: "L1",
+			stepNames: []string{
+				"Tạo Pillar (L1)",
+				"Đánh Giá Phương Án Pillar",
+			},
+		},
+		// L1 → L6: pillar → stp → insight → contentLine → gene → script
+		{
+			name:        "Quy Trình Tạo Nội Dung - Từ Pillar (L1 đến L6)",
+			description: "Workflow đầy đủ để tạo và đánh giá nội dung từ Pillar (L1) đến Script (L6) theo quy trình tuần tự. Workflow này bao gồm 10 bước: tạo và đánh giá STP, Insight, Content Line, Gene, và Script. Phù hợp khi bạn đã có Pillar và muốn tạo ra Script hoàn chỉnh.",
+			version:     "1.0.0",
+			rootRefType: "pillar",
 			targetLevel: "L6",
 			stepNames: []string{
-				"Tạo STP từ Layer",
+				"Tạo STP từ Pillar",
 				"Đánh Giá Phương Án STP",
 				"Tạo Insight từ STP",
 				"Đánh Giá Phương Án Insight",
@@ -3238,13 +3179,13 @@ func (h *InitService) initAIWorkflowCommands(ctx context.Context, systemOrgID pr
 
 	// Lấy một vài workflows và steps để tạo command ví dụ
 	workflowNames := []string{
-		"Quy Trình Tạo Nội Dung - Từ Layer (L1 đến L6)",
+		"Quy Trình Tạo Nội Dung - Từ Pillar (L1 đến L6)",
 		"Quy Trình Tạo Nội Dung - Từ STP (L2 đến L6)",
 		"Quy Trình Tạo Nội Dung - Từ Insight (L3 đến L6)",
 	}
 
 	stepNames := []string{
-		"Tạo STP từ Layer",
+		"Tạo STP từ Pillar",
 		"Tạo Insight từ STP",
 		"Tạo Content Line từ Insight",
 	}
@@ -3313,19 +3254,19 @@ func (h *InitService) initAIWorkflowCommands(ctx context.Context, systemOrgID pr
 		// START_WORKFLOW commands
 		{
 			commandType: models.AIWorkflowCommandTypeStartWorkflow,
-			description: "Command ví dụ: Bắt đầu workflow từ Layer (L1) để tạo nội dung đến Script (L6)",
+			description: "Command ví dụ: Bắt đầu workflow từ Pillar (L1) để tạo nội dung đến Script (L6)",
 			workflowID: func() *primitive.ObjectID {
-				if wf, ok := workflows["Quy Trình Tạo Nội Dung - Từ Layer (L1 đến L6)"]; ok {
+				if wf, ok := workflows["Quy Trình Tạo Nội Dung - Từ Pillar (L1 đến L6)"]; ok {
 					return &wf.ID
 				} else {
 					return nil
 				}
 			}(),
 			stepID:      nil,
-			rootRefType: "layer",
+			rootRefType: "pillar",
 			params: map[string]interface{}{
 				"priority":    "high",
-				"description": "Tạo nội dung marketing từ Layer mẫu",
+				"description": "Tạo nội dung marketing từ Pillar mẫu",
 			},
 		},
 		{
@@ -3365,19 +3306,19 @@ func (h *InitService) initAIWorkflowCommands(ctx context.Context, systemOrgID pr
 		// EXECUTE_STEP commands
 		{
 			commandType: models.AIWorkflowCommandTypeExecuteStep,
-			description: "Command ví dụ: Chạy step tạo STP từ Layer",
+			description: "Command ví dụ: Chạy step tạo STP từ Pillar",
 			workflowID:  nil,
 			stepID: func() *primitive.ObjectID {
-				if step, ok := steps["Tạo STP từ Layer"]; ok {
+				if step, ok := steps["Tạo STP từ Pillar"]; ok {
 					return &step.ID
 				} else {
 					return nil
 				}
 			}(),
-			rootRefType: "layer",
+			rootRefType: "pillar",
 			params: map[string]interface{}{
 				"generateCount": 3, // Tạo 3 phương án STP
-				"description":   "Tạo STP từ Layer mẫu",
+				"description":   "Tạo STP từ Pillar mẫu",
 			},
 		},
 		{

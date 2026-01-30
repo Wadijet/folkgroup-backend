@@ -22,8 +22,8 @@ type AIWorkflowRun struct {
 	WorkflowID primitive.ObjectID `json:"workflowId" bson:"workflowId" index:"single:1"` // ID của workflow definition
 
 	// ===== ROOT REFERENCE =====
-	RootRefID   *primitive.ObjectID `json:"rootRefId,omitempty" bson:"rootRefId,omitempty" index:"single:1"` // ID của root content (ví dụ: Layer L1) - link về Module 1
-	RootRefType string              `json:"rootRefType,omitempty" bson:"rootRefType,omitempty" index:"single:1"` // Loại root reference: "layer", "stp", etc.
+	RootRefID   *primitive.ObjectID `json:"rootRefId,omitempty" bson:"rootRefId,omitempty" index:"single:1"` // ID của root content (ví dụ: Pillar L1) - link về Module 1
+	RootRefType string              `json:"rootRefType,omitempty" bson:"rootRefType,omitempty" index:"single:1"` // Loại root reference: "pillar", "stp", etc.
 
 	// ===== EXECUTION STATUS =====
 	Status  string `json:"status" bson:"status" index:"single:1"` // Trạng thái: pending, running, completed, failed, cancelled

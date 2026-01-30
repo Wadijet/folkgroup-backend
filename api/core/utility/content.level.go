@@ -8,7 +8,7 @@ import (
 
 // ContentLevelMap ánh xạ content type sang level number (L1-L6)
 var ContentLevelMap = map[string]int{
-	models.ContentNodeTypeLayer:       1, // L1
+	models.ContentNodeTypePillar:      1, // L1
 	models.ContentNodeTypeSTP:         2, // L2
 	models.ContentNodeTypeInsight:     3, // L3
 	models.ContentNodeTypeContentLine: 4, // L4
@@ -26,8 +26,8 @@ func GetContentLevel(contentType string) int {
 }
 
 // GetExpectedParentLevel trả về level number của parent node mong đợi cho một content type
-// Ví dụ: STP (L2) cần parent là Layer (L1) → trả về 1
-// Trả về 0 nếu là root level (Layer - L1) hoặc type không hợp lệ
+// Ví dụ: STP (L2) cần parent là Pillar (L1) → trả về 1
+// Trả về 0 nếu là root level (Pillar - L1) hoặc type không hợp lệ
 func GetExpectedParentLevel(contentType string) int {
 	currentLevel := GetContentLevel(contentType)
 	if currentLevel <= 1 {
@@ -37,8 +37,8 @@ func GetExpectedParentLevel(contentType string) int {
 }
 
 // GetExpectedParentType trả về content type của parent node mong đợi
-// Ví dụ: STP (L2) cần parent là Layer (L1) → trả về "layer"
-// Trả về "" nếu là root level (Layer - L1) hoặc type không hợp lệ
+// Ví dụ: STP (L2) cần parent là Pillar (L1) → trả về "pillar"
+// Trả về "" nếu là root level (Pillar - L1) hoặc type không hợp lệ
 func GetExpectedParentType(contentType string) string {
 	expectedLevel := GetExpectedParentLevel(contentType)
 	if expectedLevel == 0 {
@@ -80,18 +80,18 @@ func ValidateSequentialLevelConstraint(
 	if currentLevel == 0 {
 		return common.NewError(
 			common.ErrCodeValidationFormat,
-			fmt.Sprintf("Content type '%s' không hợp lệ. Các type hợp lệ: layer, stp, insight, contentLine, gene, script", contentType),
+			fmt.Sprintf("Content type '%s' không hợp lệ. Các type hợp lệ: pillar, stp, insight, contentLine, gene, script", contentType),
 			common.StatusBadRequest,
 			nil,
 		)
 	}
 
-	// 2. Nếu là root level (L1 - Layer), không cần parent
+	// 2. Nếu là root level (L1 - Pillar), không cần parent
 	if currentLevel == 1 {
 		if parentType != "" {
 			return common.NewError(
 				common.ErrCodeBusinessOperation,
-				"Layer (L1) là root level, không được có parent",
+				"Pillar (L1) là root level, không được có parent",
 				common.StatusBadRequest,
 				nil,
 			)

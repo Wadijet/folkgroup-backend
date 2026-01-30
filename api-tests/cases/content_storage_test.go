@@ -58,7 +58,7 @@ func TestContentStorageModule(t *testing.T) {
 		// CREATE: Tạo content node
 		t.Run("CREATE - Tạo content node", func(t *testing.T) {
 			payload := map[string]interface{}{
-				"type":     "layer", // Bắt buộc: layer, stp, insight, contentLine, gene, script
+				"type":     "pillar", // Bắt buộc: pillar, stp, insight, contentLine, gene, script
 				"text":     fmt.Sprintf("Test Content Node Text %d", time.Now().UnixNano()), // Bắt buộc
 				"name":     fmt.Sprintf("Test Content Node %d", time.Now().UnixNano()),
 				"status":   "active",
@@ -419,7 +419,7 @@ func TestContentStorageModule(t *testing.T) {
 		// CREATE: Tạo draft content node
 		t.Run("CREATE - Tạo draft content node", func(t *testing.T) {
 			payload := map[string]interface{}{
-				"type":     "layer", // Bắt buộc
+				"type":     "pillar", // Bắt buộc
 				"text":     fmt.Sprintf("Test Draft Node Text %d", time.Now().UnixNano()), // Bắt buộc
 				"name":     fmt.Sprintf("Test Draft Node %d", time.Now().UnixNano()),
 				"approvalStatus": "draft",
@@ -524,7 +524,7 @@ func TestContentStorageModule(t *testing.T) {
 
 			// Tạo lại draft node để test commit
 			createPayload := map[string]interface{}{
-				"type":     "layer",
+				"type":     "pillar",
 				"text":     fmt.Sprintf("Test Draft Node for Commit %d", time.Now().UnixNano()),
 				"name":     fmt.Sprintf("Test Draft Node for Commit %d", time.Now().UnixNano()),
 			}

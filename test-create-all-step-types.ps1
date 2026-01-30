@@ -71,19 +71,19 @@ $generateStepData = @{
     type = "GENERATE"
     inputSchema = @{
         type = "object"
-        required = @("layerId", "layerName", "targetAudience")
+        required = @("pillarId", "pillarName", "targetAudience")
         properties = @{
-            layerId = @{
+            pillarId = @{
                 type = "string"
-                description = "ID của layer cần generate content"
+                description = "ID của pillar cần generate content"
             }
-            layerName = @{
+            pillarName = @{
                 type = "string"
-                description = "Tên của layer"
+                description = "Tên của pillar"
             }
-            layerDescription = @{
+            pillarDescription = @{
                 type = "string"
-                description = "Mô tả của layer"
+                description = "Mô tả của pillar"
             }
             targetAudience = @{
                 type = "string"
@@ -376,22 +376,22 @@ $stepGenerationData = @{
         properties = @{
             parentContext = @{
                 type = "object"
-                description = "Context từ parent layer/step"
+                description = "Context từ parent pillar/step"
                 properties = @{
-                    layerId = @{
+                    pillarId = @{
                         type = "string"
-                        description = "ID của parent layer"
+                        description = "ID của parent pillar"
                     }
-                    layerName = @{
+                    pillarName = @{
                         type = "string"
                     }
-                    layerType = @{
+                    pillarType = @{
                         type = "string"
                         enum = @("L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8")
                     }
                     content = @{
                         type = "string"
-                        description = "Nội dung của parent layer"
+                        description = "Nội dung của parent pillar"
                     }
                 }
             }
@@ -602,7 +602,7 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "✓ GENERATE Step:" -ForegroundColor Green
 Write-Host "  ID: $generateStepId" -ForegroundColor Gray
-Write-Host "  Input: layerId, layerName, targetAudience, context, numberOfCandidates" -ForegroundColor Gray
+Write-Host "  Input: pillarId, pillarName, targetAudience, context, numberOfCandidates" -ForegroundColor Gray
 Write-Host "  Output: candidates[], generatedAt, model, tokens" -ForegroundColor Gray
 Write-Host ""
 Write-Host "✓ JUDGE Step:" -ForegroundColor Green

@@ -14,7 +14,7 @@ type AICandidateUpdateInput struct {
 	Text            string                 `json:"text,omitempty"`            // Nội dung text của candidate
 	JudgeScore      *float64               `json:"judgeScore,omitempty"`      // Quality score từ AI judge (0.0 - 1.0)
 	JudgeReasoning  string                 `json:"judgeReasoning,omitempty"`  // Lý do judge score
-	JudgedByAIRunID string                 `json:"judgedByAIRunId,omitempty"` // ID của AI run thực hiện judge (dạng string ObjectID)
+	JudgedByAIRunID string `json:"judgedByAIRunId,omitempty" transform:"str_objectid_ptr,optional"` // AI run thực hiện judge - transform sang Model *primitive.ObjectID
 	JudgeDetails    map[string]interface{} `json:"judgeDetails,omitempty"`    // Chi tiết judge
 	Selected        *bool                  `json:"selected,omitempty"`        // Candidate này đã được chọn hay chưa
 	Metadata        map[string]interface{} `json:"metadata,omitempty"`        // Metadata bổ sung

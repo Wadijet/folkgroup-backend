@@ -167,7 +167,7 @@ $workflowData = @{
             }
         }
     )
-    rootRefType = "layer"
+    rootRefType = "pillar"
     targetLevel = "L1"
     defaultPolicy = @{
         retryCount = 2

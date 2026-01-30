@@ -11,11 +11,11 @@ import "fmt"
 // - System sẽ tự động:
 //   + Parse AI response text → structured data theo outputSchema
 //   + Bổ sung metadata: timestamps, tokens, model, cost, etc.
-//   + Tạo candidates, scores, rankings, etc. từ parsed output
+//   + Tạo content, score, feedback, etc. từ parsed output
 //
 // QUAN TRỌNG VỀ STEP INPUT/OUTPUT:
-// - Step Input: Dữ liệu đầu vào cho step (layerId, context, etc.) - dùng để generate prompt
-// - Step Output: Dữ liệu đầu ra của step (candidates[], scores[], etc.) - bao gồm parsed AI output + system metadata
+// - Step Input: Dữ liệu đầu vào cho step (pillarId, context, etc.) - dùng để generate prompt
+// - Step Output: Dữ liệu đầu ra của step (content, score, etc.) - bao gồm parsed AI output + system metadata
 // - Khi execute workflow, output của step này sẽ được map vào input của step tiếp theo
 
 // GetStandardInputSchema trả về input schema chuẩn cho từng loại step
@@ -33,6 +33,7 @@ func GetStandardInputSchema(stepType string) map[string]interface{} {
 }
 
 // GetStandardOutputSchema trả về output schema chuẩn cho từng loại step
+// DEPRECATED: Dùng GetStandardSchema() với targetLevel và parentLevel để đảm bảo consistency
 func GetStandardOutputSchema(stepType string) map[string]interface{} {
 	switch stepType {
 	case AIStepTypeGenerate:
@@ -46,190 +47,136 @@ func GetStandardOutputSchema(stepType string) map[string]interface{} {
 	}
 }
 
+// GetStandardSchema trả về input và output schema chuẩn theo (stepType + TargetLevel + ParentLevel)
+// Đảm bảo schema nhất quán giữa các steps cùng level, tránh phá vỡ rule giữa các level
+//
+// Parameters:
+//   - stepType: Loại step (GENERATE, JUDGE, STEP_GENERATION)
+//   - targetLevel: Level mục tiêu (L1, L2, ..., L8) - có thể rỗng
+//   - parentLevel: Level của parent (L1, L2, ..., L8) - có thể rỗng
+//
+// Returns:
+//   - inputSchema: Input schema chuẩn
+//   - outputSchema: Output schema chuẩn
+//   - error: Lỗi nếu có
+//
+// Logic:
+//   - GENERATE step: Schema phụ thuộc vào TargetLevel và ParentLevel
+//   - L1 (no parent): Schema đặc biệt cho Pillar
+//   - L2-L8 (có parent): Schema chung cho tất cả level transitions
+//   - JUDGE step: Schema giống nhau cho tất cả level (chỉ đánh giá 1 nội dung)
+//   - STEP_GENERATION step: Schema giống nhau cho tất cả level
+func GetStandardSchema(stepType, targetLevel, parentLevel string) (map[string]interface{}, map[string]interface{}, error) {
+	var inputSchema map[string]interface{}
+	var outputSchema map[string]interface{}
+
+	switch stepType {
+	case AIStepTypeGenerate:
+		// GENERATE step: Schema phụ thuộc vào level
+		if targetLevel == "L1" && parentLevel == "" {
+			// L1 (Pillar): Không có parent, schema đặc biệt
+			inputSchema = GetStandardGenerateInputSchema()
+			outputSchema = GetStandardGenerateOutputSchema()
+		} else if targetLevel != "" {
+			// L2-L8: Có parent, schema chung (có thể customize theo level nếu cần)
+			inputSchema = GetStandardGenerateInputSchema()
+			outputSchema = GetStandardGenerateOutputSchema()
+		} else {
+			// Fallback: Dùng schema chung
+			inputSchema = GetStandardGenerateInputSchema()
+			outputSchema = GetStandardGenerateOutputSchema()
+		}
+
+	case AIStepTypeJudge:
+		// JUDGE step: Schema giống nhau cho tất cả level (chỉ đánh giá 1 nội dung)
+		inputSchema = GetStandardJudgeInputSchema()
+		outputSchema = GetStandardJudgeOutputSchema()
+
+	case AIStepTypeStepGeneration:
+		// STEP_GENERATION step: Schema giống nhau cho tất cả level
+		inputSchema = GetStandardStepGenerationInputSchema()
+		outputSchema = GetStandardStepGenerationOutputSchema()
+
+	default:
+		return nil, nil, fmt.Errorf("step type không hợp lệ: %s", stepType)
+	}
+
+	return inputSchema, outputSchema, nil
+}
+
 // GetStandardGenerateInputSchema trả về input schema chuẩn cho GENERATE step
-// 
+//
 // LƯU Ý:
-// - Step Input: Dữ liệu đầu vào (layerId, context, etc.) - dùng để generate prompt
-// - AI Input (prompt): CHỈ là TEXT - được generate từ step input này
-// - AI Output (response): CHỈ là TEXT - raw response từ AI
-// - System sẽ parse AI response text → candidates[] và bổ sung metadata (timestamps, tokens, etc.)
-// - Step Output: candidates[] + metadata (generatedAt, model, tokens) - để JUDGE step sử dụng
+// - Lớp AI: AI chỉ nhận TEXT (prompt) → trả về TEXT (response)
+// - Lớp Logic: System tự lấy parent node từ DB, tự build prompt, tự parse response
+// - Step Input: parentText (system tự lấy từ parentNode.Text) + metadata (optional)
 func GetStandardGenerateInputSchema() map[string]interface{} {
 	return map[string]interface{}{
-		"type": "object",
-		"required": []string{"layerId", "layerName", "targetAudience"},
+		"type":     "object",
+		"required": []string{"parentText"},
 		"properties": map[string]interface{}{
-			"layerId": map[string]interface{}{
+			"parentText": map[string]interface{}{
 				"type":        "string",
-				"description": "ID của layer cần generate content",
+				"description": "Text của parent node (system tự lấy từ parentNode.Text)",
 			},
-			"layerName": map[string]interface{}{
-				"type":        "string",
-				"description": "Tên của layer",
-			},
-			"layerDescription": map[string]interface{}{
-				"type":        "string",
-				"description": "Mô tả của layer",
-			},
-			"targetAudience": map[string]interface{}{
-				"type":        "string",
-				"description": "Đối tượng mục tiêu",
-				"enum":        []string{"B2B", "B2C", "B2B2C"},
-			},
-			"context": map[string]interface{}{
+			"metadata": map[string]interface{}{
 				"type":        "object",
-				"description": "Context bổ sung cho việc generate",
-				"properties": map[string]interface{}{
-					"industry": map[string]interface{}{
-						"type":        "string",
-						"description": "Ngành nghề",
-					},
-					"productType": map[string]interface{}{
-						"type":        "string",
-						"description": "Loại sản phẩm",
-					},
-					"tone": map[string]interface{}{
-						"type":        "string",
-						"description": "Tone của content",
-						"enum":        []string{"professional", "casual", "friendly", "formal"},
-					},
-				},
-			},
-			"numberOfCandidates": map[string]interface{}{
-				"type":        "integer",
-				"description": "Số lượng candidates cần generate",
-				"minimum":     1,
-				"maximum":     10,
-				"default":     3,
+				"description": "Metadata tùy chọn (targetAudience, tone, etc.)",
 			},
 		},
 	}
 }
 
 // GetStandardGenerateOutputSchema trả về output schema chuẩn cho GENERATE step
-// 
+//
 // LƯU Ý:
-// - AI Output (response): CHỈ là TEXT - raw response từ AI API
-// - System sẽ parse text này → structured data (candidates[])
-// - System tự bổ sung: generatedAt, model, tokens (không phải từ AI)
-// 
-// QUAN TRỌNG: Field "candidates" là bắt buộc và sẽ được sử dụng làm input cho JUDGE step
+// - Lớp AI: AI chỉ trả về TEXT (response) - không biết về structure
+// - Lớp Logic: System tự parse text → structured data (text, name, summary)
+// - System tự bổ sung: generatedAt, model, tokens (lưu trong step run, không cần trong output)
+//
+// ĐƠN GIẢN HÓA: text (required) + name (optional) + summary (optional)
+// - text → node.Text
+// - name → node.Name
+// - summary → node.Metadata.summary
 func GetStandardGenerateOutputSchema() map[string]interface{} {
 	return map[string]interface{}{
-		"type": "object",
-		"required": []string{"candidates", "generatedAt"},
+		"type":     "object",
+		"required": []string{"text"},
 		"properties": map[string]interface{}{
-			"candidates": map[string]interface{}{
-				"type":        "array",
-				"description": "Danh sách các content candidates đã được generate (BẮT BUỘC cho JUDGE step)",
-				"items": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"candidateId": map[string]interface{}{
-							"type":        "string",
-							"description": "ID của candidate (tự động generate hoặc từ system)",
-						},
-						"content": map[string]interface{}{
-							"type":        "string",
-							"description": "Nội dung của candidate",
-						},
-						"title": map[string]interface{}{
-							"type":        "string",
-							"description": "Tiêu đề của candidate",
-						},
-						"summary": map[string]interface{}{
-							"type":        "string",
-							"description": "Tóm tắt của candidate",
-						},
-						"metadata": map[string]interface{}{
-							"type":        "object",
-							"description": "Metadata bổ sung",
-							"properties": map[string]interface{}{
-								"wordCount": map[string]interface{}{
-									"type": "integer",
-								},
-								"language": map[string]interface{}{
-									"type": "string",
-								},
-								"tone": map[string]interface{}{
-									"type": "string",
-								},
-							},
-						},
-					},
-				},
-			},
-			"generatedAt": map[string]interface{}{
+			"text": map[string]interface{}{
 				"type":        "string",
-				"format":      "date-time",
-				"description": "Thời gian generate",
+				"description": "Nội dung chính (REQUIRED) - map vào node.Text",
 			},
-			"model": map[string]interface{}{
+			"name": map[string]interface{}{
 				"type":        "string",
-				"description": "Model AI đã sử dụng",
+				"description": "Tên node (optional) - map vào node.Name",
 			},
-			"tokens": map[string]interface{}{
-				"type":        "object",
-				"description": "Thông tin về tokens đã sử dụng",
-				"properties": map[string]interface{}{
-					"input": map[string]interface{}{
-						"type": "integer",
-					},
-					"output": map[string]interface{}{
-						"type": "integer",
-					},
-					"total": map[string]interface{}{
-						"type": "integer",
-					},
-				},
+			"summary": map[string]interface{}{
+				"type":        "string",
+				"description": "Tóm tắt (optional) - lưu vào node.Metadata.summary",
 			},
 		},
 	}
 }
 
 // GetStandardJudgeInputSchema trả về input schema chuẩn cho JUDGE step
-// 
+//
 // LƯU Ý:
-// - Step Input: candidates[] từ GENERATE step + criteria + context
-// - AI Input (prompt): CHỈ là TEXT - được generate từ step input này
-// - AI Output (response): CHỈ là TEXT - raw response từ AI
-// - System sẽ parse text này → structured data (scores[], rankings[])
-// - System tự bổ sung: judgedAt (không phải từ AI)
-// 
-// QUAN TRỌNG: Field "candidates" phải match với output "candidates" từ GENERATE step
+// - Lớp AI: AI chỉ nhận TEXT (prompt) → trả về TEXT (response)
+// - Lớp Logic: System tự lấy text từ GENERATE output, tự build prompt, tự parse response
+// - Step Input: text (system lấy từ GENERATE output) + criteria (system tự lấy) + metadata (optional)
 func GetStandardJudgeInputSchema() map[string]interface{} {
 	return map[string]interface{}{
-		"type": "object",
-		"required": []string{"candidates", "criteria"},
+		"type":     "object",
+		"required": []string{"text", "criteria"},
 		"properties": map[string]interface{}{
-			"candidates": map[string]interface{}{
-				"type":        "array",
-				"description": "Danh sách candidates cần đánh giá (từ output của GENERATE step)",
-				"items": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"candidateId": map[string]interface{}{
-							"type":        "string",
-							"description": "ID của candidate",
-						},
-						"content": map[string]interface{}{
-							"type":        "string",
-							"description": "Nội dung của candidate",
-						},
-						"title": map[string]interface{}{
-							"type":        "string",
-							"description": "Tiêu đề của candidate",
-						},
-						"summary": map[string]interface{}{
-							"type":        "string",
-							"description": "Tóm tắt của candidate (optional)",
-						},
-					},
-				},
+			"text": map[string]interface{}{
+				"type":        "string",
+				"description": "Text cần đánh giá (system lấy từ GENERATE output.text)",
 			},
 			"criteria": map[string]interface{}{
 				"type":        "object",
-				"description": "Tiêu chí đánh giá",
+				"description": "Tiêu chí đánh giá (system tự lấy từ step config)",
 				"properties": map[string]interface{}{
 					"relevance": map[string]interface{}{
 						"type":        "number",
@@ -257,117 +204,40 @@ func GetStandardJudgeInputSchema() map[string]interface{} {
 					},
 				},
 			},
-			"context": map[string]interface{}{
+			"metadata": map[string]interface{}{
 				"type":        "object",
-				"description": "Context để đánh giá",
-				"properties": map[string]interface{}{
-					"targetAudience": map[string]interface{}{
-						"type":        "string",
-						"description": "Đối tượng mục tiêu",
-					},
-					"industry": map[string]interface{}{
-						"type":        "string",
-						"description": "Ngành nghề",
-					},
-				},
+				"description": "Metadata tùy chọn (name, summary, context, etc.)",
 			},
 		},
 	}
 }
 
 // GetStandardJudgeOutputSchema trả về output schema chuẩn cho JUDGE step
-// 
+//
 // LƯU Ý:
-// - AI Output (response): CHỈ là TEXT - raw response từ AI API
-// - System sẽ parse text này → structured data (scores[], rankings[], bestCandidate)
-// - System tự bổ sung: judgedAt (không phải từ AI)
+// - Lớp AI: AI chỉ trả về TEXT (response) - system tự parse
+// - Lớp Logic: System tự parse text → score + metadata. judgedAt lưu trong step run.
 func GetStandardJudgeOutputSchema() map[string]interface{} {
 	return map[string]interface{}{
-		"type": "object",
-		"required": []string{"scores", "rankings", "judgedAt"},
+		"type":     "object",
+		"required": []string{"score"},
 		"properties": map[string]interface{}{
-			"scores": map[string]interface{}{
-				"type":        "array",
-				"description": "Điểm số của từng candidate",
-				"items": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"candidateId": map[string]interface{}{
-							"type":        "string",
-							"description": "ID của candidate",
-						},
-						"overallScore": map[string]interface{}{
-							"type":        "number",
-							"description": "Điểm tổng thể (0-10)",
-						},
-						"criteriaScores": map[string]interface{}{
-							"type": "object",
-							"properties": map[string]interface{}{
-								"relevance": map[string]interface{}{
-									"type": "number",
-								},
-								"clarity": map[string]interface{}{
-									"type": "number",
-								},
-								"engagement": map[string]interface{}{
-									"type": "number",
-								},
-								"accuracy": map[string]interface{}{
-									"type": "number",
-								},
-							},
-						},
-						"feedback": map[string]interface{}{
-							"type":        "string",
-							"description": "Nhận xét về candidate",
-						},
-					},
-				},
+			"score": map[string]interface{}{
+				"type":        "number",
+				"description": "Điểm tổng thể (0-10)",
+				"minimum":     0,
+				"maximum":     10,
 			},
-			"rankings": map[string]interface{}{
-				"type":        "array",
-				"description": "Xếp hạng các candidates theo điểm số",
-				"items": map[string]interface{}{
-					"type": "object",
-					"properties": map[string]interface{}{
-						"rank": map[string]interface{}{
-							"type": "integer",
-						},
-						"candidateId": map[string]interface{}{
-							"type": "string",
-						},
-						"score": map[string]interface{}{
-							"type": "number",
-						},
-					},
-				},
-			},
-			"bestCandidate": map[string]interface{}{
+			"metadata": map[string]interface{}{
 				"type":        "object",
-				"description": "Candidate tốt nhất",
-				"properties": map[string]interface{}{
-					"candidateId": map[string]interface{}{
-						"type": "string",
-					},
-					"score": map[string]interface{}{
-						"type": "number",
-					},
-					"reason": map[string]interface{}{
-						"type": "string",
-					},
-				},
-			},
-			"judgedAt": map[string]interface{}{
-				"type":        "string",
-				"format":      "date-time",
-				"description": "Thời gian đánh giá",
+				"description": "Metadata tùy chọn (feedback, criteriaScores, etc.)",
 			},
 		},
 	}
 }
 
 // GetStandardStepGenerationInputSchema trả về input schema chuẩn cho STEP_GENERATION step
-// 
+//
 // LƯU Ý:
 // - Step Input: parentContext, requirements, targetLevel, constraints
 // - AI Input (prompt): CHỈ là TEXT - được generate từ step input này
@@ -376,27 +246,27 @@ func GetStandardJudgeOutputSchema() map[string]interface{} {
 // - System tự bổ sung: generatedAt, model, tokens (không phải từ AI)
 func GetStandardStepGenerationInputSchema() map[string]interface{} {
 	return map[string]interface{}{
-		"type": "object",
+		"type":     "object",
 		"required": []string{"parentContext", "requirements", "targetLevel"},
 		"properties": map[string]interface{}{
 			"parentContext": map[string]interface{}{
 				"type":        "object",
-				"description": "Context từ parent layer/step",
+				"description": "Context từ parent pillar/step",
 				"properties": map[string]interface{}{
-					"layerId": map[string]interface{}{
+					"pillarId": map[string]interface{}{
 						"type":        "string",
-						"description": "ID của parent layer",
+						"description": "ID của parent pillar",
 					},
-					"layerName": map[string]interface{}{
+					"pillarName": map[string]interface{}{
 						"type": "string",
 					},
-					"layerType": map[string]interface{}{
+					"pillarType": map[string]interface{}{
 						"type": "string",
 						"enum": []string{"L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8"},
 					},
 					"content": map[string]interface{}{
 						"type":        "string",
-						"description": "Nội dung của parent layer",
+						"description": "Nội dung của parent pillar",
 					},
 				},
 			},
@@ -480,14 +350,14 @@ func GetStandardStepGenerationInputSchema() map[string]interface{} {
 }
 
 // GetStandardStepGenerationOutputSchema trả về output schema chuẩn cho STEP_GENERATION step
-// 
+//
 // LƯU Ý:
 // - AI Output (response): CHỈ là TEXT - raw response từ AI API
 // - System sẽ parse text này → structured data (generatedSteps[], generationPlan)
 // - System tự bổ sung: generatedAt, model, tokens (không phải từ AI)
 func GetStandardStepGenerationOutputSchema() map[string]interface{} {
 	return map[string]interface{}{
-		"type": "object",
+		"type":     "object",
 		"required": []string{"generatedSteps", "generationPlan", "generatedAt"},
 		"properties": map[string]interface{}{
 			"generatedSteps": map[string]interface{}{
@@ -573,7 +443,7 @@ func GetStandardStepGenerationOutputSchema() map[string]interface{} {
 				"description": "Model AI đã sử dụng",
 			},
 			"tokens": map[string]interface{}{
-				"type":        "object",
+				"type": "object",
 				"properties": map[string]interface{}{
 					"input": map[string]interface{}{
 						"type": "integer",

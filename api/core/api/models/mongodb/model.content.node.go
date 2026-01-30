@@ -6,7 +6,7 @@ import (
 
 // ContentNodeType định nghĩa các loại content node (L1-L6)
 const (
-	ContentNodeTypeLayer       = "layer"       // L1: Layer (Lớp)
+	ContentNodeTypePillar      = "pillar"      // L1: Pillar (Trụ cột)
 	ContentNodeTypeSTP         = "stp"         // L2: STP (Segmentation, Targeting, Positioning)
 	ContentNodeTypeInsight     = "insight"     // L3: Insight (Thông tin chi tiết)
 	ContentNodeTypeContentLine = "contentLine" // L4: Content Line (Dòng nội dung)
@@ -28,13 +28,13 @@ const (
 	CreationMethodWorkflow = "workflow" // Từ workflow run
 )
 
-// ContentNode đại diện cho content node (L1-L6: Layer, STP, Insight, Content Line, Gene, Script)
+// ContentNode đại diện cho content node (L1-L6: Pillar, STP, Insight, Content Line, Gene, Script)
 // Đây là production content đã được duyệt và commit
 type ContentNode struct {
 	ID primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"` // ID của content node
 
 	// ===== CONTENT HIERARCHY =====
-	Type     string              `json:"type" bson:"type" index:"single:1"`                             // Loại content node: layer, stp, insight, contentLine, gene, script
+	Type     string              `json:"type" bson:"type" index:"single:1"`                             // Loại content node: pillar, stp, insight, contentLine, gene, script
 	ParentID *primitive.ObjectID `json:"parentId,omitempty" bson:"parentId,omitempty" index:"single:1"` // ID của parent node (null nếu là root)
 	Name     string              `json:"name,omitempty" bson:"name,omitempty" index:"text"`             // Tên content node (tùy chọn)
 	Text     string              `json:"text" bson:"text" index:"text"`                                 // Nội dung text của node

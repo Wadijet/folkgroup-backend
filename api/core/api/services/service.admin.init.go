@@ -239,6 +239,11 @@ var InitialPermissions = []models.Permission{
 	{Name: "Organization.Update", Describe: "Quyền cập nhật tổ chức", Group: "Auth", Category: "Organization"},
 	{Name: "Organization.Delete", Describe: "Quyền xóa tổ chức", Group: "Auth", Category: "Organization"},
 
+	// Quản lý cấu hình tổ chức: xem (raw/resolved), cập nhật, xóa config theo tổ chức
+	{Name: "OrganizationConfig.Read", Describe: "Quyền xem cấu hình tổ chức (raw và resolved)", Group: "Auth", Category: "OrganizationConfig"},
+	{Name: "OrganizationConfig.Update", Describe: "Quyền cập nhật cấu hình tổ chức", Group: "Auth", Category: "OrganizationConfig"},
+	{Name: "OrganizationConfig.Delete", Describe: "Quyền xóa cấu hình tổ chức (không áp dụng cho config hệ thống)", Group: "Auth", Category: "OrganizationConfig"},
+
 	// Quản lý chia sẻ dữ liệu giữa các tổ chức: Thêm, xem, sửa, xóa
 	{Name: "OrganizationShare.Insert", Describe: "Quyền tạo chia sẻ dữ liệu giữa các tổ chức (CRUD)", Group: "Auth", Category: "OrganizationShare"},
 	{Name: "OrganizationShare.Read", Describe: "Quyền xem danh sách chia sẻ dữ liệu giữa các tổ chức", Group: "Auth", Category: "OrganizationShare"},

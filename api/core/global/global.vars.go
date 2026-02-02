@@ -17,8 +17,9 @@ type MongoDB_Auth_CollectionName struct {
 	Roles           string // Tên collection cho vai trò
 	RolePermissions string // Tên collection cho vai trò và quyền
 	UserRoles       string // Tên collection cho người dùng và vai trò
-	Organizations   string // Tên collection cho tổ chức
-	AccessTokens    string // Tên collection cho token
+	Organizations       string // Tên collection cho tổ chức
+	OrganizationConfigs string // Tên collection cho config tổ chức (1:1 với tổ chức)
+	AccessTokens        string // Tên collection cho token
 	FbPages         string // Tên collection cho trang Facebook
 	FbConvesations  string // Tên collection cho cuộc trò chuyện trên Facebook
 	FbMessages      string // Tên collection cho metadata tin nhắn trên Facebook

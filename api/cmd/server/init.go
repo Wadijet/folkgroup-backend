@@ -33,6 +33,7 @@ func initColNames() {
 	global.MongoDB_ColNames.RolePermissions = "auth_role_permissions"
 	global.MongoDB_ColNames.UserRoles = "auth_user_roles"
 	global.MongoDB_ColNames.Organizations = "auth_organizations"
+	global.MongoDB_ColNames.OrganizationConfigs = "auth_organization_configs"
 	global.MongoDB_ColNames.AccessTokens = "access_tokens"
 	global.MongoDB_ColNames.FbPages = "fb_pages"
 	global.MongoDB_ColNames.FbConvesations = "fb_conversations"
@@ -131,6 +132,7 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.UserRoles), models.UserRole{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.RolePermissions), models.RolePermission{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.Organizations), models.Organization{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.OrganizationConfigs), models.OrganizationConfig{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AccessTokens), models.AccessToken{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.FbPages), models.FbPage{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.FbConvesations), models.FbConversation{})

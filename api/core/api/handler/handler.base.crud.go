@@ -861,9 +861,9 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) Distinct(c fiber.Ctx) error {
 }
 
 // Upsert thêm mới hoặc cập nhật một document.
-// Filter được truyền qua query string, dữ liệu trong request body.
+// Filter được truyền qua query string, dữ liệu trong request body (DTO CreateInput).
+// Dùng CreateInput + transform (struct tag transform) để nhận body (vd: ownerOrganizationId string → ObjectID), giống InsertOne.
 // Nếu không tìm thấy document thỏa mãn filter sẽ tạo mới, ngược lại sẽ cập nhật.
-// Parse body thành struct T để struct tag `extract` có thể hoạt động tự động
 //
 // Parameters:
 // - c: Fiber context
@@ -872,20 +872,15 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) Distinct(c fiber.Ctx) error {
 // - error: Lỗi nếu có
 func (h *BaseHandler[T, CreateInput, UpdateInput]) Upsert(c fiber.Ctx) error {
 	return h.SafeHandler(c, func() error {
-		// Parse filter từ query string (sử dụng processFilter để có normalizeFilter và validate)
 		filter, err := h.processFilter(c)
 		if err != nil {
 			h.HandleResponse(c, nil, err)
 			return nil
 		}
-
-		// ✅ Tự động thêm filter ownerOrganizationId nếu model có field OwnerOrganizationID (phân quyền dữ liệu)
 		filter = h.applyOrganizationFilter(c, filter)
 
-		// Parse request body thành struct T (model) để struct tag `extract` có thể hoạt động
-		// Struct tag `extract` sẽ tự động extract dữ liệu từ PanCakeData, FacebookData, etc.
-		input := new(T)
-		if err := h.ParseRequestBody(c, input); err != nil {
+		var input CreateInput
+		if err := h.ParseRequestBody(c, &input); err != nil {
 			h.HandleResponse(c, nil, common.NewError(
 				common.ErrCodeValidationFormat,
 				fmt.Sprintf("Dữ liệu gửi lên không đúng định dạng JSON hoặc không khớp với cấu trúc yêu cầu. Chi tiết: %v", err),
@@ -895,28 +890,66 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) Upsert(c fiber.Ctx) error {
 			return nil
 		}
 
-		// ✅ Xử lý ownerOrganizationId: Cho phép chỉ định từ request hoặc dùng context
-		ownerOrgIDFromRequest := h.getOwnerOrganizationIDFromModel(input)
+		model, err := h.transformCreateInputToModel(&input)
+		if err != nil {
+			h.HandleResponse(c, nil, common.NewError(
+				common.ErrCodeValidationFormat,
+				fmt.Sprintf("Lỗi transform dữ liệu: %v", err),
+				common.StatusBadRequest,
+				err,
+			))
+			return nil
+		}
+
+		ownerOrgIDFromRequest := h.getOwnerOrganizationIDFromModel(model)
 		if ownerOrgIDFromRequest != nil && !ownerOrgIDFromRequest.IsZero() {
-			// Có ownerOrganizationId trong request → Validate quyền
 			if err := h.validateUserHasAccessToOrg(c, *ownerOrgIDFromRequest); err != nil {
 				h.HandleResponse(c, nil, err)
 				return nil
 			}
-			// ✅ Có quyền → Giữ nguyên ownerOrganizationId từ request
 		} else {
-			// Không có trong request → Dùng context (backward compatible)
 			activeOrgID := h.getActiveOrganizationID(c)
 			if activeOrgID != nil && !activeOrgID.IsZero() {
-				h.setOrganizationID(input, *activeOrgID)
+				h.setOrganizationID(model, *activeOrgID)
 			}
 		}
 
-		// Gọi Upsert với struct T - extract sẽ tự động chạy trong ToMap() khi ToUpdateData() được gọi
-		data, err := h.BaseService.Upsert(c.Context(), filter, *input)
+		// Điền filter từ model khi thiếu (vd: upsert theo ownerOrganizationId + key)
+		if h.hasOrganizationIDField() && filter["ownerOrganizationId"] == nil {
+			oid := h.getOwnerOrganizationIDFromModel(*model)
+			if oid != nil && !oid.IsZero() {
+				filter["ownerOrganizationId"] = *oid
+			}
+		}
+		if filter["key"] == nil {
+			if key := getModelStringField(model, "Key"); key != "" {
+				filter["key"] = key
+			}
+		}
+
+		data, err := h.BaseService.Upsert(c.Context(), filter, model)
 		h.HandleResponse(c, data, err)
 		return nil
 	})
+}
+
+// getModelStringField lấy giá trị string của field name từ model (dùng reflection). Trả về rỗng nếu không có field hoặc không phải string.
+func getModelStringField(model interface{}, fieldName string) string {
+	if model == nil {
+		return ""
+	}
+	val := reflect.ValueOf(model)
+	if val.Kind() == reflect.Ptr {
+		val = val.Elem()
+	}
+	if val.Kind() != reflect.Struct {
+		return ""
+	}
+	f := val.FieldByName(fieldName)
+	if !f.IsValid() || f.Kind() != reflect.String {
+		return ""
+	}
+	return f.String()
 }
 
 // UpsertMany thêm mới hoặc cập nhật nhiều document.

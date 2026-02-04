@@ -184,10 +184,10 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) getOwnerOrganizationIDFromMod
 	return nil
 }
 
-// validateUserHasAccessToOrg validate user có quyền với organization không
-// Dùng để validate khi create/update với ownerOrganizationId từ request
+// validateUserHasAccessToOrg kiểm tra user có quyền thực hiện thao tác (permission hiện tại) với organization không.
+// Share theo quyền: được share quyền nào thì làm được thao tác đó. Cho phép khi orgID thuộc allowedOrgIDs (role)
+// HOẶC org đã share đúng permission đó cho org của user (sharedOrgIDs). Dùng chung cho cả đọc và ghi.
 func (h *BaseHandler[T, CreateInput, UpdateInput]) validateUserHasAccessToOrg(c fiber.Ctx, orgID primitive.ObjectID) error {
-	// Lấy active role ID từ context (đã được middleware set)
 	activeRoleIDStr, ok := c.Locals("active_role_id").(string)
 	if !ok || activeRoleIDStr == "" {
 		return common.NewError(common.ErrCodeAuthRole, "Không có role context", common.StatusUnauthorized, nil)
@@ -196,24 +196,28 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) validateUserHasAccessToOrg(c 
 	if err != nil {
 		return common.NewError(common.ErrCodeAuthRole, "Role ID không hợp lệ", common.StatusUnauthorized, err)
 	}
-
-	// Lấy permission name từ context (đã được middleware set)
 	permissionName := h.getPermissionNameFromRoute(c)
 
-	// Lấy allowed organization IDs từ active role (org của role + children nếu scope 1)
 	allowedOrgIDs, err := services.GetAllowedOrganizationIDsFromRole(c.Context(), activeRoleID, permissionName)
 	if err != nil {
 		return err
 	}
-
-	// Kiểm tra organization có trong allowed list không
-	for _, allowedOrgID := range allowedOrgIDs {
-		if allowedOrgID == orgID {
-			return nil // ✅ Có quyền
+	for _, id := range allowedOrgIDs {
+		if id == orgID {
+			return nil
 		}
 	}
 
-	// ❌ Không có quyền
+	// Org đã share đúng permission này cho org của user → được thực hiện thao tác tương ứng (đọc/ghi tùy permission)
+	sharedOrgIDs, err := services.GetSharedOrganizationIDs(c.Context(), allowedOrgIDs, permissionName)
+	if err == nil {
+		for _, id := range sharedOrgIDs {
+			if id == orgID {
+				return nil
+			}
+		}
+	}
+
 	return common.NewError(
 		common.ErrCodeAuthRole,
 		"Không có quyền với organization này",

@@ -168,6 +168,19 @@ var (
 
 	// Webhook Logs Module Collections
 	webhookLogConfig = readWriteConfig // Webhook logs có thể xem, tạo, sửa, xóa để debug
+
+	// Organization Config Items (1 document per key): find-one, find, upsert-one, delete-one (+ resolved)
+	orgConfigItemConfig = CRUDConfig{
+		InsOne: false, InsMany: false,
+		Find: true, FindOne: true, FindById: false,
+		FindIds: false, Paginate: false,
+		UpdOne: false, UpdMany: false, UpdById: false,
+		FindUpd: false,
+		DelOne:  true, DelMany: false, DelById: false,
+		FindDel: false,
+		Count:   false, Distinct: false,
+		Upsert: true, UpsMany: false, Exists: false,
+	}
 )
 
 // RoutePrefix chứa các prefix cơ bản cho API
@@ -449,21 +462,17 @@ func (r *Router) registerRBACRoutes(router fiber.Router) error {
 	// Đã tắt log để giảm log khi khởi động
 	r.registerCRUDRoutes(router, "/organization", organizationHandler, readWriteConfig, "Organization")
 
-	// Organization Config routes — config riêng theo tổ chức (GET raw, GET resolved, PUT, DELETE)
-	// Route: GET/PUT/DELETE /organization/:id/config, GET /organization/:id/config/resolved
-	// Permission: OrganizationConfig.Read, OrganizationConfig.Update, OrganizationConfig.Delete
-	orgConfigHandler, err := handler.NewOrganizationConfigHandler()
-	if err != nil {
-		return fmt.Errorf("failed to create organization config handler: %v", err)
-	}
 	orgContextMiddleware := middleware.OrganizationContextMiddleware()
 	orgConfigReadMiddleware := middleware.AuthMiddleware("OrganizationConfig.Read")
-	orgConfigUpdateMiddleware := middleware.AuthMiddleware("OrganizationConfig.Update")
-	orgConfigDeleteMiddleware := middleware.AuthMiddleware("OrganizationConfig.Delete")
-	registerRouteWithMiddleware(router, "/organization", "GET", "/:id/config", []fiber.Handler{orgConfigReadMiddleware, orgContextMiddleware}, orgConfigHandler.GetConfig)
-	registerRouteWithMiddleware(router, "/organization", "GET", "/:id/config/resolved", []fiber.Handler{orgConfigReadMiddleware, orgContextMiddleware}, orgConfigHandler.GetResolvedConfig)
-	registerRouteWithMiddleware(router, "/organization", "PUT", "/:id/config", []fiber.Handler{orgConfigUpdateMiddleware, orgContextMiddleware}, orgConfigHandler.UpdateConfig)
-	registerRouteWithMiddleware(router, "/organization", "DELETE", "/:id/config", []fiber.Handler{orgConfigDeleteMiddleware, orgContextMiddleware}, orgConfigHandler.DeleteConfig)
+
+	// Organization Config Items (1 document per key) — CRUD chuẩn: find-one, find, upsert-one, delete-one + resolved
+	// Resource: /organization-config. Permission: OrganizationConfig.Read, OrganizationConfig.Update, OrganizationConfig.Delete
+	orgConfigItemHandler, err := handler.NewOrganizationConfigItemHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create organization config item handler: %v", err)
+	}
+	r.registerCRUDRoutes(router, "/organization-config", orgConfigItemHandler, orgConfigItemConfig, "OrganizationConfig")
+	registerRouteWithMiddleware(router, "/organization-config", "GET", "/resolved", []fiber.Handler{orgConfigReadMiddleware, orgContextMiddleware}, orgConfigItemHandler.GetResolved)
 
 	// Organization Share routes - dùng CRUD chuẩn
 	// Logic nghiệp vụ (duplicate check, validation) đã được đưa vào service.InsertOne override

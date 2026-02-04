@@ -12,28 +12,28 @@ import (
 
 // MongoDB_Auth_CollectionName chứa tên các collection trong MongoDB
 type MongoDB_Auth_CollectionName struct {
-	Users           string // Tên collection cho người dùng
-	Permissions     string // Tên collection cho quyền
-	Roles           string // Tên collection cho vai trò
-	RolePermissions string // Tên collection cho vai trò và quyền
-	UserRoles       string // Tên collection cho người dùng và vai trò
-	Organizations       string // Tên collection cho tổ chức
-	OrganizationConfigs string // Tên collection cho config tổ chức (1:1 với tổ chức)
-	AccessTokens        string // Tên collection cho token
-	FbPages         string // Tên collection cho trang Facebook
-	FbConvesations  string // Tên collection cho cuộc trò chuyện trên Facebook
-	FbMessages      string // Tên collection cho metadata tin nhắn trên Facebook
-	FbMessageItems  string // Tên collection cho từng message riêng lẻ trên Facebook
-	FbPosts         string // Tên collection cho bài viết trên Facebook
-	FbCustomers     string // Tên collection cho khách hàng từ Facebook (Pancake)
-	PcOrders        string // Tên collection cho đơn hàng trên PanCake
-	PcPosCustomers  string // Tên collection cho khách hàng từ Pancake POS
-	PcPosShops      string // Tên collection cho cửa hàng từ Pancake POS API
-	PcPosWarehouses string // Tên collection cho kho hàng từ Pancake POS API
-	PcPosProducts   string // Tên collection cho sản phẩm từ Pancake POS API
-	PcPosVariations string // Tên collection cho biến thể sản phẩm từ Pancake POS API
-	PcPosCategories string // Tên collection cho danh mục sản phẩm từ Pancake POS API
-	PcPosOrders     string // Tên collection cho đơn hàng từ Pancake POS API
+	Users                   string // Tên collection cho người dùng
+	Permissions             string // Tên collection cho quyền
+	Roles                   string // Tên collection cho vai trò
+	RolePermissions         string // Tên collection cho vai trò và quyền
+	UserRoles               string // Tên collection cho người dùng và vai trò
+	Organizations           string // Tên collection cho tổ chức
+	OrganizationConfigItems string // Tên collection cho config item (1 document per key): auth_organization_config_items
+	AccessTokens            string // Tên collection cho token
+	FbPages                 string // Tên collection cho trang Facebook
+	FbConvesations          string // Tên collection cho cuộc trò chuyện trên Facebook
+	FbMessages              string // Tên collection cho metadata tin nhắn trên Facebook
+	FbMessageItems          string // Tên collection cho từng message riêng lẻ trên Facebook
+	FbPosts                 string // Tên collection cho bài viết trên Facebook
+	FbCustomers             string // Tên collection cho khách hàng từ Facebook (Pancake)
+	PcOrders                string // Tên collection cho đơn hàng trên PanCake
+	PcPosCustomers          string // Tên collection cho khách hàng từ Pancake POS
+	PcPosShops              string // Tên collection cho cửa hàng từ Pancake POS API
+	PcPosWarehouses         string // Tên collection cho kho hàng từ Pancake POS API
+	PcPosProducts           string // Tên collection cho sản phẩm từ Pancake POS API
+	PcPosVariations         string // Tên collection cho biến thể sản phẩm từ Pancake POS API
+	PcPosCategories         string // Tên collection cho danh mục sản phẩm từ Pancake POS API
+	PcPosOrders             string // Tên collection cho đơn hàng từ Pancake POS API
 
 	// Notification System Collections (Hệ thống 2 - Routing/Template)
 	NotificationSenders      string // Tên collection cho notification senders

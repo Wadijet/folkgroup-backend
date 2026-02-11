@@ -92,7 +92,11 @@ func (s *PcPosOrderService) reportHookAfterSave(ctx context.Context, order *pcmo
 	if err != nil || len(keys) == 0 {
 		return
 	}
-	ts := order.InsertedAt
+	// Dùng posCreatedAt để khớp với báo cáo order_daily (timeField: posCreatedAt). Fallback InsertedAt, CreatedAt.
+	ts := order.PosCreatedAt
+	if ts == 0 {
+		ts = order.InsertedAt
+	}
 	if ts == 0 {
 		ts = order.CreatedAt
 	}

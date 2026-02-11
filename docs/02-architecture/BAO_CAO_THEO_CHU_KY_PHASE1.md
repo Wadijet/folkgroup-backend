@@ -94,7 +94,7 @@ Worker/Cron đọc report_dirty_periods → Recompute từng (reportKey, periodK
 ## 5. Hook
 
 - **Vị trí:** Trong PcPosOrderService (hoặc service collection nguồn), sau InsertOne/UpdateOne thành công.
-- **Logic:** Từ document lấy insertedAt (hoặc createdAt), ownerOrganizationId. Suy ra periodKey (ngày, timezone cố định). Query `report_definitions` có sourceCollection = "pc_pos_orders" → danh sách key. Với mỗi key gọi MarkDirty(ctx, reportKey, periodKey, ownerOrganizationId).
+- **Logic:** Từ document lấy posCreatedAt (hoặc insertedAt, createdAt), ownerOrganizationId. Suy ra periodKey (ngày, timezone cố định). Query `report_definitions` có sourceCollection = "pc_pos_orders" → danh sách key. Với mỗi key gọi MarkDirty(ctx, reportKey, periodKey, ownerOrganizationId).
 - **MarkDirty:** Insert vào report_dirty_periods (reportKey, periodKey, ownerOrganizationId, markedAt = now Unix seconds, processedAt = null). Có thể upsert để tránh trùng.
 - **Không** gọi engine trong request.
 
@@ -124,7 +124,7 @@ Worker/Cron đọc report_dirty_periods → Recompute từng (reportKey, periodK
 | 1 | Model ReportDefinition, ReportSnapshot, ReportDirtyPeriod. Đăng ký 3 collection + index (key unique, snapshot unique, dirty index). |
 | 2 | Service report: LoadDefinition(reportKey), MarkDirty(reportKey, periodKey, ownerOrganizationId). Helper: GetReportKeysByCollection(collectionName) — query report_definitions có sourceCollection = collectionName. |
 | 3 | Package report engine: Compute(ctx, reportKey, periodKey, ownerOrganizationId) — load definition, build aggregation, chạy, upsert snapshot. Phase 1 chỉ một sourceCollection. |
-| 4 | Hook: Trong PcPosOrderService sau InsertOne/UpdateOne → lấy insertedAt, ownerOrganizationId → periodKey → GetReportKeysByCollection("pc_pos_orders") → MarkDirty từng key. |
+| 4 | Hook: Trong PcPosOrderService sau InsertOne/UpdateOne → lấy posCreatedAt (fallback insertedAt), ownerOrganizationId → periodKey → GetReportKeysByCollection("pc_pos_orders") → MarkDirty từng key. |
 | 5 | Handler + route: GET trend, POST recompute. RBAC: Report.Read, Report.Recompute. |
 | 6 | Worker/cron (optional Phase 1): đọc dirty → Compute → đánh dấu processed. |
 | 7 | Seed: Insert document order_daily vào report_definitions (xem mục 9). |
@@ -133,28 +133,39 @@ Worker/Cron đọc report_dirty_periods → Recompute từng (reportKey, periodK
 
 ## 9. Seed document order_daily (Phase 1)
 
-Chèn một document vào `report_definitions`:
+Chèn (upsert) một document vào `report_definitions`:
 
 ```json
 {
   "key": "order_daily",
-  "name": "Báo cáo đơn hàng",
+  "name": "Báo cáo đơn hàng chu kỳ ngày",
   "periodType": "day",
   "periodLabel": "Theo ngày",
   "sourceCollection": "pc_pos_orders",
-  "timeField": "insertedAt",
+  "timeField": "posCreatedAt",
+  "timeFieldUnit": "millisecond",
   "dimensions": ["ownerOrganizationId"],
   "metrics": [
-    { "outputKey": "revenue", "aggType": "sum", "fieldPath": "posData.transfer_money" },
     { "outputKey": "orderCount", "aggType": "count", "fieldPath": "_id" },
-    { "outputKey": "paidOrderCount", "aggType": "countIf", "countIfExpr": "paidAt>0" }
+    { "outputKey": "totalAmount", "aggType": "sum", "fieldPath": "posData.total_price_after_sub_discount" }
   ],
-  "metadata": { "description": "Doanh thu và đơn hàng theo ngày" },
+  "metadata": {
+    "description": "Số lượng đơn và tổng số tiền theo ngày, phân theo nguồn (posData.tags). Nhiều tag/đơn thì chia đều.",
+    "tagDimension": {
+      "fieldPath": "posData.tags",
+      "nameField": "name",
+      "splitMode": "equal"
+    },
+    "totalAmountField": "posData.total_price_after_sub_discount",
+    "knownTags": ["Nguồn.Store-Sài Gòn", "Nguồn.Store-Hà Nội", "Nguồn.Web-Zalo", "Nguồn.Web-Shopify", "Nguồn.Bán lại", "Nguồn.Bán sỉ", "Nguồn.Bán mới"]
+  },
   "isActive": true,
   "createdAt": <Unix seconds>,
   "updatedAt": <Unix seconds>
 }
 ```
+
+**Lưu ý:** Hook MarkDirty dùng `posCreatedAt` từ document để suy periodKey.
 
 ---
 

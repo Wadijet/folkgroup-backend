@@ -26,7 +26,6 @@ import (
 	"github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -3582,46 +3581,52 @@ func (h *InitService) getProviderProfileByName(ctx context.Context, systemOrgID 
 	return &profileModel.ID, nil
 }
 
-// InitReportDefinitions tạo mẫu báo cáo đơn hàng (order_daily) trong report_definitions nếu chưa có.
-// Báo cáo gồm: doanh thu (revenue), số đơn (orderCount), số đơn đã thanh toán (paidOrderCount) theo ngày, nguồn pc_pos_orders.
+// InitReportDefinitions tạo hoặc cập nhật mẫu báo cáo đơn hàng chu kỳ ngày (order_daily) trong report_definitions.
+// Báo cáo: thời gian theo posCreatedAt; chỉ tiêu: số lượng đơn, tổng số tiền; thống kê theo posData.tags (chia đều nếu nhiều tag).
+// Các nguồn (tag): Nguồn.Store-Sài Gòn, Nguồn.Store-Hà Nội, Nguồn.Web-Zalo, Nguồn.Web-Shopify, Nguồn.Bán lại, Nguồn.Bán sỉ, Nguồn.Bán mới.
 func (h *InitService) InitReportDefinitions() error {
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.ReportDefinitions)
 	if !ok {
 		return fmt.Errorf("không tìm thấy collection %s", global.MongoDB_ColNames.ReportDefinitions)
 	}
 	ctx := context.TODO()
-	var existing reportmodels.ReportDefinition
-	err := coll.FindOne(ctx, bson.M{"key": "order_daily"}).Decode(&existing)
-	if err == nil {
-		return nil // Đã tồn tại
-	}
-	if err != mongo.ErrNoDocuments {
-		return fmt.Errorf("kiểm tra order_daily: %w", err)
-	}
 	now := time.Now().Unix()
 	seed := reportmodels.ReportDefinition{
 		Key:              "order_daily",
-		Name:             "Báo cáo đơn hàng",
+		Name:             "Báo cáo đơn hàng chu kỳ ngày",
 		PeriodType:       "day",
 		PeriodLabel:      "Theo ngày",
 		SourceCollection: global.MongoDB_ColNames.PcPosOrders,
-		TimeField:        "insertedAt",
-		TimeFieldUnit:    "millisecond", // Dữ liệu POS có thể lưu insertedAt/createdAt theo ms; engine dùng đơn vị này để filter đúng
+		TimeField:        "posCreatedAt",
+		TimeFieldUnit:    "millisecond", // Dữ liệu POS lưu theo ms; engine filter đúng theo posCreatedAt
 		Dimensions:       []string{"ownerOrganizationId"},
 		Metrics: []reportmodels.ReportMetricDefinition{
-			{OutputKey: "revenue", AggType: "sum", FieldPath: "posData.transfer_money"},
 			{OutputKey: "orderCount", AggType: "count", FieldPath: "_id"},
-			{OutputKey: "paidOrderCount", AggType: "countIf", CountIfExpr: "paidAt>0"},
+			{OutputKey: "totalAmount", AggType: "sum", FieldPath: "posData.total_price_after_sub_discount"},
 		},
-		Metadata:  map[string]interface{}{"description": "Doanh thu và đơn hàng theo ngày"},
+		Metadata: map[string]interface{}{
+			"description": "Số lượng đơn và tổng số tiền theo ngày, phân theo nguồn (posData.tags). Nhiều tag/đơn thì chia đều.",
+			"tagDimension": map[string]interface{}{
+				"fieldPath":  "posData.tags",
+				"nameField": "name",
+				"splitMode":  "equal", // Chia đều số lượng và số tiền khi đơn có nhiều tag
+			},
+			"totalAmountField": "posData.total_price_after_sub_discount",
+			"knownTags": []string{
+				"Nguồn.Store-Sài Gòn", "Nguồn.Store-Hà Nội", "Nguồn.Web-Zalo",
+				"Nguồn.Web-Shopify", "Nguồn.Bán lại", "Nguồn.Bán sỉ", "Nguồn.Bán mới",
+			},
+		},
 		IsActive:  true,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	_, err = coll.InsertOne(ctx, seed)
+	filter := bson.M{"key": "order_daily"}
+	opts := options.Replace().SetUpsert(true)
+	_, err := coll.ReplaceOne(ctx, filter, seed, opts)
 	if err != nil {
-		return fmt.Errorf("insert order_daily: %w", err)
+		return fmt.Errorf("upsert order_daily: %w", err)
 	}
-	logrus.Info("[INIT] Mẫu báo cáo đơn hàng (order_daily) đã được tạo trong report_definitions")
+	logrus.Info("[INIT] Báo cáo đơn hàng chu kỳ ngày (order_daily) đã được tạo/cập nhật trong report_definitions")
 	return nil
 }

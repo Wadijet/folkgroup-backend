@@ -1,4 +1,4 @@
-# Tóm Tắt Refactoring: Chuyển Business Logic Từ Handler → Service
+﻿# Tóm Tắt Refactoring: Chuyển Business Logic Từ Handler → Service
 
 ## Tổng Quan
 
@@ -21,8 +21,8 @@ Tài liệu này tóm tắt việc refactoring để tuân thủ nguyên tắc *
 - ✅ Handler chỉ xử lý ownerOrganizationId và gọi service
 
 **File thay đổi**:
-- `api/core/api/services/service.ai.workflow.run.go` - Thêm ValidateRootRef, InsertOne override
-- `api/core/api/handler/handler.ai.workflow.run.go` - Đơn giản hóa, chỉ gọi service
+- `api/internal/api/services/service.ai.workflow.run.go` - Thêm ValidateRootRef, InsertOne override
+- `api/internal/api/handler/handler.ai.workflow.run.go` - Đơn giản hóa, chỉ gọi service
 
 ---
 
@@ -39,8 +39,8 @@ Tài liệu này tóm tắt việc refactoring để tuân thủ nguyên tắc *
 - ✅ Handler chỉ xử lý ownerOrganizationId và gọi service
 
 **File thay đổi**:
-- `api/core/api/services/service.ai.workflow.command.go` - Thêm ValidateCommand, InsertOne override
-- `api/core/api/handler/handler.ai.workflow.command.go` - Đơn giản hóa, chỉ gọi service
+- `api/internal/api/services/service.ai.workflow.command.go` - Thêm ValidateCommand, InsertOne override
+- `api/internal/api/handler/handler.ai.workflow.command.go` - Đơn giản hóa, chỉ gọi service
 
 ---
 
@@ -57,8 +57,8 @@ Tài liệu này tóm tắt việc refactoring để tuân thủ nguyên tắc *
 - ✅ Handler dùng DTO và transform tags, chỉ gọi service
 
 **File thay đổi**:
-- `api/core/api/services/service.notification.routing.go` - Thêm ValidateUniqueness, InsertOne override
-- `api/core/api/handler/handler.notification.routing.go` - Đơn giản hóa, dùng DTO, chỉ gọi service
+- `api/internal/api/services/service.notification.routing.go` - Thêm ValidateUniqueness, InsertOne override
+- `api/internal/api/handler/handler.notification.routing.go` - Đơn giản hóa, dùng DTO, chỉ gọi service
 
 ---
 
@@ -75,8 +75,8 @@ Tài liệu này tóm tắt việc refactoring để tuân thủ nguyên tắc *
 - ✅ Handler dùng DTO và transform tags, chỉ gọi service
 
 **File thay đổi**:
-- `api/core/api/services/service.notification.channel.go` - Thêm ValidateUniqueness, InsertOne override
-- `api/core/api/handler/handler.notification.channel.go` - Đơn giản hóa, dùng DTO, chỉ gọi service
+- `api/internal/api/services/service.notification.channel.go` - Thêm ValidateUniqueness, InsertOne override
+- `api/internal/api/handler/handler.notification.channel.go` - Đơn giản hóa, dùng DTO, chỉ gọi service
 
 ---
 
@@ -92,8 +92,8 @@ Tài liệu này tóm tắt việc refactoring để tuân thủ nguyên tắc *
 - ✅ Handler chỉ xử lý ownerOrganizationId và gọi service
 
 **File thay đổi**:
-- `api/core/api/services/service.ai.step.go` - Thêm ValidateSchema, InsertOne override
-- `api/core/api/handler/handler.ai.step.go` - Đơn giản hóa, chỉ gọi service
+- `api/internal/api/services/service.ai.step.go` - Thêm ValidateSchema, InsertOne override
+- `api/internal/api/handler/handler.ai.step.go` - Đơn giản hóa, chỉ gọi service
 
 ---
 
@@ -111,8 +111,8 @@ Tài liệu này tóm tắt việc refactoring để tuân thủ nguyên tắc *
 - ✅ Handler chỉ xử lý ownerOrganizationId và gọi service
 
 **File thay đổi**:
-- `api/core/api/services/service.auth.organization.go` - Thêm CalculatePathAndLevel, calculateLevel, InsertOne override
-- `api/core/api/handler/handler.auth.organization.go` - Đơn giản hóa, chỉ gọi service
+- `api/internal/api/services/service.auth.organization.go` - Thêm CalculatePathAndLevel, calculateLevel, InsertOne override
+- `api/internal/api/handler/handler.auth.organization.go` - Đơn giản hóa, chỉ gọi service
 
 ---
 
@@ -131,9 +131,9 @@ Tài liệu này tóm tắt việc refactoring để tuân thủ nguyên tắc *
 - ✅ Handler dùng DTO và transform tags, chỉ gọi service
 
 **File thay đổi**:
-- `api/core/api/dto/dto.content.draft.approval.go` - Thêm transform tags
-- `api/core/api/services/service.content.draft.approval.go` - Thêm ValidateTargets, PrepareForInsert, InsertOne override
-- `api/core/api/handler/handler.content.draft.approval.go` - Đơn giản hóa, dùng DTO, chỉ gọi service
+- `api/internal/api/dto/dto.content.draft.approval.go` - Thêm transform tags
+- `api/internal/api/services/service.content.draft.approval.go` - Thêm ValidateTargets, PrepareForInsert, InsertOne override
+- `api/internal/api/handler/handler.content.draft.approval.go` - Đơn giản hóa, dùng DTO, chỉ gọi service
 
 ---
 

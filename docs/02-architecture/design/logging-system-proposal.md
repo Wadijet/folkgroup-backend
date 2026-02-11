@@ -1,4 +1,4 @@
-# Đề Xuất Hệ Thống Logging Chuyên Nghiệp
+﻿# Đề Xuất Hệ Thống Logging Chuyên Nghiệp
 
 ## 📋 Tổng Quan
 
@@ -167,7 +167,7 @@ auditLogger.LogAction("user_create", map[string]interface{}{
 ### Cấu Trúc Package
 
 ```
-api/core/logger/
+api/internal/logger/
 ├── logger.go          # Main logger package
 ├── config.go          # Log configuration
 ├── context.go         # Context helpers
@@ -199,7 +199,7 @@ logs/
 ### Basic Usage
 
 ```go
-import "meta_commerce/core/logger"
+import "meta_commerce/internal/logger"
 
 // Get default logger
 log := logger.GetLogger("app")

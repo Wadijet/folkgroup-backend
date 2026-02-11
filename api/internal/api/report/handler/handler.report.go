@@ -1,0 +1,177 @@
+// Package reporthdl chứa HTTP handler cho domain Report (trend, recompute).
+// File: basehdl.report.go - giữ tên cấu trúc cũ (basehdl.<domain>.<entity>.go).
+package reporthdl
+
+import (
+	"fmt"
+	"time"
+
+	reportdto "meta_commerce/internal/api/report/dto"
+	reportsvc "meta_commerce/internal/api/report/service"
+	basehdl "meta_commerce/internal/api/base/handler"
+	"meta_commerce/internal/common"
+
+	"github.com/gofiber/fiber/v3"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+)
+
+// ReportHandler xử lý API báo cáo theo chu kỳ: GET trend, POST recompute.
+type ReportHandler struct {
+	ReportService *reportsvc.ReportService
+}
+
+// NewReportHandler tạo mới ReportHandler.
+func NewReportHandler() (*ReportHandler, error) {
+	svc, err := reportsvc.NewReportService()
+	if err != nil {
+		return nil, fmt.Errorf("tạo ReportService: %w", err)
+	}
+	return &ReportHandler{ReportService: svc}, nil
+}
+
+// HandleTrend xử lý GET /reports/trend — loại báo cáo qua query reportKey.
+// URL: GET /api/v1/reports/trend?reportKey=order_daily&from=YYYY-MM-DD&to=YYYY-MM-DD
+func (h *ReportHandler) HandleTrend(c fiber.Ctx) error {
+	return basehdl.SafeHandlerWrapper(c, func() error {
+		var q reportdto.ReportTrendQuery
+		_ = c.Bind().Query(&q)
+		if q.ReportKey == "" {
+			q.ReportKey = c.Query("reportKey")
+		}
+		if q.From == "" {
+			q.From = c.Query("from")
+		}
+		if q.To == "" {
+			q.To = c.Query("to")
+		}
+		if q.ReportKey == "" {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationInput.Code, "message": "Thiếu reportKey (query: reportKey=order_daily)", "status": "error",
+			})
+			return nil
+		}
+		orgID := getActiveOrganizationID(c)
+		if orgID == nil || orgID.IsZero() {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationInput.Code, "message": "Vui lòng chọn tổ chức (active organization)", "status": "error",
+			})
+			return nil
+		}
+		if q.From == "" || q.To == "" {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationInput.Code, "message": "Thiếu from hoặc to (YYYY-MM-DD). Ví dụ: ?reportKey=order_daily&from=2025-01-01&to=2025-01-31", "status": "error",
+			})
+			return nil
+		}
+		if q.From > q.To {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationInput.Code, "message": "from phải nhỏ hơn hoặc bằng to", "status": "error",
+			})
+			return nil
+		}
+
+		list, err := h.ReportService.FindSnapshotsForTrend(c.Context(), q.ReportKey, *orgID, q.From, q.To)
+		if err != nil {
+			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
+				"code": common.ErrCodeDatabase.Code, "message": "Lỗi truy vấn báo cáo", "status": "error",
+			})
+			return nil
+		}
+		c.Status(common.StatusOK).JSON(fiber.Map{
+			"code": common.StatusOK, "message": "Thành công", "data": list, "status": "success",
+		})
+		return nil
+	})
+}
+
+// HandleRecompute xử lý POST /reports/recompute — loại báo cáo qua body reportKey.
+// URL: POST /api/v1/reports/recompute, body: {"reportKey":"order_daily","from":"YYYY-MM-DD","to":"YYYY-MM-DD"}
+func (h *ReportHandler) HandleRecompute(c fiber.Ctx) error {
+	return basehdl.SafeHandlerWrapper(c, func() error {
+		var body reportdto.ReportRecomputeBody
+		if err := c.Bind().Body(&body); err != nil {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationFormat.Code, "message": "Body không hợp lệ (cần reportKey, from, to)", "status": "error",
+			})
+			return nil
+		}
+		if body.ReportKey == "" {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationInput.Code, "message": "Thiếu reportKey trong body (vd: order_daily)", "status": "error",
+			})
+			return nil
+		}
+		if body.From == "" || body.To == "" {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationInput.Code, "message": "Thiếu from hoặc to (YYYY-MM-DD)", "status": "error",
+			})
+			return nil
+		}
+		orgID := getActiveOrganizationID(c)
+		if orgID == nil || orgID.IsZero() {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationInput.Code, "message": "Vui lòng chọn tổ chức (active organization)", "status": "error",
+			})
+			return nil
+		}
+		if body.From > body.To {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationInput.Code, "message": "from phải nhỏ hơn hoặc bằng to", "status": "error",
+			})
+			return nil
+		}
+
+		fromT, err := time.Parse("2006-01-02", body.From)
+		if err != nil {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationFormat.Code, "message": "from không đúng định dạng YYYY-MM-DD", "status": "error",
+			})
+			return nil
+		}
+		toT, err := time.Parse("2006-01-02", body.To)
+		if err != nil {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationFormat.Code, "message": "to không đúng định dạng YYYY-MM-DD", "status": "error",
+			})
+			return nil
+		}
+		days := int(toT.Sub(fromT).Hours()/24) + 1
+		if days > 31 {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationInput.Code, "message": "Khoảng từ from đến to tối đa 31 ngày", "status": "error",
+			})
+			return nil
+		}
+
+		ctx := c.Context()
+		count := 0
+		for d := fromT; !d.After(toT); d = d.AddDate(0, 0, 1) {
+			periodKey := d.Format("2006-01-02")
+			if err := h.ReportService.Compute(ctx, body.ReportKey, periodKey, *orgID); err != nil {
+				c.Status(common.StatusInternalServerError).JSON(fiber.Map{
+					"code": common.ErrCodeDatabase.Code, "message": "Lỗi tính báo cáo, vui lòng thử lại sau", "status": "error",
+				})
+				return nil
+			}
+			count++
+		}
+
+		c.Status(common.StatusOK).JSON(fiber.Map{
+			"code": common.StatusOK, "message": "Đã tính lại báo cáo",
+			"data": fiber.Map{"processedPeriods": count}, "status": "success",
+		})
+		return nil
+	})
+}
+
+func getActiveOrganizationID(c fiber.Ctx) *primitive.ObjectID {
+	orgIDStr, ok := c.Locals("active_organization_id").(string)
+	if !ok || orgIDStr == "" {
+		return nil
+	}
+	orgID, err := primitive.ObjectIDFromHex(orgIDStr)
+	if err != nil {
+		return nil
+	}
+	return &orgID
+}

@@ -1,4 +1,4 @@
-# Hệ Thống Filter Log
+﻿# Hệ Thống Filter Log
 
 ## 📋 Tổng Quan
 
@@ -14,7 +14,7 @@ Hệ thống filter log cho phép bạn bật/tắt log theo các tiêu chí c�
 
 ## 🏗️ Kiến Trúc Triển Khai
 
-### 1. LogConfig Extension (`api/core/logger/config.go`)
+### 1. LogConfig Extension (`api/internal/logger/config.go`)
 
 Thêm các fields filter vào `LogConfig`:
 - `FilterModules`: Filter theo module
@@ -25,7 +25,7 @@ Thêm các fields filter vào `LogConfig`:
 
 Tất cả filters mặc định là `"*"` (cho phép tất cả).
 
-### 2. FilterHook (`api/core/logger/filter.go`)
+### 2. FilterHook (`api/internal/logger/filter.go`)
 
 Hook mới để lọc log entries:
 - Parse filter config thành map để lookup nhanh
@@ -33,19 +33,19 @@ Hook mới để lọc log entries:
 - Đánh dấu entry bị filter bằng field `_filtered = true`
 - Thread-safe với mutex
 
-### 3. AsyncHook Integration (`api/core/logger/hook.go`)
+### 3. AsyncHook Integration (`api/internal/logger/hook.go`)
 
 Cập nhật `AsyncHook` để:
 - Kiểm tra field `_filtered` trước khi ghi log
 - Loại bỏ field `_filtered` khỏi entry trước khi format (không ghi vào log output)
 
-### 4. Logger Integration (`api/core/logger/logger.go`)
+### 4. Logger Integration (`api/internal/logger/logger.go`)
 
 Cập nhật `createLogger` để:
 - Thêm `FilterHook` trước `AsyncHook` (filter trước khi đưa vào async queue)
 - Filter áp dụng cho tất cả loggers (app, audit, performance, error)
 
-### 5. Helper Functions (`api/core/logger/context.go`)
+### 5. Helper Functions (`api/internal/logger/context.go`)
 
 Thêm các helper functions:
 - `WithModule(module string)`: Set module vào log entry
@@ -97,7 +97,7 @@ LOG_FILTER_LOG_TYPES=*                  # Cho phép tất cả log types
 ### 1. Log với Module
 
 ```go
-import "meta_commerce/core/logger"
+import "meta_commerce/internal/logger"
 
 // Log với module name
 logger.WithModule("auth").Info("User authenticated successfully")
@@ -402,13 +402,13 @@ Filter có thể được cập nhật runtime (nếu cần), nhưng thông thư
 ## 📝 Files Đã Tạo/Sửa
 
 ### Files Mới
-- `api/core/logger/filter.go`: FilterHook implementation
+- `api/internal/logger/filter.go`: FilterHook implementation
 
 ### Files Đã Sửa
-- `api/core/logger/config.go`: Thêm filter config fields
-- `api/core/logger/logger.go`: Tích hợp FilterHook
-- `api/core/logger/hook.go`: Kiểm tra `_filtered` field
-- `api/core/logger/context.go`: Thêm helper functions
+- `api/internal/logger/config.go`: Thêm filter config fields
+- `api/internal/logger/logger.go`: Tích hợp FilterHook
+- `api/internal/logger/hook.go`: Kiểm tra `_filtered` field
+- `api/internal/logger/context.go`: Thêm helper functions
 
 ---
 

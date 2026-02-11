@@ -1,4 +1,4 @@
-# Cơ Chế Quản Lý OwnerOrganizationId
+﻿# Cơ Chế Quản Lý OwnerOrganizationId
 
 ## 📋 Tổng Quan
 
@@ -16,7 +16,7 @@
 
 Hệ thống tự động phát hiện model có field `OwnerOrganizationID` hay không bằng reflection:
 
-```28:44:api/core/api/handler/handler.base.go
+```28:44:api/internal/api/handler/handler.base.go
 // hasOrganizationIDField kiểm tra model có field OwnerOrganizationID không (dùng reflection)
 // Field này dùng cho phân quyền dữ liệu (data authorization) - xác định dữ liệu thuộc về tổ chức nào
 func (h *BaseHandler[T, CreateInput, UpdateInput]) hasOrganizationIDField() bool {
@@ -40,7 +40,7 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) hasOrganizationIDField() bool
 
 #### 2.1. Lấy Organization ID từ Context
 
-```46:57:api/core/api/handler/handler.base.go
+```46:57:api/internal/api/handler/handler.base.go
 // getActiveOrganizationID lấy active organization ID từ context
 func (h *BaseHandler[T, CreateInput, UpdateInput]) getActiveOrganizationID(c fiber.Ctx) *primitive.ObjectID {
 	orgIDStr, ok := c.Locals("active_organization_id").(string)
@@ -57,7 +57,7 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) getActiveOrganizationID(c fib
 
 #### 2.2. Gán Organization ID vào Model
 
-```59:106:api/core/api/handler/handler.base.go
+```59:106:api/internal/api/handler/handler.base.go
 // setOrganizationID tự động gán ownerOrganizationId vào model (dùng reflection)
 // CHỈ gán nếu model có field OwnerOrganizationID
 // CHỈ gán từ context nếu model chưa có giá trị (zero) - ưu tiên giá trị từ request body
@@ -115,7 +115,7 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) setOrganizationID(model inter
 
 #### 2.3. Lấy Organization ID từ Model
 
-```148:184:api/core/api/handler/handler.base.go
+```148:184:api/internal/api/handler/handler.base.go
 // getOwnerOrganizationIDFromModel lấy ownerOrganizationId từ model (dùng reflection)
 // Tương tự getOrganizationIDFromModel nhưng tên rõ ràng hơn
 func (h *BaseHandler[T, CreateInput, UpdateInput]) getOwnerOrganizationIDFromModel(model interface{}) *primitive.ObjectID {
@@ -159,7 +159,7 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) getOwnerOrganizationIDFromMod
 
 #### 3.1. Validate User Có Quyền Với Organization
 
-```186:222:api/core/api/handler/handler.base.go
+```186:222:api/internal/api/handler/handler.base.go
 // validateUserHasAccessToOrg validate user có quyền với organization không
 // Dùng để validate khi create/update với ownerOrganizationId từ request
 func (h *BaseHandler[T, CreateInput, UpdateInput]) validateUserHasAccessToOrg(c fiber.Ctx, orgID primitive.ObjectID) error {
@@ -208,7 +208,7 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) validateUserHasAccessToOrg(c 
 
 #### 3.2. Validate Quyền Truy Cập Document
 
-```287:339:api/core/api/handler/handler.base.go
+```287:339:api/internal/api/handler/handler.base.go
 // validateOrganizationAccess validate user có quyền truy cập document này không
 // CHỈ validate nếu model có field OwnerOrganizationID (phân quyền dữ liệu)
 func (h *BaseHandler[T, CreateInput, UpdateInput]) validateOrganizationAccess(c fiber.Ctx, documentID string) error {
@@ -268,7 +268,7 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) validateOrganizationAccess(c 
 
 #### 4.1. Áp Dụng Organization Filter
 
-```224:285:api/core/api/handler/handler.base.go
+```224:285:api/internal/api/handler/handler.base.go
 // applyOrganizationFilter tự động thêm filter ownerOrganizationId
 // CHỈ áp dụng nếu model có field OwnerOrganizationID (phân quyền dữ liệu)
 func (h *BaseHandler[T, CreateInput, UpdateInput]) applyOrganizationFilter(c fiber.Ctx, baseFilter bson.M) bson.M {
@@ -342,7 +342,7 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) applyOrganizationFilter(c fib
 
 ### 1. CREATE (InsertOne, InsertMany, Upsert)
 
-```56:71:api/core/api/handler/handler.base.crud.go
+```56:71:api/internal/api/handler/handler.base.crud.go
 		// ✅ Xử lý ownerOrganizationId: Cho phép chỉ định từ request hoặc dùng context
 		ownerOrgIDFromRequest := h.getOwnerOrganizationIDFromModel(model)
 		if ownerOrgIDFromRequest != nil && !ownerOrgIDFromRequest.IsZero() {
@@ -372,13 +372,13 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) applyOrganizationFilter(c fib
 ### 2. READ (Find, FindOne, FindOneById, FindWithPagination)
 
 **Find, FindOne, FindWithPagination:**
-```150:151:api/core/api/handler/handler.base.crud.go
+```150:151:api/internal/api/handler/handler.base.crud.go
 		// ✅ Tự động thêm filter ownerOrganizationId nếu model có field OwnerOrganizationID (phân quyền dữ liệu)
 		filter = h.applyOrganizationFilter(c, filter)
 ```
 
 **FindOneById:**
-```196:200:api/core/api/handler/handler.base.crud.go
+```196:200:api/internal/api/handler/handler.base.crud.go
 		// ✅ Validate ownerOrganizationId trước khi query nếu model có field OwnerOrganizationID (phân quyền dữ liệu)
 		if err := h.validateOrganizationAccess(c, id); err != nil {
 			h.HandleResponse(c, nil, err)
@@ -393,7 +393,7 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) applyOrganizationFilter(c fib
 ### 3. UPDATE (UpdateById, UpdateOne, UpdateMany)
 
 **UpdateById:**
-```526:569:api/core/api/handler/handler.base.crud.go
+```526:569:api/internal/api/handler/handler.base.crud.go
 		// ✅ Validate quyền với document hiện tại trước khi update
 		if err := h.validateOrganizationAccess(c, id); err != nil {
 			h.HandleResponse(c, nil, err)
@@ -455,7 +455,7 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) applyOrganizationFilter(c fib
 ### 4. DELETE (DeleteById, DeleteMany)
 
 **DeleteMany:**
-```628:629:api/core/api/handler/handler.base.crud.go
+```628:629:api/internal/api/handler/handler.base.crud.go
 		// ✅ Tự động thêm filter ownerOrganizationId nếu model có field OwnerOrganizationID (phân quyền dữ liệu)
 		filter = h.applyOrganizationFilter(c, filter)
 ```

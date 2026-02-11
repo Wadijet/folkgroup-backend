@@ -1,4 +1,4 @@
-# Notification Domain và Severity System
+﻿# Notification Domain và Severity System
 
 ## 📋 Tổng Quan
 
@@ -42,14 +42,14 @@ const (
 
 ## 🏗️ Phân Chia Trách Nhiệm
 
-### Notification Module (`api/core/notification/`)
+### Notification Module (`api/internal/notification/`)
 **Trách nhiệm**: Xử lý logic nghiệp vụ notification
 - ✅ **Infer và set** Domain/Severity từ EventType
 - ✅ **Tính toán** Priority và MaxRetries từ Severity
 - ✅ **Routing logic** có thể filter theo Domain/Severity
 - ✅ **Tạo NotificationQueueItem** với đầy đủ thông tin (Domain, Severity, Priority, MaxRetries)
 
-### Delivery Module (`api/core/delivery/`)
+### Delivery Module (`api/internal/delivery/`)
 **Trách nhiệm**: Xử lý việc gửi notification (như "bưu điện")
 - ✅ **Chỉ dùng** các field đã được set sẵn (Priority, MaxRetries)
 - ✅ **Priority queue**: Sort theo Priority khi dequeue
@@ -68,7 +68,7 @@ const (
 
 **Implementation**:
 ```go
-// api/core/notification/classifier.go
+// api/internal/notification/classifier.go
 func GetDomainFromEventType(eventType string) string {
     if strings.HasPrefix(eventType, "system_") {
         return DomainSystem
@@ -103,7 +103,7 @@ func GetSeverityFromEventType(eventType string) string {
 
 **Implementation**:
 ```go
-// api/core/notification/rules.go
+// api/internal/notification/rules.go
 var SeverityPriority = map[string]int{
     SeverityCritical: 1,
     SeverityHigh:     2,
@@ -203,15 +203,15 @@ var SeverityMaxRetries = map[string]int{
 
 ### 1. Files Mới Sẽ Tạo
 
-#### `api/core/notification/constants.go`
+#### `api/internal/notification/constants.go`
 Định nghĩa constants cho Domain và Severity
 
-#### `api/core/notification/classifier.go`
+#### `api/internal/notification/classifier.go`
 Functions để infer Domain và Severity từ EventType:
 - `GetDomainFromEventType(eventType string) string`
 - `GetSeverityFromEventType(eventType string) string`
 
-#### `api/core/notification/rules.go`
+#### `api/internal/notification/rules.go`
 Rules xử lý (Priority, MaxRetries, Throttle):
 - `SeverityPriority map[string]int` - Mapping severity → priority
 - `SeverityMaxRetries map[string]int` - Mapping severity → maxRetries
@@ -338,9 +338,9 @@ func (q *Queue) Dequeue(ctx context.Context, limit int) ([]*models.NotificationQ
 ## 📝 Tóm Tắt Thay Đổi
 
 ### Files Mới: 3 files
-1. `api/core/notification/constants.go`
-2. `api/core/notification/classifier.go`
-3. `api/core/notification/rules.go`
+1. `api/internal/notification/constants.go`
+2. `api/internal/notification/classifier.go`
+3. `api/internal/notification/rules.go`
 
 ### Models Cập Nhật: 3 models
 1. `DeliveryQueueItem` - Thêm Priority field

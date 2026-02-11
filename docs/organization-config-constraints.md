@@ -1,4 +1,4 @@
-# Organization Config: Cấu trúc constraints và validation
+﻿# Organization Config: Cấu trúc constraints và validation
 
 ## Mục đích
 
@@ -114,7 +114,7 @@ Backend **dùng luôn** `global.Validate` (go-playground/validator) qua custom v
 ### Đăng ký
 
 - Trong `global.InitValidator()` đã đăng ký: `Validate.RegisterValidation("config_value", validateConfigValue)`.
-- Struct **ConfigConstraints** và hàm **validateConfigValue** nằm trong `api/core/global/validator.go`.
+- Struct **ConfigConstraints** và hàm **validateConfigValue** nằm trong `api/internal/global/validator.go`.
 
 ### Cách dùng
 

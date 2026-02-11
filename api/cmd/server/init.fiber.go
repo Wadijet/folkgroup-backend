@@ -2,19 +2,30 @@ package main
 
 import (
 	"fmt"
-	"meta_commerce/core/api/router"
-	"meta_commerce/core/common"
-	"meta_commerce/core/global"
 	"strings"
 	"time"
-
-	"meta_commerce/core/logger"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cors"
 	"github.com/gofiber/fiber/v3/middleware/limiter"
 	"github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/gofiber/fiber/v3/middleware/requestid"
+
+	agentrouter "meta_commerce/internal/api/agent/router"
+	airouter "meta_commerce/internal/api/ai/router"
+	authrouter "meta_commerce/internal/api/auth/router"
+	contentrouter "meta_commerce/internal/api/content/router"
+	ctarouter "meta_commerce/internal/api/cta/router"
+	deliveryrouter "meta_commerce/internal/api/delivery/router"
+	fbrouter "meta_commerce/internal/api/fb/router"
+	notificationrouter "meta_commerce/internal/api/notification/router"
+	pcrouter "meta_commerce/internal/api/pc/router"
+	reportrouter "meta_commerce/internal/api/report/router"
+	webhookrouter "meta_commerce/internal/api/webhook/router"
+	"meta_commerce/internal/api/router"
+	"meta_commerce/internal/common"
+	"meta_commerce/internal/global"
+	"meta_commerce/internal/logger"
 )
 
 // InitFiberApp khởi tạo ứng dụng Fiber với các middleware cần thiết
@@ -270,8 +281,22 @@ func InitFiberApp() *fiber.App {
 	// 	},
 	// }))
 
-	// Khởi tạo routes trước khi đăng ký response middleware
-	router.SetupRoutes(app)
+	// Khởi tạo routes trước khi đăng ký response middleware (theo từng domain để tránh import cycle)
+	if err := router.SetupRoutes(app,
+		authrouter.Register,
+		fbrouter.Register,
+		pcrouter.Register,
+		webhookrouter.Register,
+		reportrouter.Register,
+		notificationrouter.Register,
+		ctarouter.Register,
+		deliveryrouter.Register,
+		agentrouter.Register,
+		contentrouter.Register,
+		airouter.Register,
+	); err != nil {
+		panic(fmt.Sprintf("setup routes: %v", err))
+	}
 
 	return app
 }

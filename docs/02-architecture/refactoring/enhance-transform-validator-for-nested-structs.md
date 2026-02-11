@@ -1,4 +1,4 @@
-# Mở Rộng Transform Tag và Validator - Hỗ Trợ Nested Struct và Foreign Key Validation
+﻿# Mở Rộng Transform Tag và Validator - Hỗ Trợ Nested Struct và Foreign Key Validation
 
 ## Vấn Đề Hiện Tại
 
@@ -108,7 +108,7 @@ type AIPromptTemplateProviderInput struct {
 
 **Implementation:**
 ```go
-// api/core/global/validator.go
+// api/internal/global/validator.go
 
 // RegisterExistsValidator đăng ký custom validator để check foreign key
 func RegisterExistsValidator() {

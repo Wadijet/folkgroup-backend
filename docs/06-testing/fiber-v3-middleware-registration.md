@@ -1,4 +1,4 @@
-# Fiber v3 - Cách Đăng Ký Middleware Đúng
+﻿# Fiber v3 - Cách Đăng Ký Middleware Đúng
 
 ## ⚠️ Vấn Đề
 
@@ -83,7 +83,7 @@ router.Post(path, middleware, handler)
 
 ## 🔗 Tham Khảo
 
-- File: `api/core/api/router/routes.go`
+- File: `api/internal/api/router/routes.go`
 - Hàm: `registerRouteWithMiddleware()` (dòng 159-178)
 - Tất cả CRUD routes đều dùng cách này
 - Endpoint `/auth/roles` đã được sửa để dùng cách này

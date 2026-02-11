@@ -1,4 +1,4 @@
-# Kế Hoạch Triển Khai Organization Ownership
+﻿# Kế Hoạch Triển Khai Organization Ownership
 
 ## 📋 Tổng Quan
 
@@ -115,7 +115,7 @@ type BaseHandler[T any, CreateInput any, UpdateInput any] struct {
 
 #### 1. InsertOne() - Tự động gán organizationId
 
-**File**: `api/core/api/handler/handler.base.crud.go`
+**File**: `api/internal/api/handler/handler.base.crud.go`
 
 **Thay đổi:**
 ```go
@@ -200,7 +200,7 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) setOrganizationID(model inter
 
 #### 2. InsertMany() - Tự động gán organizationId cho tất cả items
 
-**File**: `api/core/api/handler/handler.base.crud.go`
+**File**: `api/internal/api/handler/handler.base.crud.go`
 
 **Thay đổi:**
 ```go
@@ -227,7 +227,7 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) InsertMany(c fiber.Ctx) error
 
 #### 3. Find() - Tự động filter theo organizationId
 
-**File**: `api/core/api/handler/handler.base.crud.go`
+**File**: `api/internal/api/handler/handler.base.crud.go`
 
 **Thay đổi:**
 ```go
@@ -296,7 +296,7 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) applyOrganizationFilter(c fib
 
 #### 4. FindOne() - Tự động filter theo organizationId
 
-**File**: `api/core/api/handler/handler.base.crud.go`
+**File**: `api/internal/api/handler/handler.base.crud.go`
 
 **Thay đổi:**
 ```go
@@ -318,7 +318,7 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) FindOne(c fiber.Ctx) error {
 
 #### 5. FindOneById() - Validate organizationId
 
-**File**: `api/core/api/handler/handler.base.crud.go`
+**File**: `api/internal/api/handler/handler.base.crud.go`
 
 **Thay đổi:**
 ```go
@@ -418,7 +418,7 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) validateOrganizationAccess(c 
 
 #### 6. UpdateOne() - Tự động filter và validate organizationId
 
-**File**: `api/core/api/handler/handler.base.crud.go`
+**File**: `api/internal/api/handler/handler.base.crud.go`
 
 **Thay đổi:**
 ```go
@@ -447,7 +447,7 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) UpdateOne(c fiber.Ctx) error 
 
 #### 7. UpdateMany() - Tự động filter theo organizationId
 
-**File**: `api/core/api/handler/handler.base.crud.go`
+**File**: `api/internal/api/handler/handler.base.crud.go`
 
 **Thay đổi:**
 ```go
@@ -473,7 +473,7 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) UpdateMany(c fiber.Ctx) error
 
 #### 8. DeleteOne() - Validate organizationId
 
-**File**: `api/core/api/handler/handler.base.crud.go`
+**File**: `api/internal/api/handler/handler.base.crud.go`
 
 **Thay đổi:**
 ```go
@@ -495,7 +495,7 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) DeleteOne(c fiber.Ctx) error 
 
 #### 9. DeleteMany() - Tự động filter theo organizationId
 
-**File**: `api/core/api/handler/handler.base.crud.go`
+**File**: `api/internal/api/handler/handler.base.crud.go`
 
 **Thay đổi:**
 ```go
@@ -517,7 +517,7 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) DeleteMany(c fiber.Ctx) error
 
 #### 10. Upsert() - Tự động gán organizationId
 
-**File**: `api/core/api/handler/handler.base.crud.go`
+**File**: `api/internal/api/handler/handler.base.crud.go`
 
 **Thay đổi:**
 ```go
@@ -550,7 +550,7 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) Upsert(c fiber.Ctx) error {
 
 #### 11. UpsertMany() - Tự động gán organizationId cho tất cả items
 
-**File**: `api/core/api/handler/handler.base.crud.go`
+**File**: `api/internal/api/handler/handler.base.crud.go`
 
 **Thay đổi:**
 ```go

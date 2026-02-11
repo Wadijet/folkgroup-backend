@@ -1,4 +1,4 @@
-# Tổng Quan Kiến Trúc
+﻿# Tổng Quan Kiến Trúc
 
 Tài liệu về kiến trúc tổng thể của hệ thống FolkForm Auth Backend.
 
@@ -29,13 +29,13 @@ Tài liệu về kiến trúc tổng thể của hệ thống FolkForm Auth Back
        ▼
 ┌─────────────────────────────────┐
 │      Router Layer               │
-│  (api/core/api/router/routes.go) │
+│  (api/internal/api/router/routes.go) │
 └──────┬──────────────────────────┘
        │
        ▼
 ┌─────────────────────────────────┐
 │      Handler Layer              │
-│  (api/core/api/handler/)        │
+│  (api/internal/api/handler/)        │
 │  - Parse request                │
 │  - Validate input               │
 │  - Call service                 │
@@ -45,7 +45,7 @@ Tài liệu về kiến trúc tổng thể của hệ thống FolkForm Auth Back
        ▼
 ┌─────────────────────────────────┐
 │      Service Layer              │
-│  (api/core/api/services/)        │
+│  (api/internal/api/services/)        │
 │  - Business logic               │
 │  - Data validation              │
 │  - Call repository              │
@@ -89,7 +89,7 @@ Tài liệu về kiến trúc tổng thể của hệ thống FolkForm Auth Back
 
 ### 2. Middleware Layer
 
-**Vị trí:** `api/core/api/middleware/`
+**Vị trí:** `api/internal/api/middleware/`
 
 **Chức năng:**
 - Authentication: Verify JWT token
@@ -104,7 +104,7 @@ Tài liệu về kiến trúc tổng thể của hệ thống FolkForm Auth Back
 
 ### 3. Router Layer
 
-**Vị trí:** `api/core/api/router/`
+**Vị trí:** `api/internal/api/router/`
 
 **Chức năng:**
 - Định nghĩa routes
@@ -117,7 +117,7 @@ Tài liệu về kiến trúc tổng thể của hệ thống FolkForm Auth Back
 
 ### 4. Handler Layer
 
-**Vị trí:** `api/core/api/handler/`
+**Vị trí:** `api/internal/api/handler/`
 
 **Chức năng:**
 - Nhận HTTP request
@@ -134,7 +134,7 @@ Tài liệu về kiến trúc tổng thể của hệ thống FolkForm Auth Back
 
 ### 5. Service Layer
 
-**Vị trí:** `api/core/api/services/`
+**Vị trí:** `api/internal/api/services/`
 
 **Chức năng:**
 - Business logic
@@ -149,7 +149,7 @@ Tài liệu về kiến trúc tổng thể của hệ thống FolkForm Auth Back
 
 ### 6. Repository Layer
 
-**Vị trí:** `api/core/api/models/mongodb/`
+**Vị trí:** `api/internal/api/models/mongodb/`
 
 **Chức năng:**
 - Định nghĩa data models
@@ -162,7 +162,7 @@ Tài liệu về kiến trúc tổng thể của hệ thống FolkForm Auth Back
 
 ### 7. Database Layer
 
-**Vị trí:** `api/core/database/`
+**Vị trí:** `api/internal/database/`
 
 **Chức năng:**
 - Kết nối MongoDB
@@ -280,7 +280,7 @@ Xem chi tiết tại [Database Schema](database.md)
 
 ### Core Utilities
 
-**Vị trí:** `api/core/utility/`
+**Vị trí:** `api/internal/utility/`
 
 - `jwt.go` - JWT token generation và verification
 - `cipher.go` - Password hashing
@@ -291,7 +291,7 @@ Xem chi tiết tại [Database Schema](database.md)
 
 ### Global Variables
 
-**Vị trí:** `api/core/global/`
+**Vị trí:** `api/internal/global/`
 
 - `global.vars.go` - Global variables (config, database, etc.)
 - `validator.go` - Input validation

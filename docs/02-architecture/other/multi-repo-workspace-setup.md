@@ -1,4 +1,4 @@
-# Mô Hình Làm Việc Với 3 Git Repositories - AI Context Setup
+﻿# Mô Hình Làm Việc Với 3 Git Repositories - AI Context Setup
 
 ## 📋 Tổng Quan
 
@@ -127,7 +127,7 @@ File → Open Workspace from File → Chọn folkform.code-workspace
 ```
 folkform-workspace/
 ├── ff_be_auth/              ← AI đọc được
-│   ├── api/core/api/        ← Backend services
+│   ├── api/internal/api/        ← Backend services
 │   └── docs/               ← Backend docs
 │
 ├── agent_pancake/           ← AI đọc được
@@ -146,8 +146,8 @@ folkform-workspace/
 Bạn: "Tạo API endpoint để frontend lấy danh sách conversations"
 
 AI: ✅ Đọc được:
-    - ff_be_auth/api/core/api/handler/ (hiểu pattern handler)
-    - ff_be_auth/api/core/api/services/ (hiểu services)
+    - ff_be_auth/api/internal/api/handler/ (hiểu pattern handler)
+    - ff_be_auth/api/internal/api/services/ (hiểu services)
     - folk_form/src/services/ (hiểu cách frontend gọi API)
     
     ✅ Suggest:
@@ -164,8 +164,8 @@ Bạn: "Agent cần sync conversations về backend"
 
 AI: ✅ Đọc được:
     - agent_pancake/app/ (hiểu sync logic)
-    - ff_be_auth/api/core/api/handler/ (hiểu API endpoints)
-    - ff_be_auth/api/core/api/models/ (hiểu data models)
+    - ff_be_auth/api/internal/api/handler/ (hiểu API endpoints)
+    - ff_be_auth/api/internal/api/models/ (hiểu data models)
     
     ✅ Suggest:
     - Code trong agent_pancake để gọi API
@@ -219,7 +219,7 @@ cd ../folk_form && git add . && git commit -m "feat: frontend changes"
 
 ```
 ✅ Tốt:
-- ff_be_auth/api/core/api/services/service.fb.conversation.go
+- ff_be_auth/api/internal/api/services/service.fb.conversation.go
 - agent_pancake/app/sync/conversation_sync.go
 - folk_form/src/services/conversationService.ts
 

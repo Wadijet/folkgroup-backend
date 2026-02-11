@@ -1,4 +1,4 @@
-# Workflow Chung Của Endpoint CRUD - Từ Request Đến Response
+﻿# Workflow Chung Của Endpoint CRUD - Từ Request Đến Response
 
 ## Tổng Quan
 
@@ -24,7 +24,7 @@ Body: { "workflowId": "...", "rootRefId": "...", ... }
 ## 2. Middleware Chain (Theo Thứ Tự)
 
 ### 2.1. AuthMiddleware
-**File**: `api/core/api/middleware/middleware.auth.go`
+**File**: `api/internal/api/middleware/middleware.auth.go`
 
 **Mục đích**: 
 - Xác thực người dùng và kiểm tra quyền truy cập endpoint
@@ -54,7 +54,7 @@ Body: { "workflowId": "...", "rootRefId": "...", ... }
 ---
 
 ### 2.2. OrganizationContextMiddleware
-**File**: `api/core/api/middleware/middleware.organization_context.go`
+**File**: `api/internal/api/middleware/middleware.organization_context.go`
 
 **Mục đích**:
 - Xác định context làm việc của user (role và organization)
@@ -87,7 +87,7 @@ Body: { "workflowId": "...", "rootRefId": "...", ... }
 ## 3. Handler Layer
 
 ### 3.1. SafeHandler Wrapper
-**File**: `api/core/api/handler/handler.base.go`
+**File**: `api/internal/api/handler/handler.base.go`
 
 **Mục đích**:
 - Bảo vệ application khỏi panic, tránh crash server
@@ -107,7 +107,7 @@ Body: { "workflowId": "...", "rootRefId": "...", ... }
 ---
 
 ### 3.2. ParseRequestBody
-**File**: `api/core/api/handler/handler.base.go`
+**File**: `api/internal/api/handler/handler.base.go`
 
 **Mục đích**:
 - Parse và validate JSON request body
@@ -132,7 +132,7 @@ Body: { "workflowId": "...", "rootRefId": "...", ... }
 ---
 
 ### 3.3. validateInput (Struct Tag Validation)
-**File**: `api/core/api/handler/handler.base.go`
+**File**: `api/internal/api/handler/handler.base.go`
 
 **Mục đích**:
 - Validate dữ liệu đầu vào theo business rules
@@ -169,7 +169,7 @@ Body: { "workflowId": "...", "rootRefId": "...", ... }
 ---
 
 ### 3.4. transformCreateInputToModel
-**File**: `api/core/api/handler/handler.base.go`
+**File**: `api/internal/api/handler/handler.base.go`
 
 **Mục đích**:
 - Convert DTO (Data Transfer Object) sang Model (Database Model)
@@ -205,7 +205,7 @@ Body: { "workflowId": "...", "rootRefId": "...", ... }
 ---
 
 ### 3.5. OwnerOrganizationID Handling
-**File**: `api/core/api/handler/handler.base.go`
+**File**: `api/internal/api/handler/handler.base.go`
 
 **Mục đích**:
 - Tự động gán `OwnerOrganizationID` cho document để phân quyền dữ liệu (data segregation)
@@ -238,7 +238,7 @@ Body: { "workflowId": "...", "rootRefId": "...", ... }
 ---
 
 ### 3.6. Set UserID vào Context
-**File**: `api/core/api/handler/handler.base.go`
+**File**: `api/internal/api/handler/handler.base.go`
 
 **Mục đích**:
 - Truyền user ID từ Fiber context sang Go context
@@ -296,7 +296,7 @@ Body: { "workflowId": "...", "rootRefId": "...", ... }
 ## 4. Service Layer
 
 ### 4.1. BaseService.InsertOne
-**File**: `api/core/api/services/service.base.mongo.go`
+**File**: `api/internal/api/services/service.base.mongo.go`
 
 **Mục đích**:
 - Thực hiện insert document vào MongoDB
@@ -331,7 +331,7 @@ Body: { "workflowId": "...", "rootRefId": "...", ... }
 ## 5. Response Layer
 
 ### 5.1. HandleResponse
-**File**: `api/core/api/handler/handler.base.go`
+**File**: `api/internal/api/handler/handler.base.go`
 
 **Mục đích**:
 - Format response thành JSON chuẩn

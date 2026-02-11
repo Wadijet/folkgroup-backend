@@ -1,4 +1,4 @@
-# Tóm Tắt Logic Đã Sửa Đổi - Mở Rộng Transform Tag và Validator
+﻿# Tóm Tắt Logic Đã Sửa Đổi - Mở Rộng Transform Tag và Validator
 
 ## Tổng Quan
 
@@ -14,7 +14,7 @@ Mở rộng hệ thống transform tag và validator để hỗ trợ:
 
 ### 1.1. Thêm Transform Type `nested_struct`
 
-**File**: `api/core/utility/data.transform.go`
+**File**: `api/internal/utility/data.transform.go`
 
 **Thay đổi**:
 - Thêm case `"nested_struct"` trong `applyTransform()` để nhận diện nested struct transform
@@ -28,7 +28,7 @@ case "nested_struct":
 
 ### 1.2. Tạo Hàm `transformNestedStruct` (Recursive)
 
-**File**: `api/core/api/handler/handler.base.go`
+**File**: `api/internal/api/handler/handler.base.go`
 
 **Chức năng**: Transform nested struct từ DTO sang Model một cách recursive
 
@@ -59,7 +59,7 @@ type AIPromptTemplateProvider struct {
 
 ### 1.3. Cập Nhật `transformCreateInputToModel` và `transformUpdateInputToModel`
 
-**File**: `api/core/api/handler/handler.base.go`
+**File**: `api/internal/api/handler/handler.base.go`
 
 **Thay đổi**:
 - Thêm logic xử lý `transform:"nested_struct"` trước khi xử lý transform thông thường
@@ -84,7 +84,7 @@ if transformConfig.Type == "nested_struct" {
 
 ### 2.1. Tạo Custom Validator `exists`
 
-**File**: `api/core/global/validator.go`
+**File**: `api/internal/global/validator.go`
 
 **Chức năng**: Kiểm tra ObjectID tồn tại trong collection (foreign key validation)
 
@@ -116,7 +116,7 @@ _ = Validate.RegisterValidation("exists", validateExists)
 
 ### 3.1. Thay Đổi Từ Parse Map Sang Dùng DTO
 
-**File**: `api/core/api/handler/handler.base.crud.go`
+**File**: `api/internal/api/handler/handler.base.crud.go`
 
 **Trước**:
 - Parse input thành `map[string]interface{}` trực tiếp từ request body
@@ -147,7 +147,7 @@ import (
 
 ### 4.1. AIPromptTemplateProviderInput
 
-**File**: `api/core/api/dto/dto.ai.prompt.template.go`
+**File**: `api/internal/api/dto/dto.ai.prompt.template.go`
 
 **Thay đổi**:
 ```go
@@ -159,7 +159,7 @@ type AIPromptTemplateProviderInput struct {
 
 ### 4.2. AIPromptTemplateCreateInput và UpdateInput
 
-**File**: `api/core/api/dto/dto.ai.prompt.template.go`
+**File**: `api/internal/api/dto/dto.ai.prompt.template.go`
 
 **Thay đổi**:
 ```go
@@ -178,7 +178,7 @@ type AIPromptTemplateUpdateInput struct {
 
 ### 4.3. AIProviderProfileCreateInput và UpdateInput
 
-**File**: `api/core/api/dto/dto.ai.provider.profile.go`
+**File**: `api/internal/api/dto/dto.ai.provider.profile.go`
 
 **Thay đổi**:
 ```go
@@ -201,33 +201,33 @@ type AIProviderProfileUpdateInput struct {
 
 ### 5.1. AIRunHandler.InsertOne
 
-**File**: `api/core/api/handler/handler.ai.run.go`
+**File**: `api/internal/api/handler/handler.ai.run.go`
 
 **Trước**: Override method với ~60 dòng code, chỉ copy logic BaseHandler
 
 **Sau**: Xóa hoàn toàn, dùng `BaseHandler.InsertOne` trực tiếp
 
 **Xóa import không sử dụng**:
-- `meta_commerce/core/common`
+- `meta_commerce/internal/common`
 - `github.com/gofiber/fiber/v3`
 - `go.mongodb.org/mongo-driver/bson/primitive`
 
 ### 5.2. AIStepRunHandler.InsertOne
 
-**File**: `api/core/api/handler/handler.ai.step.run.go`
+**File**: `api/internal/api/handler/handler.ai.step.run.go`
 
 **Trước**: Override method với ~60 dòng code, chỉ copy logic BaseHandler
 
 **Sau**: Xóa hoàn toàn, dùng `BaseHandler.InsertOne` trực tiếp
 
 **Xóa import không sử dụng**:
-- `meta_commerce/core/common`
+- `meta_commerce/internal/common`
 - `github.com/gofiber/fiber/v3`
 - `go.mongodb.org/mongo-driver/bson/primitive`
 
 ### 5.3. AIPromptTemplateHandler.InsertOne và UpdateOne
 
-**File**: `api/core/api/handler/handler.ai.prompt.template.go`
+**File**: `api/internal/api/handler/handler.ai.prompt.template.go`
 
 **Trước**: 
 - `InsertOne`: ~110 dòng code, map nested struct Provider manual
@@ -239,7 +239,7 @@ type AIProviderProfileUpdateInput struct {
 
 ### 5.4. AIProviderProfileHandler.InsertOne và UpdateOne
 
-**File**: `api/core/api/handler/handler.ai.provider.profile.go`
+**File**: `api/internal/api/handler/handler.ai.provider.profile.go`
 
 **Trước**: 
 - `InsertOne`: ~90 dòng code, map nested struct Config manual

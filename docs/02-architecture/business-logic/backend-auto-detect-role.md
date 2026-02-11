@@ -1,4 +1,4 @@
-# Backend Tự Động Detect Role
+﻿# Backend Tự Động Detect Role
 
 ## ✅ Backend CÓ Hỗ Trợ Tự Động Detect Role
 
@@ -159,7 +159,7 @@ Có header X-Active-Role-ID?
 
 ## 🔍 Code Reference
 
-**File:** `api/core/api/middleware/middleware.organization_context.go`
+**File:** `api/internal/api/middleware/middleware.organization_context.go`
 
 **Logic chính:**
 - Dòng 36-66: Logic tự động detect và fallback

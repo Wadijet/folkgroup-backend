@@ -1,4 +1,4 @@
-# Báo Cáo Điều Tra Middleware Không Check Quyền
+﻿# Báo Cáo Điều Tra Middleware Không Check Quyền
 
 ## 🔍 Vấn Đề Phát Hiện
 
@@ -125,7 +125,7 @@ Tất cả các endpoint CRUD được đăng ký qua `registerCRUDRoutes()`:
 
 ## 🔗 Files Liên Quan
 
-- `api/core/api/router/routes.go` - Route registration
-- `api/core/api/middleware/middleware.auth.go` - Auth middleware
-- `api/core/api/handler/handler.base.crud.go` - CRUD handlers
+- `api/internal/api/router/routes.go` - Route registration
+- `api/internal/api/middleware/middleware.auth.go` - Auth middleware
+- `api/internal/api/handler/handler.base.crud.go` - CRUD handlers
 - `api-tests/cases/middleware_debug_test.go` - Debug test

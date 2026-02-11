@@ -1,4 +1,4 @@
-# Hướng Dẫn Sử Dụng Hệ Thống Logging
+﻿# Hướng Dẫn Sử Dụng Hệ Thống Logging
 
 ## 📋 Tổng Quan
 
@@ -15,7 +15,7 @@ Hệ thống logging mới cung cấp:
 Logger được khởi tạo tự động trong `main.go`:
 
 ```go
-import "meta_commerce/core/logger"
+import "meta_commerce/internal/logger"
 
 func main() {
     // Logger tự động khởi tạo với cấu hình từ environment
@@ -70,7 +70,7 @@ LOG_PERFORMANCE_FILE=performance.log
 ### Basic Logging
 
 ```go
-import "meta_commerce/core/logger"
+import "meta_commerce/internal/logger"
 
 // Lấy logger chính
 log := logger.GetAppLogger()
@@ -94,7 +94,7 @@ log.WithFields(map[string]interface{}{
 Tự động thêm request ID, method, path, IP vào log:
 
 ```go
-import "meta_commerce/core/logger"
+import "meta_commerce/internal/logger"
 
 func handler(c fiber.Ctx) error {
     // Log với request context
@@ -114,7 +114,7 @@ func handler(c fiber.Ctx) error {
 ```go
 import (
     "context"
-    "meta_commerce/core/logger"
+    "meta_commerce/internal/logger"
 )
 
 // Tạo context với thông tin
@@ -129,7 +129,7 @@ logger.WithContext(ctx).Info("User action")
 ### Error Logging
 
 ```go
-import "meta_commerce/core/logger"
+import "meta_commerce/internal/logger"
 
 err := someFunction()
 if err != nil {
@@ -146,7 +146,7 @@ if err != nil {
 Log các thao tác quan trọng để audit:
 
 ```go
-import "meta_commerce/core/logger"
+import "meta_commerce/internal/logger"
 
 // Log CRUD operations
 logger.LogCRUD("create", "user", userID, c, map[string]interface{}{
@@ -174,7 +174,7 @@ logger.LogAction("custom_action", c, map[string]interface{}{
 ### Performance Logging
 
 ```go
-import "meta_commerce/core/logger"
+import "meta_commerce/internal/logger"
 
 perfLogger := logger.GetPerformanceLogger()
 
@@ -299,7 +299,7 @@ logrus.WithFields(logrus.Fields{
 ### Sau (Logger mới)
 
 ```go
-import "meta_commerce/core/logger"
+import "meta_commerce/internal/logger"
 
 logger.WithRequest(c).WithFields(map[string]interface{}{
     "user_id": userID,

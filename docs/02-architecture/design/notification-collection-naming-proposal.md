@@ -1,4 +1,4 @@
-# Đề Xuất: Đổi Tên Collection Để Phân Biệt 2 Hệ Thống
+﻿# Đề Xuất: Đổi Tên Collection Để Phân Biệt 2 Hệ Thống
 
 ## 🔴 Vấn Đề Hiện Tại
 
@@ -42,7 +42,7 @@ Delivery System:
 **Ưu điểm**:
 - ✅ Phân biệt rõ ràng 2 hệ thống
 - ✅ Tên ngắn gọn, dễ hiểu
-- ✅ Phù hợp với module structure (`api/core/delivery/`)
+- ✅ Phù hợp với module structure (`api/internal/delivery/`)
 
 **Nhược điểm**:
 - ⚠️ Cần migration script
@@ -73,7 +73,7 @@ notification_history → notification_delivery_history
 ### Global Variables
 
 ```go
-// api/core/global/global.vars.go
+// api/internal/global/global.vars.go
 type MongoDB_Auth_CollectionName struct {
     // ... existing fields ...
     
@@ -125,22 +125,22 @@ colNames := []string{
 ### Services
 
 ```go
-// api/core/api/services/service.delivery.queue.go (đổi tên từ service.notification.queue.go)
+// api/internal/api/services/service.delivery.queue.go (đổi tên từ service.notification.queue.go)
 collection, exist := global.RegistryCollections.Get(global.MongoDB_ColNames.DeliveryQueue)
 
-// api/core/api/services/service.delivery.history.go (đổi tên từ service.notification.history.go)
+// api/internal/api/services/service.delivery.history.go (đổi tên từ service.notification.history.go)
 collection, exist := global.RegistryCollections.Get(global.MongoDB_ColNames.DeliveryHistory)
 ```
 
 ### Models
 
 ```go
-// api/core/api/models/mongodb/model.delivery.queue.go (đổi tên từ model.notification.queue.go)
+// api/internal/api/models/mongodb/model.delivery.queue.go (đổi tên từ model.notification.queue.go)
 type DeliveryQueueItem struct { // Đổi từ NotificationQueueItem
     // ... fields ...
 }
 
-// api/core/api/models/mongodb/model.delivery.history.go (đổi tên từ model.notification.history.go)
+// api/internal/api/models/mongodb/model.delivery.history.go (đổi tên từ model.notification.history.go)
 type DeliveryHistory struct { // Đổi từ NotificationHistory
     // ... fields ...
 }
@@ -149,7 +149,7 @@ type DeliveryHistory struct { // Đổi từ NotificationHistory
 ### Relationships
 
 ```go
-// api/core/api/models/mongodb/model.notification.channel.go
+// api/internal/api/models/mongodb/model.notification.channel.go
 _Relationships struct{} `relationship:"collection:delivery_queue,field:channelId,message:...|collection:delivery_history,field:channelId,message:..."`
 ```
 
@@ -178,24 +178,24 @@ _Relationships struct{} `relationship:"collection:delivery_queue,field:channelId
 ## 🔍 Files Cần Update
 
 ### Global & Config
-- [ ] `api/core/global/global.vars.go`
+- [ ] `api/internal/global/global.vars.go`
 - [ ] `api/cmd/server/init.go`
 - [ ] `api/cmd/server/init.registry.go`
 
 ### Services (Đổi Tên Files)
-- [ ] `api/core/api/services/service.notification.queue.go` → `service.delivery.queue.go`
-- [ ] `api/core/api/services/service.notification.history.go` → `service.delivery.history.go`
+- [ ] `api/internal/api/services/service.notification.queue.go` → `service.delivery.queue.go`
+- [ ] `api/internal/api/services/service.notification.history.go` → `service.delivery.history.go`
 
 ### Models (Đổi Tên Files)
-- [ ] `api/core/api/models/mongodb/model.notification.queue.go` → `model.delivery.queue.go`
-- [ ] `api/core/api/models/mongodb/model.notification.history.go` → `model.delivery.history.go`
+- [ ] `api/internal/api/models/mongodb/model.notification.queue.go` → `model.delivery.queue.go`
+- [ ] `api/internal/api/models/mongodb/model.notification.history.go` → `model.delivery.history.go`
 
 ### References
-- [ ] `api/core/delivery/queue.go` - Update references
-- [ ] `api/core/delivery/processor.go` - Update references
-- [ ] `api/core/api/handler/handler.notification.trigger.go` - Update references
-- [ ] `api/core/api/handler/handler.delivery.send.go` - Update references
-- [ ] `api/core/api/models/mongodb/model.notification.channel.go` - Update relationships
+- [ ] `api/internal/delivery/queue.go` - Update references
+- [ ] `api/internal/delivery/processor.go` - Update references
+- [ ] `api/internal/api/handler/handler.notification.trigger.go` - Update references
+- [ ] `api/internal/api/handler/handler.delivery.send.go` - Update references
+- [ ] `api/internal/api/models/mongodb/model.notification.channel.go` - Update relationships
 - [ ] Tất cả files import các models/services này
 
 ### Scripts

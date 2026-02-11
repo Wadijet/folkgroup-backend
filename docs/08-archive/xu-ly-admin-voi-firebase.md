@@ -1,4 +1,4 @@
-# XỬ LÝ ADMINISTRATOR VỚI FIREBASE AUTHENTICATION
+﻿# XỬ LÝ ADMINISTRATOR VỚI FIREBASE AUTHENTICATION
 
 Tài liệu này mô tả cách xử lý administrator trong hệ thống sau khi chuyển sang Firebase Authentication.
 
@@ -117,7 +117,7 @@ FirebaseAdminUID string `env:"FIREBASE_ADMIN_UID"` // Firebase UID của user ad
 
 ### 5.2. InitAdminUser Method
 ```go
-// api/core/api/services/service.admin.init.go
+// api/internal/api/services/service.admin.init.go
 func (h *InitService) InitAdminUser(firebaseUID string) error {
     // 1. Kiểm tra user đã tồn tại chưa
     // 2. Nếu chưa, lấy từ Firebase và tạo mới

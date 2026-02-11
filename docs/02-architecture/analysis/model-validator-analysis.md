@@ -1,4 +1,4 @@
-# Phân Tích: Có Nên Dùng Validator Trong Model Không?
+﻿# Phân Tích: Có Nên Dùng Validator Trong Model Không?
 
 ## Tổng Quan
 
@@ -54,7 +54,7 @@ type AIWorkflowRunCreateInput struct {
 
 ### 2.1. Trường Hợp 1: Service Tạo Model Trực Tiếp
 
-**File**: `api/core/api/services/service.admin.init.go`
+**File**: `api/internal/api/services/service.admin.init.go`
 
 ```go
 // InitService tạo Model trực tiếp (không qua DTO)

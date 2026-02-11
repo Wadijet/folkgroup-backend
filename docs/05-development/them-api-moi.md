@@ -1,4 +1,4 @@
-# Thêm API Mới
+﻿# Thêm API Mới
 
 Hướng dẫn thêm API endpoint mới vào hệ thống.
 
@@ -10,7 +10,7 @@ Tài liệu này hướng dẫn cách thêm một API endpoint mới từ đầu
 
 ### 1. Tạo Model (Nếu Cần)
 
-**File:** `api/core/api/models/mongodb/model.<module>.<entity>.go`
+**File:** `api/internal/api/models/mongodb/model.<module>.<entity>.go`
 
 ```go
 package mongodb
@@ -30,7 +30,7 @@ type Entity struct {
 
 ### 2. Tạo DTO
 
-**File:** `api/core/api/dto/dto.<module>.<entity>.go`
+**File:** `api/internal/api/dto/dto.<module>.<entity>.go`
 
 ```go
 package dto
@@ -42,13 +42,13 @@ type EntityCreateInput struct {
 
 ### 3. Tạo Service
 
-**File:** `api/core/api/services/service.<module>.<entity>.go`
+**File:** `api/internal/api/services/service.<module>.<entity>.go`
 
 ```go
 package services
 
 import (
-    "meta_commerce/core/api/models/mongodb"
+    "meta_commerce/internal/api/models/mongodb"
     // ...
 )
 
@@ -63,15 +63,15 @@ func NewEntityService() (*EntityService, error) {
 
 ### 4. Tạo Handler
 
-**File:** `api/core/api/handler/handler.<module>.<entity>.go`
+**File:** `api/internal/api/handler/handler.<module>.<entity>.go`
 
 ```go
 package handler
 
 import (
-    "meta_commerce/core/api/dto"
-    models "meta_commerce/core/api/models/mongodb"
-    "meta_commerce/core/api/services"
+    "meta_commerce/internal/api/dto"
+    models "meta_commerce/internal/api/models/mongodb"
+    "meta_commerce/internal/api/services"
 )
 
 type EntityHandler struct {
@@ -90,7 +90,7 @@ func (h *EntityHandler) HandleCustomAction(c fiber.Ctx) error {
 
 ### 5. Đăng Ký Route
 
-**File:** `api/core/api/router/routes.go`
+**File:** `api/internal/api/router/routes.go`
 
 ```go
 // Trong hàm register<Module>Routes

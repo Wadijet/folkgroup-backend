@@ -1,4 +1,4 @@
-# Changelog: Approval Workflow và Layer → Pillar
+﻿# Changelog: Approval Workflow và Layer → Pillar
 
 ## Tổng Quan Thay Đổi
 
@@ -22,48 +22,48 @@
 ## Files Đã Thay Đổi
 
 ### Models
-- `api/core/api/models/mongodb/model.content.node.go` - Đổi constant và comment
-- `api/core/api/models/mongodb/model.draft.content.node.go` - Đổi comment
-- `api/core/api/models/mongodb/model.ai.workflow.go` - Đổi comment
-- `api/core/api/models/mongodb/model.ai.workflow.run.go` - Đổi comment
-- `api/core/api/models/mongodb/model.ai.workflow.command.go` - Đổi comment
+- `api/internal/api/models/mongodb/model.content.node.go` - Đổi constant và comment
+- `api/internal/api/models/mongodb/model.draft.content.node.go` - Đổi comment
+- `api/internal/api/models/mongodb/model.ai.workflow.go` - Đổi comment
+- `api/internal/api/models/mongodb/model.ai.workflow.run.go` - Đổi comment
+- `api/internal/api/models/mongodb/model.ai.workflow.command.go` - Đổi comment
 
 ### Services
-- `api/core/api/services/service.draft.content.node.go` - Thêm `ApproveDraft`, `RejectDraft`, override `UpdateById`
-- `api/core/api/services/service.ai.workflow.command.go` - Đổi `isStepCreateLayer` → `isStepCreatePillar`
-- `api/core/api/services/service.ai.workflow.run.go` - Đổi error messages
-- `api/core/api/services/service.admin.init.go` - Đổi prompts, steps, workflows từ Layer → Pillar
+- `api/internal/api/services/service.draft.content.node.go` - Thêm `ApproveDraft`, `RejectDraft`, override `UpdateById`
+- `api/internal/api/services/service.ai.workflow.command.go` - Đổi `isStepCreateLayer` → `isStepCreatePillar`
+- `api/internal/api/services/service.ai.workflow.run.go` - Đổi error messages
+- `api/internal/api/services/service.admin.init.go` - Đổi prompts, steps, workflows từ Layer → Pillar
 
 ### Handlers
-- `api/core/api/handler/handler.draft.content.node.go` - Thêm `ApproveDraft`, `RejectDraft`
-- `api/core/api/handler/handler.content.node.go` - Đổi comment
+- `api/internal/api/handler/handler.draft.content.node.go` - Thêm `ApproveDraft`, `RejectDraft`
+- `api/internal/api/handler/handler.content.node.go` - Đổi comment
 
 ### DTOs
-- `api/core/api/dto/dto.content.node.go` - Đổi comment
-- `api/core/api/dto/dto.draft.content.node.go` - Đổi comment, thêm `ApproveDraftParams`, `RejectDraftParams`, `RejectDraftInput`
-- `api/core/api/dto/dto.ai.workflow.command.go` - Đổi comment
-- `api/core/api/dto/dto.ai.workflow.run.go` - Đổi comment
-- `api/core/api/dto/dto.ai.workflow.go` - Đổi comment
+- `api/internal/api/dto/dto.content.node.go` - Đổi comment
+- `api/internal/api/dto/dto.draft.content.node.go` - Đổi comment, thêm `ApproveDraftParams`, `RejectDraftParams`, `RejectDraftInput`
+- `api/internal/api/dto/dto.ai.workflow.command.go` - Đổi comment
+- `api/internal/api/dto/dto.ai.workflow.run.go` - Đổi comment
+- `api/internal/api/dto/dto.ai.workflow.go` - Đổi comment
 
 ### Routes
-- `api/core/api/router/routes.go` - Bỏ routes `/drafts/approvals/*`, thêm `/drafts/nodes/:id/approve|reject`
+- `api/internal/api/router/routes.go` - Bỏ routes `/drafts/approvals/*`, thêm `/drafts/nodes/:id/approve|reject`
 
 ### Utility
-- `api/core/utility/content.level.go` - Đổi `ContentLevelMap`, comments, error messages
+- `api/internal/utility/content.level.go` - Đổi `ContentLevelMap`, comments, error messages
 
 ### Global & Init
-- `api/core/global/global.vars.go` - Bỏ `DraftApprovals`
+- `api/internal/global/global.vars.go` - Bỏ `DraftApprovals`
 - `api/cmd/server/init.go` - Bỏ collection name và index cho DraftApprovals
 - `api/cmd/server/init.registry.go` - Bỏ `content_draft_approvals` khỏi registry
 
 ### Permissions
-- `api/core/api/services/service.admin.init.go` - Bỏ permissions `ContentDraftApprovals.*`, dùng `ContentDraftNodes.Approve` và `ContentDraftNodes.Reject`
+- `api/internal/api/services/service.admin.init.go` - Bỏ permissions `ContentDraftApprovals.*`, dùng `ContentDraftNodes.Approve` và `ContentDraftNodes.Reject`
 
 ### Files Đã Xóa
-- `api/core/api/models/mongodb/model.content.draft.approval.go`
-- `api/core/api/services/service.content.draft.approval.go`
-- `api/core/api/handler/handler.content.draft.approval.go`
-- `api/core/api/dto/dto.content.draft.approval.go`
+- `api/internal/api/models/mongodb/model.content.draft.approval.go`
+- `api/internal/api/services/service.content.draft.approval.go`
+- `api/internal/api/handler/handler.content.draft.approval.go`
+- `api/internal/api/dto/dto.content.draft.approval.go`
 
 ## Files Mới
 

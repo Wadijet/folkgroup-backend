@@ -41,9 +41,9 @@ Router đã tìm thấy routing rules nhưng **không tìm thấy channels** khi
 ### Debug Logs Đã Thêm
 
 Đã thêm debug logs vào:
-1. `api/core/notification/router.go` - Log số lượng rules, channels, routes
-2. `api/core/api/services/service.notification.channel.go` - Log query channels
-3. `api/core/api/handler/handler.notification.trigger.go` - Log quá trình trigger
+1. `api/internal/notification/router.go` - Log số lượng rules, channels, routes
+2. `api/internal/api/services/service.notification.channel.go` - Log query channels
+3. `api/internal/api/handler/handler.notification.trigger.go` - Log quá trình trigger
 
 ### Cách Kiểm Tra
 

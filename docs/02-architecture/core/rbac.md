@@ -1,4 +1,4 @@
-# RBAC System
+﻿# RBAC System
 
 Tài liệu về hệ thống phân quyền Role-Based Access Control (RBAC).
 
@@ -142,7 +142,7 @@ Required Permission vs User Permissions
 
 ### Middleware
 
-**Vị trí:** `api/core/api/middleware/middleware.auth.go`
+**Vị trí:** `api/internal/api/middleware/middleware.auth.go`
 
 ```go
 func AuthMiddleware(requiredPermission string) fiber.Handler {

@@ -1,4 +1,4 @@
-# Đề Xuất Giảm Handler Override Bằng Struct Tag
+﻿# Đề Xuất Giảm Handler Override Bằng Struct Tag
 
 ## Mục Tiêu
 Giảm thiểu các handler override để tránh phá vỡ logic chung, tăng tính nhất quán và dễ bảo trì.
@@ -44,7 +44,7 @@ Giảm thiểu các handler override để tránh phá vỡ logic chung, tăng t
 #### 1.1. Thêm Custom Validator Cho Enum
 
 ```go
-// api/core/global/validator.go
+// api/internal/global/validator.go
 
 // RegisterEnumValidator đăng ký validator cho enum values
 func RegisterEnumValidator(name string, values []string) error {
@@ -91,7 +91,7 @@ type AIStepCreateInput struct {
 #### 2.1. Thêm Transform Type Cho Nested Struct
 
 ```go
-// api/core/utility/data.transform.go
+// api/internal/utility/data.transform.go
 
 // Thêm transform type mới:
 // transform:"nested_struct,type=AIConfig" - Map nested struct tự động
@@ -123,7 +123,7 @@ type AIProviderProfileCreateInput struct {
 #### 3.1. Thêm Interface Cho Post-Transform
 
 ```go
-// api/core/api/handler/handler.base.go
+// api/internal/api/handler/handler.base.go
 
 // PostTransformHook interface cho handler muốn transform sau khi BaseHandler transform
 type PostTransformHook[T any, CreateInput any, UpdateInput any] interface {

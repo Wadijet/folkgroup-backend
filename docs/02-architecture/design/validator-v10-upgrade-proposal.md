@@ -1,4 +1,4 @@
-# Đề Xuất Upgrade Validator v9 → v10
+﻿# Đề Xuất Upgrade Validator v9 → v10
 
 ## Tình Trạng Hiện Tại
 - **Version hiện tại**: `gopkg.in/go-playground/validator.v9`
@@ -40,21 +40,21 @@ import "github.com/go-playground/validator/v10"
 
 ## Files Cần Sửa
 
-### 1. `api/core/global/validator.go`
+### 1. `api/internal/global/validator.go`
 ```go
 // Thay đổi import
 - import "gopkg.in/go-playground/validator.v9"
 + import "github.com/go-playground/validator/v10"
 ```
 
-### 2. `api/core/global/global.vars.go`
+### 2. `api/internal/global/global.vars.go`
 ```go
 // Thay đổi import
 - validator "gopkg.in/go-playground/validator.v9"
 + validator "github.com/go-playground/validator/v10"
 ```
 
-### 3. `api/core/api/handler/handler.base.go`
+### 3. `api/internal/api/handler/handler.base.go`
 ```go
 // Thay đổi import
 - import "gopkg.in/go-playground/validator.v9"

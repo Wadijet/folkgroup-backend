@@ -1,4 +1,4 @@
-# Lợi Ích Khi Làm Việc Với AI: Cùng Workspace = Cùng Context
+﻿# Lợi Ích Khi Làm Việc Với AI: Cùng Workspace = Cùng Context
 
 ## 🎯 Tổng Quan
 
@@ -62,7 +62,7 @@ AI: ❌ Không đọc được agent_pancake
 ```
 Bạn: "Refactor FbConversationService để dùng chung"
 
-AI: ✅ Thấy service đang ở api/core/api/services/
+AI: ✅ Thấy service đang ở api/internal/api/services/
     ✅ Thấy api-worker đang import từ đâu
     ✅ Suggest di chuyển sang core/shared/
     ✅ Update tất cả imports tự động
@@ -177,9 +177,9 @@ Không có docs, AI phải đoán
 Bạn: "Tạo job monitor conversation chưa trả lời"
 
 AI: ✅ Đọc được:
-    - api/core/api/services/service.fb.conversation.go
-    - api/core/api/models/mongodb/model.fb.conversation.go
-    - api/core/api/models/mongodb/model.fb.message.item.go
+    - api/internal/api/services/service.fb.conversation.go
+    - api/internal/api/models/mongodb/model.fb.conversation.go
+    - api/internal/api/models/mongodb/model.fb.message.item.go
     - api-worker/core/jobs/ (nếu có)
     
     ✅ Hiểu:

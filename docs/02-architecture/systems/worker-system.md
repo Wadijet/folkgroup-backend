@@ -1,4 +1,4 @@
-# Hệ Thống Worker và Xử Lý Logic Định Kỳ
+﻿# Hệ Thống Worker và Xử Lý Logic Định Kỳ
 
 ## 📋 Tổng Quan
 
@@ -109,8 +109,8 @@ import (
     "os/signal"
     "syscall"
     
-    "meta_commerce/core/worker"
-    "meta_commerce/core/global"
+    "meta_commerce/internal/worker"
+    "meta_commerce/internal/global"
     "github.com/sirupsen/logrus"
 )
 
@@ -152,7 +152,7 @@ func main() {
 
 ### 2. Worker Core
 
-**File:** `api/core/worker/scheduler/cron.go`
+**File:** `api/internal/worker/scheduler/cron.go`
 
 ```go
 package scheduler
@@ -214,7 +214,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 
 ### 3. Conversation Monitor Job
 
-**File:** `api/core/worker/jobs/conversation_monitor.go`
+**File:** `api/internal/worker/jobs/conversation_monitor.go`
 
 ```go
 package jobs
@@ -223,9 +223,9 @@ import (
     "context"
     "time"
     
-    models "meta_commerce/core/api/models/mongodb"
-    "meta_commerce/core/api/services"
-    "meta_commerce/core/worker/notification"
+    models "meta_commerce/internal/api/models/mongodb"
+    "meta_commerce/internal/api/services"
+    "meta_commerce/internal/worker/notification"
     "go.mongodb.org/mongo-driver/bson"
     "github.com/sirupsen/logrus"
 )
@@ -341,7 +341,7 @@ func (j *ConversationMonitorJob) isMessageFromCustomer(messageData map[string]in
 
 ### 4. Notification Service
 
-**File:** `api/core/worker/notification/alert.go`
+**File:** `api/internal/worker/notification/alert.go`
 
 ```go
 package notification
@@ -350,7 +350,7 @@ import (
     "context"
     "fmt"
     
-    models "meta_commerce/core/api/models/mongodb"
+    models "meta_commerce/internal/api/models/mongodb"
     "github.com/sirupsen/logrus"
 )
 
@@ -399,9 +399,9 @@ func (s *AlertService) SendConversationAlert(
 ### Bước 1: Tạo Cấu Trúc Thư Mục
 
 ```bash
-mkdir -p api/core/worker/jobs
-mkdir -p api/core/worker/scheduler
-mkdir -p api/core/worker/notification
+mkdir -p api/internal/worker/jobs
+mkdir -p api/internal/worker/scheduler
+mkdir -p api/internal/worker/notification
 ```
 
 ### Bước 2: Thêm Dependencies

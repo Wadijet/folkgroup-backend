@@ -1,4 +1,4 @@
-# Authentication Flow
+﻿# Authentication Flow
 
 Tài liệu chi tiết về luồng xác thực trong hệ thống FolkForm Auth Backend.
 
@@ -44,7 +44,7 @@ const jwtToken = data.data.token; // JWT token của hệ thống
 
 ### 3. Backend: Verify Firebase ID Token
 
-**Vị trí:** `api/core/api/services/service.auth.user.go`
+**Vị trí:** `api/internal/api/services/service.auth.user.go`
 
 ```go
 func LoginWithFirebase(idToken string, hwid string) (*User, string, error) {
@@ -102,7 +102,7 @@ func findOrCreateUser(firebaseUID string, firebaseToken *firebase.Token) (*User,
 
 ### 5. Backend: Tạo JWT Token
 
-**Vị trí:** `api/core/utility/jwt.go`
+**Vị trí:** `api/internal/utility/jwt.go`
 
 ```go
 func GenerateToken(user *User) (string, error) {
@@ -137,7 +137,7 @@ fetch('http://localhost:8080/api/v1/user/profile', {
 
 ### Middleware Authentication
 
-**Vị trí:** `api/core/api/middleware/middleware.auth.go`
+**Vị trí:** `api/internal/api/middleware/middleware.auth.go`
 
 ```go
 func AuthMiddleware(c fiber.Ctx) error {

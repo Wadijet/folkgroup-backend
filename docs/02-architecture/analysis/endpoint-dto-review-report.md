@@ -1,4 +1,4 @@
-# Báo Cáo Rà Soát Endpoints và DTOs
+﻿# Báo Cáo Rà Soát Endpoints và DTOs
 
 **Ngày:** 2025-01-XX  
 **Phạm vi:** AI Workflow Commands, Agent Commands, và các endpoints liên quan
@@ -6,7 +6,7 @@
 ## ✅ Đã Sửa
 
 ### 1. Lỗi Syntax
-- **File:** `api/core/api/services/service.ai.workflow.command.go`
+- **File:** `api/internal/api/services/service.ai.workflow.command.go`
 - **Vấn đề:** Dòng 12 có ký tự `s` thừa sau import statement
 - **Đã sửa:** ✅ Xóa ký tự thừa
 

@@ -1,4 +1,4 @@
-# Nguyên Tắc Tách Biệt Trách Nhiệm - DTO, Model, Handler, Service
+﻿# Nguyên Tắc Tách Biệt Trách Nhiệm - DTO, Model, Handler, Service
 
 ## Tổng Quan
 
@@ -29,7 +29,7 @@ Tài liệu này mô tả nguyên tắc tách biệt trách nhiệm (Separation 
 
 ### 1.2. Ví Dụ DTO Đúng Nguyên Tắc
 
-**File**: `api/core/api/dto/dto.ai.workflow.run.go`
+**File**: `api/internal/api/dto/dto.ai.workflow.run.go`
 
 ```go
 // AIWorkflowRunCreateInput dữ liệu đầu vào khi tạo AI workflow run
@@ -56,7 +56,7 @@ type AIWorkflowRunCreateInput struct {
 
 ### 1.3. Ví Dụ DTO Có Helper Methods (Đúng Nguyên Tắc)
 
-**File**: `api/core/api/dto/dto.cta.library.go`
+**File**: `api/internal/api/dto/dto.cta.library.go`
 
 ```go
 // TrackingActionParams là params từ URL khi gọi tracking action
@@ -119,7 +119,7 @@ func (p *TrackingActionParams) ParseHistoryID(historyIDStr string) (primitive.Ob
 
 ### 2.2. Ví Dụ Model Đúng Nguyên Tắc
 
-**File**: `api/core/api/models/mongodb/model.ai.workflow.run.go`
+**File**: `api/internal/api/models/mongodb/model.ai.workflow.run.go`
 
 ```go
 // AIWorkflowRunStatus định nghĩa các trạng thái workflow run
@@ -207,7 +207,7 @@ type AIWorkflowRun struct {
 
 ### 3.2. Ví Dụ Handler Đúng Nguyên Tắc
 
-**File**: `api/core/api/handler/handler.organization.share.go`
+**File**: `api/internal/api/handler/handler.organization.share.go`
 
 ```go
 // OrganizationShareHandler xử lý các request liên quan đến Organization Share
@@ -243,7 +243,7 @@ func NewOrganizationShareHandler() (*OrganizationShareHandler, error) {
 
 ### 3.3. Ví Dụ Handler Chưa Đúng Nguyên Tắc
 
-**File**: `api/core/api/handler/handler.ai.workflow.run.go`
+**File**: `api/internal/api/handler/handler.ai.workflow.run.go`
 
 ```go
 func (h *AIWorkflowRunHandler) InsertOne(c fiber.Ctx) error {
@@ -338,7 +338,7 @@ func (h *AIWorkflowRunHandler) InsertOne(c fiber.Ctx) error {
 
 ### 4.2. Ví Dụ Service Đúng Nguyên Tắc
 
-**File**: `api/core/api/services/service.organization.share.go`
+**File**: `api/internal/api/services/service.organization.share.go`
 
 ```go
 // InsertOne override để thêm duplicate check và validation
@@ -372,7 +372,7 @@ func (s *OrganizationShareService) InsertOne(ctx context.Context, data models.Or
 
 ### 4.3. Ví Dụ Service Đúng Nguyên Tắc (Cross-Collection Validation)
 
-**File**: `api/core/api/services/service.draft.content.node.go`
+**File**: `api/internal/api/services/service.draft.content.node.go`
 
 ```go
 // InsertOne override để validate sequential level constraint

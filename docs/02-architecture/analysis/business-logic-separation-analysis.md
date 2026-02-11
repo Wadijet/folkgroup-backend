@@ -1,4 +1,4 @@
-# Phân Tích Tách Biệt Business Logic - Handler vs Service
+﻿# Phân Tích Tách Biệt Business Logic - Handler vs Service
 
 ## Tổng Quan
 
@@ -30,7 +30,7 @@ Tài liệu này phân tích xem hệ thống có tuân thủ nguyên tắc **"B
 ### 2.1. ✅ Đúng Nguyên Tắc - Business Logic Ở Service
 
 #### 2.1.1. OrganizationShareService.InsertOne
-**File**: `api/core/api/services/service.organization.share.go`
+**File**: `api/internal/api/services/service.organization.share.go`
 
 **Business Logic ở Service**:
 - ✅ Validate ownerOrgID không được có trong ToOrgIDs
@@ -41,7 +41,7 @@ Tài liệu này phân tích xem hệ thống có tuân thủ nguyên tắc **"B
 ---
 
 #### 2.1.2. DraftContentNodeService.InsertOne
-**File**: `api/core/api/services/service.draft.content.node.go`
+**File**: `api/internal/api/services/service.draft.content.node.go`
 
 **Business Logic ở Service**:
 - ✅ Cross-collection validation: Kiểm tra parent tồn tại trong production/draft
@@ -53,7 +53,7 @@ Tài liệu này phân tích xem hệ thống có tuân thủ nguyên tắc **"B
 ---
 
 #### 2.1.3. OrganizationService.DeleteOne, RoleService.DeleteOne, UserRoleService.DeleteOne
-**File**: `api/core/api/services/service.auth.organization.go`, `service.auth.role.go`, `service.auth.user_role.go`
+**File**: `api/internal/api/services/service.auth.organization.go`, `service.auth.role.go`, `service.auth.user_role.go`
 
 **Business Logic ở Service**:
 - ✅ Cascade delete protection: Kiểm tra dependencies trước khi xóa
@@ -66,7 +66,7 @@ Tài liệu này phân tích xem hệ thống có tuân thủ nguyên tắc **"B
 ### 2.2. ⚠️ Chưa Đúng Nguyên Tắc - Business Logic Ở Handler
 
 #### 2.2.1. AIWorkflowRunHandler.InsertOne
-**File**: `api/core/api/handler/handler.ai.workflow.run.go`
+**File**: `api/internal/api/handler/handler.ai.workflow.run.go`
 
 **Business Logic đang ở Handler** (dòng 115-224):
 - ❌ Cross-collection validation: Validate RootRefID tồn tại trong production/draft
@@ -88,7 +88,7 @@ Tài liệu này phân tích xem hệ thống có tuân thủ nguyên tắc **"B
 ---
 
 #### 2.2.2. AIWorkflowCommandHandler.InsertOne
-**File**: `api/core/api/handler/handler.ai.workflow.command.go`
+**File**: `api/internal/api/handler/handler.ai.workflow.command.go`
 
 **Business Logic đang ở Handler** (dòng 119-316):
 - ❌ Conditional validation: WorkflowID bắt buộc khi CommandType = START_WORKFLOW
@@ -110,7 +110,7 @@ Tài liệu này phân tích xem hệ thống có tuân thủ nguyên tắc **"B
 ---
 
 #### 2.2.3. NotificationRoutingHandler.InsertOne
-**File**: `api/core/api/handler/handler.notification.routing.go`
+**File**: `api/internal/api/handler/handler.notification.routing.go`
 
 **Business Logic đang ở Handler** (dòng 121-166):
 - ❌ Uniqueness check: Kiểm tra đã có rule cho eventType + ownerOrganizationId chưa
@@ -130,7 +130,7 @@ Tài liệu này phân tích xem hệ thống có tuân thủ nguyên tắc **"B
 ---
 
 #### 2.2.4. NotificationChannelHandler.InsertOne
-**File**: `api/core/api/handler/handler.notification.channel.go`
+**File**: `api/internal/api/handler/handler.notification.channel.go`
 
 **Business Logic đang ở Handler**:
 - ❌ Uniqueness check: Kiểm tra đã có channel với cùng name + channelType + ownerOrganizationId chưa
@@ -150,7 +150,7 @@ Tài liệu này phân tích xem hệ thống có tuân thủ nguyên tắc **"B
 ---
 
 #### 2.2.5. AIStepHandler.InsertOne
-**File**: `api/core/api/handler/handler.ai.step.go`
+**File**: `api/internal/api/handler/handler.ai.step.go`
 
 **Business Logic đang ở Handler** (dòng 79-89):
 - ❌ Schema validation: Validate input/output schema với standard schema
@@ -169,7 +169,7 @@ Tài liệu này phân tích xem hệ thống có tuân thủ nguyên tắc **"B
 ---
 
 #### 2.2.6. OrganizationHandler.InsertOne
-**File**: `api/core/api/handler/handler.auth.organization.go`
+**File**: `api/internal/api/handler/handler.auth.organization.go`
 
 **Business Logic đang ở Handler** (dòng 110-165):
 - ❌ Tính toán Path dựa trên parent.Path + "/" + code
@@ -190,7 +190,7 @@ Tài liệu này phân tích xem hệ thống có tuân thủ nguyên tắc **"B
 ---
 
 #### 2.2.7. DraftApprovalHandler.InsertOne
-**File**: `api/core/api/handler/handler.content.draft.approval.go`
+**File**: `api/internal/api/handler/handler.content.draft.approval.go`
 
 **Business Logic đang ở Handler** (dòng 91-101):
 - ❌ Cross-field validation: "ít nhất một target" (workflowRunID, draftNodeID, draftVideoID, hoặc draftPublicationID)

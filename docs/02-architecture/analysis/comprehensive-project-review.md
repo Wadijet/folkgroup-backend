@@ -1,4 +1,4 @@
-# Đánh Giá Toàn Diện Dự Án: Các Vấn Đề Cần Cải Thiện
+﻿# Đánh Giá Toàn Diện Dự Án: Các Vấn Đề Cần Cải Thiện
 
 ## Tổng Quan
 
@@ -67,7 +67,7 @@ Tài liệu này đánh giá toàn bộ dự án để xác định các vấn �
 
 **Vấn đề**: `Delete()` và `Update()` không có comments giải thích lý do override
 
-**File**: `api/core/api/services/service.pc.order.go`
+**File**: `api/internal/api/services/service.pc.order.go`
 
 **Hiện tại**:
 ```go
@@ -92,7 +92,7 @@ func (s *PcOrderService) Delete(ctx context.Context, id primitive.ObjectID) erro
 
 **Vấn đề**: `InsertOne()` có comment ngắn, không đầy đủ theo format chuẩn
 
-**File**: `api/core/api/services/service.draft.content.node.go`
+**File**: `api/internal/api/services/service.draft.content.node.go`
 
 **Trạng thái**: ✅ **ĐÃ HOÀN THÀNH**
 
@@ -102,7 +102,7 @@ func (s *PcOrderService) Delete(ctx context.Context, id primitive.ObjectID) erro
 
 **Vấn đề**: `InsertOne()` có comment ngắn, không đầy đủ theo format chuẩn
 
-**File**: `api/core/api/services/service.organization.share.go`
+**File**: `api/internal/api/services/service.organization.share.go`
 
 **Trạng thái**: ✅ **ĐÃ HOÀN THÀNH**
 
@@ -112,7 +112,7 @@ func (s *PcOrderService) Delete(ctx context.Context, id primitive.ObjectID) erro
 
 **Vấn đề**: Các methods `DeleteOne()`, `DeleteById()`, `DeleteMany()`, `FindOneAndDelete()` có comment ngắn
 
-**File**: `api/core/api/services/service.auth.role.go`
+**File**: `api/internal/api/services/service.auth.role.go`
 
 **Trạng thái**: ✅ **ĐÃ HOÀN THÀNH**
 
@@ -122,7 +122,7 @@ func (s *PcOrderService) Delete(ctx context.Context, id primitive.ObjectID) erro
 
 **Vấn đề**: Các methods `DeleteOne()`, `DeleteById()`, `DeleteMany()` có comment ngắn
 
-**File**: `api/core/api/services/service.auth.user_role.go`
+**File**: `api/internal/api/services/service.auth.user_role.go`
 
 **Trạng thái**: ✅ **ĐÃ HOÀN THÀNH**
 
@@ -132,7 +132,7 @@ func (s *PcOrderService) Delete(ctx context.Context, id primitive.ObjectID) erro
 
 #### 2.2.1. DraftApprovalHandler - Commit Drafts Logic
 
-**File**: `api/core/api/handler/handler.content.draft.approval.go`
+**File**: `api/internal/api/handler/handler.content.draft.approval.go`
 
 **Vấn đề**:
 ```go
@@ -151,7 +151,7 @@ func (s *PcOrderService) Delete(ctx context.Context, id primitive.ObjectID) erro
 
 #### 2.2.2. AIStepService - Default Provider Logic
 
-**File**: `api/core/api/services/service.ai.step.go`
+**File**: `api/internal/api/services/service.ai.step.go`
 
 **Vấn đề**:
 ```go
@@ -170,7 +170,7 @@ func (s *PcOrderService) Delete(ctx context.Context, id primitive.ObjectID) erro
 
 #### 2.2.3. TrackingHandler - Missing Data
 
-**File**: `api/core/api/handler/handler.tracking.go`
+**File**: `api/internal/api/handler/handler.tracking.go`
 
 **Vấn đề**:
 ```go
@@ -194,7 +194,7 @@ func (s *PcOrderService) Delete(ctx context.Context, id primitive.ObjectID) erro
 
 **Vấn đề**: `Delete()` và `Update()` không dùng BaseServiceMongoImpl methods
 
-**File**: `api/core/api/services/service.pc.order.go`
+**File**: `api/internal/api/services/service.pc.order.go`
 
 **Phân tích**:
 - `Delete()` có thể dùng `BaseServiceMongoImpl.DeleteById()` thay vì truy cập collection trực tiếp
@@ -211,7 +211,7 @@ func (s *PcOrderService) Delete(ctx context.Context, id primitive.ObjectID) erro
 
 **Vấn đề**: `service.ai.workflow.command.go` đã xóa import `utility` nhưng có thể cần lại
 
-**File**: `api/core/api/services/service.ai.workflow.command.go`
+**File**: `api/internal/api/services/service.ai.workflow.command.go`
 
 **Phân tích**:
 - Đã xóa `utility` import trong refactoring

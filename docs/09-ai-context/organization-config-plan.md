@@ -1,4 +1,4 @@
-# Plan: Cấu hình tổ chức (Organization Config)
+﻿# Plan: Cấu hình tổ chức (Organization Config)
 
 Tóm tắt mục tiêu, thiết kế và trạng thái triển khai. Chi tiết API: `docs/03-api/organization-config.md`.
 
@@ -18,11 +18,11 @@ Tóm tắt mục tiêu, thiết kế và trạng thái triển khai. Chi tiết 
 | Hạng mục | Nội dung |
 |----------|----------|
 | Collection | `auth_organization_configs`, 1 doc / 1 org (unique `ownerOrganizationId`) |
-| Model | `api/core/api/models/mongodb/model.organization.config.go` — OrganizationConfig, ConfigKeyMeta |
+| Model | `api/internal/api/models/mongodb/model.organization.config.go` — OrganizationConfig, ConfigKeyMeta |
 | Global / init | `OrganizationConfigs` trong global.vars, init.go (index), init.registry.go (đăng ký collection) |
-| Service | `api/core/api/services/service.organization.config.go` — GetByOwnerOrganizationID, UpsertByOwnerOrganizationID, GetResolvedConfig, DeleteByOwnerOrganizationID, ValidateBeforeDelete, validateLockedKeysOnUpdate |
-| DTO | `api/core/api/dto/dto.organization.config.go` — ConfigKeyMetaInput, OrganizationConfigUpdateInput |
-| Handler | `api/core/api/handler/handler.organization.config.go` — GetConfig, GetResolvedConfig, UpdateConfig, DeleteConfig (custom handler, :id = org id) |
+| Service | `api/internal/api/services/service.organization.config.go` — GetByOwnerOrganizationID, UpsertByOwnerOrganizationID, GetResolvedConfig, DeleteByOwnerOrganizationID, ValidateBeforeDelete, validateLockedKeysOnUpdate |
+| DTO | `api/internal/api/dto/dto.organization.config.go` — ConfigKeyMetaInput, OrganizationConfigUpdateInput |
+| Handler | `api/internal/api/handler/handler.organization.config.go` — GetConfig, GetResolvedConfig, UpdateConfig, DeleteConfig (custom handler, :id = org id) |
 | Route | GET/PUT/DELETE `/organization/:id/config`, GET `/organization/:id/config/resolved` — registerRouteWithMiddleware trong registerRBACRoutes |
 | Permission | OrganizationConfig.Read, OrganizationConfig.Update, OrganizationConfig.Delete — thêm trong InitialPermissions (service.admin.init.go) |
 | Tài liệu | `docs/03-api/organization-config.md` — API, cấu trúc, quy tắc nghiệp vụ |

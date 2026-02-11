@@ -1,4 +1,4 @@
-# Đề Xuất Xử Lý JSON Response và Fix Cứng Prompt
+﻿# Đề Xuất Xử Lý JSON Response và Fix Cứng Prompt
 
 ## Vấn Đề
 
@@ -167,7 +167,7 @@ func ValidateParsedOutput(parsed map[string]interface{}, stepType string) error 
 ### 5. Cấu Trúc Code
 
 ```
-api/core/api/services/
+api/internal/api/services/
   service.ai.prompt.template.go
     - RenderPrompt() - Render user prompt + append JSON requirement
     - getJSONRequirementForStepType() - Get system-fixed JSON requirement

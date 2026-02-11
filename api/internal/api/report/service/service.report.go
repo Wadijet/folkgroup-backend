@@ -1,0 +1,174 @@
+// Package reportsvc chứa service báo cáo theo chu kỳ (Phase 1).
+// File: service.report.go - giữ tên cấu trúc cũ (service.<domain>.<entity>.go).
+package reportsvc
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+
+	"meta_commerce/internal/common"
+	reportmodels "meta_commerce/internal/api/report/models"
+	"meta_commerce/internal/global"
+)
+
+// ReportService xử lý định nghĩa báo cáo, đánh dấu dirty và truy vấn snapshot (báo cáo theo chu kỳ Phase 1).
+type ReportService struct {
+	defColl   *mongo.Collection
+	snapColl  *mongo.Collection
+	dirtyColl *mongo.Collection
+}
+
+// NewReportService tạo mới ReportService.
+func NewReportService() (*ReportService, error) {
+	defColl, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.ReportDefinitions)
+	if !ok {
+		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.ReportDefinitions, common.ErrNotFound)
+	}
+	snapColl, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.ReportSnapshots)
+	if !ok {
+		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.ReportSnapshots, common.ErrNotFound)
+	}
+	dirtyColl, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.ReportDirtyPeriods)
+	if !ok {
+		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.ReportDirtyPeriods, common.ErrNotFound)
+	}
+	return &ReportService{
+		defColl:   defColl,
+		snapColl:  snapColl,
+		dirtyColl: dirtyColl,
+	}, nil
+}
+
+// LoadDefinition lấy một report definition theo key, isActive = true.
+func (s *ReportService) LoadDefinition(ctx context.Context, reportKey string) (*reportmodels.ReportDefinition, error) {
+	filter := bson.M{"key": reportKey, "isActive": true}
+	var def reportmodels.ReportDefinition
+	err := s.defColl.FindOne(ctx, filter).Decode(&def)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, common.ErrNotFound
+		}
+		return nil, common.ConvertMongoError(err)
+	}
+	return &def, nil
+}
+
+// GetReportKeysByCollection trả về danh sách report key có sourceCollection = collectionName, isActive = true.
+func (s *ReportService) GetReportKeysByCollection(ctx context.Context, collectionName string) ([]string, error) {
+	filter := bson.M{"sourceCollection": collectionName, "isActive": true}
+	cursor, err := s.defColl.Find(ctx, filter, options.Find().SetProjection(bson.M{"key": 1}))
+	if err != nil {
+		return nil, common.ConvertMongoError(err)
+	}
+	defer cursor.Close(ctx)
+
+	var keys []string
+	for cursor.Next(ctx) {
+		var doc struct {
+			Key string `bson:"key"`
+		}
+		if err := cursor.Decode(&doc); err != nil {
+			return nil, common.ConvertMongoError(err)
+		}
+		keys = append(keys, doc.Key)
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, common.ConvertMongoError(err)
+	}
+	return keys, nil
+}
+
+// MarkDirty đánh dấu chu kỳ cần tính lại.
+func (s *ReportService) MarkDirty(ctx context.Context, reportKey, periodKey string, ownerOrganizationID primitive.ObjectID) error {
+	now := time.Now().Unix()
+	doc := reportmodels.ReportDirtyPeriod{
+		ReportKey:           reportKey,
+		PeriodKey:           periodKey,
+		OwnerOrganizationID: ownerOrganizationID,
+		MarkedAt:            now,
+		ProcessedAt:         nil,
+	}
+	filter := bson.M{
+		"reportKey":           reportKey,
+		"periodKey":           periodKey,
+		"ownerOrganizationId": ownerOrganizationID,
+	}
+	opts := options.Replace().SetUpsert(true)
+	_, err := s.dirtyColl.ReplaceOne(ctx, filter, doc, opts)
+	return common.ConvertMongoError(err)
+}
+
+// GetDefinitionsCollection trả về collection report_definitions.
+func (s *ReportService) GetDefinitionsCollection() *mongo.Collection { return s.defColl }
+
+// GetSnapshotsCollection trả về collection report_snapshots.
+func (s *ReportService) GetSnapshotsCollection() *mongo.Collection { return s.snapColl }
+
+// GetDirtyCollection trả về collection report_dirty_periods.
+func (s *ReportService) GetDirtyCollection() *mongo.Collection { return s.dirtyColl }
+
+// FindSnapshotsForTrend truy vấn report_snapshots theo reportKey, ownerOrganizationId, periodKey trong [from, to].
+func (s *ReportService) FindSnapshotsForTrend(ctx context.Context, reportKey string, ownerOrganizationID primitive.ObjectID, from, to string) ([]reportmodels.ReportSnapshot, error) {
+	filter := bson.M{
+		"reportKey":            reportKey,
+		"ownerOrganizationId": ownerOrganizationID,
+		"periodKey":            bson.M{"$gte": from, "$lte": to},
+	}
+	opts := options.Find().SetSort(bson.D{{Key: "periodKey", Value: 1}})
+	cursor, err := s.snapColl.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, common.ConvertMongoError(err)
+	}
+	defer cursor.Close(ctx)
+
+	var list []reportmodels.ReportSnapshot
+	if err := cursor.All(ctx, &list); err != nil {
+		return nil, common.ConvertMongoError(err)
+	}
+	if list == nil {
+		list = []reportmodels.ReportSnapshot{}
+	}
+	return list, nil
+}
+
+// GetUnprocessedDirtyPeriods lấy tối đa limit bản ghi từ report_dirty_periods có processedAt = null.
+func (s *ReportService) GetUnprocessedDirtyPeriods(ctx context.Context, limit int) ([]reportmodels.ReportDirtyPeriod, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	filter := bson.M{"processedAt": nil}
+	opts := options.Find().SetSort(bson.D{{Key: "markedAt", Value: 1}}).SetLimit(int64(limit))
+	cursor, err := s.dirtyColl.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, common.ConvertMongoError(err)
+	}
+	defer cursor.Close(ctx)
+
+	var list []reportmodels.ReportDirtyPeriod
+	if err := cursor.All(ctx, &list); err != nil {
+		return nil, common.ConvertMongoError(err)
+	}
+	if list == nil {
+		list = []reportmodels.ReportDirtyPeriod{}
+	}
+	return list, nil
+}
+
+// SetDirtyProcessed đánh dấu đã xử lý.
+func (s *ReportService) SetDirtyProcessed(ctx context.Context, reportKey, periodKey string, ownerOrganizationID primitive.ObjectID) error {
+	now := time.Now().Unix()
+	filter := bson.M{
+		"reportKey":           reportKey,
+		"periodKey":           periodKey,
+		"ownerOrganizationId": ownerOrganizationID,
+	}
+	update := bson.M{"$set": bson.M{"processedAt": now}}
+	_, err := s.dirtyColl.UpdateOne(ctx, filter, update)
+	return common.ConvertMongoError(err)
+}

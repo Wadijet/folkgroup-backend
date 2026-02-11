@@ -1,4 +1,4 @@
-# Rà Soát Toàn Bộ CRUD Override - Handler và Service
+﻿# Rà Soát Toàn Bộ CRUD Override - Handler và Service
 
 ## Tổng Quan
 
@@ -33,7 +33,7 @@ Tài liệu này rà soát tất cả các override của CRUD methods trong han
 #### ✅ CẦN GIỮ - Logic Nghiệp Vụ Phức Tạp
 
 ##### AIStepHandler.InsertOne
-**File**: `api/core/api/handler/handler.ai.step.go`
+**File**: `api/internal/api/handler/handler.ai.step.go`
 
 **Lý do override**:
 - Validate input/output schema phải match với standard schema cho từng step type
@@ -45,7 +45,7 @@ Tài liệu này rà soát tất cả các override của CRUD methods trong han
 ---
 
 ##### AIWorkflowHandler.InsertOne
-**File**: `api/core/api/handler/handler.ai.workflow.go`
+**File**: `api/internal/api/handler/handler.ai.workflow.go`
 
 **Lý do override**:
 - Convert nested struct arrays (`Steps []AIWorkflowStepReference`)
@@ -57,7 +57,7 @@ Tài liệu này rà soát tất cả các override của CRUD methods trong han
 ---
 
 ##### AIWorkflowRunHandler.InsertOne
-**File**: `api/core/api/handler/handler.ai.workflow.run.go`
+**File**: `api/internal/api/handler/handler.ai.workflow.run.go`
 
 **Lý do override**:
 1. Set default values cho business logic (CurrentStepIndex = 0, StepRunIDs = [])
@@ -68,7 +68,7 @@ Tài liệu này rà soát tất cả các override của CRUD methods trong han
 ---
 
 ##### AIWorkflowCommandHandler.InsertOne
-**File**: `api/core/api/handler/handler.ai.workflow.command.go`
+**File**: `api/internal/api/handler/handler.ai.workflow.command.go`
 
 **Lý do override**:
 1. Conditional validation (WorkflowID bắt buộc khi CommandType = START_WORKFLOW)
@@ -80,7 +80,7 @@ Tài liệu này rà soát tất cả các override của CRUD methods trong han
 ---
 
 ##### DraftApprovalHandler.InsertOne
-**File**: `api/core/api/handler/handler.content.draft.approval.go`
+**File**: `api/internal/api/handler/handler.content.draft.approval.go`
 
 **Lý do override**:
 1. Cross-field validation: Phải có ít nhất một target (workflowRunID, draftNodeID, draftVideoID, hoặc draftPublicationID)
@@ -92,7 +92,7 @@ Tài liệu này rà soát tất cả các override của CRUD methods trong han
 ---
 
 ##### OrganizationHandler.InsertOne
-**File**: `api/core/api/handler/handler.auth.organization.go`
+**File**: `api/internal/api/handler/handler.auth.organization.go`
 
 **Lý do override**:
 1. Tính toán Path dựa trên parent.Path + "/" + code
@@ -105,7 +105,7 @@ Tài liệu này rà soát tất cả các override của CRUD methods trong han
 ---
 
 ##### NotificationRoutingHandler.InsertOne
-**File**: `api/core/api/handler/handler.notification.routing.go`
+**File**: `api/internal/api/handler/handler.notification.routing.go`
 
 **Lý do override**:
 1. Validation uniqueness phức tạp (check đã có rule cho eventType/domain và ownerOrganizationId chưa)
@@ -117,7 +117,7 @@ Tài liệu này rà soát tất cả các override của CRUD methods trong han
 ---
 
 ##### NotificationChannelHandler.InsertOne
-**File**: `api/core/api/handler/handler.notification.channel.go`
+**File**: `api/internal/api/handler/handler.notification.channel.go`
 
 **Lý do override**:
 1. Validation uniqueness rất phức tạp với nhiều điều kiện:
@@ -134,7 +134,7 @@ Tài liệu này rà soát tất cả các override của CRUD methods trong han
 #### ⚠️ CÓ THỂ XÓA - Đã Có Nested Struct Support
 
 ##### AIProviderProfileHandler.InsertOne
-**File**: `api/core/api/handler/handler.ai.provider.profile.go`
+**File**: `api/internal/api/handler/handler.ai.provider.profile.go`
 
 **Lý do override hiện tại**: Map nested struct Config từ DTO sang Model
 
@@ -172,7 +172,7 @@ Tài liệu này rà soát tất cả các override của CRUD methods trong han
 ### 2.1. InsertOne Overrides
 
 #### OrganizationShareService.InsertOne
-**File**: `api/core/api/services/service.organization.share.go`
+**File**: `api/internal/api/services/service.organization.share.go`
 
 **Lý do override**:
 1. Validation nghiệp vụ: ownerOrgID không được có trong ToOrgIDs
@@ -184,7 +184,7 @@ Tài liệu này rà soát tất cả các override của CRUD methods trong han
 ---
 
 #### DraftContentNodeService.InsertOne
-**File**: `api/core/api/services/service.draft.content.node.go`
+**File**: `api/internal/api/services/service.draft.content.node.go`
 
 **Lý do override**:
 1. Cross-collection validation: Kiểm tra parent phải tồn tại và đã được commit (production) hoặc là draft đã được approve
@@ -203,7 +203,7 @@ Tài liệu này rà soát tất cả các override của CRUD methods trong han
 ### 2.3. DeleteOne Overrides
 
 #### OrganizationService.DeleteOne và DeleteById
-**File**: `api/core/api/services/service.auth.organization.go`
+**File**: `api/internal/api/services/service.auth.organization.go`
 
 **Lý do override**:
 - Validation trước khi xóa: Kiểm tra organization có children không (cascade delete protection)
@@ -214,7 +214,7 @@ Tài liệu này rà soát tất cả các override của CRUD methods trong han
 ---
 
 #### RoleService.DeleteOne, DeleteById, DeleteMany, FindOneAndDelete
-**File**: `api/core/api/services/service.auth.role.go`
+**File**: `api/internal/api/services/service.auth.role.go`
 
 **Lý do override**:
 - Validation trước khi xóa: Kiểm tra role có users không
@@ -225,7 +225,7 @@ Tài liệu này rà soát tất cả các override của CRUD methods trong han
 ---
 
 #### UserRoleService.DeleteOne, DeleteById, DeleteMany
-**File**: `api/core/api/services/service.auth.user_role.go`
+**File**: `api/internal/api/services/service.auth.user_role.go`
 
 **Lý do override**:
 - Business rule validation: Kiểm tra không thể xóa Administrator role nếu đó là user cuối cùng
@@ -238,7 +238,7 @@ Tài liệu này rà soát tất cả các override của CRUD methods trong han
 ### 2.4. FindOne Overrides
 
 #### PcOrderService.FindOne
-**File**: `api/core/api/services/service.pc.order.go`
+**File**: `api/internal/api/services/service.pc.order.go`
 
 **Lý do override**:
 - Signature khác: `FindOne(ctx, id ObjectID)` thay vì `FindOne(ctx, filter, opts)`

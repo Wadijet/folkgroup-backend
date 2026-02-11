@@ -1,6 +1,19 @@
-# Đề xuất: Tổ chức thống kê & báo cáo phục vụ điều hành kinh doanh
+﻿# Đề xuất: Tổ chức thống kê & báo cáo phục vụ điều hành kinh doanh
 
-Tài liệu dựa trên dữ liệu mẫu tại `docs-shared/ai-context/folkform/sample-data`, đề xuất cách tổ chức thống kê và báo cáo phục vụ điều hành kinh doanh (FolkForm / Folk Group).
+Tài liệu dựa trên dữ liệu mẫu và cấu trúc backend hiện tại, đề xuất cách tổ chức thống kê và báo cáo phục vụ điều hành kinh doanh (FolkForm / Folk Group).
+
+---
+
+## 0. Dữ liệu mẫu (Sample Data)
+
+| Mục | Nội dung |
+|-----|----------|
+| **Vị trí** | Dữ liệu mẫu **đã có sẵn** tại thư mục `docs-shared/ai-context/folkform/sample-data` (các file `{collection}-sample.json`). |
+| **Làm mới (tùy chọn)** | Chạy script `scripts/export_sample_documents.go` (từ thư mục gốc hoặc `api/`) — kết nối MongoDB theo config env, export mỗi collection tối đa 10 document ra thư mục trên. |
+| **Phân tích cấu trúc** | Script `scripts/analyze_data_structure.go` in ra cấu trúc thực tế (field, kiểu, độ sâu) của các collection: `pc_pos_*`, `fb_*`, `customers`, v.v. |
+| **Collections trong sample-data** | Auth/RBAC, Facebook, POS (pc_pos_*), Content (content_*, content_draft_*), AI (ai_workflows, ai_steps, ai_workflow_commands, ai_workflow_runs, ai_step_runs, …), Notification, Delivery, CTA, Agent, Webhook, Access tokens. |
+
+Khi triển khai báo cáo, nên đối chiếu với model Go trong `api/internal/api/models/mongodb/` và với file JSON mẫu trong thư mục này để dùng đúng tên trường (xem mục 5).
 
 ---
 
@@ -157,9 +170,9 @@ Trong `fb_message_items`, mỗi tin nhắn có `messageData.from`:
 
 Gợi ý cấu trúc thư mục:
 
-- `api/core/api/handler/handler.report.*.go` (hoặc `handler.stats.*.go`) — từng nhóm báo cáo.
-- `api/core/api/services/service.report.*.go` — logic aggregate, gọi repository.
-- `api/core/api/models/mongodb` — tái sử dụng model hiện có; nếu cần có thể thêm model read-only cho view/aggregation.
+- `api/internal/api/handler/handler.report.*.go` (hoặc `handler.stats.*.go`) — từng nhóm báo cáo.
+- `api/internal/api/services/service.report.*.go` — logic aggregate, gọi repository.
+- `api/internal/api/models/mongodb` — tái sử dụng model hiện có; nếu cần có thể thêm model read-only cho view/aggregation.
 
 ---
 
@@ -180,16 +193,20 @@ Gợi ý cấu trúc thư mục:
 
 ---
 
-## 5. Lưu ý với dữ liệu mẫu hiện tại
+## 5. Lưu ý với dữ liệu mẫu và đối chiếu model backend
 
-- **pc_pos_orders:** Có `posData.total_price`, `total_price_after_sub_discount`, `total_discount`, `transfer_money`, `status`/`status_name`, `shop_id`, `inserted_at`/`createdAt` — đủ để làm báo cáo doanh thu/đơn theo shop và thời gian.
-- **content_nodes:** Có `type`, `ownerOrganizationId`, `createdAt` — đủ để thống kê theo loại và org.
-- **content_draft_*:** Có `approvalStatus`, `status`, `platform` — đủ cho pipeline duyệt và xuất bản.
-- **delivery_history:** Có `channelType`, `eventType`, `status`, `sentAt`, `severity` — đủ cho thống kê gửi thông báo và sự kiện (ví dụ conversation_unreplied).
+### 5.1. Nguồn dữ liệu mẫu
+
+- **pc_pos_orders (model: `PcPosOrder`):** Model có sẵn: `ShopId`, `Status`, `StatusName`, `InsertedAt`, `PaidAt`, `TotalDiscount`, `OrderItems`, `OwnerOrganizationID`, `CreatedAt`. Doanh thu cần lấy từ **`posData`** (map): `posData["total_price"]`, `posData["total_price_after_sub_discount"]`, `posData["transfer_money"]` (theo quy ước nghiệp vụ). Sản phẩm bán chạy: aggregate từ `OrderItems` hoặc `posData["order_items"]` (product_id / variation_id, quantity). Đủ để báo cáo doanh thu/đơn theo shop và thời gian.
+- **content_nodes (model: `ContentNode`):** Có `Type` (pillar, stp, insight, contentLine, gene, script), `OwnerOrganizationID`, `CreatedAt`, `Status` — đủ để thống kê theo loại và org.
+- **content_draft_* (model: `DraftContentNode`):** Có `ApprovalStatus` (draft, pending, approved, rejected), `Type`, `OwnerOrganizationID`, `CreatedAt`. Draft publication/video có `status`, `platform` — đủ cho pipeline duyệt và xuất bản.
+- **delivery_history (model: `DeliveryHistory`):** Có `ChannelType`, `EventType`, `Status`, `SentAt`, `Severity`, `Domain`, `OpenCount`, `ClickCount`, `CTAClicks` — đủ cho thống kê gửi thông báo và sự kiện (ví dụ conversation_unreplied), tỷ lệ mở/click.
 - **auth_organizations:** Có cấu trúc `parentId`, `path`, `type` (system, team, group, company) — dùng để filter hoặc roll-up theo tổ chức con.
-- **fb_conversations / fb_messages:** Có `totalMessages`, `pageId`, `ownerOrganizationId` — đủ cho volume hội thoại/tin nhắn; thời gian phản hồi cần thêm quy tắc và trường (nếu chưa có).
+- **fb_conversations / fb_messages:** Có `totalMessages`, `pageId`, `ownerOrganizationId`; trong conversation có `panCakeData` (tags, last_sent_by, tag_histories, assignee) — đủ cho volume hội thoại/tin nhắn và báo cáo nhân viên sale; thời gian phản hồi cần thêm quy tắc và trường (nếu chưa có).
 
-Nếu sau này bổ sung collection **ai_workflow_runs** / **ai_step_runs**, nên thêm ngay nhóm báo cáo AI runs vào Phase 2.
+### 5.2. Collections đã có trong code
+
+- **ai_workflow_runs / ai_step_runs:** Đã có trong script export và registry; khi dùng được trong API thì thêm ngay nhóm báo cáo AI runs vào Phase 2.
 
 ---
 

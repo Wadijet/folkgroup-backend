@@ -1,4 +1,4 @@
-# CÁC PHƯƠNG ÁN XỬ LÝ ADMINISTRATOR VỚI FIREBASE
+﻿# CÁC PHƯƠNG ÁN XỬ LÝ ADMINISTRATOR VỚI FIREBASE
 
 Tài liệu này trình bày các phương án khác nhau để xử lý administrator trong hệ thống với Firebase Authentication.
 
@@ -48,7 +48,7 @@ if global.MongoDB_ServerConfig.FirebaseAdminUID != "" {
 
 ### Code đề xuất:
 ```go
-// api/core/api/services/service.auth.user.go
+// api/internal/api/services/service.auth.user.go
 func (s *UserService) LoginWithFirebase(...) {
     // ... login logic ...
     
@@ -78,7 +78,7 @@ func (s *UserService) LoginWithFirebase(...) {
 
 ### Code đề xuất:
 ```go
-// api/core/api/middleware/middleware.auth.go
+// api/internal/api/middleware/middleware.auth.go
 func AuthMiddleware(requiredPermission string) fiber.Handler {
     return func(c fiber.Ctx) error {
         // Nếu là set-admin và chưa có admin, bỏ qua permission check
@@ -109,7 +109,7 @@ func AuthMiddleware(requiredPermission string) fiber.Handler {
 
 ### Code đề xuất:
 ```go
-// api/core/api/services/service.admin.init.go
+// api/internal/api/services/service.admin.init.go
 func (h *InitService) InitAdminUserByEmail(email string) error {
     // Tìm user theo email
     filter := bson.M{"email": email}

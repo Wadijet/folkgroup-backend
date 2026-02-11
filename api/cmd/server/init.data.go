@@ -1,16 +1,16 @@
 package main
 
 import (
-	"meta_commerce/core/api/services"
-	"meta_commerce/core/global"
-	"meta_commerce/core/logger"
+	"meta_commerce/internal/api/initsvc"
+	"meta_commerce/internal/global"
+	"meta_commerce/internal/logger"
 )
 
 func InitDefaultData() {
 	log := logger.GetAppLogger()
 	log.Info("🔄 [INIT] Starting InitDefaultData...")
 	
-	initService, err := services.NewInitService()
+	initService, err := initsvc.NewInitService()
 	if err != nil {
 		log.Fatalf("Failed to initialize init service: %v", err)
 	}
@@ -30,7 +30,7 @@ func InitDefaultData() {
 	log.Info("✅ [INIT] Step 2: Permissions initialized/updated successfully")
 
 	// 3. Tạo Role Administrator (nếu chưa có) + Đảm bảo đầy đủ Permission cho Administrator
-	// Tự động gán tất cả quyền trong hệ thống (bao gồm quyền mới) cho role Administrator
+	// Tự động gán tất cả quyền trong hệ thống (bao gồm Report.Read, Report.Recompute cho báo cáo theo chu kỳ) cho role Administrator
 	if err := initService.CheckPermissionForAdministrator(); err != nil {
 		log.Warnf("Failed to check permissions for administrator: %v", err)
 	} else {
@@ -92,6 +92,14 @@ func InitDefaultData() {
 	} else {
 		log.Info("✅ [INIT] Step 8: AI workflow data initialized successfully")
 	}
-	
+
+	// 9. Tạo mẫu báo cáo đơn hàng (order_daily) trong report_definitions nếu chưa có
+	log.Info("🔄 [INIT] Step 9: Initializing report definitions (mẫu báo cáo đơn hàng order_daily)...")
+	if err := initService.InitReportDefinitions(); err != nil {
+		log.WithError(err).Warn("⚠️ [INIT] Step 9: Failed to seed report definitions (có thể bỏ qua nếu collection chưa có)")
+	} else {
+		log.Info("✅ [INIT] Step 9: Mẫu báo cáo đơn hàng (order_daily) đã sẵn sàng")
+	}
+
 	log.Info("✅ [INIT] InitDefaultData completed successfully")
 }

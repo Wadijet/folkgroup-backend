@@ -1,4 +1,4 @@
-# Thêm Service Mới
+﻿# Thêm Service Mới
 
 Hướng dẫn thêm service mới vào hệ thống.
 
@@ -10,14 +10,14 @@ Service chứa business logic của ứng dụng. Tài liệu này hướng dẫ
 
 ### 1. Tạo Service Struct
 
-**File:** `api/core/api/services/service.<module>.<entity>.go`
+**File:** `api/internal/api/services/service.<module>.<entity>.go`
 
 ```go
 package services
 
 import (
     "context"
-    "meta_commerce/core/api/models/mongodb"
+    "meta_commerce/internal/api/models/mongodb"
     "go.mongodb.org/mongo-driver/mongo"
 )
 

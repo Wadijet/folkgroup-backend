@@ -1,4 +1,4 @@
-# Phân Tích: Có Nên Tách Worker Thành Dự Án Riêng?
+﻿# Phân Tích: Có Nên Tách Worker Thành Dự Án Riêng?
 
 ## 📋 Tổng Quan
 
@@ -189,8 +189,8 @@ ff_be_auth/
 ```go
 // api-worker/cmd/worker/main.go
 import (
-    "meta_commerce/core/shared/services"
-    "meta_commerce/core/shared/models"
+    "meta_commerce/internal/shared/services"
+    "meta_commerce/internal/shared/models"
 )
 ```
 
@@ -279,9 +279,9 @@ go work use ./api-worker
 ```go
 // api-worker/cmd/worker/main.go
 import (
-    "meta_commerce/core/shared/services"
-    "meta_commerce/core/shared/models"
-    "meta_commerce/core/shared/database"
+    "meta_commerce/internal/shared/services"
+    "meta_commerce/internal/shared/models"
+    "meta_commerce/internal/shared/database"
 )
 ```
 

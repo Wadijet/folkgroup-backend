@@ -1,4 +1,4 @@
-# Phân Tích & Đề Xuất: Bổ Sung Field Sở Hữu Dữ Liệu Theo Tổ Chức
+﻿# Phân Tích & Đề Xuất: Bổ Sung Field Sở Hữu Dữ Liệu Theo Tổ Chức
 
 ## 📋 Tổng Quan
 
@@ -1613,7 +1613,7 @@ activity := CustomerActivity{
 ### Phase 1: Middleware & Context Management
 
 #### 1.1. Tạo OrganizationContextMiddleware
-- [ ] **File mới**: `api/core/api/middleware/middleware.organization_context.go`
+- [ ] **File mới**: `api/internal/api/middleware/middleware.organization_context.go`
   - [ ] Function `OrganizationContextMiddleware()` - Đọc `X-Active-Role-ID` từ header
   - [ ] Validate user có role đó không
   - [ ] Lấy organization từ role
@@ -1621,19 +1621,19 @@ activity := CustomerActivity{
   - [ ] Fallback: Nếu không có header, lấy role đầu tiên của user
 
 #### 1.2. Cập nhật AuthManager
-- [ ] **File**: `api/core/api/middleware/middleware.auth.go`
+- [ ] **File**: `api/internal/api/middleware/middleware.auth.go`
   - [ ] Thêm method `GetUserRolesWithDetails(userID)` - Lấy roles với thông tin organization
   - [ ] Thêm method `ValidateUserHasRole(userID, roleID)` - Validate user có role không
 
 ### Phase 2: API Endpoints
 
 #### 2.1. Endpoint Lấy Danh Sách Roles
-- [ ] **File**: `api/core/api/handler/handler.auth.user.go` hoặc tạo file mới
+- [ ] **File**: `api/internal/api/handler/handler.auth.user.go` hoặc tạo file mới
   - [ ] Handler `GetUserRoles(c fiber.Ctx)` - `GET /api/v1/auth/roles`
   - [ ] Trả về: `[{roleId, roleName, organizationId, organizationName, organizationCode, ...}]`
 
 #### 2.2. Cập nhật Router
-- [ ] **File**: `api/core/api/router/routes.go`
+- [ ] **File**: `api/internal/api/router/routes.go`
   - [ ] Thêm route `GET /api/v1/auth/roles` với `AuthMiddleware("")`
   - [ ] Áp dụng `OrganizationContextMiddleware()` vào các routes cần thiết (sau `AuthMiddleware`)
 
@@ -1643,69 +1643,69 @@ activity := CustomerActivity{
 - [ ] Chỉ cần thêm field vào models, MongoDB sẽ tự động tạo index khi có tag `index:"single:1"`
 
 #### 3.2. Cập nhật Models (Priority 1 - Bắt buộc)
-- [ ] **File**: `api/core/api/models/mongodb/model.fb.customer.go`
+- [ ] **File**: `api/internal/api/models/mongodb/model.fb.customer.go`
   - [ ] Thêm field: `OrganizationID primitive.ObjectID` với index `single:1`
-- [ ] **File**: `api/core/api/models/mongodb/model.pc.pos.customer.go`
+- [ ] **File**: `api/internal/api/models/mongodb/model.pc.pos.customer.go`
   - [ ] Thêm field: `OrganizationID primitive.ObjectID` với index `single:1`
-- [ ] **File**: `api/core/api/models/mongodb/model.pc.pos.order.go`
+- [ ] **File**: `api/internal/api/models/mongodb/model.pc.pos.order.go`
   - [ ] Thêm field: `OrganizationID primitive.ObjectID` với index `single:1`
-- [ ] **File**: `api/core/api/models/mongodb/model.pc.pos.shop.go`
+- [ ] **File**: `api/internal/api/models/mongodb/model.pc.pos.shop.go`
   - [ ] Thêm field: `OrganizationID primitive.ObjectID` với index `single:1`
-- [ ] **File**: `api/core/api/models/mongodb/model.pc.pos.product.go`
+- [ ] **File**: `api/internal/api/models/mongodb/model.pc.pos.product.go`
   - [ ] Thêm field: `OrganizationID primitive.ObjectID` với index `single:1`
-- [ ] **File**: `api/core/api/models/mongodb/model.pc.pos.warehouse.go`
+- [ ] **File**: `api/internal/api/models/mongodb/model.pc.pos.warehouse.go`
   - [ ] Thêm field: `OrganizationID primitive.ObjectID` với index `single:1`
-- [ ] **File**: `api/core/api/models/mongodb/model.fb.page.go`
+- [ ] **File**: `api/internal/api/models/mongodb/model.fb.page.go`
   - [ ] Thêm field: `OrganizationID primitive.ObjectID` với index `single:1`
-- [ ] **File**: `api/core/api/models/mongodb/model.fb.post.go`
+- [ ] **File**: `api/internal/api/models/mongodb/model.fb.post.go`
   - [ ] Thêm field: `OrganizationID primitive.ObjectID` với index `single:1`
-- [ ] **File**: `api/core/api/models/mongodb/model.fb.conversation.go`
+- [ ] **File**: `api/internal/api/models/mongodb/model.fb.conversation.go`
   - [ ] Thêm field: `OrganizationID primitive.ObjectID` với index `single:1`
-- [ ] **File**: `api/core/api/models/mongodb/model.fb.message.go`
+- [ ] **File**: `api/internal/api/models/mongodb/model.fb.message.go`
   - [ ] Thêm field: `OrganizationID primitive.ObjectID` với index `single:1`
-- [ ] **File**: `api/core/api/models/mongodb/model.auth.agent.go`
+- [ ] **File**: `api/internal/api/models/mongodb/model.auth.agent.go`
   - [ ] Thêm field: `OrganizationID *primitive.ObjectID` (nullable) với index `single:1`
 
 #### 3.3. Cập nhật Models (Priority 2 - Tối ưu query)
-- [ ] **File**: `api/core/api/models/mongodb/model.pc.pos.category.go`
+- [ ] **File**: `api/internal/api/models/mongodb/model.pc.pos.category.go`
   - [ ] Thêm field: `OrganizationID primitive.ObjectID` với index `single:1`
-- [ ] **File**: `api/core/api/models/mongodb/model.pc.pos.variation.go`
+- [ ] **File**: `api/internal/api/models/mongodb/model.pc.pos.variation.go`
   - [ ] Thêm field: `OrganizationID primitive.ObjectID` với index `single:1`
-- [ ] **File**: `api/core/api/models/mongodb/model.fb.message.item.go`
+- [ ] **File**: `api/internal/api/models/mongodb/model.fb.message.item.go`
   - [ ] Thêm field: `OrganizationID primitive.ObjectID` với index `single:1`
 
 #### 3.4. Cập nhật Models (Priority 3 - Cần xác định)
-- [ ] **File**: `api/core/api/models/mongodb/model.pc.order.go`
+- [ ] **File**: `api/internal/api/models/mongodb/model.pc.order.go`
   - [ ] Xác định business logic: Đơn hàng có thuộc organization không?
   - [ ] Nếu có: Thêm field `OrganizationID primitive.ObjectID` với index `single:1`
 
 ### Phase 4: Services
 
 #### 4.1. Helper Functions trong BaseService
-- [ ] **File**: `api/core/api/services/service.base.mongo.go`
+- [ ] **File**: `api/internal/api/services/service.base.mongo.go`
   - [ ] Method `GetUserAllowedOrganizationIDs(ctx, userID, permissionName)` - Tính toán allowed org IDs dựa trên scope
   - [ ] **Tự động thêm parent organizations** vào allowedOrgIDs (không cần permission)
   - [ ] Method `ApplyOrganizationFilter(baseFilter, allowedOrgIDs)` - Thêm filter organizationId
 
 #### 4.2. Cập nhật OrganizationService
-- [ ] **File**: `api/core/api/services/service.auth.organization.go`
+- [ ] **File**: `api/internal/api/services/service.auth.organization.go`
   - [ ] Đảm bảo method `GetChildrenIDs()` hoạt động đúng (đã có)
   - [ ] **Thêm method `GetParentIDs(ctx, childID)`** - Lấy tất cả parent IDs (inverse lookup)
 
 ### Phase 5: Handlers
 
 #### 5.1. Cập nhật BaseHandler
-- [ ] **File**: `api/core/api/handler/handler.base.go`
+- [ ] **File**: `api/internal/api/handler/handler.base.go`
   - [ ] Method `getActiveOrganizationID(c)` - Lấy active organization từ context
   - [ ] Method `applyOrganizationFilter(c, permissionName, baseFilter)` - Tự động filter theo scope
 
 #### 5.2. Cập nhật InsertOne trong BaseHandler
-- [ ] **File**: `api/core/api/handler/handler.base.crud.go`
+- [ ] **File**: `api/internal/api/handler/handler.base.crud.go`
   - [ ] Trong `InsertOne()`: Tự động gán `organizationId` từ `active_organization_id` trong context
   - [ ] Validate model có field `OrganizationID` không (dùng reflection)
 
 #### 5.3. Cập nhật Find/Query Methods trong BaseHandler
-- [ ] **File**: `api/core/api/handler/handler.base.crud.go`
+- [ ] **File**: `api/internal/api/handler/handler.base.crud.go`
   - [ ] Trong `Find()`: Tự động thêm filter `organizationId` dựa trên scope
   - [ ] Trong `FindWithPagination()`: Tự động thêm filter `organizationId`
   - [ ] Trong `FindOne()`: Tự động thêm filter `organizationId`
@@ -1723,7 +1723,7 @@ activity := CustomerActivity{
 ### Phase 6: Router & Middleware Chain
 
 #### 6.1. Cập nhật Router
-- [ ] **File**: `api/core/api/router/routes.go`
+- [ ] **File**: `api/internal/api/router/routes.go`
   - [ ] Thêm `OrganizationContextMiddleware()` vào middleware chain
   - [ ] Đảm bảo thứ tự: `AuthMiddleware` → `OrganizationContextMiddleware` → Handler
   - [ ] Áp dụng cho tất cả routes cần organization context (trừ auth routes)

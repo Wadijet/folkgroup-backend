@@ -1,0 +1,479 @@
+---
+description: "Quy tắc thiết kế và coding cho FolkForm Backend (Go)"
+alwaysApply: true
+---
+
+# Cursor Rules cho Folkgroup Backend (Go)
+
+## 🌐 Ngôn Ngữ và Giao Tiếp
+- Luôn làm việc bằng Tiếng Việt
+- Luôn mô tả và chú thích đầy đủ bằng Tiếng Việt
+- Comments trong code phải bằng Tiếng Việt
+- Error messages và log messages phải bằng Tiếng Việt
+
+## 📁 Cấu Trúc File và Naming Conventions
+
+### File Naming
+- Handler: `handler.<module>.<entity>.go` (ví dụ: `handler.notification.trigger.go`)
+- Service: `service.<module>.<entity>.go` (ví dụ: `service.customer.go`)
+- Model: `model.<module>.<entity>.go` (ví dụ: `model.mongodb.user.go`)
+- DTO: `dto.<module>.<entity>.go` (ví dụ: `dto.customer.create.go`)
+- Middleware: `middleware.<name>.go`
+- Router: `router.<module>.go`
+
+### Function Naming
+- Handler methods: `Handle<Action><Entity>` (ví dụ: `HandleCreateCustomer`, `HandleTriggerNotification`)
+- Service methods: `<Action><Entity>` (ví dụ: `CreateCustomer`, `FindOneById`)
+- Private functions: `camelCase` (ví dụ: `findSenderForChannel`)
+- Public functions: `PascalCase` (ví dụ: `NewCustomerHandler`)
+
+### Variable Naming
+- Constants: `UPPER_SNAKE_CASE` (ví dụ: `STATUS_PENDING`)
+- Variables: `camelCase` (ví dụ: `customerID`, `baseURL`)
+- Exported variables: `PascalCase` (ví dụ: `DefaultConfig`)
+
+## 🏗️ Kiến Trúc và Patterns
+
+### Layered Architecture
+```
+Request → Router → Middleware → Handler → Service → Repository → Database
+```
+
+### Handler Pattern
+- Handlers phải kế thừa từ `BaseHandler[T, CreateInput, UpdateInput]` khi có thể
+- Sử dụng `SafeHandlerWrapper` để xử lý errors
+- Luôn trả về `error` từ handler function
+- Response format: `c.Status(code).JSON(fiber.Map{...})`
+
+### Service Pattern
+- Services phải kế thừa từ `BaseServiceMongoImpl[T]` khi có thể
+- Tất cả service methods phải nhận `context.Context` làm tham số đầu tiên
+- Service methods trả về `(result, error)`
+- Sử dụng `common.ConvertMongoError()` để convert MongoDB errors
+
+### Error Handling
+- Luôn xử lý errors, không bỏ qua
+- Sử dụng `common.ErrorCode` và `common.NewError()` để tạo errors
+- Convert MongoDB errors bằng `common.ConvertMongoError()`
+- Trả về `common.ErrNotFound` khi không tìm thấy document
+- Error messages phải bằng Tiếng Việt và rõ ràng
+
+### Context Usage
+- Luôn truyền `context.Context` cho tất cả database operations
+- Sử dụng `c.Context()` từ Fiber để lấy context; không dùng `context.Background()` trong handler
+- Không tạo context mới trừ khi cần timeout hoặc cancellation
+
+### Error wrapping và bảo mật
+- Wrap errors khi cần ngữ cảnh: `fmt.Errorf("...: %w", err)`
+- Không expose lỗi nội bộ ra client: chỉ trả message an toàn, không leak stack/path
+
+## 📝 Code Structure
+
+### Handler Structure
+```go
+func (h *Handler) HandleAction(c fiber.Ctx) error {
+    return SafeHandlerWrapper(c, func() error {
+        // 1. Parse input
+        var input dto.Input
+        if err := c.Bind().Body(&input); err != nil {
+            c.Status(common.StatusBadRequest).JSON(fiber.Map{
+                "code":    common.ErrCodeValidationFormat.Code,
+                "message": "Dữ liệu gửi lên không đúng định dạng JSON",
+                "status":  "error",
+            })
+            return nil
+        }
+        
+        // 2. Validate
+        if input.Field == "" {
+            c.Status(common.StatusBadRequest).JSON(fiber.Map{
+                "code":    common.ErrCodeValidationFormat.Code,
+                "message": "Field không được để trống",
+                "status":  "error",
+            })
+            return nil
+        }
+        
+        // 3. Call service
+        result, err := h.service.Action(c.Context(), &input)
+        if err != nil {
+            // Handle error appropriately
+            return nil
+        }
+        
+        // 4. Return response
+        c.Status(common.StatusOK).JSON(fiber.Map{
+            "code":    common.StatusOK,
+            "message": "Thao tác thành công",
+            "data":    result,
+            "status":  "success",
+        })
+        return nil
+    })
+}
+```
+
+### Service Structure
+```go
+func (s *Service) Action(ctx context.Context, input *dto.Input) (*models.Entity, error) {
+    // 1. Validate
+    if err := validate(input); err != nil {
+        return nil, err
+    }
+    
+    // 2. Business logic
+    entity := &models.Entity{
+        // ...
+    }
+    
+    // 3. Database operation
+    result, err := s.InsertOne(ctx, entity)
+    if err != nil {
+        return nil, err
+    }
+    
+    return result, nil
+}
+```
+
+## 🔒 Security và Authorization
+
+### Organization-based Data Authorization
+- **OwnerOrganizationID**: dùng cho phân quyền dữ liệu (data authorization) — dữ liệu thuộc tổ chức nào.
+- **OrganizationID**: dùng cho logic nghiệp vụ (business logic); không thay thế OwnerOrganizationID cho authorization.
+- Luôn kiểm tra và set `OwnerOrganizationID` từ context khi tạo/update; ưu tiên giá trị từ request nếu hợp lệ.
+- Sử dụng `getActiveOrganizationID()` để lấy organization ID từ context; `setOrganizationID()` để gán.
+- Query luôn filter theo `OwnerOrganizationID` (hoặc danh sách org user được phép). Không query toàn bộ rồi lọc.
+- Không cho client update trực tiếp OwnerOrganizationID để chuyển dữ liệu sang org khác (trừ flow được thiết kế rõ ràng).
+
+### System Data Protection
+- Không cho phép tạo/update dữ liệu với `IsSystem = true` từ API thông thường
+- Chỉ hệ thống (init process) mới có thể tạo system data
+- Validate system data updates trong service layer
+
+## 📊 Logging
+
+### Logging Patterns
+- Sử dụng `logger.GetAppLogger()` để lấy logger instance
+- Sử dụng structured logging với fields:
+  ```go
+  log.WithFields(map[string]interface{}{
+      "eventType": req.EventType,
+      "channelId": channel.ID.Hex(),
+  }).Info("🔔 [NOTIFICATION] Message")
+  ```
+- Log levels:
+  - `Info`: Thông tin quan trọng, flow bình thường
+  - `Warn`: Cảnh báo, có thể bỏ qua nhưng cần lưu ý
+  - `Error`: Lỗi cần xử lý, kèm `WithError(err)`
+  - `Debug`: Thông tin debug (chỉ trong development)
+
+### Log Messages Format
+- Bắt đầu với emoji nếu có (ví dụ: 🔔 [NOTIFICATION])
+- Sử dụng prefix module trong ngoặc vuông (ví dụ: [NOTIFICATION], [AUTH])
+- Messages phải bằng Tiếng Việt và mô tả rõ ràng
+
+## 🗄️ Database Operations
+
+### MongoDB Patterns
+- Sử dụng `bson.M` hoặc `bson.D` cho filters
+- Luôn xử lý `mongo.ErrNoDocuments` và convert thành `common.ErrNotFound`
+- Sử dụng `primitive.ObjectID` cho MongoDB ObjectIDs
+- Validate ObjectID trước khi query: `primitive.ObjectIDFromHex()`
+
+### Query Patterns
+- Luôn truyền `context.Context` vào database operations
+- Sử dụng options (`*options.FindOptions`, `*options.FindOneOptions`) khi cần
+- Handle nil filters: `if filter == nil { filter = bson.D{} }`
+- Luôn trả về empty slice `[]T{}` thay vì `nil` cho Find operations
+- Dùng `defer cursor.Close(ctx)` cho mọi MongoDB cursor
+- Tránh N+1: ưu tiên aggregation hoặc batch, không query trong vòng lặp
+
+## 📐 Trách nhiệm từng layer (DTO, Model, Handler, Service)
+
+| Layer | Nên làm | Không làm |
+|-------|----------|-----------|
+| **DTO** | Cấu trúc JSON; struct tags `validate`, `transform`; helper parse/validate URL, query params. | Business logic, cross-collection check, gọi DB, xử lý HTTP. |
+| **Model** | Cấu trúc document; BSON/JSON tags; index tags; hằng enum (status, type). | Business logic, validation, gọi DB. |
+| **Handler** | Parse body; validate input đơn giản; gọi service; trả response chuẩn; set OwnerOrganizationID từ context (qua base). | Business logic phức tạp; query DB trực tiếp. |
+| **Service** | Validate business rules; logic nghiệp vụ; gọi DB; `ConvertMongoError()`. | Parse HTTP; trả response. |
+
+- Handler mỏng: chỉ parse → validate cơ bản → gọi service → trả response. Không chứa business logic.
+- Service chứa logic: mọi validation phức tạp, cross-collection, uniqueness check đều trong Service.
+
+## 🎯 Best Practices
+
+### General
+1. **Error Handling**: Luôn xử lý lỗi, không bỏ qua
+2. **Context**: Sử dụng context cho tất cả operations
+3. **Validation**: Validate input ở handler layer
+4. **Logging**: Log errors và important events
+5. **Comments**: Comment cho public functions bằng Tiếng Việt
+
+### Development Principles (Nguyên Tắc Phát Triển)
+1. **Ưu tiên CRUD, hạn chế tạo endpoint mới**:
+   - Luôn ưu tiên sử dụng các CRUD endpoints có sẵn từ `BaseHandler`
+   - Chỉ tạo endpoint mới khi thực sự cần thiết và không thể dùng CRUD
+   - Trước khi tạo endpoint mới, hỏi: "Có thể dùng CRUD với filter/query không?"
+   - Endpoint mới phải có lý do rõ ràng và được document đầy đủ
+
+2. **Code phải đầy đủ ghi chú**:
+   - Tất cả public functions phải có comment mô tả bằng Tiếng Việt
+   - Comment phải giải thích: mục đích, tham số, giá trị trả về, và các trường hợp đặc biệt
+   - Complex logic phải có comment giải thích tại sao làm như vậy
+   - Business rules quan trọng phải được comment rõ ràng
+   - Ví dụ comment format:
+     ```go
+     // HandleCreateCustomer xử lý request tạo mới customer
+     // Tham số:
+     //   - c: Fiber context chứa request body
+     // Trả về:
+     //   - error: Lỗi nếu có trong quá trình xử lý
+     // Lưu ý: Tự động gán OwnerOrganizationID từ context nếu customer chưa có
+     func (h *CustomerHandler) HandleCreateCustomer(c fiber.Ctx) error {
+         // ...
+     }
+     ```
+
+### Code Quality
+- Sử dụng generics (`BaseHandler[T, CreateInput, UpdateInput]`) khi có thể
+- Tránh code duplication, tái sử dụng base handlers/services
+- Giữ functions ngắn gọn và focused
+- Một function chỉ làm một việc
+
+### Performance
+- Cache kết quả khi phù hợp (ví dụ: system organization ID)
+- Cursor và N+1: xem mục Database / Query Patterns
+
+### Testing
+- Viết tests cho business logic trong services
+- Test error cases và edge cases
+- Sử dụng test fixtures khi cần
+
+## 📦 Dependencies và Imports
+
+### Import Organization
+```go
+import (
+    // Standard library
+    "context"
+    "fmt"
+    "time"
+    
+    // Third-party
+    "github.com/gofiber/fiber/v3"
+    "go.mongodb.org/mongo-driver/bson"
+    "go.mongodb.org/mongo-driver/bson/primitive"
+    
+    // Internal packages
+    models "meta_commerce/internal/api/models/mongodb"
+    "meta_commerce/internal/api/services"
+    "meta_commerce/internal/common"
+    "meta_commerce/internal/logger"
+)
+```
+
+### Package Aliases
+- Models: `models "meta_commerce/internal/api/models/mongodb"`
+- MongoDB options: `mongoopts "go.mongodb.org/mongo-driver/mongo/options"`
+
+## 🔄 Common Patterns
+
+### New Handler Pattern
+```go
+func NewEntityHandler() (*EntityHandler, error) {
+    service, err := services.NewEntityService()
+    if err != nil {
+        return nil, fmt.Errorf("failed to create entity service: %v", err)
+    }
+    
+    handler := &EntityHandler{
+        BaseHandler: *NewBaseHandler[models.Entity, dto.EntityCreateInput, dto.EntityUpdateInput](service.BaseServiceMongoImpl),
+        EntityService: service,
+    }
+    
+    return handler, nil
+}
+```
+
+### New Service Pattern
+```go
+func NewEntityService() (*EntityService, error) {
+    collection, exist := global.RegistryCollections.Get(global.MongoDB_ColNames.Entities)
+    if !exist {
+        return nil, fmt.Errorf("failed to get entities collection: %v", common.ErrNotFound)
+    }
+    
+    return &EntityService{
+        BaseServiceMongoImpl: NewBaseServiceMongo[models.Entity](collection),
+    }, nil
+}
+```
+
+### Response Format
+**TẤT CẢ API responses PHẢI tuân theo format chuẩn sau:**
+
+#### Success Response (Thành công)
+```go
+c.Status(common.StatusOK).JSON(fiber.Map{
+    "code":    common.StatusOK,
+    "message": "Thông báo thành công",
+    "data":    result, // Dữ liệu trả về (có thể là object, array, hoặc null)
+    "status":  "success",
+})
+```
+
+#### Error Response (Lỗi)
+```go
+c.Status(common.StatusBadRequest).JSON(fiber.Map{
+    "code":    common.ErrCodeValidationFormat.Code, // Error code từ common package
+    "message": "Thông báo lỗi bằng Tiếng Việt",
+    "status":  "error",
+    // Optional: "details" cho thông tin chi tiết lỗi
+})
+```
+
+#### Quy Tắc Response Format
+1. **Luôn dùng `fiber.Map` thay vì `map[string]interface{}`** để nhất quán
+2. **Luôn set status code** bằng `c.Status(code)` trước khi gọi `JSON()`
+3. **Success response PHẢI có**: `code`, `message`, `data`, `status: "success"`
+4. **Error response PHẢI có**: `code`, `message`, `status: "error"`
+5. **Sử dụng constants từ `common` package**: `common.StatusOK`, `common.StatusBadRequest`, `common.ErrCodeValidationFormat`, etc.
+6. **Message phải bằng Tiếng Việt** và rõ ràng
+7. **Không được trả về format khác** như `c.JSON(DeliverySendResponse{...})` hoặc `c.JSON(map[string]string{"error": ...})`
+
+#### Ví dụ Response Formats
+
+**✅ ĐÚNG - Success:**
+```go
+c.Status(common.StatusOK).JSON(fiber.Map{
+    "code":    common.StatusOK,
+    "message": "Notification đã được thêm vào queue",
+    "data": map[string]interface{}{
+        "eventType": req.EventType,
+        "queued":    len(queueItems),
+    },
+    "status": "success",
+})
+```
+
+**✅ ĐÚNG - Error:**
+```go
+c.Status(common.StatusBadRequest).JSON(fiber.Map{
+    "code":    common.ErrCodeValidationFormat.Code,
+    "message": "Dữ liệu gửi lên không đúng định dạng JSON",
+    "status":  "error",
+})
+```
+
+**❌ SAI - Thiếu format chuẩn:**
+```go
+// SAI: Thiếu code, status
+c.JSON(map[string]interface{}{
+    "message": "Thành công",
+    "data": result,
+})
+
+// SAI: Dùng struct trực tiếp
+c.JSON(DeliverySendResponse{
+    MessageID: "...",
+    Status: "queued",
+})
+
+// SAI: Format error không chuẩn
+c.Status(400).JSON(fiber.Map{
+    "error": "Invalid input",
+})
+```
+
+## ⚠️ Lưu Ý Quan Trọng
+
+### Quy Tắc Bắt Buộc
+1. **Ưu tiên CRUD trước khi tạo endpoint mới**:
+   - Luôn kiểm tra xem có thể dùng CRUD endpoints có sẵn không
+   - Chỉ tạo endpoint mới khi thực sự cần thiết
+   - Phải có lý do rõ ràng và được approve trước khi tạo endpoint mới
+
+2. **Code phải đầy đủ ghi chú**:
+   - Tất cả public functions PHẢI có comment đầy đủ bằng Tiếng Việt
+   - Comment phải mô tả: mục đích, tham số, giá trị trả về, edge cases
+   - Complex logic PHẢI có comment giải thích
+   - Business rules quan trọng PHẢI được document trong comment
+
+3. **Không hardcode**: Sử dụng constants từ `common` package
+4. **Không expose sensitive data**: Không log passwords, tokens, secrets
+5. **Validate input**: Luôn validate input ở handler layer
+6. **Handle nil**: Luôn kiểm tra nil trước khi sử dụng
+7. **Context propagation**: Luôn truyền context qua các layers
+8. **Error wrapping**: Sử dụng `fmt.Errorf("...: %w", err)` để wrap errors
+9. **Organization isolation**: Luôn filter theo `OwnerOrganizationID` khi query
+
+## 🚫 Anti-patterns (Tránh)
+
+### Development Anti-patterns
+- ❌ **KHÔNG tạo endpoint mới nếu có thể dùng CRUD**: Luôn ưu tiên sử dụng CRUD có sẵn
+- ❌ **KHÔNG viết code không có comment**: Tất cả public functions và complex logic phải có comment
+- ❌ **KHÔNG tạo context mới với `context.Background()` trong handlers**: Dùng `c.Context()`
+- ❌ **KHÔNG bỏ qua errors**: Luôn xử lý errors đầy đủ
+- ❌ **KHÔNG hardcode error messages**: Dùng constants từ `common` package
+- ❌ **KHÔNG expose internal errors ra client**: Chỉ trả về error messages an toàn
+- ❌ **KHÔNG query mà không filter theo organization**: Luôn filter theo `OwnerOrganizationID` khi có
+- ❌ **KHÔNG log sensitive data**: Không log passwords, tokens, API keys
+- ❌ **KHÔNG sử dụng `panic` trong production code**: Luôn trả về error
+- ❌ **KHÔNG tạo circular dependencies**: Tránh dependencies vòng giữa packages
+- ❌ **KHÔNG trả về response không đúng format chuẩn**: Tất cả responses phải có `code`, `message`, `data`/`status`, `status: "success"` hoặc `"error"`
+- ❌ **KHÔNG đặt business logic trong DTO/Handler**: Đặt trong Service
+- ❌ **KHÔNG gọi DB trực tiếp từ Handler**: Luôn qua Service
+
+---
+
+## 📋 Quy trình thêm API / entity mới
+
+| Bước | Nội dung | Vị trí |
+|------|----------|--------|
+| 1 | Model (nếu mới) | `api/internal/api/models/mongodb/model.<module>.<entity>.go` |
+| 2 | DTO | `api/internal/api/dto/dto.<module>.<entity>.go` |
+| 3 | Service | `api/internal/api/services/service.<module>.<entity>.go` — kế thừa Base khi có thể |
+| 4 | Handler | `api/internal/api/handler/handler.<module>.<entity>.go` — kế thừa BaseHandler |
+| 5 | Router | Đăng ký route trong `api/internal/api/router/router.<module>.go` |
+| 6 | Collection | Đăng ký collection trong global (tên collection theo convention) |
+
+Tham chiếu: `docs/05-development/them-api-moi.md`, `them-service-moi.md`.
+
+---
+
+## ⚙️ Business rules đặc biệt (tóm tắt)
+
+| Domain | Quy tắc | Ghi chú |
+|--------|---------|--------|
+| **RBAC** | Role Administrator phải có ít nhất một user. | Không xóa user cuối cùng mang role Administrator. |
+| **Notification** | Routing/retry/priority theo Domain và Severity. | Xem `docs/02-architecture/systems/notification-processing-rules.md`. |
+| **Reject/Approval** | Khi reject bắt buộc có lý do (`decisionNote`). | Custom endpoint/validation. |
+| **Uniqueness** | Nhiều entity unique theo (eventType/domain + ownerOrganizationId). | Validate trong service trước khi Insert. |
+| **Share/Organization** | Chia sẻ dữ liệu giữa org tuân theo design share. | Không tự ý gán OwnerOrganizationID sang org khác. |
+
+---
+
+## ✅ Checklist nhanh (trước khi hoàn thành thay đổi)
+
+- [ ] Đã dùng Tiếng Việt cho comment và message?
+- [ ] Đã tuân naming (file, handler, service, DTO, model)?
+- [ ] Handler chỉ parse/validate/gọi service/trả response?
+- [ ] Business logic nằm trong Service?
+- [ ] Response đúng format (`code`, `message`, `data`, `status`)?
+- [ ] Đã xử lý OwnerOrganizationID / filter theo org khi cần?
+- [ ] Đã dùng context, xử lý error, không panic?
+- [ ] Đã ưu tiên CRUD thay vì tạo endpoint mới?
+- [ ] Public functions đã có comment Tiếng Việt?
+- [ ] Không hardcode, không log dữ liệu nhạy cảm?
+
+---
+
+## 📚 Tài liệu tham khảo (theo task)
+
+- Tổng quan kiến trúc: `docs/02-architecture/core/tong-quan.md`, `02-architecture/README.md`
+- Auth, RBAC, Firebase: `02-architecture/core/authentication.md`, `rbac.md`, `firebase-auth-voi-database.md`
+- Thêm/sửa API: `docs/05-development/them-api-moi.md`, `02-architecture/analysis/endpoint-workflow-general.md`
+- Phân quyền org: `02-architecture/business-logic/co-che-quan-ly-ownerorganizationid.md`, `organization-data-authorization.md`
+- Tách layer: `02-architecture/refactoring/layer-separation-principles.md`
+- Bảng quy tắc đầy đủ: `docs/09-ai-context/BANG_QUY_TAC_THIET_KE_HE_THONG.md`

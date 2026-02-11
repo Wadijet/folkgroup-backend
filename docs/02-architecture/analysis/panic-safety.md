@@ -1,4 +1,4 @@
-# Panic Safety - Báo Cáo Toàn Diện
+﻿# Panic Safety - Báo Cáo Toàn Diện
 
 ## Tổng Quan
 
@@ -27,8 +27,8 @@ Báo cáo này kiểm tra **TẤT CẢ** các nơi trong codebase có thể gây
 
 **Cơ chế:**
 - Fiber Recover Middleware (`api/cmd/server/init.fiber.go:233`)
-- SafeHandler wrapper (`api/core/api/handler/handler.base.response.go:27`)
-- SafeHandlerWrapper (`api/core/api/handler/handler.notification.trigger.go:433`)
+- SafeHandler wrapper (`api/internal/api/handler/handler.base.response.go:27`)
+- SafeHandlerWrapper (`api/internal/api/handler/handler.notification.trigger.go:433`)
 
 **Coverage:**
 - ✅ Tất cả handlers đều dùng `SafeHandler` hoặc `SafeHandlerWrapper`
@@ -49,7 +49,7 @@ return h.SafeHandler(c, func() error {
 
 **Status:** ✅ **ĐÃ CÓ RECOVER** (vừa sửa)
 
-**File:** `api/core/logger/hook.go`
+**File:** `api/internal/logger/hook.go`
 
 **Trước khi sửa:**
 - ❌ `processEntries()` không có recover
@@ -84,7 +84,7 @@ func (h *AsyncHook) processEntries() {
 
 **Status:** ✅ **ĐÃ CÓ RECOVER ĐẦY ĐỦ**
 
-**File:** `api/core/delivery/processor.go`
+**File:** `api/internal/delivery/processor.go`
 
 **Các lớp bảo vệ:**
 1. ✅ **Main goroutine** (`api/cmd/server/main.go:164`) - có recover
@@ -138,8 +138,8 @@ for _, item := range items {
 **Status:** ✅ **ĐÃ CÓ RECOVER ĐẦY ĐỦ**
 
 **Files:**
-- `api/core/worker/command_cleanup.go`
-- `api/core/worker/agent_command_cleanup.go`
+- `api/internal/worker/command_cleanup.go`
+- `api/internal/worker/agent_command_cleanup.go`
 
 **Các lớp bảo vệ:**
 1. ✅ **Main goroutine** (`api/cmd/server/main.go:192, 220`) - có recover
@@ -151,7 +151,7 @@ for _, item := range items {
 
 **Status:** ✅ **ĐÃ CÓ RECOVER** (vừa sửa)
 
-**File:** `api/core/delivery/processor.go:305`
+**File:** `api/internal/delivery/processor.go:305`
 
 **Trước khi sửa:**
 - ❌ Goroutine không có recover ở ngoài
@@ -179,7 +179,7 @@ go func() {
 
 ### ❌ Vấn Đề 1: Logger Hook Goroutine - THIẾU RECOVER
 
-**File:** `api/core/logger/hook.go`
+**File:** `api/internal/logger/hook.go`
 
 **Vấn đề:** Hàm `processEntries()` chạy trong goroutine riêng nhưng **KHÔNG có recover**
 
@@ -194,7 +194,7 @@ go func() {
 
 ### ❌ Vấn Đề 2: Cleanup Job Goroutine - THIẾU RECOVER Ở NGOÀI
 
-**File:** `api/core/delivery/processor.go`
+**File:** `api/internal/delivery/processor.go`
 
 **Vấn đề:** Có recover cho từng item nhưng **KHÔNG có recover cho toàn bộ goroutine**
 
@@ -343,7 +343,7 @@ bytes.(*Buffer).WriteByte(...)
 
 ### ✅ Fix 1: Thêm Recover Vào Logger Hook
 
-**File:** `api/core/logger/hook.go`
+**File:** `api/internal/logger/hook.go`
 
 **Giải pháp:** Thêm recover vào `processEntries()`:
 
@@ -373,7 +373,7 @@ func (h *AsyncHook) processEntries() {
 
 ### ✅ Fix 2: Thêm Recover Vào Cleanup Job
 
-**File:** `api/core/delivery/processor.go`
+**File:** `api/internal/delivery/processor.go`
 
 **Giải pháp:** Thêm recover vào goroutine:
 

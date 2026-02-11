@@ -1,4 +1,4 @@
-package main
+﻿package main
 
 import (
 	"context"
@@ -11,10 +11,10 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"meta_commerce/core/delivery"
-	"meta_commerce/core/global"
-	"meta_commerce/core/logger"
-	"meta_commerce/core/worker"
+	"meta_commerce/internal/delivery"
+	"meta_commerce/internal/global"
+	"meta_commerce/internal/logger"
+	"meta_commerce/internal/worker"
 )
 
 // initLogger khởi tạo và cấu hình logger cho toàn bộ ứng dụng
@@ -232,6 +232,30 @@ func main() {
 		}()
 
 		log.Info("🔄 [AGENT_COMMAND_CLEANUP] Agent Command Cleanup Worker started successfully")
+	}
+
+	// Worker báo cáo theo chu kỳ: xử lý report_dirty_periods (Compute → set processedAt)
+	reportDirtyWorker, err := worker.NewReportDirtyWorker(5*time.Minute, 50)
+	if err != nil {
+		log.WithError(err).Warn("Failed to create report dirty worker, continuing without report worker")
+	} else {
+		ctxReport, cancelReport := context.WithCancel(context.Background())
+		defer cancelReport()
+
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.WithFields(map[string]interface{}{
+						"panic": r,
+					}).Error("📊 [REPORT_DIRTY] Worker goroutine panic")
+				}
+			}()
+			log.Info("📊 [REPORT_DIRTY] Starting Report Dirty Worker...")
+			reportDirtyWorker.Start(ctxReport)
+			log.Warn("📊 [REPORT_DIRTY] Worker đã dừng")
+		}()
+
+		log.Info("📊 [REPORT_DIRTY] Report Dirty Worker started successfully")
 	}
 
 	// Chạy Fiber server trên main thread

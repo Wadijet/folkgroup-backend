@@ -1,4 +1,4 @@
-# Chạy Nhiều Service Đồng Thời và Quản Lý Log
+﻿# Chạy Nhiều Service Đồng Thời và Quản Lý Log
 
 ## 📋 Tổng Quan
 
@@ -153,7 +153,7 @@ cat logs/combined.log | jq 'select(.level=="error")'
 
 ### Cải Thiện Logger Hiện Tại
 
-**File:** `api/core/logger/logger.go`
+**File:** `api/internal/logger/logger.go`
 
 ```go
 package logger
@@ -239,7 +239,7 @@ func getRootDir() string {
 
 **api/cmd/server/main.go:**
 ```go
-import "meta_commerce/core/logger"
+import "meta_commerce/internal/logger"
 
 func main() {
     log := logger.GetLogger("api-server")
@@ -250,7 +250,7 @@ func main() {
 
 **api-worker/cmd/worker/main.go:**
 ```go
-import "meta_commerce/core/logger"
+import "meta_commerce/internal/logger"
 
 func main() {
     log := logger.GetLogger("api-worker")
@@ -261,7 +261,7 @@ func main() {
 
 **agent_pancake/main.go:**
 ```go
-import "meta_commerce/core/logger"
+import "meta_commerce/internal/logger"
 
 func main() {
     log := logger.GetLogger("agent-pancake")

@@ -3605,16 +3605,33 @@ func (h *InitService) InitReportDefinitions() error {
 			{OutputKey: "totalAmount", AggType: "sum", FieldPath: "posData.total_price_after_sub_discount"},
 		},
 		Metadata: map[string]interface{}{
-			"description": "Số lượng đơn và tổng số tiền theo ngày, phân theo nguồn (posData.tags). Nhiều tag/đơn thì chia đều.",
+			"description": "Số lượng đơn và tổng số tiền theo ngày, phân theo nguồn (posData.tags), trạng thái đơn (posData.status), kho (posData.warehouse_info.name), nhân viên tạo đơn (posData.assigning_seller.name).",
+			"warehouseDimension": map[string]interface{}{
+				"fieldPath": "posData.warehouse_info.name",
+			},
+			"assigningSellerDimension": map[string]interface{}{
+				"fieldPath": "posData.assigning_seller.name",
+			},
 			"tagDimension": map[string]interface{}{
 				"fieldPath":  "posData.tags",
 				"nameField": "name",
 				"splitMode":  "equal", // Chia đều số lượng và số tiền khi đơn có nhiều tag
 			},
+			"statusDimension": map[string]interface{}{
+				"fieldPath": "posData.status",
+			},
 			"totalAmountField": "posData.total_price_after_sub_discount",
 			"knownTags": []string{
 				"Nguồn.Store-Sài Gòn", "Nguồn.Store-Hà Nội", "Nguồn.Web-Zalo",
 				"Nguồn.Web-Shopify", "Nguồn.Bán lại", "Nguồn.Bán sỉ", "Nguồn.Bán mới",
+			},
+			"knownStatuses": []interface{}{0, 17, 11, 12, 13, 20, 1, 8, 9, 2, 3, 16, 4, 15, 5, 6, 7},
+			"statusLabels": map[string]interface{}{
+				"0": "Mới", "17": "Chờ xác nhận", "11": "Chờ hàng", "12": "Chờ in",
+				"13": "Đã in", "20": "Đã đặt hàng", "1": "Đã xác nhận", "8": "Đang đóng hàng",
+				"9": "Chờ lấy hàng", "2": "Đã giao hàng", "3": "Đã nhận hàng", "16": "Đã thu tiền",
+				"4": "Đang trả hàng", "15": "Trả hàng một phần", "5": "Đã trả hàng",
+				"6": "Đã hủy", "7": "Đã xóa gần đây",
 			},
 		},
 		IsActive:  true,

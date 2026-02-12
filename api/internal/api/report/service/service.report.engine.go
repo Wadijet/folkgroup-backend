@@ -174,24 +174,112 @@ func extractTagDimension(metadata map[string]interface{}) *tagDimensionConfig {
 	return cfg
 }
 
+// extractStatusDimensionField đọc statusDimension.fieldPath từ metadata. Trả về rỗng nếu không có.
+func extractStatusDimensionField(metadata map[string]interface{}) string {
+	if metadata == nil {
+		return ""
+	}
+	raw, ok := metadata["statusDimension"]
+	if !ok || raw == nil {
+		return ""
+	}
+	m, ok := raw.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	path, _ := m["fieldPath"].(string)
+	return path
+}
+
+// extractWarehouseDimensionField đọc warehouseDimension.fieldPath từ metadata. Trả về rỗng nếu không có.
+func extractWarehouseDimensionField(metadata map[string]interface{}) string {
+	if metadata == nil {
+		return ""
+	}
+	raw, ok := metadata["warehouseDimension"]
+	if !ok || raw == nil {
+		return ""
+	}
+	m, ok := raw.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	path, _ := m["fieldPath"].(string)
+	return path
+}
+
+// extractAssigningSellerDimensionField đọc assigningSellerDimension.fieldPath từ metadata.
+func extractAssigningSellerDimensionField(metadata map[string]interface{}) string {
+	if metadata == nil {
+		return ""
+	}
+	raw, ok := metadata["assigningSellerDimension"]
+	if !ok || raw == nil {
+		return ""
+	}
+	m, ok := raw.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	path, _ := m["fieldPath"].(string)
+	return path
+}
+
+// extractStatusLabels đọc statusLabels từ metadata (mã status -> tên tiếng Việt).
+func extractStatusLabels(metadata map[string]interface{}) map[string]string {
+	if metadata == nil {
+		return nil
+	}
+	raw, ok := metadata["statusLabels"]
+	if !ok || raw == nil {
+		return nil
+	}
+	m, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	out := make(map[string]string)
+	for k, v := range m {
+		if s, ok := v.(string); ok {
+			out[k] = s
+		}
+	}
+	return out
+}
+
+// getStatusLabel trả về tên tiếng Việt cho mã status. Trả về mã nếu không có trong labels.
+func getStatusLabel(labels map[string]string, statusKey string) string {
+	if labels == nil {
+		return statusKey
+	}
+	if label, ok := labels[statusKey]; ok {
+		return label
+	}
+	if statusKey == "-1" {
+		return "Không xác định"
+	}
+	return statusKey
+}
+
 // computeWithTagDimension chạy aggregation với $unwind tags, chia đều số lượng và số tiền khi đơn có nhiều tag.
+// Thêm byStatus khi có statusDimension trong metadata (theo docs Pancake POS API).
 func (s *ReportService) computeWithTagDimension(ctx context.Context, reportKey, periodKey string, ownerOrganizationID primitive.ObjectID, def *reportmodels.ReportDefinition, sourceColl *mongo.Collection, filter bson.M, tagDim *tagDimensionConfig) error {
 	tagPath := tagDim.FieldPath
 	nameField := tagDim.NameField
 	amountPath := tagDim.TotalAmountPath
+	statusFieldPath := extractStatusDimensionField(def.Metadata)
+	warehouseFieldPath := extractWarehouseDimensionField(def.Metadata)
+	assigningSellerFieldPath := extractAssigningSellerDimensionField(def.Metadata)
 
-	// $facet: vừa tính tổng, vừa tính theo tag.
-	pipeline := []bson.M{
-		{"$match": filter},
-		{"$facet": bson.M{
-			"total": []bson.M{
-				{"$group": bson.M{
-					"_id": nil,
-					"orderCount": bson.M{"$sum": 1},
-					"totalAmount": bson.M{"$sum": bson.M{"$toLong": bson.M{"$ifNull": bson.A{"$" + amountPath, 0}}}},
-				}},
-			},
-			"byTag": []bson.M{
+	facet := bson.M{
+		"total": []bson.M{
+			{"$group": bson.M{
+				"_id": nil,
+				"orderCount": bson.M{"$sum": 1},
+				"totalAmount": bson.M{"$sum": bson.M{"$toLong": bson.M{"$ifNull": bson.A{"$" + amountPath, 0}}}},
+			}},
+		},
+		"byTag": []bson.M{
 				{"$addFields": bson.M{
 					"__tagCount":   bson.M{"$size": bson.M{"$ifNull": bson.A{"$" + tagPath, bson.A{}}}},
 					"__docAmount":  bson.M{"$toLong": bson.M{"$ifNull": bson.A{"$" + amountPath, 0}}},
@@ -211,7 +299,49 @@ func (s *ReportService) computeWithTagDimension(ctx context.Context, reportKey, 
 					"totalAmount": bson.M{"$sum": "$__splitAmount"},
 				}},
 			},
-		}},
+	}
+	if statusFieldPath != "" {
+		facet["byStatus"] = []bson.M{
+			{"$addFields": bson.M{
+				"__statusKey": bson.M{"$toString": bson.M{"$ifNull": bson.A{"$" + statusFieldPath, -1}}},
+				"__docAmount": bson.M{"$toLong": bson.M{"$ifNull": bson.A{"$" + amountPath, 0}}},
+			}},
+			{"$group": bson.M{
+				"_id":        "$__statusKey",
+				"orderCount": bson.M{"$sum": 1},
+				"totalAmount": bson.M{"$sum": "$__docAmount"},
+			}},
+		}
+	}
+	if warehouseFieldPath != "" {
+		facet["byWarehouse"] = []bson.M{
+			{"$addFields": bson.M{
+				"__warehouseKey": bson.M{"$ifNull": bson.A{"$" + warehouseFieldPath, "Không xác định"}},
+				"__docAmount":   bson.M{"$toLong": bson.M{"$ifNull": bson.A{"$" + amountPath, 0}}},
+			}},
+			{"$group": bson.M{
+				"_id":        "$__warehouseKey",
+				"orderCount": bson.M{"$sum": 1},
+				"totalAmount": bson.M{"$sum": "$__docAmount"},
+			}},
+		}
+	}
+	if assigningSellerFieldPath != "" {
+		facet["byAssigningSeller"] = []bson.M{
+			{"$addFields": bson.M{
+				"__sellerKey": bson.M{"$ifNull": bson.A{"$" + assigningSellerFieldPath, "Không xác định"}},
+				"__docAmount": bson.M{"$toLong": bson.M{"$ifNull": bson.A{"$" + amountPath, 0}}},
+			}},
+			{"$group": bson.M{
+				"_id":        "$__sellerKey",
+				"orderCount": bson.M{"$sum": 1},
+				"totalAmount": bson.M{"$sum": "$__docAmount"},
+			}},
+		}
+	}
+	pipeline := []bson.M{
+		{"$match": filter},
+		{"$facet": facet},
 	}
 
 	cursor, err := sourceColl.Aggregate(ctx, pipeline)
@@ -223,6 +353,9 @@ func (s *ReportService) computeWithTagDimension(ctx context.Context, reportKey, 
 	metrics := make(map[string]interface{})
 	metrics["total"] = map[string]interface{}{"orderCount": int64(0), "totalAmount": int64(0)}
 	metrics["byTag"] = make(map[string]interface{})
+	metrics["byStatus"] = make(map[string]interface{})
+	metrics["byWarehouse"] = make(map[string]interface{})
+	metrics["byAssigningSeller"] = make(map[string]interface{})
 
 	if cursor.Next(ctx) {
 		var raw struct {
@@ -235,6 +368,21 @@ func (s *ReportService) computeWithTagDimension(ctx context.Context, reportKey, 
 				OrderCount  float64 `bson:"orderCount"`
 				TotalAmount float64 `bson:"totalAmount"`
 			} `bson:"byTag"`
+			ByStatus []struct {
+				ID          string  `bson:"_id"`
+				OrderCount  float64 `bson:"orderCount"`
+				TotalAmount float64 `bson:"totalAmount"`
+			} `bson:"byStatus"`
+			ByWarehouse []struct {
+				ID          string  `bson:"_id"`
+				OrderCount  float64 `bson:"orderCount"`
+				TotalAmount float64 `bson:"totalAmount"`
+			} `bson:"byWarehouse"`
+			ByAssigningSeller []struct {
+				ID          string  `bson:"_id"`
+				OrderCount  float64 `bson:"orderCount"`
+				TotalAmount float64 `bson:"totalAmount"`
+			} `bson:"byAssigningSeller"`
 		}
 		if err := cursor.Decode(&raw); err != nil {
 			return common.ConvertMongoError(err)
@@ -262,6 +410,53 @@ func (s *ReportService) computeWithTagDimension(ctx context.Context, reportKey, 
 			}
 		}
 		metrics["byTag"] = byTag
+
+		statusLabels := extractStatusLabels(def.Metadata)
+		byStatus := make(map[string]interface{})
+		for _, st := range raw.ByStatus {
+			avgAmount := float64(0)
+			if st.OrderCount > 0 {
+				avgAmount = st.TotalAmount / st.OrderCount
+			}
+			label := getStatusLabel(statusLabels, st.ID)
+			byStatus[st.ID] = map[string]interface{}{
+				"label":       label,
+				"orderCount":  st.OrderCount,
+				"totalAmount": st.TotalAmount,
+				"avgAmount":   avgAmount,
+			}
+		}
+		metrics["byStatus"] = byStatus
+
+		byWarehouse := make(map[string]interface{})
+		for _, w := range raw.ByWarehouse {
+			avgAmount := float64(0)
+			if w.OrderCount > 0 {
+				avgAmount = w.TotalAmount / w.OrderCount
+			}
+			byWarehouse[w.ID] = map[string]interface{}{
+				"label":       w.ID,
+				"orderCount":  w.OrderCount,
+				"totalAmount": w.TotalAmount,
+				"avgAmount":   avgAmount,
+			}
+		}
+		metrics["byWarehouse"] = byWarehouse
+
+		byAssigningSeller := make(map[string]interface{})
+		for _, s := range raw.ByAssigningSeller {
+			avgAmount := float64(0)
+			if s.OrderCount > 0 {
+				avgAmount = s.TotalAmount / s.OrderCount
+			}
+			byAssigningSeller[s.ID] = map[string]interface{}{
+				"label":       s.ID,
+				"orderCount":  s.OrderCount,
+				"totalAmount": s.TotalAmount,
+				"avgAmount":   avgAmount,
+			}
+		}
+		metrics["byAssigningSeller"] = byAssigningSeller
 	}
 
 	return s.upsertSnapshot(ctx, reportKey, periodKey, ownerOrganizationID, metrics)

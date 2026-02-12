@@ -165,7 +165,9 @@ Chèn (upsert) một document vào `report_definitions`:
 }
 ```
 
-**Lưu ý:** Hook MarkDirty dùng `posCreatedAt` từ document để suy periodKey.
+**Lưu ý:**
+- Hook MarkDirty dùng `posCreatedAt` từ document để suy periodKey.
+- `statusDimension` + `statusLabels`: thống kê theo trạng thái đơn (posData.status). Danh sách trạng thái theo [Pancake POS API](docs-shared/ai-context/pancake-pos/api-context.md#trạng-thái-đơn-hàng-order-status).
 
 ---
 

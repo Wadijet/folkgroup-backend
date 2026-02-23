@@ -3,12 +3,21 @@ package models
 
 import "go.mongodb.org/mongo-driver/bson/primitive"
 
-// ReportMetricDefinition định nghĩa một metric trong báo cáo (Phase 1: sum|avg|count|countIf|min|max)
+// ReportMetricDefinition định nghĩa một metric trong báo cáo.
+// type: "base" (mặc định) = aggregation từ collection; "derived" = tính từ công thức.
 type ReportMetricDefinition struct {
-	OutputKey   string `json:"outputKey" bson:"outputKey"`         // Tên trường kết quả (vd: revenue, orderCount)
-	AggType     string `json:"aggType" bson:"aggType"`              // sum | avg | count | countIf | min | max
-	FieldPath   string `json:"fieldPath,omitempty" bson:"fieldPath,omitempty"`       // Đường dẫn field trong document nguồn (vd: posData.transfer_money)
-	CountIfExpr string `json:"countIfExpr,omitempty" bson:"countIfExpr,omitempty"`  // Biểu thức cho countIf (vd: paidAt>0)
+	OutputKey        string            `json:"outputKey" bson:"outputKey"`                                     // Tên trường kết quả (vd: revenue, orderCount)
+	Type             string            `json:"type,omitempty" bson:"type,omitempty"`                          // "base" | "derived"; rỗng = base
+	AggType          string            `json:"aggType,omitempty" bson:"aggType,omitempty"`                     // sum | avg | count | countIf | min | max (cho base)
+	FieldPath        string            `json:"fieldPath,omitempty" bson:"fieldPath,omitempty"`                 // Đường dẫn field trong document nguồn (cho base)
+	CountIfExpr      string            `json:"countIfExpr,omitempty" bson:"countIfExpr,omitempty"`             // Biểu thức cho countIf (cho base)
+	SourceCollection string            `json:"sourceCollection,omitempty" bson:"sourceCollection,omitempty"`  // Collection nguồn; rỗng = dùng cấp report
+	TimeField        string            `json:"timeField,omitempty" bson:"timeField,omitempty"`                 // Field thời gian; rỗng = dùng cấp report
+	TimeFieldUnit    string            `json:"timeFieldUnit,omitempty" bson:"timeFieldUnit,omitempty"`          // second | millisecond; rỗng = dùng cấp report
+	// Derived metric: công thức tham chiếu
+	FormulaRef string            `json:"formulaRef,omitempty" bson:"formulaRef,omitempty"` // pct_of_total | avg_from_sum_count | ratio
+	Params     map[string]string `json:"params,omitempty" bson:"params,omitempty"`        // Tham số cho công thức (vd: value, total)
+	Scope      string            `json:"scope,omitempty" bson:"scope,omitempty"`          // "total" | "perDimension"
 }
 
 // ReportDefinition định nghĩa một báo cáo theo chu kỳ (lưu trong report_definitions)

@@ -84,6 +84,57 @@ func (s *ReportService) GetReportKeysByCollection(ctx context.Context, collectio
 	return keys, nil
 }
 
+// GetDirtyPeriodKeysForCollection trả về map reportKey -> periodKey cho collection và timestamp.
+// Hook dùng khi dữ liệu nguồn thay đổi để mark đúng chu kỳ cho từng loại báo cáo (day/week/month).
+func (s *ReportService) GetDirtyPeriodKeysForCollection(ctx context.Context, collectionName string, unixSec int64) (map[string]string, error) {
+	filter := bson.M{"sourceCollection": collectionName, "isActive": true}
+	cursor, err := s.defColl.Find(ctx, filter, options.Find().SetProjection(bson.M{"key": 1, "periodType": 1}))
+	if err != nil {
+		return nil, common.ConvertMongoError(err)
+	}
+	defer cursor.Close(ctx)
+
+	loc, err := time.LoadLocation(ReportTimezone)
+	if err != nil {
+		return nil, fmt.Errorf("load timezone %s: %w", ReportTimezone, err)
+	}
+	t := time.Unix(unixSec, 0).In(loc)
+
+	result := make(map[string]string)
+	for cursor.Next(ctx) {
+		var doc struct {
+			Key       string `bson:"key"`
+			PeriodType string `bson:"periodType"`
+		}
+		if err := cursor.Decode(&doc); err != nil {
+			return nil, common.ConvertMongoError(err)
+		}
+		periodKey := periodKeyFromTime(t, doc.PeriodType)
+		result[doc.Key] = periodKey
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, common.ConvertMongoError(err)
+	}
+	return result, nil
+}
+
+// periodKeyFromTime tính periodKey theo periodType từ thời điểm t (đã In(loc)).
+func periodKeyFromTime(t time.Time, periodType string) string {
+	switch periodType {
+	case "week":
+		weekday := int(t.Weekday())
+		if weekday == 0 {
+			weekday = 7
+		}
+		monday := t.AddDate(0, 0, -(weekday - 1))
+		return monday.Format("2006-01-02")
+	case "month":
+		return t.Format("2006-01")
+	default:
+		return t.Format("2006-01-02")
+	}
+}
+
 // MarkDirty đánh dấu chu kỳ cần tính lại.
 func (s *ReportService) MarkDirty(ctx context.Context, reportKey, periodKey string, ownerOrganizationID primitive.ObjectID) error {
 	now := time.Now().Unix()

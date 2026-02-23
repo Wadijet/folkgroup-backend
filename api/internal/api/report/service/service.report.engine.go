@@ -41,6 +41,30 @@ func (s *ReportService) Compute(ctx context.Context, reportKey, periodKey string
 		}
 		startSec = t.Unix()
 		endSec = t.AddDate(0, 0, 1).Unix() - 1
+	case "week":
+		// periodKey: YYYY-MM-DD (thứ Hai đầu tuần) hoặc bất kỳ ngày nào trong tuần — engine chuẩn hóa về thứ Hai
+		t, err := time.ParseInLocation("2006-01-02", periodKey, loc)
+		if err != nil {
+			return fmt.Errorf("parse periodKey %s (cần YYYY-MM-DD): %w", periodKey, err)
+		}
+		// Lùi về thứ Hai (weekday 1 trong Go: Mon=1, Sun=7)
+		weekday := int(t.Weekday())
+		if weekday == 0 {
+			weekday = 7 // Chủ nhật = 7
+		}
+		monday := t.AddDate(0, 0, -(weekday - 1))
+		startSec = monday.Unix()
+		endSec = monday.AddDate(0, 0, 7).Unix() - 1 // Hết Chủ nhật 23:59:59
+	case "month":
+		// periodKey: YYYY-MM (vd: 2025-02)
+		t, err := time.ParseInLocation("2006-01", periodKey, loc)
+		if err != nil {
+			return fmt.Errorf("parse periodKey %s (cần YYYY-MM): %w", periodKey, err)
+		}
+		startSec = t.Unix()
+		// Ngày cuối tháng
+		endOfMonth := t.AddDate(0, 1, 0).Add(-time.Second)
+		endSec = endOfMonth.Unix()
 	default:
 		return fmt.Errorf("periodType %s chưa hỗ trợ", def.PeriodType)
 	}
@@ -77,6 +101,9 @@ func (s *ReportService) Compute(ctx context.Context, reportKey, periodKey string
 	// Pipeline chuẩn (không có tag dimension).
 	groupExpr := bson.M{"_id": nil}
 	for _, m := range def.Metrics {
+		if m.Type == "derived" {
+			continue
+		}
 		switch m.AggType {
 		case "sum":
 			groupExpr[m.OutputKey] = bson.M{"$sum": "$" + m.FieldPath}
@@ -125,11 +152,16 @@ func (s *ReportService) Compute(ctx context.Context, reportKey, periodKey string
 	if metrics == nil {
 		metrics = make(map[string]interface{})
 		for _, m := range def.Metrics {
-			metrics[m.OutputKey] = 0
+			if m.Type != "derived" {
+				metrics[m.OutputKey] = 0
+			}
 		}
 	}
 
-	return s.upsertSnapshot(ctx, reportKey, periodKey, ownerOrganizationID, metrics)
+	// Áp dụng derived metrics (pipeline chuẩn: scope total, context = metrics)
+	applyDerivedMetricsFromDef(metrics, nil, metrics, def.Metrics)
+
+	return s.upsertSnapshot(ctx, reportKey, periodKey, def.PeriodType, ownerOrganizationID, metrics)
 }
 
 // tagDimensionConfig cấu hình thống kê theo tag trong report.
@@ -245,6 +277,123 @@ func extractStatusLabels(metadata map[string]interface{}) map[string]string {
 		}
 	}
 	return out
+}
+
+// formulaRegistry map formulaRef -> hàm tính (params đã resolve).
+var formulaRegistry = map[string]func(params map[string]float64) float64{
+	"pct_of_total": func(p map[string]float64) float64 {
+		v, t := p["value"], p["total"]
+		if t == 0 {
+			return 0
+		}
+		return round2(v/t*100)
+	},
+	"avg_from_sum_count": func(p map[string]float64) float64 {
+		sum, count := p["sum"], p["count"]
+		if count == 0 {
+			return 0
+		}
+		return sum / count
+	},
+	"ratio": func(p map[string]float64) float64 {
+		v, t := p["value"], p["total"]
+		if t == 0 {
+			return 0
+		}
+		return v / t
+	},
+}
+
+// resolveParam lấy giá trị float64 từ param path (vd: "orderCount", "total.orderCount").
+func resolveParam(path string, item, totalMap map[string]interface{}) float64 {
+	if path == "" {
+		return 0
+	}
+	var m map[string]interface{}
+	if len(path) > 6 && path[:6] == "total." {
+		m = totalMap
+		path = path[6:]
+	} else {
+		if item != nil {
+			m = item
+		} else {
+			m = totalMap
+		}
+	}
+	if m == nil {
+		return 0
+	}
+	return toFloat64(m[path])
+}
+
+// applyDerivedMetricsFromDef áp dụng derived metrics từ definition vào metrics.
+// totalMap: map tổng (metrics["total"] hoặc metrics cho pipeline chuẩn).
+// item: map item (nil cho scope=total).
+func applyDerivedMetricsFromDef(metrics map[string]interface{}, totalMap map[string]interface{}, flatOrTotal map[string]interface{}, defMetrics []reportmodels.ReportMetricDefinition) {
+	for _, m := range defMetrics {
+		if m.Type != "derived" || m.FormulaRef == "" {
+			continue
+		}
+		fn, ok := formulaRegistry[m.FormulaRef]
+		if !ok {
+			continue
+		}
+		if m.Scope == "total" {
+			target := totalMap
+			if target == nil {
+				target = flatOrTotal
+			}
+			if target == nil {
+				continue
+			}
+			params := make(map[string]float64)
+			for k, path := range m.Params {
+				params[k] = resolveParam(path, nil, target)
+			}
+			target[m.OutputKey] = fn(params)
+		} else if m.Scope == "perDimension" {
+			if totalMap == nil {
+				totalMap, _ = metrics["total"].(map[string]interface{})
+			}
+			if totalMap == nil {
+				continue
+			}
+			for _, dimKey := range []string{"byTag", "byStatus", "byWarehouse", "byAssigningSeller"} {
+				dimMap, _ := metrics[dimKey].(map[string]interface{})
+				if dimMap == nil {
+					continue
+				}
+				for _, itemVal := range dimMap {
+					itemMap, ok := itemVal.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					params := make(map[string]float64)
+					for k, path := range m.Params {
+						params[k] = resolveParam(path, itemMap, totalMap)
+					}
+					itemMap[m.OutputKey] = fn(params)
+				}
+			}
+		}
+	}
+}
+
+func toFloat64(v interface{}) float64 {
+	switch x := v.(type) {
+	case float64:
+		return x
+	case int64:
+		return float64(x)
+	case int:
+		return float64(x)
+	default:
+		return 0
+	}
+}
+
+func round2(f float64) float64 {
+	return float64(int64(f*100+0.5)) / 100
 }
 
 // getStatusLabel trả về tên tiếng Việt cho mã status. Trả về mã nếu không có trong labels.
@@ -457,12 +606,16 @@ func (s *ReportService) computeWithTagDimension(ctx context.Context, reportKey, 
 			}
 		}
 		metrics["byAssigningSeller"] = byAssigningSeller
+
+		// Áp dụng derived metrics từ definition (formulaRef + params)
+		totalMap, _ := metrics["total"].(map[string]interface{})
+		applyDerivedMetricsFromDef(metrics, totalMap, totalMap, def.Metrics)
 	}
 
-	return s.upsertSnapshot(ctx, reportKey, periodKey, ownerOrganizationID, metrics)
+	return s.upsertSnapshot(ctx, reportKey, periodKey, def.PeriodType, ownerOrganizationID, metrics)
 }
 
-func (s *ReportService) upsertSnapshot(ctx context.Context, reportKey, periodKey string, ownerOrganizationID primitive.ObjectID, metrics map[string]interface{}) error {
+func (s *ReportService) upsertSnapshot(ctx context.Context, reportKey, periodKey, periodType string, ownerOrganizationID primitive.ObjectID, metrics map[string]interface{}) error {
 	now := time.Now().Unix()
 	filterSnap := bson.M{
 		"reportKey":            reportKey,
@@ -471,9 +624,10 @@ func (s *ReportService) upsertSnapshot(ctx context.Context, reportKey, periodKey
 	}
 	update := bson.M{
 		"$set": bson.M{
-			"metrics":    metrics,
-			"computedAt": now,
-			"updatedAt":  now,
+			"metrics":     metrics,
+			"periodType":  periodType,
+			"computedAt":  now,
+			"updatedAt":   now,
 		},
 		"$setOnInsert": bson.M{"createdAt": now},
 	}

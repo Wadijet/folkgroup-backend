@@ -3581,9 +3581,40 @@ func (h *InitService) getProviderProfileByName(ctx context.Context, systemOrgID 
 	return &profileModel.ID, nil
 }
 
-// InitReportDefinitions tạo hoặc cập nhật mẫu báo cáo đơn hàng chu kỳ ngày (order_daily) trong report_definitions.
+// orderReportMetadata metadata dùng chung cho báo cáo đơn hàng (daily/weekly/monthly).
+var orderReportMetadata = map[string]interface{}{
+	"description": "Số lượng đơn và tổng số tiền, phân theo nguồn (posData.tags), trạng thái đơn (posData.status), kho (posData.warehouse_info.name), nhân viên tạo đơn (posData.assigning_seller.name).",
+	"warehouseDimension": map[string]interface{}{
+		"fieldPath": "posData.warehouse_info.name",
+	},
+	"assigningSellerDimension": map[string]interface{}{
+		"fieldPath": "posData.assigning_seller.name",
+	},
+	"tagDimension": map[string]interface{}{
+		"fieldPath":  "posData.tags",
+		"nameField": "name",
+		"splitMode":  "equal", // Chia đều số lượng và số tiền khi đơn có nhiều tag
+	},
+	"statusDimension": map[string]interface{}{
+		"fieldPath": "posData.status",
+	},
+	"totalAmountField": "posData.total_price_after_sub_discount",
+	"knownTags": []string{
+		"Nguồn.Store-Sài Gòn", "Nguồn.Store-Hà Nội", "Nguồn.Web-Zalo",
+		"Nguồn.Web-Shopify", "Nguồn.Bán lại", "Nguồn.Bán sỉ", "Nguồn.Bán mới",
+	},
+	"knownStatuses": []interface{}{0, 17, 11, 12, 13, 20, 1, 8, 9, 2, 3, 16, 4, 15, 5, 6, 7},
+	"statusLabels": map[string]interface{}{
+		"0": "Mới", "17": "Chờ xác nhận", "11": "Chờ hàng", "12": "Chờ in",
+		"13": "Đã in", "20": "Đã đặt hàng", "1": "Đã xác nhận", "8": "Đang đóng hàng",
+		"9": "Chờ lấy hàng", "2": "Đã giao hàng", "3": "Đã nhận hàng", "16": "Đã thu tiền",
+		"4": "Đang trả hàng", "15": "Trả hàng một phần", "5": "Đã trả hàng",
+		"6": "Đã hủy", "7": "Đã xóa gần đây",
+	},
+}
+
+// InitReportDefinitions tạo hoặc cập nhật mẫu báo cáo đơn hàng (order_daily, order_weekly, order_monthly) trong report_definitions.
 // Báo cáo: thời gian theo posCreatedAt; chỉ tiêu: số lượng đơn, tổng số tiền; thống kê theo posData.tags (chia đều nếu nhiều tag).
-// Các nguồn (tag): Nguồn.Store-Sài Gòn, Nguồn.Store-Hà Nội, Nguồn.Web-Zalo, Nguồn.Web-Shopify, Nguồn.Bán lại, Nguồn.Bán sỉ, Nguồn.Bán mới.
 func (h *InitService) InitReportDefinitions() error {
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.ReportDefinitions)
 	if !ok {
@@ -3591,59 +3622,50 @@ func (h *InitService) InitReportDefinitions() error {
 	}
 	ctx := context.TODO()
 	now := time.Now().Unix()
-	seed := reportmodels.ReportDefinition{
-		Key:              "order_daily",
-		Name:             "Báo cáo đơn hàng chu kỳ ngày",
-		PeriodType:       "day",
-		PeriodLabel:      "Theo ngày",
-		SourceCollection: global.MongoDB_ColNames.PcPosOrders,
-		TimeField:        "posCreatedAt",
-		TimeFieldUnit:    "millisecond", // Dữ liệu POS lưu theo ms; engine filter đúng theo posCreatedAt
-		Dimensions:       []string{"ownerOrganizationId"},
-		Metrics: []reportmodels.ReportMetricDefinition{
-			{OutputKey: "orderCount", AggType: "count", FieldPath: "_id"},
-			{OutputKey: "totalAmount", AggType: "sum", FieldPath: "posData.total_price_after_sub_discount"},
-		},
-		Metadata: map[string]interface{}{
-			"description": "Số lượng đơn và tổng số tiền theo ngày, phân theo nguồn (posData.tags), trạng thái đơn (posData.status), kho (posData.warehouse_info.name), nhân viên tạo đơn (posData.assigning_seller.name).",
-			"warehouseDimension": map[string]interface{}{
-				"fieldPath": "posData.warehouse_info.name",
-			},
-			"assigningSellerDimension": map[string]interface{}{
-				"fieldPath": "posData.assigning_seller.name",
-			},
-			"tagDimension": map[string]interface{}{
-				"fieldPath":  "posData.tags",
-				"nameField": "name",
-				"splitMode":  "equal", // Chia đều số lượng và số tiền khi đơn có nhiều tag
-			},
-			"statusDimension": map[string]interface{}{
-				"fieldPath": "posData.status",
-			},
-			"totalAmountField": "posData.total_price_after_sub_discount",
-			"knownTags": []string{
-				"Nguồn.Store-Sài Gòn", "Nguồn.Store-Hà Nội", "Nguồn.Web-Zalo",
-				"Nguồn.Web-Shopify", "Nguồn.Bán lại", "Nguồn.Bán sỉ", "Nguồn.Bán mới",
-			},
-			"knownStatuses": []interface{}{0, 17, 11, 12, 13, 20, 1, 8, 9, 2, 3, 16, 4, 15, 5, 6, 7},
-			"statusLabels": map[string]interface{}{
-				"0": "Mới", "17": "Chờ xác nhận", "11": "Chờ hàng", "12": "Chờ in",
-				"13": "Đã in", "20": "Đã đặt hàng", "1": "Đã xác nhận", "8": "Đang đóng hàng",
-				"9": "Chờ lấy hàng", "2": "Đã giao hàng", "3": "Đã nhận hàng", "16": "Đã thu tiền",
-				"4": "Đang trả hàng", "15": "Trả hàng một phần", "5": "Đã trả hàng",
-				"6": "Đã hủy", "7": "Đã xóa gần đây",
-			},
-		},
-		IsActive:  true,
-		CreatedAt: now,
-		UpdatedAt: now,
+	metrics := []reportmodels.ReportMetricDefinition{
+		// Base metrics: aggregation từ collection
+		{OutputKey: "orderCount", Type: "base", AggType: "count", FieldPath: "_id"},
+		{OutputKey: "totalAmount", Type: "base", AggType: "sum", FieldPath: "posData.total_price_after_sub_discount"},
+		// Derived metrics: công thức từ metric gốc
+		{OutputKey: "avgAmount", Type: "derived", FormulaRef: "avg_from_sum_count", Params: map[string]string{"sum": "totalAmount", "count": "orderCount"}, Scope: "total"},
+		{OutputKey: "orderCountPct", Type: "derived", FormulaRef: "pct_of_total", Params: map[string]string{"value": "orderCount", "total": "total.orderCount"}, Scope: "perDimension"},
+		{OutputKey: "totalAmountPct", Type: "derived", FormulaRef: "pct_of_total", Params: map[string]string{"value": "totalAmount", "total": "total.totalAmount"}, Scope: "perDimension"},
+		{OutputKey: "avgAmount", Type: "derived", FormulaRef: "avg_from_sum_count", Params: map[string]string{"sum": "totalAmount", "count": "orderCount"}, Scope: "perDimension"},
 	}
-	filter := bson.M{"key": "order_daily"}
+
+	seeds := []struct {
+		key         string
+		name        string
+		periodType  string
+		periodLabel string
+	}{
+		{"order_daily", "Báo cáo đơn hàng chu kỳ ngày", "day", "Theo ngày"},
+		{"order_weekly", "Báo cáo đơn hàng chu kỳ tuần", "week", "Theo tuần"},
+		{"order_monthly", "Báo cáo đơn hàng chu kỳ tháng", "month", "Theo tháng"},
+	}
+
 	opts := options.Replace().SetUpsert(true)
-	_, err := coll.ReplaceOne(ctx, filter, seed, opts)
-	if err != nil {
-		return fmt.Errorf("upsert order_daily: %w", err)
+	for _, s := range seeds {
+		seed := reportmodels.ReportDefinition{
+			Key:              s.key,
+			Name:             s.name,
+			PeriodType:       s.periodType,
+			PeriodLabel:      s.periodLabel,
+			SourceCollection: global.MongoDB_ColNames.PcPosOrders,
+			TimeField:        "posCreatedAt",
+			TimeFieldUnit:    "millisecond",
+			Dimensions:       []string{"ownerOrganizationId"},
+			Metrics:          metrics,
+			Metadata:         orderReportMetadata,
+			IsActive:         true,
+			CreatedAt:        now,
+			UpdatedAt:        now,
+		}
+		filter := bson.M{"key": s.key}
+		if _, err := coll.ReplaceOne(ctx, filter, seed, opts); err != nil {
+			return fmt.Errorf("upsert %s: %w", s.key, err)
+		}
+		logrus.Infof("[INIT] Báo cáo %s (%s) đã được tạo/cập nhật trong report_definitions", s.name, s.key)
 	}
-	logrus.Info("[INIT] Báo cáo đơn hàng chu kỳ ngày (order_daily) đã được tạo/cập nhật trong report_definitions")
 	return nil
 }

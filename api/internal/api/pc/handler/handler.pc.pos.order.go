@@ -21,6 +21,7 @@ func NewPcPosOrderHandler() (*PcPosOrderHandler, error) {
 		return nil, fmt.Errorf("failed to create pc pos order service: %v", err)
 	}
 	hdl := &PcPosOrderHandler{PcPosOrderService: service}
-	hdl.BaseHandler = basehdl.NewBaseHandler[pcmodels.PcPosOrder, pcdto.PcPosOrderCreateInput, pcdto.PcPosOrderCreateInput](service.BaseServiceMongoImpl)
+	// Dùng full service để CRUD đi qua BaseServiceMongoImpl (đã tích hợp EmitDataChanged)
+	hdl.BaseHandler = basehdl.NewBaseHandler[pcmodels.PcPosOrder, pcdto.PcPosOrderCreateInput, pcdto.PcPosOrderCreateInput](service)
 	return hdl, nil
 }

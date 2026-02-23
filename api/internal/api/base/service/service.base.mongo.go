@@ -17,6 +17,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 
 	basemodels "meta_commerce/internal/api/base/models"
+	"meta_commerce/internal/api/events"
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/utility"
 )
@@ -225,6 +226,11 @@ func (s *BaseServiceMongoImpl[T]) InsertOne(ctx context.Context, data T) (T, err
 		return zero, common.ConvertMongoError(err)
 	}
 
+	events.EmitDataChanged(ctx, events.DataChangeEvent{
+		CollectionName: s.collection.Name(),
+		Operation:      events.OpInsert,
+		Document:       created,
+	})
 	return created, nil
 }
 
@@ -271,6 +277,13 @@ func (s *BaseServiceMongoImpl[T]) InsertMany(ctx context.Context, data []T) ([]T
 		return nil, common.ConvertMongoError(err)
 	}
 
+	for i := range created {
+		events.EmitDataChanged(ctx, events.DataChangeEvent{
+			CollectionName: s.collection.Name(),
+			Operation:      events.OpInsert,
+			Document:       created[i],
+		})
+	}
 	return created, nil
 }
 
@@ -413,6 +426,11 @@ func (s *BaseServiceMongoImpl[T]) UpdateOne(ctx context.Context, filter interfac
 		return zero, common.ConvertMongoError(err)
 	}
 
+	events.EmitDataChanged(ctx, events.DataChangeEvent{
+		CollectionName: s.collection.Name(),
+		Operation:      events.OpUpdate,
+		Document:       updated,
+	})
 	return updated, nil
 }
 
@@ -504,6 +522,11 @@ func (s *BaseServiceMongoImpl[T]) DeleteOne(ctx context.Context, filter interfac
 		return common.ErrNotFound
 	}
 
+	events.EmitDataChanged(ctx, events.DataChangeEvent{
+		CollectionName: s.collection.Name(),
+		Operation:      events.OpDelete,
+		Document:       existing,
+	})
 	return nil
 }
 
@@ -620,6 +643,15 @@ func (s *BaseServiceMongoImpl[T]) FindOneAndUpdate(ctx context.Context, filter i
 		}
 	}
 
+	op := events.OpUpdate
+	if !isExisting {
+		op = events.OpUpsert
+	}
+	events.EmitDataChanged(ctx, events.DataChangeEvent{
+		CollectionName: s.collection.Name(),
+		Operation:      op,
+		Document:       result,
+	})
 	return result, nil
 }
 
@@ -883,6 +915,11 @@ func (s *BaseServiceMongoImpl[T]) UpdateById(ctx context.Context, id primitive.O
 		return zero, common.ConvertMongoError(err)
 	}
 
+	events.EmitDataChanged(ctx, events.DataChangeEvent{
+		CollectionName: s.collection.Name(),
+		Operation:      events.OpUpdate,
+		Document:       updated,
+	})
 	return updated, nil
 }
 
@@ -921,6 +958,11 @@ func (s *BaseServiceMongoImpl[T]) DeleteById(ctx context.Context, id primitive.O
 		return common.ErrNotFound
 	}
 
+	events.EmitDataChanged(ctx, events.DataChangeEvent{
+		CollectionName: s.collection.Name(),
+		Operation:      events.OpDelete,
+		Document:       existing,
+	})
 	return nil
 }
 
@@ -1108,6 +1150,11 @@ func (s *BaseServiceMongoImpl[T]) Upsert(ctx context.Context, filter interface{}
 								err = s.collection.FindOneAndUpdate(ctx, filter, updateData, opts).Decode(&upserted)
 								if err == nil {
 									logrus.Debug("Upsert: Upsert thành công sau khi xóa field từ document cũ")
+									events.EmitDataChanged(ctx, events.DataChangeEvent{
+										CollectionName: s.collection.Name(),
+										Operation:      events.OpUpsert,
+										Document:       upserted,
+									})
 									return upserted, nil
 								}
 							}
@@ -1130,6 +1177,11 @@ func (s *BaseServiceMongoImpl[T]) Upsert(ctx context.Context, filter interface{}
 		"collection": s.collection.Name(),
 	}).Debug("Upsert: Upsert thành công")
 
+	events.EmitDataChanged(ctx, events.DataChangeEvent{
+		CollectionName: s.collection.Name(),
+		Operation:      events.OpUpsert,
+		Document:       upserted,
+	})
 	return upserted, nil
 }
 
@@ -1345,6 +1397,13 @@ func (s *BaseServiceMongoImpl[T]) UpsertMany(ctx context.Context, filter interfa
 		upserted = append(upserted, updated...)
 	}
 
+	for i := range upserted {
+		events.EmitDataChanged(ctx, events.DataChangeEvent{
+			CollectionName: s.collection.Name(),
+			Operation:      events.OpUpsert,
+			Document:       upserted[i],
+		})
+	}
 	return upserted, nil
 }
 

@@ -65,6 +65,16 @@ func (s *ReportService) Compute(ctx context.Context, reportKey, periodKey string
 		// Ngày cuối tháng
 		endOfMonth := t.AddDate(0, 1, 0).Add(-time.Second)
 		endSec = endOfMonth.Unix()
+	case "year":
+		// periodKey: YYYY (vd: 2026)
+		t, err := time.ParseInLocation("2006", periodKey, loc)
+		if err != nil {
+			return fmt.Errorf("parse periodKey %s (cần YYYY): %w", periodKey, err)
+		}
+		startSec = t.Unix()
+		// 31/12 23:59:59 của năm đó
+		endOfYear := t.AddDate(1, 0, 0).Add(-time.Second)
+		endSec = endOfYear.Unix()
 	default:
 		return fmt.Errorf("periodType %s chưa hỗ trợ", def.PeriodType)
 	}
@@ -91,6 +101,12 @@ func (s *ReportService) Compute(ctx context.Context, reportKey, periodKey string
 	filter := bson.M{
 		"ownerOrganizationId": ownerOrganizationID,
 		def.TimeField:         bson.M{"$gte": timeFrom, "$lte": timeTo},
+	}
+	// Loại trừ đơn hàng đã hủy (status 6) và đã xóa gần đây (status 7) khỏi doanh thu
+	if statusPath := extractStatusDimensionField(def.Metadata); statusPath != "" {
+		if exclude := extractExcludeStatuses(def.Metadata); len(exclude) > 0 {
+			filter[statusPath] = bson.M{"$nin": exclude}
+		}
 	}
 
 	// Nếu có tagDimension trong metadata: chạy pipeline đặc biệt với $unwind tags, chia đều.
@@ -255,6 +271,22 @@ func extractAssigningSellerDimensionField(metadata map[string]interface{}) strin
 	}
 	path, _ := m["fieldPath"].(string)
 	return path
+}
+
+// extractExcludeStatuses đọc excludeStatuses từ metadata (danh sách status cần loại trừ khỏi doanh thu, vd: 6=Đã hủy, 7=Đã xóa gần đây).
+func extractExcludeStatuses(metadata map[string]interface{}) []interface{} {
+	if metadata == nil {
+		return nil
+	}
+	raw, ok := metadata["excludeStatuses"]
+	if !ok || raw == nil {
+		return nil
+	}
+	arr, ok := raw.([]interface{})
+	if !ok || len(arr) == 0 {
+		return nil
+	}
+	return arr
 }
 
 // extractStatusLabels đọc statusLabels từ metadata (mã status -> tên tiếng Việt).

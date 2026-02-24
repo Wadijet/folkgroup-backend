@@ -222,6 +222,19 @@ func (h *ReportHandler) HandleRecompute(c fiber.Ctx) error {
 				count++
 				d = d.AddDate(0, 1, 0)
 			}
+		case "year":
+			d := time.Date(fromT.Year(), 1, 1, 0, 0, 0, 0, fromT.Location())
+			for (d.Before(toT) || d.Equal(toT)) && count < 5 {
+				periodKey := d.Format("2006")
+				if err := h.ReportService.Compute(ctx, body.ReportKey, periodKey, *orgID); err != nil {
+					c.Status(common.StatusInternalServerError).JSON(fiber.Map{
+						"code": common.ErrCodeDatabase.Code, "message": "Lỗi tính báo cáo, vui lòng thử lại sau", "status": "error",
+					})
+					return nil
+				}
+				count++
+				d = d.AddDate(1, 0, 0)
+			}
 		default:
 			c.Status(common.StatusBadRequest).JSON(fiber.Map{
 				"code": common.ErrCodeValidationInput.Code, "message": "Loại chu kỳ báo cáo chưa hỗ trợ", "status": "error",
@@ -237,11 +250,13 @@ func (h *ReportHandler) HandleRecompute(c fiber.Ctx) error {
 	})
 }
 
-// formatTrendRange chuyển khoảng thời gian sang format periodKey cho query (day/week: YYYY-MM-DD, month: YYYY-MM).
+// formatTrendRange chuyển khoảng thời gian sang format periodKey cho query (day/week: YYYY-MM-DD, month: YYYY-MM, year: YYYY).
 func formatTrendRange(fromT, toT time.Time, periodType string) (fromStr, toStr string) {
 	switch periodType {
 	case "month":
 		return fromT.Format("2006-01"), toT.Format("2006-01")
+	case "year":
+		return fromT.Format("2006"), toT.Format("2006")
 	default:
 		return fromT.Format("2006-01-02"), toT.Format("2006-01-02")
 	}

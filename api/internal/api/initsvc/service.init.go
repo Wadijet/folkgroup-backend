@@ -3598,6 +3598,8 @@ var orderReportMetadata = map[string]interface{}{
 	"statusDimension": map[string]interface{}{
 		"fieldPath": "posData.status",
 	},
+	// excludeStatuses: loại trừ đơn hàng đã hủy (6) và đã xóa gần đây (7) khỏi doanh thu
+	"excludeStatuses": []interface{}{6, 7},
 	"totalAmountField": "posData.total_price_after_sub_discount",
 	"knownTags": []string{
 		"Nguồn.Store-Sài Gòn", "Nguồn.Store-Hà Nội", "Nguồn.Web-Zalo",
@@ -3642,6 +3644,7 @@ func (h *InitService) InitReportDefinitions() error {
 		{"order_daily", "Báo cáo đơn hàng chu kỳ ngày", "day", "Theo ngày"},
 		{"order_weekly", "Báo cáo đơn hàng chu kỳ tuần", "week", "Theo tuần"},
 		{"order_monthly", "Báo cáo đơn hàng chu kỳ tháng", "month", "Theo tháng"},
+		{"order_yearly", "Báo cáo đơn hàng chu kỳ năm", "year", "Theo năm"},
 	}
 
 	opts := options.Replace().SetUpsert(true)

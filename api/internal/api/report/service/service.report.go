@@ -85,7 +85,7 @@ func (s *ReportService) GetReportKeysByCollection(ctx context.Context, collectio
 }
 
 // GetDirtyPeriodKeysForCollection trả về map reportKey -> periodKey cho collection và timestamp.
-// Hook dùng khi dữ liệu nguồn thay đổi để mark đúng chu kỳ cho từng loại báo cáo (day/week/month).
+// Hook dùng khi dữ liệu nguồn thay đổi để mark đúng chu kỳ cho từng loại báo cáo (day/week/month/year).
 func (s *ReportService) GetDirtyPeriodKeysForCollection(ctx context.Context, collectionName string, unixSec int64) (map[string]string, error) {
 	filter := bson.M{"sourceCollection": collectionName, "isActive": true}
 	cursor, err := s.defColl.Find(ctx, filter, options.Find().SetProjection(bson.M{"key": 1, "periodType": 1}))
@@ -130,6 +130,8 @@ func periodKeyFromTime(t time.Time, periodType string) string {
 		return monday.Format("2006-01-02")
 	case "month":
 		return t.Format("2006-01")
+	case "year":
+		return t.Format("2006")
 	default:
 		return t.Format("2006-01-02")
 	}

@@ -21,7 +21,7 @@ type ReportMetricDefinitionInput struct {
 type ReportDefinitionCreateInput struct {
 	Key              string                       `json:"key" validate:"required"`
 	Name             string                      `json:"name" validate:"required"`
-	PeriodType       string                      `json:"periodType" validate:"required"` // day | week | month
+	PeriodType       string                      `json:"periodType" validate:"required"` // day | week | month | year
 	PeriodLabel      string                      `json:"periodLabel,omitempty"`
 	SourceCollection string                      `json:"sourceCollection" validate:"required"`
 	TimeField        string                      `json:"timeField" validate:"required"`

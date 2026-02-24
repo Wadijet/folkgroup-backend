@@ -35,7 +35,7 @@ Worker/Cron đọc report_dirty_periods → Recompute từng (reportKey, periodK
 |-------|------|--------|
 | `key` | string | Unique (ví dụ `order_daily`). reportKey. |
 | `name` | string | Tên báo cáo (tách riêng với chu kỳ). |
-| `periodType` | string | `day` \| `week` \| `month`. Chu kỳ. |
+| `periodType` | string | `day` \| `week` \| `month` \| `year`. Chu kỳ. |
 | `periodLabel` | string | (Optional) Tên hiển thị chu kỳ, ví dụ "Theo ngày". |
 | `sourceCollection` | string | Collection nguồn (Phase 1: một report một collection). |
 | `timeField` | string | Field thời gian trong document nguồn — giá trị **Unix (int64)**, đơn vị **giây**. Ví dụ `insertedAt`. |
@@ -55,7 +55,7 @@ Worker/Cron đọc report_dirty_periods → Recompute từng (reportKey, periodK
 |-------|------|--------|
 | `reportKey` | string | |
 | `periodKey` | string | Ví dụ "2025-02-01". |
-| `periodType` | string | day \| week \| month. |
+| `periodType` | string | day \| week \| month \| year. |
 | `ownerOrganizationId` | ObjectID | |
 | `dimensions` | object | (Optional) shopId, ... |
 | `metrics` | object | Map outputKey → value, ví dụ { "revenue": 123, "orderCount": 5 }. |

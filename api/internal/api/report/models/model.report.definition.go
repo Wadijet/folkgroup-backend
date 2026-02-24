@@ -25,7 +25,7 @@ type ReportDefinition struct {
 	ID               primitive.ObjectID     `json:"id,omitempty" bson:"_id,omitempty"`                         // MongoDB _id (tự sinh nếu không gửi)
 	Key              string                 `json:"key" bson:"key" index:"unique"`                             // Unique report key (vd: order_daily)
 	Name             string                   `json:"name" bson:"name"`                                         // Tên báo cáo
-	PeriodType       string                   `json:"periodType" bson:"periodType"`                             // day | week | month
+	PeriodType       string                   `json:"periodType" bson:"periodType"`                             // day | week | month | year
 	PeriodLabel      string                   `json:"periodLabel,omitempty" bson:"periodLabel,omitempty"`       // Tên hiển thị chu kỳ (vd: Theo ngày)
 	SourceCollection string                   `json:"sourceCollection" bson:"sourceCollection"`                 // Collection nguồn (Phase 1: một report một collection)
 	TimeField        string                   `json:"timeField" bson:"timeField"`                               // Field thời gian trong document nguồn (vd: insertedAt)

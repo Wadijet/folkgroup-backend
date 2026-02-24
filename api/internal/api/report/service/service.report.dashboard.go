@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	basemodels "meta_commerce/internal/api/base/models"
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
 
@@ -63,6 +64,9 @@ type StuckOrderItem struct {
 	AgingMinutes int64   `json:"agingMinutes"`
 	SlaMinutes   int64   `json:"slaMinutes"`
 	AssignedSale string  `json:"assignedSale"`
+	TotalAmount  float64 `json:"totalAmount"`  // Giá trị đơn (từ money_to_collect hoặc total_price_after_sub_discount)
+	ItemCount    int     `json:"itemCount"`    // Số dòng sản phẩm trong đơn
+	CreatedAt    string  `json:"createdAt"`    // Thời gian tạo đơn (ISO format)
 }
 
 // RecentOrderItem đơn hàng gần nhất cho bảng Order status.
@@ -389,9 +393,13 @@ func (s *ReportService) GetStageAgingSnapshot(ctx context.Context, ownerOrganiza
 	return result, nil
 }
 
-// GetStuckOrders trả về danh sách đơn vượt SLA, sort theo aging giảm dần.
-// Tham số: limit (mặc định 50, max 200), stage (lọc theo stage, optional).
-func (s *ReportService) GetStuckOrders(ctx context.Context, ownerOrganizationID primitive.ObjectID, limit int, stageFilter string) ([]StuckOrderItem, error) {
+// GetStuckOrders trả về danh sách đơn vượt SLA có phân trang, sort theo aging giảm dần.
+// Tham số: page (mặc định 1), limit (mặc định 50, max 200), stage (lọc theo stage, optional).
+// Trả về PaginateResult theo format chuẩn: page, limit, itemCount, items, total, totalPage.
+func (s *ReportService) GetStuckOrders(ctx context.Context, ownerOrganizationID primitive.ObjectID, page, limit int64, stageFilter string) (*basemodels.PaginateResult[StuckOrderItem], error) {
+	if page < 1 {
+		page = 1
+	}
 	if limit <= 0 {
 		limit = 50
 	}
@@ -410,11 +418,22 @@ func (s *ReportService) GetStuckOrders(ctx context.Context, ownerOrganizationID 
 		"posData.status":      bson.M{"$in": statusesToFetch},
 	}
 	opts := options.Find().SetProjection(bson.M{
-		"orderId":              1,
-		"billFullName":         1,
-		"posData.status":       1,
-		"posData.status_history": 1,
-		"posData.assigning_seller": 1,
+		"orderId":                               1,
+		"billFullName":                          1,
+		"orderItems":                            1,
+		"insertedAt":                            1,
+		"posData.status":                        1,
+		"posData.status_history":                1,
+		"posData.assigning_seller":              1,
+		"posData.money_to_collect":              1,
+		"posData.total_price_after_sub_discount": 1,
+		"posData.total_price":                   1,
+		"posData.transfer_money":                1,
+		"posData.total_amount":                  1,
+		"posData.items":                         1,
+		"posData.order_items":                   1,
+		"posData.total_quantity":                1,
+		"posData.inserted_at":                   1,
 	})
 	cursor, err := coll.Find(ctx, filter, opts)
 	if err != nil {
@@ -426,17 +445,26 @@ func (s *ReportService) GetStuckOrders(ctx context.Context, ownerOrganizationID 
 	var stuck []StuckOrderItem
 	for cursor.Next(ctx) {
 		var doc struct {
-			OrderID      int64 `bson:"orderId"`
-			BillFullName string `bson:"billFullName"`
+			OrderID      int64         `bson:"orderId"`
+			BillFullName string        `bson:"billFullName"`
+			OrderItems   []interface{} `bson:"orderItems"`
+			InsertedAt   interface{}   `bson:"insertedAt"`
 			PosData      struct {
 				Status        *int `bson:"status"`
 				StatusHistory []struct {
 					Status    *int   `bson:"status"`
 					UpdatedAt string `bson:"updated_at"`
 				} `bson:"status_history"`
-				AssigningSeller *struct {
-					Name string `bson:"name"`
-				} `bson:"assigning_seller"`
+				AssigningSeller            *struct{ Name string `bson:"name"` } `bson:"assigning_seller"`
+				MoneyToCollect             interface{}   `bson:"money_to_collect"`
+				TotalPriceAfterSubDiscount interface{}   `bson:"total_price_after_sub_discount"`
+				TotalPrice                 interface{}   `bson:"total_price"`
+				TransferMoney              interface{}   `bson:"transfer_money"`
+				TotalAmount                interface{}   `bson:"total_amount"`
+				Items                      []interface{} `bson:"items"`
+				OrderItems                 []interface{} `bson:"order_items"`
+				TotalQuantity              interface{}   `bson:"total_quantity"`
+				InsertedAt                 interface{}   `bson:"inserted_at"`
 			} `bson:"posData"`
 		}
 		if err := cursor.Decode(&doc); err != nil {
@@ -466,6 +494,20 @@ func (s *ReportService) GetStuckOrders(ctx context.Context, ownerOrganizationID 
 		if doc.PosData.AssigningSeller != nil {
 			assignedSale = doc.PosData.AssigningSeller.Name
 		}
+		totalAmount := extractFloat64(doc.PosData.MoneyToCollect, doc.PosData.TotalPriceAfterSubDiscount, doc.PosData.TransferMoney, doc.PosData.TotalPrice, doc.PosData.TotalAmount)
+		itemCount := len(doc.PosData.Items)
+		if itemCount == 0 {
+			itemCount = len(doc.PosData.OrderItems)
+		}
+		if itemCount == 0 && len(doc.OrderItems) > 0 {
+			itemCount = len(doc.OrderItems)
+		}
+		if itemCount == 0 {
+			if n, ok := toInt64(doc.PosData.TotalQuantity); ok && n > 0 {
+				itemCount = int(n)
+			}
+		}
+		createdAt := formatInsertedAt(doc.InsertedAt, doc.PosData.InsertedAt)
 		stuck = append(stuck, StuckOrderItem{
 			OrderID:      doc.OrderID,
 			CustomerName: doc.BillFullName,
@@ -474,6 +516,9 @@ func (s *ReportService) GetStuckOrders(ctx context.Context, ownerOrganizationID 
 			AgingMinutes: agingMins,
 			SlaMinutes:   cfg.SlaMinutes,
 			AssignedSale: assignedSale,
+			TotalAmount:  totalAmount,
+			ItemCount:    itemCount,
+			CreatedAt:    createdAt,
 		})
 	}
 	if err := cursor.Err(); err != nil {
@@ -481,13 +526,105 @@ func (s *ReportService) GetStuckOrders(ctx context.Context, ownerOrganizationID 
 	}
 
 	sort.Slice(stuck, func(i, j int) bool { return stuck[i].AgingMinutes > stuck[j].AgingMinutes })
-	if len(stuck) > limit {
-		stuck = stuck[:limit]
-	}
+
+	total := int64(len(stuck))
 	if stuck == nil {
 		stuck = []StuckOrderItem{}
 	}
-	return stuck, nil
+
+	// Phân trang: skip = (page-1)*limit
+	skip := (page - 1) * limit
+	var items []StuckOrderItem
+	if skip < total {
+		end := skip + limit
+		if end > total {
+			end = total
+		}
+		items = stuck[int(skip):int(end)]
+	} else {
+		items = []StuckOrderItem{}
+	}
+
+	totalPage := int64(0)
+	if total > 0 {
+		totalPage = (total + limit - 1) / limit
+	}
+
+	return &basemodels.PaginateResult[StuckOrderItem]{
+		Page:      page,
+		Limit:     limit,
+		ItemCount: int64(len(items)),
+		Items:     items,
+		Total:     total,
+		TotalPage: totalPage,
+	}, nil
+}
+
+// formatInsertedAt chuyển inserted_at (int64 ms/string) hoặc root insertedAt thành chuỗi ISO.
+func formatInsertedAt(rootInsertedAt, posDataInsertedAt interface{}) string {
+	for _, v := range []interface{}{posDataInsertedAt, rootInsertedAt} {
+		if v == nil {
+			continue
+		}
+		if s, ok := v.(string); ok && s != "" {
+			return s
+		}
+		if n, ok := toInt64(v); ok && n > 0 {
+			// Unix ms (Pancake) hoặc seconds
+			if n > 1e12 {
+				return time.UnixMilli(n).Format("2006-01-02T15:04:05.000")
+			}
+			return time.Unix(n, 0).Format("2006-01-02T15:04:05")
+		}
+	}
+	return ""
+}
+
+func toInt64(v interface{}) (int64, bool) {
+	switch x := v.(type) {
+	case int64:
+		return x, true
+	case int:
+		return int64(x), true
+	case int32:
+		return int64(x), true
+	case float64:
+		return int64(x), true
+	default:
+		return 0, false
+	}
+}
+
+// extractFloat64 lấy giá trị float64 từ các interface{} theo thứ tự ưu tiên (bỏ qua nil/zero).
+func extractFloat64(values ...interface{}) float64 {
+	for _, v := range values {
+		if v == nil {
+			continue
+		}
+		switch x := v.(type) {
+		case float64:
+			if x != 0 {
+				return x
+			}
+		case int:
+			if x != 0 {
+				return float64(x)
+			}
+		case int64:
+			if x != 0 {
+				return float64(x)
+			}
+		case int32:
+			if x != 0 {
+				return float64(x)
+			}
+		case float32:
+			if x != 0 {
+				return float64(x)
+			}
+		}
+	}
+	return 0
 }
 
 // computeStageEnteredAt trả về thời điểm cuối cùng đơn vào stage hiện tại.

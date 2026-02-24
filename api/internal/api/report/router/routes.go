@@ -29,6 +29,18 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/orders/stage-aging", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetStageAging)
 	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/orders/stuck-orders", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetStuckOrders)
 
+	// Dashboard Inventory Intelligence (TAB 5) — snapshot tồn kho
+	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/inventory", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetInventory)
+	// Tree lazy load: danh sách sản phẩm (level 1) + mẫu mã khi expand (level 2)
+	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/inventory/products", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetInventoryProducts)
+	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/inventory/products/:productId/variations", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetInventoryProductVariations)
+
+	// Dashboard Customer Intelligence (TAB 4) — KPI, tier distribution, lifecycle, bảng khách, VIP inactive panel
+	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/customers", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetCustomers)
+
+	// Dashboard Inbox Operations (TAB 7) — KPI, bảng hội thoại, Sale performance, Alert zone
+	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/inbox", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetInbox)
+
 	// CRUD report definition (chỉ đọc)
 	reportDefHandler, err := reporthdl.NewReportDefinitionHandler()
 	if err != nil {

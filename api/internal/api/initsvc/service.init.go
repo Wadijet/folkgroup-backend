@@ -3600,6 +3600,8 @@ var orderReportMetadata = map[string]interface{}{
 	},
 	// excludeStatuses: loại trừ đơn hàng đã hủy (6) và đã xóa gần đây (7) khỏi doanh thu
 	"excludeStatuses": []interface{}{6, 7},
+	// revenueCompletedStatuses: trạng thái đơn được tính vào doanh thu đã hoàn thành (3=Đã nhận hàng, 16=Đã thu tiền)
+	"revenueCompletedStatuses": []interface{}{3, 16},
 	"totalAmountField": "posData.total_price_after_sub_discount",
 	"knownTags": []string{
 		"Nguồn.Store-Sài Gòn", "Nguồn.Store-Hà Nội", "Nguồn.Web-Zalo",

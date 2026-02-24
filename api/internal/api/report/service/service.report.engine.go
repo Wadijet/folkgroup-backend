@@ -273,6 +273,22 @@ func extractAssigningSellerDimensionField(metadata map[string]interface{}) strin
 	return path
 }
 
+// extractRevenueCompletedStatuses đọc revenueCompletedStatuses từ metadata (trạng thái đơn được tính doanh thu hoàn thành: 3, 16).
+func extractRevenueCompletedStatuses(metadata map[string]interface{}) []interface{} {
+	if metadata == nil {
+		return []interface{}{3, 16}
+	}
+	raw, ok := metadata["revenueCompletedStatuses"]
+	if !ok || raw == nil {
+		return []interface{}{3, 16}
+	}
+	arr, ok := raw.([]interface{})
+	if !ok || len(arr) == 0 {
+		return []interface{}{3, 16}
+	}
+	return arr
+}
+
 // extractExcludeStatuses đọc excludeStatuses từ metadata (danh sách status cần loại trừ khỏi doanh thu, vd: 6=Đã hủy, 7=Đã xóa gần đây).
 func extractExcludeStatuses(metadata map[string]interface{}) []interface{} {
 	if metadata == nil {
@@ -520,6 +536,61 @@ func (s *ReportService) computeWithTagDimension(ctx context.Context, reportKey, 
 			}},
 		}
 	}
+	// revenueCompleted: doanh thu và số đơn ở trạng thái hoàn thành (3, 16)
+	if statusFieldPath != "" {
+		revenueStatuses := extractRevenueCompletedStatuses(def.Metadata)
+		facet["revenueCompleted"] = []bson.M{
+			{"$match": bson.M{statusFieldPath: bson.M{"$in": revenueStatuses}}},
+			{"$group": bson.M{
+				"_id":        nil,
+				"orderCount": bson.M{"$sum": 1},
+				"totalAmount": bson.M{"$sum": bson.M{"$toLong": bson.M{"$ifNull": bson.A{"$" + amountPath, 0}}}},
+			}},
+		}
+	}
+	// byOrderSource: doanh thu theo nguồn (meta_ads: ["-1"] hoặc -1 hoặc "-1", organic: []/null, direct: khác)
+	// Lưu ý: posData.order_sources có thể là array, number (-1), string ("-1"), hoặc null — $size chỉ hỗ trợ array.
+	orderSrcPath := "posData.order_sources"
+	safeArray := bson.M{"$cond": bson.A{
+		bson.M{"$eq": bson.A{bson.M{"$ifNull": bson.A{bson.M{"$isArray": "$" + orderSrcPath}, false}}, true}},
+		bson.M{"$ifNull": bson.A{"$" + orderSrcPath, bson.A{}}},
+		bson.A{},
+	}}
+	facet["byOrderSource"] = []bson.M{
+		{"$addFields": bson.M{
+			"__orderSource": bson.M{
+				"$switch": bson.M{
+					"branches": bson.A{
+						bson.M{
+							"case": bson.M{"$and": bson.A{
+								bson.M{"$eq": bson.A{bson.M{"$size": safeArray}, 1}},
+								bson.M{"$eq": bson.A{bson.M{"$arrayElemAt": bson.A{safeArray, 0}}, "-1"}},
+							}},
+							"then": "meta_ads",
+						},
+						bson.M{
+							"case": bson.M{"$in": bson.A{
+								bson.M{"$ifNull": bson.A{"$" + orderSrcPath, "___nil___"}},
+								bson.A{-1, "-1"},
+							}},
+							"then": "meta_ads",
+						},
+						bson.M{
+							"case":  bson.M{"$lte": bson.A{bson.M{"$size": safeArray}, 0}},
+							"then": "organic",
+						},
+					},
+					"default": "direct",
+				},
+			},
+			"__docAmount": bson.M{"$toLong": bson.M{"$ifNull": bson.A{"$" + amountPath, 0}}},
+		}},
+		{"$group": bson.M{
+			"_id":        "$__orderSource",
+			"orderCount": bson.M{"$sum": 1},
+			"totalAmount": bson.M{"$sum": "$__docAmount"},
+		}},
+	}
 	pipeline := []bson.M{
 		{"$match": filter},
 		{"$facet": facet},
@@ -533,10 +604,12 @@ func (s *ReportService) computeWithTagDimension(ctx context.Context, reportKey, 
 
 	metrics := make(map[string]interface{})
 	metrics["total"] = map[string]interface{}{"orderCount": int64(0), "totalAmount": int64(0)}
+	metrics["revenueCompleted"] = map[string]interface{}{"orderCount": int64(0), "totalAmount": int64(0)}
 	metrics["byTag"] = make(map[string]interface{})
 	metrics["byStatus"] = make(map[string]interface{})
 	metrics["byWarehouse"] = make(map[string]interface{})
 	metrics["byAssigningSeller"] = make(map[string]interface{})
+	metrics["byOrderSource"] = make(map[string]interface{})
 
 	if cursor.Next(ctx) {
 		var raw struct {
@@ -544,6 +617,10 @@ func (s *ReportService) computeWithTagDimension(ctx context.Context, reportKey, 
 				OrderCount  int64 `bson:"orderCount"`
 				TotalAmount int64 `bson:"totalAmount"`
 			} `bson:"total"`
+			RevenueCompleted []struct {
+				OrderCount  int64 `bson:"orderCount"`
+				TotalAmount int64 `bson:"totalAmount"`
+			} `bson:"revenueCompleted"`
 			ByTag []struct {
 				ID          string  `bson:"_id"`
 				OrderCount  float64 `bson:"orderCount"`
@@ -564,6 +641,11 @@ func (s *ReportService) computeWithTagDimension(ctx context.Context, reportKey, 
 				OrderCount  float64 `bson:"orderCount"`
 				TotalAmount float64 `bson:"totalAmount"`
 			} `bson:"byAssigningSeller"`
+			ByOrderSource []struct {
+				ID          string  `bson:"_id"`
+				OrderCount  float64 `bson:"orderCount"`
+				TotalAmount float64 `bson:"totalAmount"`
+			} `bson:"byOrderSource"`
 		}
 		if err := cursor.Decode(&raw); err != nil {
 			return common.ConvertMongoError(err)
@@ -576,6 +658,12 @@ func (s *ReportService) computeWithTagDimension(ctx context.Context, reportKey, 
 			metrics["total"] = map[string]interface{}{
 				"orderCount":  totalOrderCount,
 				"totalAmount": totalAmount,
+			}
+		}
+		if len(raw.RevenueCompleted) > 0 {
+			metrics["revenueCompleted"] = map[string]interface{}{
+				"orderCount":  raw.RevenueCompleted[0].OrderCount,
+				"totalAmount": raw.RevenueCompleted[0].TotalAmount,
 			}
 		}
 		byTag := make(map[string]interface{})
@@ -638,6 +726,29 @@ func (s *ReportService) computeWithTagDimension(ctx context.Context, reportKey, 
 			}
 		}
 		metrics["byAssigningSeller"] = byAssigningSeller
+
+		byOrderSource := make(map[string]interface{})
+		for _, os := range raw.ByOrderSource {
+			avgAmount := float64(0)
+			if os.OrderCount > 0 {
+				avgAmount = os.TotalAmount / os.OrderCount
+			}
+			label := os.ID
+			if os.ID == "meta_ads" {
+				label = "Meta ads"
+			} else if os.ID == "organic" {
+				label = "Organic"
+			} else if os.ID == "direct" {
+				label = "Direct"
+			}
+			byOrderSource[os.ID] = map[string]interface{}{
+				"label":       label,
+				"orderCount":  os.OrderCount,
+				"totalAmount": os.TotalAmount,
+				"avgAmount":   avgAmount,
+			}
+		}
+		metrics["byOrderSource"] = byOrderSource
 
 		// Áp dụng derived metrics từ definition (formulaRef + params)
 		totalMap, _ := metrics["total"].(map[string]interface{})

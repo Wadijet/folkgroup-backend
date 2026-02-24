@@ -11,7 +11,7 @@ import (
 	"meta_commerce/internal/api/middleware"
 )
 
-// Register đăng ký tất cả route report lên v1: trend, recompute và CRUD report-definition, report-snapshot, report-dirty-period.
+// Register đăng ký tất cả route report lên v1: trend, recompute, dashboard orders và CRUD report-definition, report-snapshot, report-dirty-period.
 func Register(v1 fiber.Router, r *apirouter.Router) error {
 	reportHandler, err := reporthdl.NewReportHandler()
 	if err != nil {
@@ -22,6 +22,12 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 	orgContextMiddleware := middleware.OrganizationContextMiddleware()
 	apirouter.RegisterRouteWithMiddleware(v1, "/reports", "GET", "/trend", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleTrend)
 	apirouter.RegisterRouteWithMiddleware(v1, "/reports", "POST", "/recompute", []fiber.Handler{reportRecomputeMiddleware, orgContextMiddleware}, reportHandler.HandleRecompute)
+
+	// Dashboard Order Processing (TAB 6) — dữ liệu lũy kế, query trực tiếp DB
+	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/orders/funnel", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetOrderFunnel)
+	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/orders/recent", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetRecentOrders)
+	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/orders/stage-aging", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetStageAging)
+	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/orders/stuck-orders", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetStuckOrders)
 
 	// CRUD report definition (chỉ đọc)
 	reportDefHandler, err := reporthdl.NewReportDefinitionHandler()

@@ -199,8 +199,9 @@ func (s *ReportService) GetCustomersSnapshot(ctx context.Context, ownerOrganizat
 
 	// Filter items
 	items = filterCustomerItems(items, params.Filter)
-	// Sort
-	sortCustomerItems(items, params.Sort)
+	// Sort theo chuẩn CRUD (sortField + sortOrder: 1=asc, -1=desc)
+	sortField, sortOrder := reportdto.ParseCustomerSortParams(params.SortField, params.SortOrder)
+	sortCustomerItems(items, sortField, sortOrder)
 	// Paginate
 	items = paginateCustomerItems(items, params.Offset, params.Limit)
 
@@ -506,44 +507,61 @@ func filterCustomerItems(items []reportdto.CustomerItem, filter string) []report
 	return out
 }
 
-func sortCustomerItems(items []reportdto.CustomerItem, sortBy string) {
-	switch sortBy {
-	case "total_spend_desc":
-		sort.Slice(items, func(i, j int) bool {
-			return items[i].TotalSpend > items[j].TotalSpend
-		})
-	case "last_order_desc":
-		// Sắp xếp theo đơn gần nhất trước: daysSince nhỏ hơn = gần đây hơn
-		sort.Slice(items, func(i, j int) bool {
-			if items[i].DaysSinceLast < 0 && items[j].DaysSinceLast < 0 {
-				return items[i].Name < items[j].Name
-			}
-			if items[i].DaysSinceLast < 0 {
-				return false
-			}
-			if items[j].DaysSinceLast < 0 {
-				return true
-			}
+// sortCustomerItems sắp xếp theo field và order (chuẩn CRUD: 1=asc, -1=desc).
+func sortCustomerItems(items []reportdto.CustomerItem, field string, order int) {
+	if order == 0 {
+		order = -1
+	}
+	asc := order == 1
+
+	cmpDaysSince := func(i, j int) bool {
+		if items[i].DaysSinceLast < 0 && items[j].DaysSinceLast < 0 {
+			return (items[i].Name < items[j].Name) == asc
+		}
+		if items[i].DaysSinceLast < 0 {
+			return false
+		}
+		if items[j].DaysSinceLast < 0 {
+			return true
+		}
+		if asc {
 			return items[i].DaysSinceLast < items[j].DaysSinceLast
-		})
-	case "name_asc":
-		sort.Slice(items, func(i, j int) bool {
-			return items[i].Name < items[j].Name
-		})
-	default:
-		// days_since_desc - VIP inactive, inactive trước
-		sort.Slice(items, func(i, j int) bool {
-			if items[i].DaysSinceLast < 0 && items[j].DaysSinceLast < 0 {
-				return items[i].Name < items[j].Name
-			}
-			if items[i].DaysSinceLast < 0 {
-				return false
-			}
-			if items[j].DaysSinceLast < 0 {
-				return true
-			}
+		}
+		return items[i].DaysSinceLast > items[j].DaysSinceLast
+	}
+	cmpLastOrder := func(i, j int) bool {
+		if items[i].DaysSinceLast < 0 && items[j].DaysSinceLast < 0 {
+			return (items[i].Name < items[j].Name) == asc
+		}
+		if items[i].DaysSinceLast < 0 {
+			return false
+		}
+		if items[j].DaysSinceLast < 0 {
+			return true
+		}
+		if asc {
 			return items[i].DaysSinceLast > items[j].DaysSinceLast
-		})
+		}
+		return items[i].DaysSinceLast < items[j].DaysSinceLast
+	}
+
+	switch field {
+	case "totalSpend":
+		if asc {
+			sort.Slice(items, func(i, j int) bool { return items[i].TotalSpend < items[j].TotalSpend })
+		} else {
+			sort.Slice(items, func(i, j int) bool { return items[i].TotalSpend > items[j].TotalSpend })
+		}
+	case "lastOrderAt":
+		sort.Slice(items, cmpLastOrder)
+	case "name":
+		if asc {
+			sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
+		} else {
+			sort.Slice(items, func(i, j int) bool { return items[i].Name > items[j].Name })
+		}
+	default:
+		sort.Slice(items, cmpDaysSince)
 	}
 }
 
@@ -563,7 +581,7 @@ func paginateCustomerItems(items []reportdto.CustomerItem, offset, limit int) []
 
 func applyCustomersDefaults(p *reportdto.CustomersQueryParams) {
 	if p.Limit <= 0 {
-		p.Limit = 500
+		p.Limit = 20
 	}
 	if p.Limit > 2000 {
 		p.Limit = 2000
@@ -577,8 +595,11 @@ func applyCustomersDefaults(p *reportdto.CustomersQueryParams) {
 	if p.Filter == "" {
 		p.Filter = "all"
 	}
-	if p.Sort == "" {
-		p.Sort = "days_since_desc"
+	if p.SortField == "" {
+		p.SortField = "daysSinceLast"
+	}
+	if p.SortOrder != 1 && p.SortOrder != -1 {
+		p.SortOrder = -1
 	}
 	if p.VipInactiveLimit <= 0 {
 		p.VipInactiveLimit = 15

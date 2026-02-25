@@ -36,6 +36,12 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/inventory/products/:productId/variations", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetInventoryProductVariations)
 
 	// Dashboard Customer Intelligence (TAB 4) — KPI, tier distribution, lifecycle, bảng khách, VIP inactive panel
+	// Đăng ký route con trước /customers để tránh conflict
+	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/customers/ceo-groups", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetCeoGroups)
+	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/customers/journey-funnel", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetJourneyFunnel)
+	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/customers/asset-matrix", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetAssetMatrix)
+	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/customers/matrix-journey-value", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetMatrixJourneyValue)
+	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/customers/matrix-value-loyalty", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetMatrixValueLoyalty)
 	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/customers", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetCustomers)
 
 	// Dashboard Inbox Operations (TAB 7) — KPI, bảng hội thoại, Sale performance, Alert zone

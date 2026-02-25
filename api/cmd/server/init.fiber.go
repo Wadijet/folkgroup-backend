@@ -15,6 +15,7 @@ import (
 	airouter "meta_commerce/internal/api/ai/router"
 	authrouter "meta_commerce/internal/api/auth/router"
 	contentrouter "meta_commerce/internal/api/content/router"
+	crmrouter "meta_commerce/internal/api/crm/router"
 	ctarouter "meta_commerce/internal/api/cta/router"
 	deliveryrouter "meta_commerce/internal/api/delivery/router"
 	fbrouter "meta_commerce/internal/api/fb/router"
@@ -288,6 +289,7 @@ func InitFiberApp() *fiber.App {
 		pcrouter.Register,
 		webhookrouter.Register,
 		reportrouter.Register,
+		crmrouter.Register,
 		notificationrouter.Register,
 		ctarouter.Register,
 		deliveryrouter.Register,

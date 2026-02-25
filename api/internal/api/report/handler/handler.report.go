@@ -8,6 +8,7 @@ import (
 
 	reportdto "meta_commerce/internal/api/report/dto"
 	reportsvc "meta_commerce/internal/api/report/service"
+	crmvc "meta_commerce/internal/api/crm/service"
 	basehdl "meta_commerce/internal/api/base/handler"
 	"meta_commerce/internal/common"
 
@@ -15,9 +16,10 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// ReportHandler xử lý API báo cáo theo chu kỳ: GET trend, POST recompute.
+// ReportHandler xử lý API báo cáo theo chu kỳ: GET trend, POST recompute, dashboard customers.
 type ReportHandler struct {
-	ReportService *reportsvc.ReportService
+	ReportService     *reportsvc.ReportService
+	CrmCustomerService *crmvc.CrmCustomerService
 }
 
 // NewReportHandler tạo mới ReportHandler.
@@ -26,7 +28,14 @@ func NewReportHandler() (*ReportHandler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("tạo ReportService: %w", err)
 	}
-	return &ReportHandler{ReportService: svc}, nil
+	crmSvc, err := crmvc.NewCrmCustomerService()
+	if err != nil {
+		return nil, fmt.Errorf("tạo CrmCustomerService: %w", err)
+	}
+	return &ReportHandler{
+		ReportService:     svc,
+		CrmCustomerService: crmSvc,
+	}, nil
 }
 
 // HandleTrend xử lý GET /reports/trend — loại báo cáo qua query reportKey.

@@ -163,16 +163,53 @@ func (h *PancakeWebhookHandler) handleConversationEvent(ctx context.Context, pay
 	}
 	filter := bson.M{"conversationId": conversationId}
 	now := time.Now().UnixMilli()
+	setFields := bson.M{
+		"panCakeData": conversationData, "pageId": pageId,
+		"panCakeUpdatedAt": payload.Timestamp, "updatedAt": now,
+	}
+	// Extract customerId để checkHasConversation match được (Pancake có thể dùng customer_id, customer.id, customers[0].id)
+	if cid := extractCustomerIdFromConversation(conversationData); cid != "" {
+		setFields["customerId"] = cid
+	}
 	update := bson.M{
-		"$set": bson.M{
-			"panCakeData": conversationData, "pageId": pageId,
-			"panCakeUpdatedAt": payload.Timestamp, "updatedAt": now,
-		},
+		"$set":         setFields,
 		"$setOnInsert": bson.M{"conversationId": conversationId, "pageUsername": "", "createdAt": now},
 	}
 	opts := options.FindOneAndUpdate().SetUpsert(true).SetReturnDocument(options.After)
 	_, err := h.fbConversationService.BaseServiceMongoImpl.FindOneAndUpdate(ctx, filter, update, opts)
 	return err
+}
+
+// extractCustomerIdFromConversation lấy customer ID từ conversation data (nhiều cấu trúc Pancake).
+func extractCustomerIdFromConversation(data map[string]interface{}) string {
+	if data == nil {
+		return ""
+	}
+	if s, ok := data["customer_id"].(string); ok && s != "" {
+		return s
+	}
+	if n, ok := data["customer_id"].(float64); ok {
+		return fmt.Sprintf("%.0f", n)
+	}
+	if cust, ok := data["customer"].(map[string]interface{}); ok {
+		if s, ok := cust["id"].(string); ok && s != "" {
+			return s
+		}
+		if n, ok := cust["id"].(float64); ok {
+			return fmt.Sprintf("%.0f", n)
+		}
+	}
+	if arr, ok := data["customers"].([]interface{}); ok && len(arr) > 0 {
+		if m, ok := arr[0].(map[string]interface{}); ok {
+			if s, ok := m["id"].(string); ok && s != "" {
+				return s
+			}
+			if n, ok := m["id"].(float64); ok {
+				return fmt.Sprintf("%.0f", n)
+			}
+		}
+	}
+	return ""
 }
 
 func (h *PancakeWebhookHandler) handleMessageEvent(ctx context.Context, payload webhookdto.PancakeWebhookPayload) error {
@@ -204,7 +241,14 @@ func (h *PancakeWebhookHandler) handleMessageEvent(ctx context.Context, payload 
 	} else {
 		panCakeData["messages"] = []interface{}{messageData}
 	}
-	_, err := h.fbMessageService.UpsertMessages(ctx, conversationId, pageId, "", "", panCakeData, false)
+	// Lấy customerId từ message data hoặc conversation để fb_messages có customerId (cho checkHasConversation)
+	customerId := extractCustomerIdFromConversation(messageData)
+	if customerId == "" {
+		if conv, err := h.fbConversationService.FindOne(ctx, bson.M{"conversationId": conversationId}, nil); err == nil && conv.CustomerId != "" {
+			customerId = conv.CustomerId
+		}
+	}
+	_, err := h.fbMessageService.UpsertMessages(ctx, conversationId, pageId, "", customerId, panCakeData, false)
 	return err
 }
 

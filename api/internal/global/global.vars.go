@@ -1,4 +1,4 @@
-﻿package global
+package global
 
 import (
 	"database/sql"
@@ -79,9 +79,14 @@ type MongoDB_Auth_CollectionName struct {
 	AIWorkflowCommands  string // Tên collection cho workflow commands: ai_workflow_commands
 
 	// Báo cáo theo chu kỳ (Phase 1)
-	ReportDefinitions   string // report_definitions: định nghĩa báo cáo
-	ReportSnapshots     string // report_snapshots: kết quả snapshot theo chu kỳ
-	ReportDirtyPeriods  string // report_dirty_periods: đánh dấu chu kỳ cần tính lại
+	ReportDefinitions  string // report_definitions: định nghĩa báo cáo
+	ReportSnapshots    string // report_snapshots: kết quả snapshot theo chu kỳ
+	ReportDirtyPeriods string // report_dirty_periods: đánh dấu chu kỳ cần tính lại
+
+	// Module CRM (tiền tố crm_)
+	CrmCustomers        string // crm_customers: khách đã merge
+	CrmActivityHistory  string // crm_activity_history: lịch sử hoạt động
+	CrmNotes            string // crm_notes: ghi chú khách
 }
 
 // Các biến toàn cục

@@ -21,7 +21,7 @@ type CrmCustomer struct {
 	SourceIds      CrmCustomerSourceIds `json:"sourceIds" bson:"sourceIds"`
 	PrimarySource  string `json:"primarySource" bson:"primarySource"` // pos | fb
 	Name           string   `json:"name" bson:"name"`
-	PhoneNumbers   []string `json:"phoneNumbers" bson:"phoneNumbers" index:"single:1"`
+	PhoneNumbers   []string `json:"phoneNumbers" bson:"phoneNumbers" index:"single:1,compound:crm_customer_org_phones"`
 	Emails         []string `json:"emails" bson:"emails"`
 
 	// Flags
@@ -36,18 +36,21 @@ type CrmCustomer struct {
 	IsOmnichannel      bool   `json:"isOmnichannel" bson:"isOmnichannel"`
 
 	// Cached metrics (aggregate từ pc_pos_orders, cập nhật qua hooks)
-	TotalSpent      float64 `json:"totalSpent" bson:"totalSpent"`
-	OrderCount      int     `json:"orderCount" bson:"orderCount"`
-	LastOrderAt     int64   `json:"lastOrderAt,omitempty" bson:"lastOrderAt,omitempty"` // Unix ms
+	TotalSpent         float64 `json:"totalSpent" bson:"totalSpent"`
+	OrderCount         int     `json:"orderCount" bson:"orderCount"`
+	LastOrderAt        int64   `json:"lastOrderAt,omitempty" bson:"lastOrderAt,omitempty" index:"single:-1,compound:crm_customer_org_lastorder"` // Unix ms — index cho sort dashboard
+	SecondLastOrderAt  int64   `json:"secondLastOrderAt,omitempty" bson:"secondLastOrderAt,omitempty"` // Unix ms — đơn thứ 2 gần nhất (để tính REACTIVATED)
+	RevenueLast30d     float64 `json:"revenueLast30d" bson:"revenueLast30d"`                       // Doanh thu 30 ngày qua (cho Momentum)
+	RevenueLast90d     float64 `json:"revenueLast90d" bson:"revenueLast90d"`                       // Doanh thu 90 ngày qua (cho Momentum)
 
 	// Merge metadata
 	MergeMethod string `json:"mergeMethod" bson:"mergeMethod"` // customer_id | fb_id | phone | single_source
 	MergedAt    int64  `json:"mergedAt" bson:"mergedAt"`
 
 	// Phân quyền
-	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:crm_customer_org_unified_unique"`
+	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:crm_customer_org_unified_unique,compound:crm_customer_org_lastorder,compound:crm_customer_org_phones"`
 
 	// Metadata
-	CreatedAt int64 `json:"createdAt" bson:"createdAt"`
-	UpdatedAt int64 `json:"updatedAt" bson:"updatedAt"`
+	CreatedAt int64 `json:"createdAt" bson:"createdAt" index:"single:1"`
+	UpdatedAt int64 `json:"updatedAt" bson:"updatedAt" index:"single:1"`
 }

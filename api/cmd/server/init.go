@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"meta_commerce/config"
-	aimodels "meta_commerce/internal/api/ai/models"
 	agentmodels "meta_commerce/internal/api/agent/models"
+	aimodels "meta_commerce/internal/api/ai/models"
 	authmodels "meta_commerce/internal/api/auth/models"
 	contentmodels "meta_commerce/internal/api/content/models"
+	crmmodels "meta_commerce/internal/api/crm/models"
 	ctamodels "meta_commerce/internal/api/cta/models"
 	deliverymodels "meta_commerce/internal/api/delivery/models"
 	fbmodels "meta_commerce/internal/api/fb/models"
@@ -105,6 +106,11 @@ func initColNames() {
 	global.MongoDB_ColNames.ReportDefinitions = "report_definitions"
 	global.MongoDB_ColNames.ReportSnapshots = "report_snapshots"
 	global.MongoDB_ColNames.ReportDirtyPeriods = "report_dirty_periods"
+
+	// Module CRM (tiền tố crm_)
+	global.MongoDB_ColNames.CrmCustomers = "crm_customers"
+	global.MongoDB_ColNames.CrmActivityHistory = "crm_activity_history"
+	global.MongoDB_ColNames.CrmNotes = "crm_notes"
 
 	logrus.Info("Initialized collection names") // Ghi log thông báo đã khởi tạo tên các collection
 }
@@ -205,6 +211,11 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.ReportDefinitions), reportmodels.ReportDefinition{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.ReportSnapshots), reportmodels.ReportSnapshot{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.ReportDirtyPeriods), reportmodels.ReportDirtyPeriod{})
+
+	// Module CRM
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmCustomers), crmmodels.CrmCustomer{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmActivityHistory), crmmodels.CrmActivityHistory{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmNotes), crmmodels.CrmNote{})
 }
 
 // initFirebase khởi tạo Firebase Admin SDK

@@ -22,7 +22,12 @@ const ReportTimezone = "Asia/Ho_Chi_Minh"
 
 // Compute chạy engine tính báo cáo: load definition, aggregation nguồn, upsert snapshot.
 // Hỗ trợ báo cáo có tagDimension trong metadata: thống kê theo posData.tags, chia đều khi đơn có nhiều tag.
+// Báo cáo customer_* (customer_daily, customer_weekly, ...) dùng engine riêng ComputeCustomerReport.
 func (s *ReportService) Compute(ctx context.Context, reportKey, periodKey string, ownerOrganizationID primitive.ObjectID) error {
+	if len(reportKey) >= 9 && reportKey[:9] == "customer_" {
+		return s.ComputeCustomerReport(ctx, reportKey, periodKey, ownerOrganizationID)
+	}
+
 	def, err := s.LoadDefinition(ctx, reportKey)
 	if err != nil {
 		return fmt.Errorf("load report definition: %w", err)

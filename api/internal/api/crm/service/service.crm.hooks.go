@@ -40,7 +40,7 @@ func handleCrmDataChange(ctx context.Context, e events.DataChangeEvent) {
 
 	case global.MongoDB_ColNames.FbCustomers:
 		if doc, ok := toFbCustomer(e.Document); ok {
-			if err := customerSvc.MergeFromFbCustomer(ctx, doc); err != nil {
+			if err := customerSvc.MergeFromFbCustomer(ctx, doc, 0); err != nil {
 				logger.GetAppLogger().WithError(err).WithField("customerId", doc.CustomerId).Warn("[CRM] MergeFromFbCustomer lỗi")
 			}
 		}
@@ -64,18 +64,27 @@ func handleCrmDataChange(ctx context.Context, e events.DataChangeEvent) {
 						channel = "online"
 					}
 				}
-				_ = customerSvc.IngestOrderTouchpoint(ctx, customerId, ownerOrgID, doc.OrderId, e.Operation == events.OpUpdate, channel, false)
+				_ = customerSvc.IngestOrderTouchpoint(ctx, customerId, ownerOrgID, doc.OrderId, e.Operation == events.OpUpdate, channel, false, doc)
 			}
 		}
 
 	case global.MongoDB_ColNames.FbConvesations:
 		if doc, ok := toFbConversation(e.Document); ok && doc.CustomerId != "" {
-			_ = customerSvc.IngestConversationTouchpoint(ctx, doc.CustomerId, ownerOrgID, doc.ConversationId, false)
+			_, _ = customerSvc.IngestConversationTouchpoint(ctx, doc.CustomerId, ownerOrgID, doc.ConversationId, false, doc)
 		}
 
 	case global.MongoDB_ColNames.CrmNotes:
-		if doc, ok := toCrmNote(e.Document); ok && e.Operation == events.OpInsert {
-			_ = customerSvc.IngestNoteTouchpoint(ctx, doc.CustomerId, ownerOrgID, doc.ID.Hex(), false)
+		if doc, ok := toCrmNote(e.Document); ok {
+			switch e.Operation {
+			case events.OpInsert:
+				_ = customerSvc.IngestNoteTouchpoint(ctx, doc.CustomerId, ownerOrgID, doc.ID.Hex(), false, doc)
+			case events.OpUpdate:
+				if doc.IsDeleted {
+					_ = customerSvc.IngestNoteDeletedTouchpoint(ctx, doc.CustomerId, ownerOrgID, doc.ID.Hex(), doc)
+				} else {
+					_ = customerSvc.IngestNoteUpdatedTouchpoint(ctx, doc.CustomerId, ownerOrgID, doc.ID.Hex(), doc)
+				}
+			}
 		}
 
 	default:

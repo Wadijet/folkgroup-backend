@@ -104,7 +104,8 @@ type AssetMatrixResult struct {
 	Total  int                      `json:"total"` // Tổng số khách (để verify sum(matrix)==total)
 }
 
-// ListCustomersForDashboard lấy danh sách khách từ crm_customers với filter và phân loại.
+// ListCustomersForDashboard lấy danh sách khách từ crm_customers với filter và phân trang ở DB.
+// Dùng classification đã lưu (valueTier, lifecycleStage, ...) — filter + sort + skip/limit ở MongoDB.
 func (s *CrmCustomerService) ListCustomersForDashboard(ctx context.Context, ownerOrgID primitive.ObjectID, filters *CrmDashboardFilters) ([]CrmDashboardCustomerItem, int, error) {
 	if filters == nil {
 		filters = &CrmDashboardFilters{}
@@ -116,8 +117,20 @@ func (s *CrmCustomerService) ListCustomersForDashboard(ctx context.Context, owne
 		filters.Offset = 0
 	}
 
-	filter := bson.M{"ownerOrganizationId": ownerOrgID}
-	opts := mongoopts.Find().SetSort(bson.D{{Key: "lastOrderAt", Value: -1}})
+	filter := buildDashboardMongoFilter(ownerOrgID, filters)
+	sortDoc := buildDashboardSortBson(filters.SortField, filters.SortOrder)
+
+	// Tổng số match (cho pagination)
+	total, err := s.Collection().CountDocuments(ctx, filter)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	opts := mongoopts.Find().
+		SetSort(sortDoc).
+		SetSkip(int64(filters.Offset)).
+		SetLimit(int64(filters.Limit))
+
 	all, err := s.BaseServiceMongoImpl.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, 0, err
@@ -126,31 +139,103 @@ func (s *CrmCustomerService) ListCustomersForDashboard(ctx context.Context, owne
 		all = []crmmodels.CrmCustomer{}
 	}
 
-	// Lọc và transform
 	var items []CrmDashboardCustomerItem
 	for i := range all {
-		item := s.toDashboardItem(&all[i])
-		if !matchDashboardFilters(item, filters) {
+		items = append(items, s.toDashboardItem(&all[i]))
+	}
+	return items, int(total), nil
+}
+
+// buildDashboardMongoFilter tạo MongoDB filter từ CrmDashboardFilters (dùng classification đã lưu).
+func buildDashboardMongoFilter(ownerOrgID primitive.ObjectID, f *CrmDashboardFilters) bson.M {
+	filter := bson.M{"ownerOrganizationId": ownerOrgID}
+
+	if len(f.Journey) > 0 {
+		vals := make([]string, 0, len(f.Journey))
+		for _, v := range f.Journey {
+			if n := normalizeJourneyFilter(v); n != "" {
+				vals = append(vals, n)
+			}
+		}
+		if len(vals) > 0 {
+			filter["journeyStage"] = bson.M{"$in": vals}
+		}
+	}
+	if len(f.Channel) > 0 {
+		filter["channel"] = bson.M{"$in": f.Channel}
+	}
+	if len(f.ValueTier) > 0 {
+		filter["valueTier"] = bson.M{"$in": f.ValueTier}
+	}
+	if len(f.Lifecycle) > 0 {
+		filter["lifecycleStage"] = bson.M{"$in": f.Lifecycle}
+	}
+	if len(f.Loyalty) > 0 {
+		filter["loyaltyStage"] = bson.M{"$in": f.Loyalty}
+	}
+	if len(f.Momentum) > 0 {
+		filter["momentumStage"] = bson.M{"$in": f.Momentum}
+	}
+	if len(f.CeoGroup) > 0 {
+		ceoOr := buildCeoGroupOrConditions(f.CeoGroup)
+		if len(ceoOr) > 0 {
+			filter["$or"] = ceoOr
+		}
+	}
+	return filter
+}
+
+// buildCeoGroupOrConditions tạo $or conditions cho filter CeoGroup.
+func buildCeoGroupOrConditions(ceoGroups []string) []bson.M {
+	var or []bson.M
+	for _, g := range ceoGroups {
+		var cond bson.M
+		switch g {
+		case "vip_active":
+			cond = bson.M{"valueTier": "vip", "lifecycleStage": "active"}
+		case "vip_inactive":
+			cond = bson.M{"valueTier": "vip", "lifecycleStage": bson.M{"$in": []string{"inactive", "dead"}}}
+		case "rising":
+			cond = bson.M{"momentumStage": "rising"}
+		case "new":
+			cond = bson.M{"$or": []bson.M{
+				{"journeyStage": "first"},
+				{"valueTier": "new"},
+			}}
+		case "one_time":
+			cond = bson.M{"loyaltyStage": "one_time"}
+		case "dead":
+			cond = bson.M{"lifecycleStage": "dead"}
+		default:
 			continue
 		}
-		items = append(items, item)
+		or = append(or, cond)
+	}
+	return or
+}
+
+// buildDashboardSortBson tạo bson.D cho sort theo sortField và sortOrder (1=asc, -1=desc).
+func buildDashboardSortBson(sortField string, sortOrder int) bson.D {
+	if sortOrder == 0 {
+		sortOrder = -1
+	}
+	dir := -1
+	if sortOrder == 1 {
+		dir = 1
 	}
 
-	total := len(items)
-
-	// Sort theo chuẩn CRUD (sortField + sortOrder: 1=asc, -1=desc)
-	sortDashboardItems(items, filters.SortField, filters.SortOrder)
-
-	// Paginate
-	from := filters.Offset
-	to := from + filters.Limit
-	if from >= len(items) {
-		return []CrmDashboardCustomerItem{}, total, nil
+	switch sortField {
+	case "totalSpend":
+		return bson.D{{Key: "totalSpent", Value: dir}}
+	case "lastOrderAt":
+		// Đơn gần nhất trước = lastOrderAt desc
+		return bson.D{{Key: "lastOrderAt", Value: -sortOrder}}
+	case "name":
+		return bson.D{{Key: "name", Value: dir}}
+	default:
+		// daysSinceLast: lâu không mua trước (desc) = lastOrderAt asc; mua gần đây trước (asc) = lastOrderAt desc
+		return bson.D{{Key: "lastOrderAt", Value: -sortOrder}}
 	}
-	if to > len(items) {
-		to = len(items)
-	}
-	return items[from:to], total, nil
 }
 
 // toDashboardItem chuyển CrmCustomer sang CrmDashboardCustomerItem.
@@ -183,16 +268,17 @@ func (s *CrmCustomerService) toDashboardItem(c *crmmodels.CrmCustomer) CrmDashbo
 		sources = []string{}
 	}
 
+	// Dùng classification đã lưu trong crm_customers (cập nhật qua hooks, backfill).
 	return CrmDashboardCustomerItem{
 		CustomerID:     c.UnifiedId,
 		Name:           c.Name,
 		Phone:          phone,
-		JourneyStage:   ComputeJourneyStage(c),
-		Channel:        ComputeChannel(c),
-		ValueTier:      ComputeValueTier(c.TotalSpent),
-		LifecycleStage: ComputeLifecycleStage(c.LastOrderAt),
-		LoyaltyStage:   ComputeLoyaltyStage(c.OrderCount),
-		MomentumStage:  ComputeMomentumStage(c),
+		JourneyStage:   c.JourneyStage,
+		Channel:        c.Channel,
+		ValueTier:      c.ValueTier,
+		LifecycleStage: c.LifecycleStage,
+		LoyaltyStage:   c.LoyaltyStage,
+		MomentumStage:  c.MomentumStage,
 		TotalSpend:     c.TotalSpent,
 		OrderCount:     c.OrderCount,
 		RevenueLast30d: c.RevenueLast30d,

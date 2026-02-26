@@ -106,7 +106,7 @@ func (s *AgentCommandService) ClaimPendingCommands(ctx context.Context, agentId 
 	update := bson.M{"$set": bson.M{"status": "executing", "executedAt": now, "lastHeartbeatAt": now}}
 	opts := options.FindOneAndUpdate().SetSort(bson.M{"createdAt": 1}).SetReturnDocument(options.After)
 	coll := s.Collection()
-	var claimedCommands []agentmodels.AgentCommand
+	claimedCommands := make([]agentmodels.AgentCommand, 0, limit) // Dùng [] thay vì nil để JSON trả về data: [] chứ không phải data: null
 	for i := 0; i < limit; i++ {
 		var command agentmodels.AgentCommand
 		err := coll.FindOneAndUpdate(ctx, filter, update, opts).Decode(&command)

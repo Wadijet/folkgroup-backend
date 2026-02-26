@@ -33,7 +33,11 @@ type PcPosOrder struct {
 	PosData         map[string]interface{} `json:"posData" bson:"posData"`                                                                                              // Dữ liệu gốc từ Pancake POS API
 
 	// ===== ORGANIZATION =====
-	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1"` // Tổ chức sở hữu dữ liệu (phân quyền)
+	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:idx_backfill_orders"` // Tổ chức sở hữu dữ liệu
+
+	// Index backfill: sort theo thời gian gốc trong posData (dùng cho Find phân trang CRUD)
+	posDataInsertedAt int64 `bson:"posData.inserted_at,omitempty" index:"compound:idx_backfill_orders"`
+	posDataUpdatedAt  int64 `bson:"posData.updated_at,omitempty" index:"compound:idx_backfill_orders"`
 
 	CreatedAt int64 `json:"createdAt" bson:"createdAt"` // Thời gian tạo
 	UpdatedAt int64 `json:"updatedAt" bson:"updatedAt"` // Thời gian cập nhật

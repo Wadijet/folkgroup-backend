@@ -3637,7 +3637,7 @@ func (h *InitService) InitReportDefinitions() error {
 		{OutputKey: "avgAmount", Type: "derived", FormulaRef: "avg_from_sum_count", Params: map[string]string{"sum": "totalAmount", "count": "orderCount"}, Scope: "perDimension"},
 	}
 
-	seeds := []struct {
+	orderSeeds := []struct {
 		key         string
 		name        string
 		periodType  string
@@ -3650,7 +3650,7 @@ func (h *InitService) InitReportDefinitions() error {
 	}
 
 	opts := options.Replace().SetUpsert(true)
-	for _, s := range seeds {
+	for _, s := range orderSeeds {
 		seed := reportmodels.ReportDefinition{
 			Key:              s.key,
 			Name:             s.name,
@@ -3662,6 +3662,47 @@ func (h *InitService) InitReportDefinitions() error {
 			Dimensions:       []string{"ownerOrganizationId"},
 			Metrics:          metrics,
 			Metadata:         orderReportMetadata,
+			IsActive:         true,
+			CreatedAt:        now,
+			UpdatedAt:        now,
+		}
+		filter := bson.M{"key": s.key}
+		if _, err := coll.ReplaceOne(ctx, filter, seed, opts); err != nil {
+			return fmt.Errorf("upsert %s: %w", s.key, err)
+		}
+		logrus.Infof("[INIT] Báo cáo %s (%s) đã được tạo/cập nhật trong report_definitions", s.name, s.key)
+	}
+
+	// Báo cáo khách hàng theo chu kỳ (customer_daily, customer_weekly, ...) — dùng engine riêng ComputeCustomerReport.
+	// sourceCollection = pc_pos_orders để hook MarkDirty khi đơn thay đổi.
+	customerSeeds := []struct {
+		key         string
+		name        string
+		periodType  string
+		periodLabel string
+	}{
+		{"customer_daily", "Báo cáo khách hàng chu kỳ ngày", "day", "Theo ngày"},
+		{"customer_weekly", "Báo cáo khách hàng chu kỳ tuần", "week", "Theo tuần"},
+		{"customer_monthly", "Báo cáo khách hàng chu kỳ tháng", "month", "Theo tháng"},
+		{"customer_yearly", "Báo cáo khách hàng chu kỳ năm", "year", "Theo năm"},
+	}
+
+	customerMetrics := []reportmodels.ReportMetricDefinition{} // Engine ComputeCustomerReport tính trực tiếp, không dùng metrics
+	customerMetadata := map[string]interface{}{
+		"description": "Snapshot khách hàng tại cuối chu kỳ: KPI, phân bố tier, lifecycle. Dùng cho xu hướng Tab Customer.",
+	}
+	for _, s := range customerSeeds {
+		seed := reportmodels.ReportDefinition{
+			Key:              s.key,
+			Name:             s.name,
+			PeriodType:       s.periodType,
+			PeriodLabel:      s.periodLabel,
+			SourceCollection: global.MongoDB_ColNames.PcPosOrders,
+			TimeField:        "posCreatedAt",
+			TimeFieldUnit:    "millisecond",
+			Dimensions:       []string{"ownerOrganizationId"},
+			Metrics:          customerMetrics,
+			Metadata:         customerMetadata,
 			IsActive:         true,
 			CreatedAt:        now,
 			UpdatedAt:        now,

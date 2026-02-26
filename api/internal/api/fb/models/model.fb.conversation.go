@@ -14,14 +14,18 @@ type FbConversation struct {
 	ConversationId   string                 `json:"conversationId" bson:"conversationId" index:"unique;text" extract:"PanCakeData\\.id"`                                                   // ID của cuộc hội thoại (extract từ PanCakeData["id"])
 	CustomerId       string                 `json:"customerId" bson:"customerId" index:"text" extract:"PanCakeData\\.customer_id,optional"`                                                // ID của khách hàng (extract từ PanCakeData["customer_id"])
 	PanCakeData      map[string]interface{} `json:"panCakeData" bson:"panCakeData"`                                                                                                        // Dữ liệu API
-	PanCakeUpdatedAt int64                  `json:"panCakeUpdatedAt" bson:"panCakeUpdatedAt" extract:"PanCakeData\\.updated_at,converter=time,format=2006-01-02T15:04:05.000000,optional"` // Thời gian cập nhật dữ liệu API (extract từ PanCakeData["updated_at"])
+	PanCakeUpdatedAt int64                  `json:"panCakeUpdatedAt" bson:"panCakeUpdatedAt" extract:"PanCakeData\\.updated_at,converter=time,format=2006-01-02T15:04:05.000000,optional" index:"compound:idx_backfill_conversations"` // Thời gian cập nhật API (extract từ PanCakeData["updated_at"])
 
 	// ===== SYNC FLAGS =====
 	NeedsPrioritySync bool `json:"needsPrioritySync" bson:"needsPrioritySync" index:"single:1"` // Đánh dấu hội thoại này cần ưu tiên đồng bộ lại ngay
 
 	// ===== ORGANIZATION =====
-	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1"` // Tổ chức sở hữu dữ liệu (phân quyền)
+	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:idx_backfill_conversations"` // Tổ chức sở hữu dữ liệu
 
-	CreatedAt int64 `json:"createdAt" bson:"createdAt"` // Thời gian tạo quyền
-	UpdatedAt int64 `json:"updatedAt" bson:"updatedAt"` // Thời gian cập nhật quyền
+	// Index backfill: sort theo thời gian gốc trong panCakeData (dùng cho Find phân trang CRUD)
+	panCakeDataInsertedAt int64 `bson:"panCakeData.inserted_at,omitempty" index:"compound:idx_backfill_conversations"`
+	panCakeDataUpdatedAt  int64 `bson:"panCakeData.updated_at,omitempty" index:"compound:idx_backfill_conversations"`
+
+	CreatedAt int64 `json:"createdAt" bson:"createdAt"` // Thời gian tạo
+	UpdatedAt int64 `json:"updatedAt" bson:"updatedAt"` // Thời gian cập nhật
 }

@@ -26,11 +26,14 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 	orgContextMiddleware := middleware.OrganizationContextMiddleware()
 	middlewares := []fiber.Handler{crmReadMiddleware, orgContextMiddleware}
 
-	// POST /customers/sync — đồng bộ crm_customers từ POS + FB
+	// POST /customers/sync — đồng bộ crm_customers từ POS + FB. Query: sources=pos,fb
 	apirouter.RegisterRouteWithMiddleware(v1, "/customers", "POST", "/sync", middlewares, customerHandler.HandleSyncCustomers)
 
-	// POST /customers/backfill-activity — job bên ngoài gọi để backfill activity từ dữ liệu cũ
+	// POST /customers/backfill-activity — backfill activity. Query: types=order,conversation,note
 	apirouter.RegisterRouteWithMiddleware(v1, "/customers", "POST", "/backfill-activity", middlewares, customerHandler.HandleBackfillActivity)
+
+	// POST /customers/rebuild — sync rồi backfill. Query: sources=pos,fb types=order,conversation,note
+	apirouter.RegisterRouteWithMiddleware(v1, "/customers", "POST", "/rebuild", middlewares, customerHandler.HandleRebuildCrm)
 
 	// GET /customers/:unifiedId/profile
 	apirouter.RegisterRouteWithMiddleware(v1, "/customers", "GET", "/:unifiedId/profile", middlewares, customerHandler.HandleGetProfile)

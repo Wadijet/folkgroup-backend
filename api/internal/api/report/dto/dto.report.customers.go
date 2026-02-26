@@ -39,7 +39,7 @@ type CustomersQueryParams struct {
 	Loyalty   string `query:"loyalty"`  // core|repeat|one_time
 	Momentum  string `query:"momentum"`  // rising|stable|declining|lost
 	CeoGroup  string `query:"ceoGroup"`  // vip_active|vip_inactive|rising|new|one_time|dead
-	Source    string `query:"source"`    // crm (mặc định) | legacy (pc_pos_customers)
+	Source    string `query:"source"`    // Chỉ dùng crm (legacy đã bỏ)
 }
 
 // CustomerSummary 6 KPI cho Row 1 Tab 4.
@@ -47,7 +47,7 @@ type CustomerSummary struct {
 	TotalCustomers       int64   `json:"totalCustomers"`       // Tổng khách hàng
 	NewCustomersInPeriod int64   `json:"newCustomersInPeriod"` // Khách mới trong period (đơn đầu trong khoảng thời gian)
 	RepeatRate           float64 `json:"repeatRate"`          // Khách ≥2 đơn / Tổng có đơn
-	VipInactiveCount     int64   `json:"vipInactiveCount"`   // Số VIP inactive (Gold/Platinum, days > 90)
+	VipInactiveCount     int64   `json:"vipInactiveCount"`   // Số VIP inactive (Value=VIP, Lifecycle=inactive/dead)
 	ReactivationValue   int64   `json:"reactivationValue"`   // Tổng trị giá tái KHO = SUM(purchased_amount) VIP inactive
 	ActiveTodayCount     int64   `json:"activeTodayCount"`    // Khách có đơn trong 24h
 }
@@ -57,7 +57,7 @@ type CustomerItem struct {
 	CustomerID        string   `json:"customerId"`
 	Name              string   `json:"name"`
 	Phone             string   `json:"phone"`
-	Tier              string   `json:"tier,omitempty"`             // legacy: new|silver|gold|platinum
+	Tier              string   `json:"tier,omitempty"`             // deprecated — dùng valueTier
 	TotalSpend        float64  `json:"totalSpend"`
 	OrderCount        int64    `json:"orderCount"`
 	LastOrderAt       string   `json:"lastOrderAt"`
@@ -87,30 +87,167 @@ type VipInactiveItem struct {
 	AssignedSale   string  `json:"assignedSale"`
 }
 
-// TierDistribution phân bố theo tier (New, Silver, Gold, Platinum).
-type TierDistribution struct {
-	New      int64 `json:"new"`
-	Silver   int64 `json:"silver"`
-	Gold     int64 `json:"gold"`
-	Platinum int64 `json:"platinum"`
+// ValueDistribution phân bố theo Value (CRM): vip, high, medium, low, new.
+type ValueDistribution struct {
+	Vip    int64 `json:"vip"`
+	High   int64 `json:"high"`
+	Medium int64 `json:"medium"`
+	Low    int64 `json:"low"`
+	New    int64 `json:"new"`
 }
 
-// LifecycleDistribution phân bố theo lifecycle.
+// JourneyDistribution phân bố theo Journey (CRM): visitor, engaged, first, repeat, vip, inactive.
+type JourneyDistribution struct {
+	Visitor  int64 `json:"visitor"`
+	Engaged  int64 `json:"engaged"`
+	First    int64 `json:"first"`
+	Repeat   int64 `json:"repeat"`
+	Vip      int64 `json:"vip"`
+	Inactive int64 `json:"inactive"`
+}
+
+// LifecycleDistribution phân bố theo Lifecycle (CRM): active, cooling, inactive, dead, never_purchased.
 type LifecycleDistribution struct {
 	Active         int64 `json:"active"`
 	Cooling        int64 `json:"cooling"`
 	Inactive       int64 `json:"inactive"`
-	VipInactive    int64 `json:"vip_inactive"`
+	Dead           int64 `json:"dead"`
 	NeverPurchased int64 `json:"never_purchased"`
 }
 
+// ChannelDistribution phân bố theo Channel (CRM): online, offline, omnichannel.
+type ChannelDistribution struct {
+	Online       int64 `json:"online"`
+	Offline      int64 `json:"offline"`
+	Omnichannel  int64 `json:"omnichannel"`
+	Unspecified  int64 `json:"unspecified"` // Chưa mua
+}
+
+// LoyaltyDistribution phân bố theo Loyalty (CRM): core, repeat, one_time.
+type LoyaltyDistribution struct {
+	Core     int64 `json:"core"`
+	Repeat   int64 `json:"repeat"`
+	OneTime  int64 `json:"one_time"`
+	Unspecified int64 `json:"unspecified"`
+}
+
+// MomentumDistribution phân bố theo Momentum (CRM): rising, stable, declining, lost.
+type MomentumDistribution struct {
+	Rising    int64 `json:"rising"`
+	Stable    int64 `json:"stable"`
+	Declining int64 `json:"declining"`
+	Lost      int64 `json:"lost"`
+	Unspecified int64 `json:"unspecified"`
+}
+
+// CeoGroupDistribution phân bố 6 nhóm CEO.
+type CeoGroupDistribution struct {
+	VipActive    int64 `json:"vip_active"`
+	VipInactive  int64 `json:"vip_inactive"`
+	Rising       int64 `json:"rising"`
+	New          int64 `json:"new"`
+	OneTime      int64 `json:"one_time"`
+	Dead         int64 `json:"dead"`
+}
+
+// CustomersDashboardSnapshotData dữ liệu KPI + phân bố từ report_snapshots (CRM).
+// Dùng cho GetSnapshotForCustomersDashboard.
+type CustomersDashboardSnapshotData struct {
+	Summary               CustomerSummary
+	ValueDistribution     ValueDistribution
+	JourneyDistribution   JourneyDistribution
+	LifecycleDistribution LifecycleDistribution
+	ChannelDistribution   ChannelDistribution
+	LoyaltyDistribution   LoyaltyDistribution
+	MomentumDistribution  MomentumDistribution
+	CeoGroupDistribution  CeoGroupDistribution
+}
+
 // CustomersSnapshotResult kết quả trả về cho GET /dashboard/customers.
+// Chỉ dùng hệ CRM (journey, value, lifecycle, channel, loyalty, momentum, ceoGroup).
 type CustomersSnapshotResult struct {
-	Summary               CustomerSummary       `json:"summary"`
-	SummaryStatuses       map[string]string     `json:"summaryStatuses,omitempty"`
-	TierDistribution      TierDistribution      `json:"tierDistribution"`
-	LifecycleDistribution LifecycleDistribution `json:"lifecycleDistribution"`
-	Customers             []CustomerItem        `json:"customers"`
-	VipInactiveCustomers  []VipInactiveItem     `json:"vipInactiveCustomers"`
-	TotalCount            int                   `json:"totalCount,omitempty"` // Tổng số khách (cho phân trang, khi source=crm)
+	Summary                CustomerSummary        `json:"summary"`
+	SummaryStatuses        map[string]string      `json:"summaryStatuses,omitempty"`
+	ValueDistribution      ValueDistribution     `json:"valueDistribution"`
+	JourneyDistribution    JourneyDistribution    `json:"journeyDistribution"`
+	LifecycleDistribution  LifecycleDistribution  `json:"lifecycleDistribution"`
+	ChannelDistribution    ChannelDistribution    `json:"channelDistribution,omitempty"`
+	LoyaltyDistribution   LoyaltyDistribution    `json:"loyaltyDistribution,omitempty"`
+	MomentumDistribution   MomentumDistribution   `json:"momentumDistribution,omitempty"`
+	CeoGroupDistribution   CeoGroupDistribution   `json:"ceoGroupDistribution,omitempty"`
+	Customers              []CustomerItem         `json:"customers"`
+	VipInactiveCustomers   []VipInactiveItem      `json:"vipInactiveCustomers"`
+	TotalCount             int                    `json:"totalCount,omitempty"`
+	SnapshotSource         string                 `json:"snapshotSource,omitempty"`
+	SnapshotPeriodKey      string                 `json:"snapshotPeriodKey,omitempty"`
+	SnapshotComputedAt     int64                  `json:"snapshotComputedAt,omitempty"`
+}
+
+// CustomersTrendResult kết quả GET /dashboard/customers/trend — snapshot hiện tại + trend + comparison.
+type CustomersTrendResult struct {
+	CurrentSnapshot *CustomersSnapshotResult       `json:"currentSnapshot"`
+	TrendData       []CustomersTrendDataItem      `json:"trendData"`
+	Comparison      map[string]ComparisonItem     `json:"comparison"`
+}
+
+// CustomersTrendDataItem một mục trong trendData (snapshot theo chu kỳ).
+type CustomersTrendDataItem struct {
+	PeriodKey  string                 `json:"periodKey"`
+	PeriodType string                 `json:"periodType"`
+	Metrics    map[string]interface{} `json:"metrics"`
+	ComputedAt int64                  `json:"computedAt,omitempty"`
+}
+
+// ComparisonItem so sánh KPI kỳ hiện tại vs kỳ trước.
+type ComparisonItem struct {
+	Current   interface{} `json:"current"`
+	Previous  interface{} `json:"previous"`
+	ChangePct float64     `json:"changePct"`
+}
+
+// TransitionMatrixResult kết quả GET /dashboard/customers/trend/transition-matrix.
+type TransitionMatrixResult struct {
+	FromPeriod      string                        `json:"fromPeriod"`
+	ToPeriod        string                        `json:"toPeriod"`
+	Dimension       string                        `json:"dimension"` // journey|channel|value|lifecycle|loyalty|momentum|ceoGroup
+	Matrix          map[string]map[string]int64   `json:"matrix"`
+	ConversionRates map[string]float64            `json:"conversionRates"`
+	SankeyData      *SankeyData                   `json:"sankeyData,omitempty"`
+}
+
+// SankeyData format cho Sankey diagram (nodes + links).
+type SankeyData struct {
+	Nodes []SankeyNode `json:"nodes"`
+	Links []SankeyLink `json:"links"`
+}
+
+// SankeyNode một node trong Sankey.
+type SankeyNode struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// SankeyLink một link (luồng) trong Sankey.
+type SankeyLink struct {
+	Source string `json:"source"`
+	Target string `json:"target"`
+	Value  int64  `json:"value"`
+}
+
+// GroupChangesResult kết quả GET /dashboard/customers/trend/group-changes.
+type GroupChangesResult struct {
+	FromPeriod string              `json:"fromPeriod"`
+	ToPeriod   string              `json:"toPeriod"`
+	Dimension  string              `json:"dimension"`
+	Upgraded   []GroupChangeItem   `json:"upgraded"`
+	Downgraded []GroupChangeItem   `json:"downgraded"`
+	Unchanged  []GroupChangeItem   `json:"unchanged"`
+}
+
+// GroupChangeItem một nhóm chuyển đổi (fromGroup → toGroup).
+type GroupChangeItem struct {
+	FromGroup    string   `json:"fromGroup"`
+	ToGroup      string   `json:"toGroup"`
+	Count        int64    `json:"count"`
+	CustomerIDs  []string `json:"customerIds,omitempty"`
 }

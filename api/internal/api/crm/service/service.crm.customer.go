@@ -70,7 +70,7 @@ func (s *CrmCustomerService) tryMergeFromSource(ctx context.Context, customerId 
 	if ok {
 		var doc fbmodels.FbCustomer
 		if fbColl.FindOne(ctx, bson.M{"customerId": customerId, "ownerOrganizationId": ownerOrgID}).Decode(&doc) == nil {
-			return s.MergeFromFbCustomer(ctx, &doc) == nil
+			return s.MergeFromFbCustomer(ctx, &doc, 0) == nil
 		}
 	}
 	return false
@@ -79,19 +79,41 @@ func (s *CrmCustomerService) tryMergeFromSource(ctx context.Context, customerId 
 // toProfileResponse chuyển CrmCustomer sang CrmCustomerProfileResponse.
 func (s *CrmCustomerService) toProfileResponse(c *crmmodels.CrmCustomer) *crmdto.CrmCustomerProfileResponse {
 	resp := &crmdto.CrmCustomerProfileResponse{
-		UnifiedId:          c.UnifiedId,
-		Name:               c.Name,
-		PhoneNumbers:       c.PhoneNumbers,
-		Emails:             c.Emails,
-		HasConversation:    c.HasConversation,
-		TotalSpent:         c.TotalSpent,
-		OrderCount:         c.OrderCount,
-		OrderCountOnline:   c.OrderCountOnline,
-		OrderCountOffline:  c.OrderCountOffline,
-		FirstOrderChannel:  c.FirstOrderChannel,
-		LastOrderChannel:   c.LastOrderChannel,
-		IsOmnichannel:     c.IsOmnichannel,
-		LastOrderAt:       c.LastOrderAt,
+		UnifiedId:                 c.UnifiedId,
+		Name:                      c.Name,
+		PhoneNumbers:              c.PhoneNumbers,
+		Emails:                    c.Emails,
+		Birthday:                  c.Birthday,
+		Gender:                    c.Gender,
+		LivesIn:                   c.LivesIn,
+		Addresses:                 c.Addresses,
+		ReferralCode:              c.ReferralCode,
+		HasConversation:           c.HasConversation,
+		TotalSpent:                c.TotalSpent,
+		OrderCount:                c.OrderCount,
+		OrderCountOnline:          c.OrderCountOnline,
+		OrderCountOffline:         c.OrderCountOffline,
+		FirstOrderChannel:         c.FirstOrderChannel,
+		LastOrderChannel:          c.LastOrderChannel,
+		IsOmnichannel:             c.IsOmnichannel,
+		LastOrderAt:               c.LastOrderAt,
+		AvgOrderValue:             c.AvgOrderValue,
+		CancelledOrderCount:       c.CancelledOrderCount,
+		OrdersLast30d:             c.OrdersLast30d,
+		OrdersLast90d:             c.OrdersLast90d,
+		OrdersFromAds:             c.OrdersFromAds,
+		OrdersFromOrganic:         c.OrdersFromOrganic,
+		OrdersFromDirect:          c.OrdersFromDirect,
+		OwnedSkuQuantities:        c.OwnedSkuQuantities,
+		ConversationCount:         c.ConversationCount,
+		ConversationCountByInbox:  c.ConversationCountByInbox,
+		ConversationCountByComment: c.ConversationCountByComment,
+		LastConversationAt:        c.LastConversationAt,
+		FirstConversationAt:       c.FirstConversationAt,
+		TotalMessages:             c.TotalMessages,
+		LastMessageFromCustomer:   c.LastMessageFromCustomer,
+		ConversationFromAds:       c.ConversationFromAds,
+		ConversationTags:          c.ConversationTags,
 		SourceIds: map[string]string{
 			"pos": c.SourceIds.Pos,
 			"fb":  c.SourceIds.Fb,

@@ -139,7 +139,7 @@ func (s *AIWorkflowCommandService) ClaimPendingCommands(ctx context.Context, age
 		SetSort(bson.M{"createdAt": 1}).
 		SetReturnDocument(options.After)
 	coll := s.Collection()
-	var claimedCommands []aimodels.AIWorkflowCommand
+	claimedCommands := make([]aimodels.AIWorkflowCommand, 0, limit) // Dùng [] thay vì nil để JSON trả về data: [] chứ không phải data: null
 	for i := 0; i < limit; i++ {
 		var command aimodels.AIWorkflowCommand
 		err := coll.FindOneAndUpdate(ctx, filter, update, opts).Decode(&command)

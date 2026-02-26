@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"context"
@@ -256,6 +256,43 @@ func main() {
 		}()
 
 		log.Info("📊 [REPORT_DIRTY] Report Dirty Worker started successfully")
+	}
+
+	// Worker tính lại phân loại khách hàng (full: hàng ngày; smart: mỗi 6h, chỉ khách gần ngưỡng)
+	classificationRefreshFullWorker, err := worker.NewClassificationRefreshWorker(24*time.Hour, 200, worker.ClassificationRefreshModeFull)
+	if err != nil {
+		log.WithError(err).Warn("Failed to create classification refresh full worker")
+	} else {
+		ctxClassFull, cancelClassFull := context.WithCancel(context.Background())
+		defer cancelClassFull()
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.WithFields(map[string]interface{}{"panic": r}).Error("📊 [CLASSIFICATION_FULL] Worker panic")
+				}
+			}()
+			log.Info("📊 [CLASSIFICATION_FULL] Starting Classification Refresh Worker (full mode)...")
+			classificationRefreshFullWorker.Start(ctxClassFull)
+		}()
+		log.Info("📊 [CLASSIFICATION_FULL] Classification Refresh Full Worker started (chạy mỗi 24h)")
+	}
+
+	classificationRefreshSmartWorker, err := worker.NewClassificationRefreshWorker(6*time.Hour, 200, worker.ClassificationRefreshModeSmart)
+	if err != nil {
+		log.WithError(err).Warn("Failed to create classification refresh smart worker")
+	} else {
+		ctxClassSmart, cancelClassSmart := context.WithCancel(context.Background())
+		defer cancelClassSmart()
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.WithFields(map[string]interface{}{"panic": r}).Error("📊 [CLASSIFICATION_SMART] Worker panic")
+				}
+			}()
+			log.Info("📊 [CLASSIFICATION_SMART] Starting Classification Refresh Worker (smart mode)...")
+			classificationRefreshSmartWorker.Start(ctxClassSmart)
+		}()
+		log.Info("📊 [CLASSIFICATION_SMART] Classification Refresh Smart Worker started (chạy mỗi 6h)")
 	}
 
 	// Chạy Fiber server trên main thread

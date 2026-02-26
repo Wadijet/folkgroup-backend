@@ -37,6 +37,9 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 
 	// Dashboard Customer Intelligence (TAB 4) — KPI, tier distribution, lifecycle, bảng khách, VIP inactive panel
 	// Đăng ký route con trước /customers để tránh conflict
+	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/customers/trend", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetCustomersTrend)
+	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/customers/trend/transition-matrix", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetTransitionMatrix)
+	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/customers/trend/group-changes", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetGroupChanges)
 	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/customers/ceo-groups", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetCeoGroups)
 	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/customers/journey-funnel", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetJourneyFunnel)
 	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/customers/asset-matrix", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetAssetMatrix)

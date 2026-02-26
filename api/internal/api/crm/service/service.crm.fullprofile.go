@@ -3,7 +3,7 @@ package crmvc
 
 import (
 	"context"
-	"time"
+	"fmt"
 
 	crmdto "meta_commerce/internal/api/crm/dto"
 	crmmodels "meta_commerce/internal/api/crm/models"
@@ -15,14 +15,23 @@ import (
 )
 
 const (
-	fullProfileOrderLimit    = 20
+	fullProfileOrderLimit     = 20
 	fullProfileNoteLimit      = 50
-	fullProfileActivityLimit = 50
+	fullProfileActivityLimit  = 50
 )
+
+// GetFullProfileOpts tùy chọn khi gọi GetFullProfile (clientIp, userAgent, actor cho audit).
+type GetFullProfileOpts struct {
+	ClientIp  string
+	UserAgent string
+	ActorId   *primitive.ObjectID
+	ActorName string
+	Domains   []string // Lọc activity theo domain (rỗng = tất cả)
+}
 
 // GetFullProfile trả về toàn bộ thông tin khách: profile, đơn hàng gần đây, hội thoại, ghi chú, lịch sử hoạt động.
 // Đồng thời ghi lịch sử profile_viewed vào crm_activity_history.
-func (s *CrmCustomerService) GetFullProfile(ctx context.Context, unifiedId string, ownerOrgID primitive.ObjectID) (*crmdto.CrmCustomerFullProfileResponse, error) {
+func (s *CrmCustomerService) GetFullProfile(ctx context.Context, unifiedId string, ownerOrgID primitive.ObjectID, opts *GetFullProfileOpts) (*crmdto.CrmCustomerFullProfileResponse, error) {
 	// 1. Lấy profile (có thể merge từ nguồn nếu chưa có)
 	profile, err := s.GetProfile(ctx, unifiedId, ownerOrgID)
 	if err != nil {
@@ -49,17 +58,37 @@ func (s *CrmCustomerService) GetFullProfile(ctx context.Context, unifiedId strin
 	notes := s.fetchNotes(ctx, unifiedId, ownerOrgID)
 
 	// 6. Lấy lịch sử hoạt động
-	activityHistory := s.fetchActivityHistory(ctx, unifiedId, ownerOrgID)
+	activityHistory := s.fetchActivityHistory(ctx, unifiedId, ownerOrgID, opts)
 
-	// 7. Ghi lịch sử profile_viewed
+	// 7. Ghi lịch sử profile_viewed (không lưu snapshot — chỉ ghi sự kiện xem)
 	if actSvc, err := NewCrmActivityService(); err == nil {
-		_ = actSvc.LogActivity(ctx, unifiedId, ownerOrgID, "profile_viewed", "system", nil, map[string]interface{}{
-			"timestamp": time.Now().UnixMilli(),
+		actorName := "Hệ thống"
+		if opts != nil && opts.ActorName != "" {
+			actorName = opts.ActorName
+		}
+		metadata := map[string]interface{}{}
+		_ = actSvc.LogActivity(ctx, LogActivityInput{
+			UnifiedId:    unifiedId,
+			OwnerOrgID:   ownerOrgID,
+			Domain:       crmmodels.ActivityDomainProfile,
+			ActivityType: "profile_viewed",
+			Source:       "system",
+			Metadata:     metadata,
+			DisplayLabel: fmt.Sprintf("%s xem hồ sơ", actorName),
+			DisplayIcon:  "visibility",
+			ActorId:      opts.ActorId,
+			ActorName:    opts.ActorName,
+			ClientIp:     getOptClientIp(opts),
+			UserAgent:    getOptUserAgent(opts),
 		})
 	}
 
+	// currentMetrics: số liệu hiện tại — cùng cấu trúc với metadata.metricsSnapshot để frontend so sánh lịch sử vs now
+	currentMetrics := BuildCurrentMetricsSnapshot(&customer)
+
 	return &crmdto.CrmCustomerFullProfileResponse{
 		Profile:         *profile,
+		CurrentMetrics:  currentMetrics,
 		RecentOrders:    recentOrders,
 		Conversations:   conversations,
 		Notes:           notes,
@@ -212,26 +241,71 @@ func (s *CrmCustomerService) fetchNotes(ctx context.Context, unifiedId string, o
 }
 
 // fetchActivityHistory lấy lịch sử hoạt động từ crm_activity_history.
-func (s *CrmCustomerService) fetchActivityHistory(ctx context.Context, unifiedId string, ownerOrgID primitive.ObjectID) []crmdto.CrmActivitySummary {
+func (s *CrmCustomerService) fetchActivityHistory(ctx context.Context, unifiedId string, ownerOrgID primitive.ObjectID, opts *GetFullProfileOpts) []crmdto.CrmActivitySummary {
 	actSvc, err := NewCrmActivityService()
 	if err != nil {
 		return []crmdto.CrmActivitySummary{}
 	}
-	activities, err := actSvc.FindByUnifiedId(ctx, unifiedId, ownerOrgID, fullProfileActivityLimit)
+	domains := []string{}
+	if opts != nil && len(opts.Domains) > 0 {
+		domains = opts.Domains
+	}
+	activities, err := actSvc.FindByUnifiedId(ctx, unifiedId, ownerOrgID, domains, fullProfileActivityLimit)
 	if err != nil {
 		return []crmdto.CrmActivitySummary{}
 	}
 	result := make([]crmdto.CrmActivitySummary, 0, len(activities))
 	for _, a := range activities {
+		changes := make([]crmdto.ActivityChangeItem, 0, len(a.Changes))
+		for _, c := range a.Changes {
+			changes = append(changes, crmdto.ActivityChangeItem{
+				Field:    c.Field,
+				OldValue: c.OldValue,
+				NewValue: c.NewValue,
+			})
+		}
+		actorIdStr := ""
+		if a.ActorId != nil && !a.ActorId.IsZero() {
+			actorIdStr = a.ActorId.Hex()
+		}
+		activityAt := a.ActivityAt
+		if activityAt <= 0 {
+			activityAt = a.CreatedAt // Fallback cho bản ghi cũ
+		}
 		result = append(result, crmdto.CrmActivitySummary{
-			ActivityType: a.ActivityType,
-			ActivityAt:   a.ActivityAt,
-			Source:       a.Source,
-			SourceRef:    a.SourceRef,
-			Metadata:     a.Metadata,
+			ActivityType:   a.ActivityType,
+			Domain:         a.Domain,
+			ActivityAt:     activityAt,
+			Source:         a.Source,
+			SourceRef:      a.SourceRef,
+			Metadata:       a.Metadata,
+			DisplayLabel:   a.DisplayLabel,
+			DisplayIcon:    a.DisplayIcon,
+			DisplaySubtext: a.DisplaySubtext,
+			ActorId:        actorIdStr,
+			ActorName:      a.ActorName,
+			Changes:        changes,
+			Reason:         a.Reason,
+			ClientIp:       a.ClientIp,
+			UserAgent:      a.UserAgent,
+			Status:         a.Status,
 		})
 	}
 	return result
+}
+
+func getOptClientIp(opts *GetFullProfileOpts) string {
+	if opts == nil {
+		return ""
+	}
+	return opts.ClientIp
+}
+
+func getOptUserAgent(opts *GetFullProfileOpts) string {
+	if opts == nil {
+		return ""
+	}
+	return opts.UserAgent
 }
 
 func getFloatFromMap(m map[string]interface{}, key string) float64 {

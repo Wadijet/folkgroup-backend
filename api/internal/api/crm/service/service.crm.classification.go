@@ -196,3 +196,27 @@ func ComputeMomentumStage(c *crmmodels.CrmCustomer) string {
 	}
 	return "stable"
 }
+
+// ComputeClassificationFromMetrics trả về map các field phân loại để $set vào crm_customers.
+// Dùng khi đã có metrics từ aggregate (RefreshMetrics, Merge) — lưu classification hiện tại.
+// metricsSnapshot trong activity history giữ lịch sử theo từng sự kiện.
+func ComputeClassificationFromMetrics(totalSpent float64, orderCount int, lastOrderAt int64, revenueLast30d, revenueLast90d float64, orderCountOnline, orderCountOffline int, hasConversation bool) map[string]interface{} {
+	c := &crmmodels.CrmCustomer{
+		TotalSpent:        totalSpent,
+		OrderCount:        orderCount,
+		LastOrderAt:       lastOrderAt,
+		RevenueLast30d:    revenueLast30d,
+		RevenueLast90d:    revenueLast90d,
+		OrderCountOnline:  orderCountOnline,
+		OrderCountOffline: orderCountOffline,
+		HasConversation:   hasConversation,
+	}
+	return map[string]interface{}{
+		"valueTier":      ComputeValueTier(totalSpent),
+		"lifecycleStage": ComputeLifecycleStage(lastOrderAt),
+		"journeyStage":   ComputeJourneyStage(c),
+		"channel":        ComputeChannel(c),
+		"loyaltyStage":   ComputeLoyaltyStage(orderCount),
+		"momentumStage":  ComputeMomentumStage(c),
+	}
+}

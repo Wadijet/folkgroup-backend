@@ -158,18 +158,25 @@ GET /api/v1/dashboard/customers
 
 ---
 
-## 7. Files cần tạo/sửa
+## 7. Thống kê theo Snapshot
+
+**KPI Summary và phân bố (Tier, Lifecycle)** ưu tiên lấy từ `report_snapshots` (đã tính sẵn theo chu kỳ). Chi tiết xem `CUSTOMER_REPORT_SNAPSHOT_DESIGN.md`.
+
+---
+
+## 8. Files cần tạo/sửa
 
 | File | Nội dung |
 |------|----------|
 | `report/dto/dto.report.customers.go` | DTO: CustomersQueryParams, CustomerSummary, CustomerItem, vipInactiveItem |
 | `report/service/service.report.customers.go` | GetCustomersSnapshot |
-| `report/handler/handler.report.dashboard.go` | HandleGetCustomers |
+| `report/service/service.report.customer.go` | ComputeCustomerReport, GetSnapshotForCustomersDashboard |
+| `report/handler/handler.report.dashboard.go` | HandleGetCustomers (ưu tiên snapshot) |
 | `report/router/routes.go` | Register GET /dashboard/customers |
 
 ---
 
-## 8. Logic aggregate từ orders
+## 9. Logic aggregate từ orders
 
 Khi `pc_pos_customers` thiếu `last_order_at`, `purchased_amount`, `order_count`:
 

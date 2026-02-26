@@ -84,6 +84,42 @@ func (s *ReportService) GetReportKeysByCollection(ctx context.Context, collectio
 	return keys, nil
 }
 
+// GetDirtyPeriodKeysForReportKeys trả về map reportKey -> periodKey cho danh sách report keys và timestamp.
+// Dùng khi hook cần mark dirty cho các report cụ thể (vd: customer_* khi pc_pos_customers thay đổi).
+func (s *ReportService) GetDirtyPeriodKeysForReportKeys(ctx context.Context, reportKeys []string, unixSec int64) (map[string]string, error) {
+	if len(reportKeys) == 0 {
+		return nil, nil
+	}
+	filter := bson.M{"key": bson.M{"$in": reportKeys}, "isActive": true}
+	cursor, err := s.defColl.Find(ctx, filter, options.Find().SetProjection(bson.M{"key": 1, "periodType": 1}))
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	loc, err := time.LoadLocation(ReportTimezone)
+	if err != nil {
+		return nil, fmt.Errorf("load timezone %s: %w", ReportTimezone, err)
+	}
+	t := time.Unix(unixSec, 0).In(loc)
+
+	result := make(map[string]string)
+	for cursor.Next(ctx) {
+		var doc struct {
+			Key       string `bson:"key"`
+			PeriodType string `bson:"periodType"`
+		}
+		if err := cursor.Decode(&doc); err != nil {
+			return nil, err
+		}
+		result[doc.Key] = periodKeyFromTime(t, doc.PeriodType)
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 // GetDirtyPeriodKeysForCollection trả về map reportKey -> periodKey cho collection và timestamp.
 // Hook dùng khi dữ liệu nguồn thay đổi để mark đúng chu kỳ cho từng loại báo cáo (day/week/month/year).
 func (s *ReportService) GetDirtyPeriodKeysForCollection(ctx context.Context, collectionName string, unixSec int64) (map[string]string, error) {
@@ -165,6 +201,25 @@ func (s *ReportService) GetSnapshotsCollection() *mongo.Collection { return s.sn
 
 // GetDirtyCollection trả về collection report_dirty_periods.
 func (s *ReportService) GetDirtyCollection() *mongo.Collection { return s.dirtyColl }
+
+// GetReportSnapshot lấy một snapshot theo reportKey, periodKey, ownerOrganizationId.
+// Trả về nil nếu không tìm thấy (không phải lỗi).
+func (s *ReportService) GetReportSnapshot(ctx context.Context, reportKey, periodKey string, ownerOrganizationID primitive.ObjectID) (*reportmodels.ReportSnapshot, error) {
+	filter := bson.M{
+		"reportKey":            reportKey,
+		"periodKey":            periodKey,
+		"ownerOrganizationId": ownerOrganizationID,
+	}
+	var snap reportmodels.ReportSnapshot
+	err := s.snapColl.FindOne(ctx, filter).Decode(&snap)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, nil
+		}
+		return nil, common.ConvertMongoError(err)
+	}
+	return &snap, nil
+}
 
 // FindSnapshotsForTrend truy vấn report_snapshots theo reportKey, ownerOrganizationId, periodKey trong [from, to].
 func (s *ReportService) FindSnapshotsForTrend(ctx context.Context, reportKey string, ownerOrganizationID primitive.ObjectID, from, to string) ([]reportmodels.ReportSnapshot, error) {

@@ -2,8 +2,31 @@
 # Su dung bearer token cua admin user
 
 $baseUrl = "http://localhost:8080/api/v1"
-$bearerToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI2OTVmN2IzOGNiZjYyZGJhMGZiMDk0Y2IiLCJ0aW1lIjoiNjk2NWM4Y2UiLCJyYW5kb21OdW1iZXIiOiIxOCJ9.dNBKLgP0Hb7BHiudUanQCI96ot1Sw4IM2TwoMPiAnOA"
+$bearerToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI2OThjMzQ4OWNiZjYyZGJhMGYwZmQzZmMiLCJ0aW1lIjoiNjk5ZjU1MmMiLCJyYW5kb21OdW1iZXIiOiIxNiJ9.iJglvkv-JziiRF_hCzaNMGFLDG-hW_rEDXBeJSSuk6I"
 $outputDir = "docs-shared/ai-context/folkform/sample-data"
+
+# Bước 0: Lấy role từ /auth/roles — BẮT BUỘC vì API yêu cầu X-Active-Role-ID
+$baseHeaders = @{
+    "Authorization" = "Bearer $bearerToken"
+    "Content-Type" = "application/json"
+}
+$activeRoleId = $null
+try {
+    $roleResp = Invoke-RestMethod -Uri "$baseUrl/auth/roles" -Method GET -Headers $baseHeaders
+    if ($roleResp.data -and $roleResp.data.Count -gt 0) {
+        $adminRole = $roleResp.data | Where-Object { $_.roleName -eq "Administrator" } | Select-Object -First 1
+        $role = if ($adminRole) { $adminRole } else { $roleResp.data[0] }
+        $activeRoleId = $role.roleId
+        Write-Host "Dung role: $($role.roleName) (roleId: $activeRoleId)" -ForegroundColor Green
+    }
+} catch {
+    Write-Host "Loi lay roles: $_" -ForegroundColor Red
+    exit 1
+}
+if (-not $activeRoleId) {
+    Write-Host "Loi: User khong co role" -ForegroundColor Red
+    exit 1
+}
 
 # Tao thu muc output neu chua co
 if (-not (Test-Path $outputDir)) {
@@ -29,6 +52,7 @@ function Get-SampleData {
         $headers = @{
             "Authorization" = "Bearer $bearerToken"
             "Content-Type" = "application/json"
+            "X-Active-Role-ID" = $activeRoleId
         }
         
         $response = Invoke-RestMethod -Uri $url -Method Get -Headers $headers -ErrorAction Stop
@@ -62,6 +86,38 @@ function Get-SampleData {
     }
 }
 
+# Ham de lay du lieu tu dashboard endpoints (GET voi query params)
+function Get-DashboardData {
+    param(
+        [string]$Endpoint,
+        [string]$OutputFile,
+        [string]$QueryParams = "period=month&limit=20&offset=0"
+    )
+    try {
+        $url = "$baseUrl/$Endpoint`?$QueryParams"
+        Write-Host "Dang lay du lieu tu: $url" -ForegroundColor Cyan
+        $headers = @{
+            "Authorization" = "Bearer $bearerToken"
+            "Content-Type" = "application/json"
+            "X-Active-Role-ID" = $activeRoleId
+        }
+        $response = Invoke-RestMethod -Uri $url -Method Get -Headers $headers -ErrorAction Stop
+        if ($response.status -eq "success" -and $response.data) {
+            $json = $response.data | ConvertTo-Json -Depth 20
+            $outputPath = Join-Path $outputDir $OutputFile
+            $json | Out-File -FilePath $outputPath -Encoding UTF8
+            Write-Host "OK Da luu vao $OutputFile" -ForegroundColor Green
+            return $true
+        } else {
+            Write-Host "WARNING Khong co du lieu tu $Endpoint" -ForegroundColor Yellow
+            return $false
+        }
+    } catch {
+        Write-Host "ERROR Loi khi lay du lieu tu $Endpoint : $($_.Exception.Message)" -ForegroundColor Red
+        return $false
+    }
+}
+
 # Ham de lay du lieu voi pagination
 function Get-SampleDataWithPagination {
     param(
@@ -79,6 +135,7 @@ function Get-SampleDataWithPagination {
         $headers = @{
             "Authorization" = "Bearer $bearerToken"
             "Content-Type" = "application/json"
+            "X-Active-Role-ID" = $activeRoleId
         }
         
         $response = Invoke-RestMethod -Uri $url -Method Get -Headers $headers -ErrorAction Stop
@@ -142,8 +199,8 @@ $collections = @(
     @{ Endpoint = "facebook/message-item"; OutputFile = "fb-message-items-sample.json"; UsePagination = $false },
     @{ Endpoint = "fb-customer"; OutputFile = "fb-customers-sample.json"; UsePagination = $false },
     
-    # Customers
-    @{ Endpoint = "customer"; OutputFile = "customers-sample.json"; UsePagination = $false },
+    # Customers (dashboard/customers trả về snapshot CRM; pc-pos-customer là CRUD)
+    @{ Endpoint = "dashboard/customers"; OutputFile = "dashboard-customers-sample.json"; UsePagination = $false; IsDashboard = $true },
     @{ Endpoint = "pc-pos-customer"; OutputFile = "pc-pos-customers-sample.json"; UsePagination = $false },
     
     # Pancake POS
@@ -207,7 +264,9 @@ $failCount = 0
 
 foreach ($collection in $collections) {
     Write-Host ""
-    if ($collection.UsePagination) {
+    if ($collection.IsDashboard) {
+        $result = Get-DashboardData -Endpoint $collection.Endpoint -OutputFile $collection.OutputFile
+    } elseif ($collection.UsePagination) {
         $result = Get-SampleDataWithPagination -Endpoint $collection.Endpoint -OutputFile $collection.OutputFile -Limit 10
     } else {
         $result = Get-SampleData -Endpoint $collection.Endpoint -OutputFile $collection.OutputFile -Limit 10

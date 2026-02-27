@@ -69,8 +69,11 @@ func handleCrmDataChange(ctx context.Context, e events.DataChangeEvent) {
 		}
 
 	case global.MongoDB_ColNames.FbConvesations:
-		if doc, ok := toFbConversation(e.Document); ok && doc.CustomerId != "" {
-			_, _ = customerSvc.IngestConversationTouchpoint(ctx, doc.CustomerId, ownerOrgID, doc.ConversationId, false, doc)
+		if doc, ok := toFbConversation(e.Document); ok {
+			customerId := extractConversationCustomerId(doc)
+			if customerId != "" {
+				_, _ = customerSvc.IngestConversationTouchpoint(ctx, customerId, ownerOrgID, doc.ConversationId, false, doc)
+			}
 		}
 
 	case global.MongoDB_ColNames.CrmNotes:

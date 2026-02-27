@@ -49,6 +49,13 @@ func (s *ReportService) GetCustomersTrendWithComparison(ctx context.Context, own
 			LoyaltyDistribution:    snapData.LoyaltyDistribution,
 			MomentumDistribution:   snapData.MomentumDistribution,
 			CeoGroupDistribution:  snapData.CeoGroupDistribution,
+			ValueLTV:               snapData.ValueLTV,
+			JourneyLTV:             snapData.JourneyLTV,
+			LifecycleLTV:           snapData.LifecycleLTV,
+			ChannelLTV:             snapData.ChannelLTV,
+			LoyaltyLTV:             snapData.LoyaltyLTV,
+			MomentumLTV:            snapData.MomentumLTV,
+			CeoGroupLTV:            snapData.CeoGroupLTV,
 			Customers:              nil, // Handler sẽ fill từ CrmCustomerService
 			VipInactiveCustomers:   nil,
 			TotalCount:             int(snapData.Summary.TotalCustomers),
@@ -186,11 +193,16 @@ func buildComparison(curr, prev map[string]interface{}) map[string]reportdto.Com
 	// Flatten nested metrics để so sánh (path -> key trong comparison)
 	pairs := []struct{ nested, flat string }{
 		{"summary.totalCustomers", "totalCustomers"},
+		{"summary.customersWithOrder", "customersWithOrder"},
+		{"summary.customersRepeat", "customersRepeat"},
 		{"summary.newCustomersInPeriod", "newCustomersInPeriod"},
 		{"summary.repeatRate", "repeatRate"},
 		{"summary.vipInactiveCount", "vipInactiveCount"},
 		{"summary.reactivationValue", "reactivationValue"},
 		{"summary.activeInPeriod", "activeInPeriod"},
+		{"summary.totalLTV", "totalLTV"},
+		{"summary.avgLTV", "avgLTV"},
+		{"summary.vipLTV", "vipLTV"},
 		{"valueDistribution.vip", "value_vip"},
 		{"valueDistribution.high", "value_high"},
 		{"valueDistribution.medium", "value_medium"},
@@ -226,6 +238,42 @@ func buildComparison(curr, prev map[string]interface{}) map[string]reportdto.Com
 		{"ceoGroupDistribution.new", "ceo_new"},
 		{"ceoGroupDistribution.one_time", "ceo_one_time"},
 		{"ceoGroupDistribution.dead", "ceo_dead"},
+		{"valueLTV.vip", "valueLTV_vip"},
+		{"valueLTV.high", "valueLTV_high"},
+		{"valueLTV.medium", "valueLTV_medium"},
+		{"valueLTV.low", "valueLTV_low"},
+		{"valueLTV.new", "valueLTV_new"},
+		{"journeyLTV.visitor", "journeyLTV_visitor"},
+		{"journeyLTV.engaged", "journeyLTV_engaged"},
+		{"journeyLTV.first", "journeyLTV_first"},
+		{"journeyLTV.repeat", "journeyLTV_repeat"},
+		{"journeyLTV.vip", "journeyLTV_vip"},
+		{"journeyLTV.inactive", "journeyLTV_inactive"},
+		{"lifecycleLTV.active", "lifecycleLTV_active"},
+		{"lifecycleLTV.cooling", "lifecycleLTV_cooling"},
+		{"lifecycleLTV.inactive", "lifecycleLTV_inactive"},
+		{"lifecycleLTV.dead", "lifecycleLTV_dead"},
+		{"lifecycleLTV.never_purchased", "lifecycleLTV_never_purchased"},
+		{"channelLTV.online", "channelLTV_online"},
+		{"channelLTV.offline", "channelLTV_offline"},
+		{"channelLTV.omnichannel", "channelLTV_omnichannel"},
+		{"channelLTV.unspecified", "channelLTV_unspecified"},
+		{"loyaltyLTV.core", "loyaltyLTV_core"},
+		{"loyaltyLTV.repeat", "loyaltyLTV_repeat"},
+		{"loyaltyLTV.one_time", "loyaltyLTV_one_time"},
+		{"loyaltyLTV.unspecified", "loyaltyLTV_unspecified"},
+		{"momentumLTV.rising", "momentumLTV_rising"},
+		{"momentumLTV.stable", "momentumLTV_stable"},
+		{"momentumLTV.declining", "momentumLTV_declining"},
+		{"momentumLTV.lost", "momentumLTV_lost"},
+		{"momentumLTV.unspecified", "momentumLTV_unspecified"},
+		{"ceoGroupLTV.vip_active", "ceoGroupLTV_vip_active"},
+		{"ceoGroupLTV.vip_inactive", "ceoGroupLTV_vip_inactive"},
+		{"ceoGroupLTV.rising", "ceoGroupLTV_rising"},
+		{"ceoGroupLTV.new", "ceoGroupLTV_new"},
+		{"ceoGroupLTV.one_time", "ceoGroupLTV_one_time"},
+		{"ceoGroupLTV.dead", "ceoGroupLTV_dead"},
+		{"ceoGroupLTV.other", "ceoGroupLTV_other"},
 	}
 	for _, p := range pairs {
 		cv := getMetricValue(curr, p.nested, p.flat)
@@ -396,12 +444,12 @@ func (s *ReportService) getCustomerStateMapForPeriod(ctx context.Context, ownerO
 
 	result := make(map[string]customerStateAtPeriod)
 	for unifiedId, m := range snapshotMap {
-		valueTier := getStrFromSnapshotMap(m, "valueTier")
-		lifecycleStage := getStrFromSnapshotMap(m, "lifecycleStage")
-		journeyStage := getStrFromSnapshotMap(m, "journeyStage")
-		channel := getStrFromSnapshotMap(m, "channel")
-		loyaltyStage := getStrFromSnapshotMap(m, "loyaltyStage")
-		momentumStage := getStrFromSnapshotMap(m, "momentumStage")
+		valueTier := crmvc.GetStrFromNestedMetrics(m, "valueTier")
+		lifecycleStage := crmvc.GetStrFromNestedMetrics(m, "lifecycleStage")
+		journeyStage := crmvc.GetStrFromNestedMetrics(m, "journeyStage")
+		channel := crmvc.GetStrFromNestedMetrics(m, "channel")
+		loyaltyStage := crmvc.GetStrFromNestedMetrics(m, "loyaltyStage")
+		momentumStage := crmvc.GetStrFromNestedMetrics(m, "momentumStage")
 		if valueTier == "" { valueTier = "new" }
 		if lifecycleStage == "" { lifecycleStage = "never_purchased" }
 		if journeyStage == "" { journeyStage = "visitor" }

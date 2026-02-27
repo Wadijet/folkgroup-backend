@@ -522,7 +522,7 @@ func (s *CrmCustomerService) GetMetricsForSnapshotAt(ctx context.Context, c *crm
 		return nil
 	}
 	ids := []string{c.SourceIds.Pos, c.SourceIds.Fb, c.UnifiedId}
-	om := s.aggregateOrderMetricsForCustomer(ctx, ids, c.OwnerOrganizationID, c.PhoneNumbers, activityAt)
+	om := s.aggregateOrderMetricsForCustomer(ctx, ids, c.OwnerOrganizationID, GetPhoneNumbersFromCustomer(c), activityAt)
 	cm := s.aggregateConversationMetricsForCustomer(ctx, ids, c.OwnerOrganizationID, activityAt)
 	avgOrderValue := 0.0
 	if om.OrderCount > 0 {
@@ -652,22 +652,22 @@ func (s *CrmCustomerService) GetProfileForSnapshotAt(ctx context.Context, c *crm
 		return nil
 	}
 	p := map[string]interface{}{
-		"name":          c.Name,
-		"phoneNumbers":  c.PhoneNumbers,
-		"emails":        c.Emails,
-		"birthday":      c.Birthday,
-		"gender":        c.Gender,
-		"livesIn":       c.LivesIn,
-		"referralCode":  c.ReferralCode,
+		"name":          GetNameFromCustomer(c),
+		"phoneNumbers":  GetPhoneNumbersFromCustomer(c),
+		"emails":        GetEmailsFromCustomer(c),
+		"birthday":      GetBirthdayFromCustomer(c),
+		"gender":        GetGenderFromCustomer(c),
+		"livesIn":       GetLivesInFromCustomer(c),
+		"referralCode":  GetReferralCodeFromCustomer(c),
 		"primarySource": c.PrimarySource,
 	}
 	ids := []string{c.SourceIds.Pos, c.SourceIds.Fb, c.UnifiedId}
-	addrs := s.getAddressesFromFirstOrderAsOf(ctx, ids, c.OwnerOrganizationID, c.PhoneNumbers, activityAt)
+	addrs := s.getAddressesFromFirstOrderAsOf(ctx, ids, c.OwnerOrganizationID, GetPhoneNumbersFromCustomer(c), activityAt)
 	if len(addrs) > 0 {
 		p["addresses"] = addrs
-	} else if len(c.Addresses) > 0 && c.MergedAt > 0 && c.MergedAt <= activityAt {
+	} else if len(GetAddressesFromCustomer(c)) > 0 && c.MergedAt > 0 && c.MergedAt <= activityAt {
 		// Merge đã xảy ra trước activityAt — dùng addresses từ merge (POS shop_customer_addresses)
-		p["addresses"] = c.Addresses
+		p["addresses"] = GetAddressesFromCustomer(c)
 	}
 	return p
 }
@@ -679,56 +679,32 @@ func (s *CrmCustomerService) RefreshMetrics(ctx context.Context, unifiedId strin
 		return err
 	}
 	ids := []string{customer.SourceIds.Pos, customer.SourceIds.Fb, customer.UnifiedId}
-	metrics := s.aggregateOrderMetricsForCustomer(ctx, ids, ownerOrgID, customer.PhoneNumbers, 0)
+	metrics := s.aggregateOrderMetricsForCustomer(ctx, ids, ownerOrgID, GetPhoneNumbersFromCustomer(&customer), 0)
 	hasConv := s.checkHasConversation(ctx, ids, ownerOrgID)
 	convMetrics := s.aggregateConversationMetricsForCustomer(ctx, ids, ownerOrgID, 0)
 
-	avgOrderValue := 0.0
-	if metrics.OrderCount > 0 {
-		avgOrderValue = metrics.TotalSpent / float64(metrics.OrderCount)
-	}
-
 	now := time.Now().UnixMilli()
+	cm := BuildCurrentMetricsFromOrderAndConv(metrics, convMetrics, hasConv)
+	class := ComputeClassificationFromMetrics(metrics.TotalSpent, metrics.OrderCount, metrics.LastOrderAt, metrics.RevenueLast30d, metrics.RevenueLast90d, metrics.OrderCountOnline, metrics.OrderCountOffline, hasConv)
+
 	setFields := bson.M{
-		"hasConversation":          hasConv,
-		"hasOrder":                 metrics.OrderCount > 0,
-		"orderCountOnline":        metrics.OrderCountOnline,
-		"orderCountOffline":       metrics.OrderCountOffline,
-		"firstOrderChannel":       metrics.FirstOrderChannel,
-		"lastOrderChannel":        metrics.LastOrderChannel,
-		"isOmnichannel":           metrics.OrderCountOnline > 0 && metrics.OrderCountOffline > 0,
-		"totalSpent":              metrics.TotalSpent,
-		"orderCount":              metrics.OrderCount,
-		"lastOrderAt":             metrics.LastOrderAt,
-		"secondLastOrderAt":       metrics.SecondLastOrderAt,
-		"revenueLast30d":          metrics.RevenueLast30d,
-		"revenueLast90d":          metrics.RevenueLast90d,
-		"avgOrderValue":           avgOrderValue,
-		"cancelledOrderCount":     metrics.CancelledOrderCount,
-		"ordersLast30d":           metrics.OrdersLast30d,
-		"ordersLast90d":           metrics.OrdersLast90d,
-		"ordersFromAds":           metrics.OrdersFromAds,
-		"ordersFromOrganic":       metrics.OrdersFromOrganic,
-		"ordersFromDirect":        metrics.OrdersFromDirect,
-		"ownedSkuQuantities":      metrics.OwnedSkuQuantities,
-		"conversationCount":       convMetrics.ConversationCount,
-		"conversationCountByInbox": convMetrics.ConversationCountByInbox,
-		"conversationCountByComment": convMetrics.ConversationCountByComment,
-		"lastConversationAt":      convMetrics.LastConversationAt,
-		"firstConversationAt":     convMetrics.FirstConversationAt,
-		"totalMessages":           convMetrics.TotalMessages,
-		"lastMessageFromCustomer":  convMetrics.LastMessageFromCustomer,
-		"conversationFromAds":      convMetrics.ConversationFromAds,
-		"conversationTags":         convMetrics.ConversationTags,
-		"mergeMethod":             customer.MergeMethod,
-		"mergedAt":                now,
-		"updatedAt":               now,
+		"totalSpent":         metrics.TotalSpent,
+		"orderCount":         metrics.OrderCount,
+		"lastOrderAt":        metrics.LastOrderAt,
+		"ownedSkuQuantities": metrics.OwnedSkuQuantities,
+		"conversationTags":   convMetrics.ConversationTags,
+		"mergeMethod":       customer.MergeMethod,
+		"mergedAt":          now,
+		"updatedAt":         now,
+		"currentMetrics":    cm,
 	}
-	// Cập nhật phân loại hiện tại (classification) — cùng metrics, dùng cho filter/sort dashboard.
-	for k, v := range ComputeClassificationFromMetrics(metrics.TotalSpent, metrics.OrderCount, metrics.LastOrderAt, metrics.RevenueLast30d, metrics.RevenueLast90d, metrics.OrderCountOnline, metrics.OrderCountOffline, hasConv) {
+	for k, v := range class {
 		setFields[k] = v
 	}
-	update := bson.M{"$set": setFields}
+	update := bson.M{
+		"$set":   setFields,
+		"$unset": unsetRawFields,
+	}
 	_, err = s.Collection().UpdateOne(ctx, bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}, update)
 	if err != nil {
 		return err

@@ -18,7 +18,7 @@ type CrmActivityHistory struct {
 	ID primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"`
 
 	UnifiedId           string                 `json:"unifiedId" bson:"unifiedId" index:"single:1,compound:crm_activity_org_unified_at,compound:crm_activity_org_unified_type,compound:crm_activity_org_unified_domain_at"`
-	OwnerOrganizationID primitive.ObjectID    `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:crm_activity_org_unified_at,compound:crm_activity_org_type_at,compound:crm_activity_org_source_at,compound:crm_activity_org_unified_type,compound:crm_activity_org_unified_domain_at,compound:crm_activity_org_snapshot_at,compound:crm_activity_org_at_report"`
+	OwnerOrganizationID primitive.ObjectID    `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:crm_activity_org_unified_at,compound:crm_activity_org_type_at,compound:crm_activity_org_source_at,compound:crm_activity_org_unified_type,compound:crm_activity_org_unified_domain_at,compound:crm_activity_org_snapshot_at,compound:crm_activity_org_at_report,compound:crm_activity_org_created"`
 	Domain              string                 `json:"domain" bson:"domain" index:"single:1,compound:crm_activity_org_unified_domain_at"` // order, conversation, note, profile, customer, ...
 	ActivityType       string                 `json:"activityType" bson:"activityType" index:"single:1,compound:crm_activity_org_type_at,compound:crm_activity_org_source_at,compound:crm_activity_org_unified_type"`
 	ActivityAt         int64                  `json:"activityAt" bson:"activityAt" index:"single:-1,compound:crm_activity_org_unified_at,compound:crm_activity_org_type_at,compound:crm_activity_org_source_at,compound:crm_activity_org_unified_domain_at,compound:crm_activity_org_at_report,order:-1"`
@@ -39,5 +39,5 @@ type CrmActivityHistory struct {
 	UserAgent      string             `json:"userAgent,omitempty" bson:"userAgent,omitempty"`
 	Status         string             `json:"status,omitempty" bson:"status,omitempty"` // success | failed
 
-	CreatedAt int64 `json:"createdAt" bson:"createdAt" index:"single:1"`
+	CreatedAt int64 `json:"createdAt" bson:"createdAt" index:"single:-1,compound:crm_activity_org_created,order:-1"`
 }

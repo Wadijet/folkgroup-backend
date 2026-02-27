@@ -1,4 +1,4 @@
-﻿package database
+package database
 
 import (
 	"context"
@@ -389,4 +389,27 @@ func CreateIndexes(ctx context.Context, collection *mongo.Collection, model inte
 	}
 
 	return nil
+}
+
+// CreateCrmCustomerProfileIndexes tạo index cho profile nested (profile.name, profile.phoneNumbers).
+// Gọi sau CreateIndexes cho CrmCustomer.
+func CreateCrmCustomerProfileIndexes(ctx context.Context, collection *mongo.Collection) error {
+	indexes := []mongo.IndexModel{
+		{
+			Keys: bson.D{
+				{Key: "ownerOrganizationId", Value: 1},
+				{Key: "profile.name", Value: 1},
+			},
+			Options: options.Index().SetName("crm_customer_org_name"),
+		},
+		{
+			Keys: bson.D{
+				{Key: "ownerOrganizationId", Value: 1},
+				{Key: "profile.phoneNumbers", Value: 1},
+			},
+			Options: options.Index().SetName("crm_customer_org_phones"),
+		},
+	}
+	_, err := collection.Indexes().CreateMany(ctx, indexes)
+	return err
 }

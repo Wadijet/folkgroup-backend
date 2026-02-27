@@ -169,6 +169,45 @@ func (h *CrmCustomerHandler) HandleRebuildCrm(c fiber.Ctx) error {
 	})
 }
 
+// HandleRecalculateCustomer xử lý POST /customers/:unifiedId/recalculate — cập nhật toàn bộ thông tin khách từ tất cả nguồn.
+func (h *CrmCustomerHandler) HandleRecalculateCustomer(c fiber.Ctx) error {
+	return basehdl.SafeHandlerWrapper(c, func() error {
+		unifiedId := c.Params("unifiedId")
+		if unifiedId == "" {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationInput.Code, "message": "Thiếu unifiedId", "status": "error",
+			})
+			return nil
+		}
+		orgID := getActiveOrganizationID(c)
+		if orgID == nil || orgID.IsZero() {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationInput.Code, "message": "Vui lòng chọn tổ chức (active organization)", "status": "error",
+			})
+			return nil
+		}
+		result, err := h.CustomerService.RecalculateCustomerFromAllSources(c.Context(), unifiedId, *orgID)
+		if err != nil {
+			if errors.Is(err, common.ErrNotFound) {
+				c.Status(common.StatusNotFound).JSON(fiber.Map{
+					"code": common.ErrCodeDatabaseQuery.Code, "message": "Không tìm thấy khách hàng", "status": "error",
+				})
+				return nil
+			}
+			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
+				"code": common.ErrCodeDatabase.Code, "message": "Lỗi cập nhật khách hàng: " + err.Error(), "status": "error",
+			})
+			return nil
+		}
+		c.Status(common.StatusOK).JSON(fiber.Map{
+			"code": common.StatusOK, "message": "Đã cập nhật toàn bộ thông tin khách hàng",
+			"data": result,
+			"status": "success",
+		})
+		return nil
+	})
+}
+
 // HandleGetProfile xử lý GET /customers/:unifiedId/profile.
 func (h *CrmCustomerHandler) HandleGetProfile(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {

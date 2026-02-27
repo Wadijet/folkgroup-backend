@@ -215,22 +215,39 @@ func buildItemSkusFromOrder(orderDoc *pcmodels.PcPosOrder) map[string]int {
 	return out
 }
 
+// getConversationTimestamp lấy thời điểm bắt đầu hội thoại từ conversation.
+// Ưu tiên inserted_at (thời điểm hội thoại bắt đầu), fallback updated_at, PanCakeUpdatedAt, CreatedAt.
+// Tránh trả về 0 vì LogActivity sẽ dùng "now" khi activityAt=0 — timeline sai.
 func getConversationTimestamp(convDoc *fbmodels.FbConversation) int64 {
-	if convDoc == nil || convDoc.PanCakeData == nil {
+	if convDoc == nil {
 		return 0
 	}
-	// Chỉ lấy thời gian gốc từ panCakeData. CreatedAt/PanCakeUpdatedAt/UpdatedAt ngoài document là thời gian đồng bộ.
-	if t := getTimestampFromMap(convDoc.PanCakeData, "inserted_at"); t > 0 {
-		return t
+	// Ưu tiên thời gian gốc từ panCakeData (inserted_at = thời điểm hội thoại bắt đầu)
+	if convDoc.PanCakeData != nil {
+		for _, key := range []string{"inserted_at", "insertedAt", "created_at", "createdAt"} {
+			if t := getTimestampFromMap(convDoc.PanCakeData, key); t > 0 {
+				return t
+			}
+		}
+		for _, key := range []string{"updated_at", "updatedAt"} {
+			if t := getTimestampFromMap(convDoc.PanCakeData, key); t > 0 {
+				return t
+			}
+		}
 	}
-	if t := getTimestampFromMap(convDoc.PanCakeData, "updated_at"); t > 0 {
-		return t
+	// Fallback: PanCakeUpdatedAt (thời gian cập nhật từ API) hoặc CreatedAt (thời gian tạo document)
+	if convDoc.PanCakeUpdatedAt > 0 {
+		return convDoc.PanCakeUpdatedAt
+	}
+	if convDoc.CreatedAt > 0 {
+		return convDoc.CreatedAt
 	}
 	return 0
 }
 
 // getTimestampFromMap lấy Unix ms từ map (hỗ trợ string ISO, primitive.DateTime, float64, int64).
 // Khi BSON decode panCakeData/posData, inserted_at có thể là primitive.DateTime → phải xử lý để activityAt đúng.
+// Giá trị số < 1e12 được coi là Unix seconds (Pancake API có thể trả seconds) → nhân 1000.
 func getTimestampFromMap(m map[string]interface{}, key string) int64 {
 	if m == nil {
 		return 0
@@ -241,7 +258,14 @@ func getTimestampFromMap(m map[string]interface{}, key string) int64 {
 	}
 	switch x := v.(type) {
 	case string:
-		for _, layout := range []string{"2006-01-02T15:04:05.000000", "2006-01-02T15:04:05.000", "2006-01-02T15:04:05", time.RFC3339, time.RFC3339Nano} {
+		// Hỗ trợ nhiều format: ISO với microsecond (Pancake), RFC3339, format có space
+		layouts := []string{
+			"2006-01-02T15:04:05.000000", "2006-01-02T15:04:05.999999",
+			"2006-01-02T15:04:05.000", "2006-01-02T15:04:05",
+			"2006-01-02 15:04:05.000000", "2006-01-02 15:04:05",
+			time.RFC3339, time.RFC3339Nano,
+		}
+		for _, layout := range layouts {
 			if t, err := time.Parse(layout, x); err == nil {
 				return t.UnixMilli()
 			}
@@ -250,11 +274,22 @@ func getTimestampFromMap(m map[string]interface{}, key string) int64 {
 	case primitive.DateTime:
 		return x.Time().UnixMilli()
 	case float64:
-		return int64(x)
+		ms := int64(x)
+		if ms > 0 && ms < 1e12 {
+			ms *= 1000 // Unix seconds → milliseconds
+		}
+		return ms
 	case int64:
+		if x > 0 && x < 1e12 {
+			x *= 1000 // Unix seconds → milliseconds
+		}
 		return x
 	case int:
-		return int64(x)
+		ms := int64(x)
+		if ms > 0 && ms < 1e12 {
+			ms *= 1000
+		}
+		return ms
 	}
 	return 0
 }

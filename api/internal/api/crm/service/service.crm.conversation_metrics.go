@@ -25,6 +25,42 @@ type conversationMetrics struct {
 	ConversationTags          []string
 }
 
+// buildConversationFilterForCustomerIds tạo filter để match conversation với customer.
+// Match theo: customerId (root), panCakeData.customer_id, panCakeData.customer.id, panCakeData.customers.id.
+// Dùng chung cho aggregateConversationMetricsForCustomer và fetchConversations.
+func buildConversationFilterForCustomerIds(customerIds []string, ownerOrgID primitive.ObjectID) bson.M {
+	var ids []string
+	var numIds []interface{}
+	for _, id := range customerIds {
+		if id != "" {
+			ids = append(ids, id)
+			if n, err := strconv.ParseInt(id, 10, 64); err == nil {
+				numIds = append(numIds, n)
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return bson.M{"ownerOrganizationId": ownerOrgID, "customerId": "__NO_MATCH__"} // Không match gì
+	}
+	convCustomerOr := []bson.M{
+		{"customerId": bson.M{"$in": ids}},
+		{"panCakeData.customer_id": bson.M{"$in": ids}},
+		{"panCakeData.customer.id": bson.M{"$in": ids}},
+		{"panCakeData.customers.id": bson.M{"$in": ids}},
+	}
+	if len(numIds) > 0 {
+		convCustomerOr = append(convCustomerOr,
+			bson.M{"panCakeData.customer_id": bson.M{"$in": numIds}},
+			bson.M{"panCakeData.customer.id": bson.M{"$in": numIds}},
+			bson.M{"panCakeData.customers.id": bson.M{"$in": numIds}},
+		)
+	}
+	return bson.M{
+		"ownerOrganizationId": ownerOrgID,
+		"$or":                 convCustomerOr,
+	}
+}
+
 // aggregateConversationMetricsForCustomer aggregate từ fb_conversations. asOf > 0: chỉ conv có convUpdatedAt <= asOf.
 func (s *CrmCustomerService) aggregateConversationMetricsForCustomer(ctx context.Context, customerIds []string, ownerOrgID primitive.ObjectID, asOf int64) conversationMetrics {
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.FbConvesations)
@@ -45,23 +81,7 @@ func (s *CrmCustomerService) aggregateConversationMetricsForCustomer(ctx context
 		return conversationMetrics{}
 	}
 
-	convCustomerOr := []bson.M{
-		{"customerId": bson.M{"$in": ids}},
-		{"panCakeData.customer_id": bson.M{"$in": ids}},
-		{"panCakeData.customer.id": bson.M{"$in": ids}},
-		{"panCakeData.customers.id": bson.M{"$in": ids}},
-	}
-	if len(numIds) > 0 {
-		convCustomerOr = append(convCustomerOr,
-			bson.M{"panCakeData.customer_id": bson.M{"$in": numIds}},
-			bson.M{"panCakeData.customer.id": bson.M{"$in": numIds}},
-			bson.M{"panCakeData.customers.id": bson.M{"$in": numIds}},
-		)
-	}
-	matchFilter := bson.M{
-		"ownerOrganizationId": ownerOrgID,
-		"$or":                 convCustomerOr,
-	}
+	matchFilter := buildConversationFilterForCustomerIds(customerIds, ownerOrgID)
 	if asOf > 0 {
 		matchFilter["$expr"] = bson.M{"$lte": bson.A{
 			bson.M{"$ifNull": bson.A{"$panCakeUpdatedAt", "$updatedAt"}},

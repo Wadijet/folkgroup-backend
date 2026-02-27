@@ -7,6 +7,7 @@ import (
 	"time"
 
 	crmmodels "meta_commerce/internal/api/crm/models"
+	"meta_commerce/internal/api/report/layer3"
 )
 
 const (
@@ -57,13 +58,16 @@ func BuildSnapshotWithChanges(c *crmmodels.CrmCustomer, lastProfile, lastMetrics
 
 // BuildSnapshotForNewCustomer snapshot cho khách mới (customer_created).
 // useEmptyMetrics: true = metrics = 0 — đúng timeline (metrics tăng dần theo mỗi order/chat); false = metrics từ customer hiện tại.
-func BuildSnapshotForNewCustomer(c *crmmodels.CrmCustomer, snapshotAt int64, useEmptyMetrics bool) map[string]interface{} {
+// metricsOverride: khi != nil dùng thay cho buildEmpty/buildMetrics — cho metrics as-of activityAt (timeline đúng, có Lớp 3).
+func BuildSnapshotForNewCustomer(c *crmmodels.CrmCustomer, snapshotAt int64, useEmptyMetrics bool, metricsOverride map[string]interface{}) map[string]interface{} {
 	if c == nil {
 		return nil
 	}
 	profile := buildProfileSnapshot(c)
 	var metrics map[string]interface{}
-	if useEmptyMetrics {
+	if metricsOverride != nil {
+		metrics = metricsOverride
+	} else if useEmptyMetrics {
 		metrics = buildEmptyMetricsSnapshot()
 	} else {
 		metrics = buildMetricsSnapshot(c)
@@ -83,65 +87,522 @@ func BuildSnapshotForNewCustomer(c *crmmodels.CrmCustomer, snapshotAt int64, use
 
 func buildProfileSnapshot(c *crmmodels.CrmCustomer) map[string]interface{} {
 	p := map[string]interface{}{
-		"name":          c.Name,
-		"phoneNumbers":  c.PhoneNumbers,
-		"emails":        c.Emails,
-		"birthday":      c.Birthday,
-		"gender":        c.Gender,
-		"livesIn":       c.LivesIn,
-		"referralCode":  c.ReferralCode,
+		"name":          GetNameFromCustomer(c),
+		"phoneNumbers":  GetPhoneNumbersFromCustomer(c),
+		"emails":        GetEmailsFromCustomer(c),
+		"birthday":      GetBirthdayFromCustomer(c),
+		"gender":        GetGenderFromCustomer(c),
+		"livesIn":       GetLivesInFromCustomer(c),
+		"referralCode":  GetReferralCodeFromCustomer(c),
 		"primarySource": c.PrimarySource,
 	}
-	if len(c.Addresses) > 0 {
-		p["addresses"] = c.Addresses
+	if len(GetAddressesFromCustomer(c)) > 0 {
+		p["addresses"] = GetAddressesFromCustomer(c)
 	}
 	return p
 }
 
+// buildMetricsSnapshot trả về metricsSnapshot cấu trúc 3 lớp (raw, layer1, layer2, layer3).
+// Nếu customer có currentMetrics (nested) → trả về (đảm bảo có layer3 khi thiếu).
+// Nếu không (temp customer từ BuildCurrentMetricsFromOrderAndConv) → build từ top-level.
 func buildMetricsSnapshot(c *crmmodels.CrmCustomer) map[string]interface{} {
-	m := map[string]interface{}{
-		"totalSpent":                 c.TotalSpent,
-		"orderCount":                 c.OrderCount,
-		"avgOrderValue":              c.AvgOrderValue,
-		"lastOrderAt":                c.LastOrderAt,
-		"secondLastOrderAt":          c.SecondLastOrderAt,
-		"revenueLast30d":             c.RevenueLast30d,
-		"revenueLast90d":             c.RevenueLast90d,
-		"cancelledOrderCount":        c.CancelledOrderCount,
-		"ordersLast30d":              c.OrdersLast30d,
-		"ordersLast90d":              c.OrdersLast90d,
-		"ordersFromAds":              c.OrdersFromAds,
-		"ordersFromOrganic":          c.OrdersFromOrganic,
-		"ordersFromDirect":           c.OrdersFromDirect,
-		"orderCountOnline":           c.OrderCountOnline,
-		"orderCountOffline":          c.OrderCountOffline,
-		"firstOrderChannel":          c.FirstOrderChannel,
-		"lastOrderChannel":           c.LastOrderChannel,
-		"isOmnichannel":              c.IsOmnichannel,
-		"hasConversation":            c.HasConversation,
-		"hasOrder":                   c.HasOrder,
-		"conversationCount":          c.ConversationCount,
-		"conversationCountByInbox":   c.ConversationCountByInbox,
-		"conversationCountByComment": c.ConversationCountByComment,
-		"lastConversationAt":         c.LastConversationAt,
-		"firstConversationAt":        c.FirstConversationAt,
-		"totalMessages":              c.TotalMessages,
-		"lastMessageFromCustomer":    c.LastMessageFromCustomer,
-		"conversationFromAds":        c.ConversationFromAds,
-		"valueTier":                  ComputeValueTier(c.TotalSpent),
-		"lifecycleStage":             ComputeLifecycleStage(c.LastOrderAt),
-		"journeyStage":               ComputeJourneyStage(c),
-		"channel":                    ComputeChannel(c),
-		"loyaltyStage":               ComputeLoyaltyStage(c.OrderCount),
-		"momentumStage":              ComputeMomentumStage(c),
+	if c != nil && c.CurrentMetrics != nil {
+		if _, hasRaw := c.CurrentMetrics["raw"]; hasRaw {
+			return ensureLayer3InMetrics(c.CurrentMetrics)
+		}
+	}
+	// Build từ top-level (temp customer từ order+conv aggregate)
+	totalSpent := GetTotalSpentFromCustomer(c)
+	orderCount := GetOrderCountFromCustomer(c)
+	lastOrderAt := GetLastOrderAtFromCustomer(c)
+	journeyStage := ComputeJourneyStage(c)
+	valueTier := ComputeValueTier(totalSpent)
+	lifecycleStage := ComputeLifecycleStage(lastOrderAt)
+	channel := ComputeChannel(c)
+	loyaltyStage := ComputeLoyaltyStage(orderCount)
+	momentumStage := ComputeMomentumStage(c)
+
+	avgOrderValue := 0.0
+	if orderCount > 0 {
+		avgOrderValue = totalSpent / float64(orderCount)
+	}
+	raw := map[string]interface{}{
+		"totalSpent":                totalSpent,
+		"orderCount":                orderCount,
+		"avgOrderValue":             avgOrderValue,
+		"lastOrderAt":               lastOrderAt,
+		"secondLastOrderAt":         GetInt64FromCustomer(c, "secondLastOrderAt"),
+		"revenueLast30d":            GetFloatFromCustomer(c, "revenueLast30d"),
+		"revenueLast90d":            GetFloatFromCustomer(c, "revenueLast90d"),
+		"cancelledOrderCount":       GetIntFromCustomer(c, "cancelledOrderCount"),
+		"ordersLast30d":             GetIntFromCustomer(c, "ordersLast30d"),
+		"ordersLast90d":             GetIntFromCustomer(c, "ordersLast90d"),
+		"ordersFromAds":             GetIntFromCustomer(c, "ordersFromAds"),
+		"ordersFromOrganic":         GetIntFromCustomer(c, "ordersFromOrganic"),
+		"ordersFromDirect":          GetIntFromCustomer(c, "ordersFromDirect"),
+		"orderCountOnline":          GetIntFromCustomer(c, "orderCountOnline"),
+		"orderCountOffline":         GetIntFromCustomer(c, "orderCountOffline"),
+		"firstOrderChannel":         getStrFromCustomer(c, "firstOrderChannel"),
+		"lastOrderChannel":          getStrFromCustomer(c, "lastOrderChannel"),
+		"isOmnichannel":             GetIntFromCustomer(c, "orderCountOnline") > 0 && GetIntFromCustomer(c, "orderCountOffline") > 0,
+		"hasConversation":           GetBoolFromCustomer(c, "hasConversation"),
+		"hasOrder":                  GetBoolFromCustomer(c, "hasOrder"),
+		"conversationCount":         GetIntFromCustomer(c, "conversationCount"),
+		"conversationCountByInbox":  GetIntFromCustomer(c, "conversationCountByInbox"),
+		"conversationCountByComment": GetIntFromCustomer(c, "conversationCountByComment"),
+		"lastConversationAt":        GetInt64FromCustomer(c, "lastConversationAt"),
+		"firstConversationAt":       GetInt64FromCustomer(c, "firstConversationAt"),
+		"totalMessages":             GetIntFromCustomer(c, "totalMessages"),
+		"lastMessageFromCustomer":   GetBoolFromCustomer(c, "lastMessageFromCustomer"),
+		"conversationFromAds":       GetBoolFromCustomer(c, "conversationFromAds"),
 	}
 	if len(c.ConversationTags) > 0 {
-		m["conversationTags"] = c.ConversationTags
+		raw["conversationTags"] = c.ConversationTags
 	}
 	if len(c.OwnedSkuQuantities) > 0 {
-		m["ownedSkuQuantities"] = truncateOwnedSkuQuantities(c.OwnedSkuQuantities, maxOwnedSkusInSnapshot)
+		raw["ownedSkuQuantities"] = truncateOwnedSkuQuantities(c.OwnedSkuQuantities, maxOwnedSkusInSnapshot)
 	}
-	return m
+
+	flatForDerive := make(map[string]interface{})
+	for k, v := range raw {
+		flatForDerive[k] = v
+	}
+	flatForDerive["journeyStage"] = journeyStage
+	flatForDerive["valueTier"] = valueTier
+	flatForDerive["lifecycleStage"] = lifecycleStage
+	flatForDerive["channel"] = channel
+	flatForDerive["loyaltyStage"] = loyaltyStage
+	flatForDerive["momentumStage"] = momentumStage
+
+	layer1 := map[string]interface{}{"journeyStage": journeyStage, "orderCount": orderCount}
+	layer2 := map[string]interface{}{
+		"valueTier":      valueTier,
+		"lifecycleStage": lifecycleStage,
+		"channel":        channel,
+		"loyaltyStage":   loyaltyStage,
+		"momentumStage":  momentumStage,
+	}
+
+	agg := layer3.DeriveFromMap(flatForDerive, layer3.NowMs())
+	layer3Map := layer3.ToMapForStorage(agg)
+	layer3Obj := make(map[string]interface{})
+	if layer3Map != nil {
+		if v := layer3Map["firstLayer3"]; v != nil {
+			layer3Obj["first"] = v
+		}
+		if v := layer3Map["repeatLayer3"]; v != nil {
+			layer3Obj["repeat"] = v
+		}
+		if v := layer3Map["vipLayer3"]; v != nil {
+			layer3Obj["vip"] = v
+		}
+		if v := layer3Map["inactiveLayer3"]; v != nil {
+			layer3Obj["inactive"] = v
+		}
+		if v := layer3Map["engagedLayer3"]; v != nil {
+			layer3Obj["engaged"] = v
+		}
+	}
+
+	return map[string]interface{}{
+		"raw":    raw,
+		"layer1": layer1,
+		"layer2": layer2,
+		"layer3": layer3Obj,
+	}
+}
+
+// ensureLayer3InMetrics đảm bảo metrics có layer3 đầy đủ (gồm Engaged khi thiếu).
+// Derive từ raw+layer1+layer2 rồi merge vào. Trả về map mới để không mutate input.
+func ensureLayer3InMetrics(m map[string]interface{}) map[string]interface{} {
+	if m == nil {
+		return nil
+	}
+	agg := layer3.DeriveFromNested(m, layer3.NowMs())
+	layer3Map := layer3.ToMapForStorage(agg)
+	if layer3Map == nil {
+		return m
+	}
+	// Merge layer3 vào bản sao (format: first/repeat/vip/inactive từ firstLayer3/repeatLayer3/...)
+	out := make(map[string]interface{}, len(m)+1)
+	for k, v := range m {
+		out[k] = v
+	}
+	layer3Obj := make(map[string]interface{})
+	if v := layer3Map["firstLayer3"]; v != nil {
+		layer3Obj["first"] = v
+	}
+	if v := layer3Map["repeatLayer3"]; v != nil {
+		layer3Obj["repeat"] = v
+	}
+	if v := layer3Map["vipLayer3"]; v != nil {
+		layer3Obj["vip"] = v
+	}
+	if v := layer3Map["inactiveLayer3"]; v != nil {
+		layer3Obj["inactive"] = v
+	}
+	if v := layer3Map["engagedLayer3"]; v != nil {
+		layer3Obj["engaged"] = v
+	}
+	if len(layer3Obj) > 0 {
+		out["layer3"] = layer3Obj
+	}
+	return out
+}
+
+// GetNameFromCustomer đọc name — ưu tiên Profile, fallback Legacy.
+func GetNameFromCustomer(c *crmmodels.CrmCustomer) string {
+	if c == nil {
+		return ""
+	}
+	if c.Profile.Name != "" {
+		return c.Profile.Name
+	}
+	return c.LegacyName
+}
+
+// GetPhoneNumbersFromCustomer đọc phoneNumbers — ưu tiên Profile, fallback Legacy.
+func GetPhoneNumbersFromCustomer(c *crmmodels.CrmCustomer) []string {
+	if c == nil {
+		return nil
+	}
+	if len(c.Profile.PhoneNumbers) > 0 {
+		return c.Profile.PhoneNumbers
+	}
+	return c.LegacyPhoneNumbers
+}
+
+// GetEmailsFromCustomer đọc emails — ưu tiên Profile, fallback Legacy.
+func GetEmailsFromCustomer(c *crmmodels.CrmCustomer) []string {
+	if c == nil {
+		return nil
+	}
+	if len(c.Profile.Emails) > 0 {
+		return c.Profile.Emails
+	}
+	return c.LegacyEmails
+}
+
+// GetBirthdayFromCustomer đọc birthday — ưu tiên Profile, fallback Legacy.
+func GetBirthdayFromCustomer(c *crmmodels.CrmCustomer) string {
+	if c == nil {
+		return ""
+	}
+	if c.Profile.Birthday != "" {
+		return c.Profile.Birthday
+	}
+	return c.LegacyBirthday
+}
+
+// GetGenderFromCustomer đọc gender — ưu tiên Profile, fallback Legacy.
+func GetGenderFromCustomer(c *crmmodels.CrmCustomer) string {
+	if c == nil {
+		return ""
+	}
+	if c.Profile.Gender != "" {
+		return c.Profile.Gender
+	}
+	return c.LegacyGender
+}
+
+// GetLivesInFromCustomer đọc livesIn — ưu tiên Profile, fallback Legacy.
+func GetLivesInFromCustomer(c *crmmodels.CrmCustomer) string {
+	if c == nil {
+		return ""
+	}
+	if c.Profile.LivesIn != "" {
+		return c.Profile.LivesIn
+	}
+	return c.LegacyLivesIn
+}
+
+// GetAddressesFromCustomer đọc addresses — ưu tiên Profile, fallback Legacy.
+func GetAddressesFromCustomer(c *crmmodels.CrmCustomer) []interface{} {
+	if c == nil {
+		return nil
+	}
+	if len(c.Profile.Addresses) > 0 {
+		return c.Profile.Addresses
+	}
+	return c.LegacyAddresses
+}
+
+// GetReferralCodeFromCustomer đọc referralCode — ưu tiên Profile, fallback Legacy.
+func GetReferralCodeFromCustomer(c *crmmodels.CrmCustomer) string {
+	if c == nil {
+		return ""
+	}
+	if c.Profile.ReferralCode != "" {
+		return c.Profile.ReferralCode
+	}
+	return c.LegacyReferralCode
+}
+
+// GetTotalSpentFromCustomer đọc totalSpent từ customer — ưu tiên currentMetrics, fallback top-level (backward compat).
+func GetTotalSpentFromCustomer(c *crmmodels.CrmCustomer) float64 {
+	if c != nil && c.CurrentMetrics != nil {
+		return GetFloatFromNestedMetrics(c.CurrentMetrics, "totalSpent")
+	}
+	if c != nil {
+		return c.TotalSpent
+	}
+	return 0
+}
+
+// GetOrderCountFromCustomer đọc orderCount từ customer.
+func GetOrderCountFromCustomer(c *crmmodels.CrmCustomer) int {
+	if c != nil && c.CurrentMetrics != nil {
+		return GetIntFromNestedMetrics(c.CurrentMetrics, "orderCount")
+	}
+	if c != nil {
+		return c.OrderCount
+	}
+	return 0
+}
+
+// GetLastOrderAtFromCustomer đọc lastOrderAt từ customer.
+func GetLastOrderAtFromCustomer(c *crmmodels.CrmCustomer) int64 {
+	if c != nil && c.CurrentMetrics != nil {
+		return GetInt64FromNestedMetrics(c.CurrentMetrics, "lastOrderAt")
+	}
+	if c != nil {
+		return c.LastOrderAt
+	}
+	return 0
+}
+
+// GetInt64FromCustomer đọc int64 từ customer (secondLastOrderAt, lastConversationAt, ...).
+func GetInt64FromCustomer(c *crmmodels.CrmCustomer, key string) int64 {
+	if c != nil && c.CurrentMetrics != nil {
+		return GetInt64FromNestedMetrics(c.CurrentMetrics, key)
+	}
+	switch key {
+	case "secondLastOrderAt":
+		if c != nil {
+			return c.SecondLastOrderAt
+		}
+	case "lastConversationAt":
+		if c != nil {
+			return c.LastConversationAt
+		}
+	case "firstConversationAt":
+		if c != nil {
+			return c.FirstConversationAt
+		}
+	}
+	return 0
+}
+
+// GetIntFromCustomer đọc int từ customer (cancelledOrderCount, ordersLast30d, ...).
+func GetIntFromCustomer(c *crmmodels.CrmCustomer, key string) int {
+	if c != nil && c.CurrentMetrics != nil {
+		return GetIntFromNestedMetrics(c.CurrentMetrics, key)
+	}
+	switch key {
+	case "cancelledOrderCount":
+		if c != nil {
+			return c.CancelledOrderCount
+		}
+	case "ordersLast30d":
+		if c != nil {
+			return c.OrdersLast30d
+		}
+	case "orderCountOnline":
+		if c != nil {
+			return c.OrderCountOnline
+		}
+	case "orderCountOffline":
+		if c != nil {
+			return c.OrderCountOffline
+		}
+	case "ordersLast90d":
+		if c != nil {
+			return c.OrdersLast90d
+		}
+	case "ordersFromAds", "ordersFromOrganic", "ordersFromDirect":
+		if c != nil {
+			switch key {
+			case "ordersFromAds":
+				return c.OrdersFromAds
+			case "ordersFromOrganic":
+				return c.OrdersFromOrganic
+			case "ordersFromDirect":
+				return c.OrdersFromDirect
+			}
+		}
+	case "conversationCount", "conversationCountByInbox", "conversationCountByComment", "totalMessages":
+		if c != nil {
+			switch key {
+			case "conversationCount":
+				return c.ConversationCount
+			case "conversationCountByInbox":
+				return c.ConversationCountByInbox
+			case "conversationCountByComment":
+				return c.ConversationCountByComment
+			case "totalMessages":
+				return c.TotalMessages
+			}
+		}
+	}
+	return 0
+}
+
+// GetFloatFromCustomer đọc float64 từ customer (revenueLast30d, revenueLast90d, avgOrderValue).
+func GetFloatFromCustomer(c *crmmodels.CrmCustomer, key string) float64 {
+	if c != nil && c.CurrentMetrics != nil {
+		return GetFloatFromNestedMetrics(c.CurrentMetrics, key)
+	}
+	if c == nil {
+		return 0
+	}
+	switch key {
+	case "revenueLast30d":
+		return c.RevenueLast30d
+	case "revenueLast90d":
+		return c.RevenueLast90d
+	case "avgOrderValue":
+		return c.AvgOrderValue
+	}
+	return 0
+}
+
+// getStrFromCustomer đọc string từ customer (firstOrderChannel, lastOrderChannel) — dùng nội bộ.
+func getStrFromCustomer(c *crmmodels.CrmCustomer, key string) string {
+	if c != nil && c.CurrentMetrics != nil {
+		return GetStrFromNestedMetrics(c.CurrentMetrics, key)
+	}
+	if c == nil {
+		return ""
+	}
+	switch key {
+	case "firstOrderChannel":
+		return c.FirstOrderChannel
+	case "lastOrderChannel":
+		return c.LastOrderChannel
+	}
+	return ""
+}
+
+// GetBoolFromCustomer đọc bool từ customer (hasConversation, hasOrder).
+func GetBoolFromCustomer(c *crmmodels.CrmCustomer, key string) bool {
+	if c != nil && c.CurrentMetrics != nil {
+		v := getFromNestedMetrics(c.CurrentMetrics, key)
+		if b, ok := v.(bool); ok {
+			return b
+		}
+		return false
+	}
+	if c == nil {
+		return false
+	}
+	switch key {
+	case "hasConversation":
+		return c.HasConversation
+	case "hasOrder":
+		return c.HasOrder
+	case "lastMessageFromCustomer":
+		return c.LastMessageFromCustomer
+	case "conversationFromAds":
+		return c.ConversationFromAds
+	}
+	return false
+}
+
+// GetStrFromNestedMetrics đọc string từ metricsSnapshot nested.
+func GetStrFromNestedMetrics(m map[string]interface{}, key string) string {
+	v := getFromNestedMetrics(m, key)
+	if v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
+
+// GetIntFromNestedMetrics đọc int từ metricsSnapshot nested.
+func GetIntFromNestedMetrics(m map[string]interface{}, key string) int {
+	v := getFromNestedMetrics(m, key)
+	if v == nil {
+		return 0
+	}
+	switch x := v.(type) {
+	case int:
+		return x
+	case int64:
+		return int(x)
+	case float64:
+		return int(x)
+	case int32:
+		return int(x)
+	}
+	return 0
+}
+
+// GetInt64FromNestedMetrics đọc int64 từ metricsSnapshot nested.
+func GetInt64FromNestedMetrics(m map[string]interface{}, key string) int64 {
+	v := getFromNestedMetrics(m, key)
+	if v == nil {
+		return 0
+	}
+	switch x := v.(type) {
+	case int64:
+		return x
+	case int:
+		return int64(x)
+	case float64:
+		return int64(x)
+	}
+	return 0
+}
+
+// GetFloatFromNestedMetrics đọc float64 từ metricsSnapshot nested.
+func GetFloatFromNestedMetrics(m map[string]interface{}, key string) float64 {
+	v := getFromNestedMetrics(m, key)
+	if v == nil {
+		return 0
+	}
+	switch x := v.(type) {
+	case float64:
+		return x
+	case int:
+		return float64(x)
+	case int64:
+		return float64(x)
+	}
+	return 0
+}
+
+func getFromNestedMetrics(m map[string]interface{}, key string) interface{} {
+	if m == nil {
+		return nil
+	}
+	if _, hasRaw := m["raw"]; !hasRaw {
+		return nil
+	}
+	for _, layer := range []string{"layer2", "layer1", "raw"} {
+		if sub, ok := m[layer].(map[string]interface{}); ok {
+			if v, ok := sub[key]; ok {
+				return v
+			}
+		}
+	}
+	if l3, ok := m["layer3"].(map[string]interface{}); ok {
+		nestedKey := key
+		if key == "firstLayer3" {
+			nestedKey = "first"
+		} else if key == "repeatLayer3" {
+			nestedKey = "repeat"
+		} else if key == "vipLayer3" {
+			nestedKey = "vip"
+		} else if key == "inactiveLayer3" {
+			nestedKey = "inactive"
+		}
+		if v, ok := l3[nestedKey]; ok {
+			return v
+		}
+	}
+	return nil
 }
 
 // buildEmptyMetricsSnapshot trả về metrics snapshot với tất cả giá trị = 0.
@@ -159,23 +620,81 @@ func BuildCurrentMetricsSnapshot(c *crmmodels.CrmCustomer) map[string]interface{
 	return buildMetricsSnapshot(c)
 }
 
-// diffSnapshot so sánh profile và metrics mới với cũ, trả về danh sách thay đổi.
-// Phát hiện: giá trị thay đổi, key mới (trong new không có trong old), key bị xóa (trong old không có trong new).
-func diffSnapshot(newProfile, newMetrics, oldProfile, oldMetrics map[string]interface{}) []snapshotChange {
-	// Pre-allocate: profile ~9 fields, metrics ~35 fields; ít khi tất cả đều thay đổi
-	capProfile := len(newProfile) + len(oldProfile)
-	capMetrics := len(newMetrics) + len(oldMetrics)
-	if capProfile > 16 {
-		capProfile = 16
+// BuildCurrentMetricsFromOrderAndConv tạo currentMetrics nested từ order + conversation metrics.
+// Dùng khi merge/refresh — chưa có CrmCustomer đầy đủ trong memory, cần build từ aggregate results.
+func BuildCurrentMetricsFromOrderAndConv(om orderMetrics, cm conversationMetrics, hasConv bool) map[string]interface{} {
+	avgOrderValue := 0.0
+	if om.OrderCount > 0 {
+		avgOrderValue = om.TotalSpent / float64(om.OrderCount)
 	}
-	if capMetrics > 40 {
-		capMetrics = 40
+	c := &crmmodels.CrmCustomer{
+		TotalSpent:                om.TotalSpent,
+		OrderCount:                om.OrderCount,
+		AvgOrderValue:             avgOrderValue,
+		LastOrderAt:               om.LastOrderAt,
+		SecondLastOrderAt:         om.SecondLastOrderAt,
+		RevenueLast30d:            om.RevenueLast30d,
+		RevenueLast90d:            om.RevenueLast90d,
+		CancelledOrderCount:       om.CancelledOrderCount,
+		OrdersLast30d:             om.OrdersLast30d,
+		OrdersLast90d:             om.OrdersLast90d,
+		OrdersFromAds:             om.OrdersFromAds,
+		OrdersFromOrganic:         om.OrdersFromOrganic,
+		OrdersFromDirect:          om.OrdersFromDirect,
+		OrderCountOnline:          om.OrderCountOnline,
+		OrderCountOffline:         om.OrderCountOffline,
+		FirstOrderChannel:         om.FirstOrderChannel,
+		LastOrderChannel:          om.LastOrderChannel,
+		IsOmnichannel:             om.OrderCountOnline > 0 && om.OrderCountOffline > 0,
+		HasConversation:           hasConv,
+		HasOrder:                  om.OrderCount > 0,
+		ConversationCount:         cm.ConversationCount,
+		ConversationCountByInbox:  cm.ConversationCountByInbox,
+		ConversationCountByComment: cm.ConversationCountByComment,
+		LastConversationAt:        cm.LastConversationAt,
+		FirstConversationAt:       cm.FirstConversationAt,
+		TotalMessages:             cm.TotalMessages,
+		LastMessageFromCustomer:   cm.LastMessageFromCustomer,
+		ConversationFromAds:       cm.ConversationFromAds,
+		ConversationTags:          cm.ConversationTags,
+		OwnedSkuQuantities:        om.OwnedSkuQuantities,
 	}
-	out := make([]snapshotChange, 0, capProfile+capMetrics)
+	return buildMetricsSnapshot(c)
+}
 
+// diffSnapshot so sánh profile và metrics mới với cũ, trả về danh sách thay đổi.
+// Metrics nested — diff từng layer với prefix metrics.raw., metrics.layer1., metrics.layer2., metrics.layer3.
+func diffSnapshot(newProfile, newMetrics, oldProfile, oldMetrics map[string]interface{}) []snapshotChange {
+	newNested := ensureNested(newMetrics)
+	oldNested := ensureNested(oldMetrics)
+	out := make([]snapshotChange, 0, 64)
 	out = append(out, diffMap(oldProfile, newProfile, "profile.")...)
-	out = append(out, diffMap(oldMetrics, newMetrics, "metrics.")...)
+	for _, layer := range []struct{ name string }{{"raw"}, {"layer1"}, {"layer2"}, {"layer3"}} {
+		oldSub := getSubMap(oldNested, layer.name)
+		newSub := getSubMap(newNested, layer.name)
+		out = append(out, diffMap(oldSub, newSub, "metrics."+layer.name+".")...)
+	}
 	return out
+}
+
+func ensureNested(m map[string]interface{}) map[string]interface{} {
+	if m == nil {
+		return nil
+	}
+	if _, has := m["raw"]; has {
+		return m
+	}
+	return nil
+}
+
+func getSubMap(m map[string]interface{}, key string) map[string]interface{} {
+	if m == nil {
+		return nil
+	}
+	if sub, ok := m[key].(map[string]interface{}); ok {
+		return sub
+	}
+	return nil
 }
 
 // diffMap so sánh hai map, trả về thay đổi. Xử lý: value thay đổi, key mới, key bị xóa.
@@ -213,9 +732,13 @@ func buildChangesForNewCustomer(profile, metrics map[string]interface{}) []snaps
 			out = append(out, snapshotChange{Field: "profile." + k, OldValue: nil, NewValue: v})
 		}
 	}
-	for k, v := range metrics {
-		if !isEmptyValue(v) {
-			out = append(out, snapshotChange{Field: "metrics." + k, OldValue: nil, NewValue: v})
+	metricsNested := ensureNested(metrics)
+	for _, layer := range []string{"raw", "layer1", "layer2", "layer3"} {
+		sub := getSubMap(metricsNested, layer)
+		for k, v := range sub {
+			if !isEmptyValue(v) {
+				out = append(out, snapshotChange{Field: "metrics." + layer + "." + k, OldValue: nil, NewValue: v})
+			}
 		}
 	}
 	return out

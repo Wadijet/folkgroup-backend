@@ -214,6 +214,7 @@ func initDatabase_MongoDB() {
 
 	// Module CRM
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmCustomers), crmmodels.CrmCustomer{})
+	database.CreateCrmCustomerProfileIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmCustomers))
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmActivityHistory), crmmodels.CrmActivityHistory{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmNotes), crmmodels.CrmNote{})
 }

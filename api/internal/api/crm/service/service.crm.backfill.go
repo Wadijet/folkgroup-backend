@@ -64,6 +64,39 @@ func (s *CrmCustomerService) BackfillActivity(ctx context.Context, ownerOrgID pr
 	return result, nil
 }
 
+// extractConversationCustomerId lấy customerId từ FbConversation — ưu tiên panCakeData.customers[0].id (match fb_customers) trước customer_id.
+func extractConversationCustomerId(doc *fbmodels.FbConversation) string {
+	if doc == nil {
+		return ""
+	}
+	if doc.CustomerId != "" {
+		return doc.CustomerId
+	}
+	if doc.PanCakeData == nil {
+		return ""
+	}
+	pd := doc.PanCakeData
+	// 1. Ưu tiên customers[0].id — match fb_customers.customerId (crm sourceIds.fb)
+	if arr, ok := pd["customers"].([]interface{}); ok && len(arr) > 0 {
+		if m, ok := arr[0].(map[string]interface{}); ok {
+			if id := extractIdFromMap(m); id != "" {
+				return id
+			}
+		}
+	}
+	// 2. customer.id
+	if cust, ok := pd["customer"].(map[string]interface{}); ok {
+		if id := extractIdFromMap(cust); id != "" {
+			return id
+		}
+	}
+	// 3. customer_id (Pancake format — có thể khác fb_customers)
+	if s, ok := pd["customer_id"].(string); ok && s != "" {
+		return s
+	}
+	return ""
+}
+
 // extractIdFromMap lấy id từ map (string, float64, int).
 func extractIdFromMap(m map[string]interface{}) string {
 	if m == nil {
@@ -211,24 +244,8 @@ func (s *CrmCustomerService) backfillConversations(ctx context.Context, ownerOrg
 				}
 				continue
 			}
-			customerId := doc.CustomerId
-			if customerId == "" && doc.PanCakeData != nil {
-				if s, ok := doc.PanCakeData["customer_id"].(string); ok && s != "" {
-					customerId = s
-				}
-				if customerId == "" {
-					if cust, ok := doc.PanCakeData["customer"].(map[string]interface{}); ok {
-						customerId = extractIdFromMap(cust)
-					}
-				}
-				if customerId == "" {
-					if arr, ok := doc.PanCakeData["customers"].([]interface{}); ok && len(arr) > 0 {
-						if m, ok := arr[0].(map[string]interface{}); ok {
-							customerId = extractIdFromMap(m)
-						}
-					}
-				}
-			}
+			// Ưu tiên customers[0].id (match fb_customers.customerId) trước customer_id (Pancake format có thể khác)
+			customerId := extractConversationCustomerId(&doc)
 			if customerId != "" {
 				processed++
 				loggedOk, _ := s.IngestConversationTouchpoint(ctx, customerId, ownerOrgID, doc.ConversationId, true, &doc)

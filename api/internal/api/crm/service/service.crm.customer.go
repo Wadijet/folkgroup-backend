@@ -80,39 +80,39 @@ func (s *CrmCustomerService) tryMergeFromSource(ctx context.Context, customerId 
 func (s *CrmCustomerService) toProfileResponse(c *crmmodels.CrmCustomer) *crmdto.CrmCustomerProfileResponse {
 	resp := &crmdto.CrmCustomerProfileResponse{
 		UnifiedId:                 c.UnifiedId,
-		Name:                      c.Name,
-		PhoneNumbers:              c.PhoneNumbers,
-		Emails:                    c.Emails,
-		Birthday:                  c.Birthday,
-		Gender:                    c.Gender,
-		LivesIn:                   c.LivesIn,
-		Addresses:                 c.Addresses,
-		ReferralCode:              c.ReferralCode,
-		HasConversation:           c.HasConversation,
-		TotalSpent:                c.TotalSpent,
-		OrderCount:                c.OrderCount,
-		OrderCountOnline:          c.OrderCountOnline,
-		OrderCountOffline:         c.OrderCountOffline,
-		FirstOrderChannel:         c.FirstOrderChannel,
-		LastOrderChannel:          c.LastOrderChannel,
-		IsOmnichannel:             c.IsOmnichannel,
-		LastOrderAt:               c.LastOrderAt,
-		AvgOrderValue:             c.AvgOrderValue,
-		CancelledOrderCount:       c.CancelledOrderCount,
-		OrdersLast30d:             c.OrdersLast30d,
-		OrdersLast90d:             c.OrdersLast90d,
-		OrdersFromAds:             c.OrdersFromAds,
-		OrdersFromOrganic:         c.OrdersFromOrganic,
-		OrdersFromDirect:          c.OrdersFromDirect,
+		Name:                      GetNameFromCustomer(c),
+		PhoneNumbers:              GetPhoneNumbersFromCustomer(c),
+		Emails:                    GetEmailsFromCustomer(c),
+		Birthday:                  GetBirthdayFromCustomer(c),
+		Gender:                    GetGenderFromCustomer(c),
+		LivesIn:                   GetLivesInFromCustomer(c),
+		Addresses:                 GetAddressesFromCustomer(c),
+		ReferralCode:              GetReferralCodeFromCustomer(c),
+		HasConversation:           GetBoolFromCustomer(c, "hasConversation"),
+		TotalSpent:                GetTotalSpentFromCustomer(c),
+		OrderCount:                GetOrderCountFromCustomer(c),
+		OrderCountOnline:          GetIntFromCustomer(c, "orderCountOnline"),
+		OrderCountOffline:         GetIntFromCustomer(c, "orderCountOffline"),
+		FirstOrderChannel:         getStrFromCustomer(c, "firstOrderChannel"),
+		LastOrderChannel:          getStrFromCustomer(c, "lastOrderChannel"),
+		IsOmnichannel:             GetIntFromCustomer(c, "orderCountOnline") > 0 && GetIntFromCustomer(c, "orderCountOffline") > 0,
+		LastOrderAt:               GetLastOrderAtFromCustomer(c),
+		AvgOrderValue:             GetFloatFromCustomer(c, "avgOrderValue"),
+		CancelledOrderCount:       GetIntFromCustomer(c, "cancelledOrderCount"),
+		OrdersLast30d:             GetIntFromCustomer(c, "ordersLast30d"),
+		OrdersLast90d:             GetIntFromCustomer(c, "ordersLast90d"),
+		OrdersFromAds:             GetIntFromCustomer(c, "ordersFromAds"),
+		OrdersFromOrganic:         GetIntFromCustomer(c, "ordersFromOrganic"),
+		OrdersFromDirect:          GetIntFromCustomer(c, "ordersFromDirect"),
 		OwnedSkuQuantities:        c.OwnedSkuQuantities,
-		ConversationCount:         c.ConversationCount,
-		ConversationCountByInbox:  c.ConversationCountByInbox,
-		ConversationCountByComment: c.ConversationCountByComment,
-		LastConversationAt:        c.LastConversationAt,
-		FirstConversationAt:       c.FirstConversationAt,
-		TotalMessages:             c.TotalMessages,
-		LastMessageFromCustomer:   c.LastMessageFromCustomer,
-		ConversationFromAds:       c.ConversationFromAds,
+		ConversationCount:         GetIntFromCustomer(c, "conversationCount"),
+		ConversationCountByInbox:  GetIntFromCustomer(c, "conversationCountByInbox"),
+		ConversationCountByComment: GetIntFromCustomer(c, "conversationCountByComment"),
+		LastConversationAt:        GetInt64FromCustomer(c, "lastConversationAt"),
+		FirstConversationAt:       GetInt64FromCustomer(c, "firstConversationAt"),
+		TotalMessages:             GetIntFromCustomer(c, "totalMessages"),
+		LastMessageFromCustomer:   GetBoolFromCustomer(c, "lastMessageFromCustomer"),
+		ConversationFromAds:       GetBoolFromCustomer(c, "conversationFromAds"),
 		ConversationTags:          c.ConversationTags,
 		SourceIds: map[string]string{
 			"pos": c.SourceIds.Pos,
@@ -120,12 +120,36 @@ func (s *CrmCustomerService) toProfileResponse(c *crmmodels.CrmCustomer) *crmdto
 		},
 		OwnerOrganizationId: c.OwnerOrganizationID,
 	}
-	// Phân loại 6 thành phần theo CUSTOMER_CLASSIFICATION_SYSTEM_DESIGN
-	resp.ValueTier = ComputeValueTier(c.TotalSpent)
-	resp.LifecycleStage = ComputeLifecycleStage(c.LastOrderAt)
-	resp.JourneyStage = ComputeJourneyStage(c)
-	resp.Channel = ComputeChannel(c)
-	resp.LoyaltyStage = ComputeLoyaltyStage(c.OrderCount)
-	resp.MomentumStage = ComputeMomentumStage(c)
+	// Phân loại — ưu tiên từ top-level (denormalized), fallback compute
+	if c.ValueTier != "" {
+		resp.ValueTier = c.ValueTier
+	} else {
+		resp.ValueTier = ComputeValueTier(GetTotalSpentFromCustomer(c))
+	}
+	if c.LifecycleStage != "" {
+		resp.LifecycleStage = c.LifecycleStage
+	} else {
+		resp.LifecycleStage = ComputeLifecycleStage(GetLastOrderAtFromCustomer(c))
+	}
+	if c.JourneyStage != "" {
+		resp.JourneyStage = c.JourneyStage
+	} else {
+		resp.JourneyStage = ComputeJourneyStage(c)
+	}
+	if c.Channel != "" {
+		resp.Channel = c.Channel
+	} else {
+		resp.Channel = ComputeChannel(c)
+	}
+	if c.LoyaltyStage != "" {
+		resp.LoyaltyStage = c.LoyaltyStage
+	} else {
+		resp.LoyaltyStage = ComputeLoyaltyStage(GetOrderCountFromCustomer(c))
+	}
+	if c.MomentumStage != "" {
+		resp.MomentumStage = c.MomentumStage
+	} else {
+		resp.MomentumStage = ComputeMomentumStage(c)
+	}
 	return resp
 }

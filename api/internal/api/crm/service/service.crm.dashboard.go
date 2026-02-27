@@ -17,23 +17,31 @@ import (
 
 // CrmDashboardCustomerItem 1 dòng khách cho dashboard (format mới theo CUSTOMER_CLASSIFICATION_SYSTEM_DESIGN).
 type CrmDashboardCustomerItem struct {
-	CustomerID     string   `json:"customerId"`
-	Name           string   `json:"name"`
-	Phone          string   `json:"phone"`
-	JourneyStage   string   `json:"journeyStage"`   // visitor|engaged|first|repeat|vip|inactive
-	Channel        string   `json:"channel"`       // online|offline|omnichannel (rỗng nếu chưa mua)
-	ValueTier      string   `json:"valueTier"`
-	LifecycleStage string   `json:"lifecycleStage"`
-	LoyaltyStage   string   `json:"loyaltyStage"`
-	MomentumStage  string   `json:"momentumStage"`
-	TotalSpend     float64  `json:"totalSpend"`
-	OrderCount     int      `json:"orderCount"`
-	RevenueLast30d float64  `json:"revenueLast30d"`
-	RevenueLast90d float64  `json:"revenueLast90d"`
-	AvgOrderValue  float64  `json:"avgOrderValue"`
-	LastOrderAt    string   `json:"lastOrderAt"`
-	DaysSinceLast  int64    `json:"daysSinceLast"`
-	Sources        []string `json:"sources"`
+	CustomerID          string   `json:"customerId"`
+	Name                string   `json:"name"`
+	Phone               string   `json:"phone"`
+	JourneyStage        string   `json:"journeyStage"`   // visitor|engaged|first|repeat|vip|inactive
+	Channel             string   `json:"channel"`       // online|offline|omnichannel (rỗng nếu chưa mua)
+	ValueTier           string   `json:"valueTier"`
+	LifecycleStage      string   `json:"lifecycleStage"`
+	LoyaltyStage        string   `json:"loyaltyStage"`
+	MomentumStage       string   `json:"momentumStage"`
+	TotalSpend          float64  `json:"totalSpend"`
+	OrderCount          int      `json:"orderCount"`
+	RevenueLast30d      float64  `json:"revenueLast30d"`
+	RevenueLast90d      float64  `json:"revenueLast90d"`
+	AvgOrderValue       float64  `json:"avgOrderValue"`
+	LastOrderAt         string   `json:"lastOrderAt"`
+	DaysSinceLast       int64    `json:"daysSinceLast"`
+	Sources             []string `json:"sources"`
+	LastOrderAtMs       int64    `json:"-"` // Timestamp ms — dùng cho First/Repeat metrics
+	SecondLastOrderAt   int64    `json:"-"` // Đơn thứ 2 gần nhất — dùng cho Repeat (avg days)
+	LastConversationAt  int64    `json:"-"` // Dùng cho First/Repeat (engagement)
+	CancelledOrderCount int      `json:"-"` // Dùng cho First (experience quality)
+	OrdersLast30d       int      `json:"-"` // Số đơn 30 ngày — dùng cho Repeat (spend momentum)
+	OwnedSkuCount       int      `json:"-"` // Số SKU đã mua — dùng cho Repeat (product expansion)
+	TotalMessages       int      `json:"-"` // Tổng tin nhắn — dùng cho Engaged (engagement depth)
+	ConversationFromAds bool     `json:"-"` // Hội thoại từ ads — dùng cho Engaged (source type)
 }
 
 // CrmDashboardFilters filter cho ListCustomersForDashboard.
@@ -231,7 +239,7 @@ func buildDashboardSortBson(sortField string, sortOrder int) bson.D {
 		// Đơn gần nhất trước = lastOrderAt desc
 		return bson.D{{Key: "lastOrderAt", Value: -sortOrder}}
 	case "name":
-		return bson.D{{Key: "name", Value: dir}}
+		return bson.D{{Key: "profile.name", Value: dir}}
 	default:
 		// daysSinceLast: lâu không mua trước (desc) = lastOrderAt asc; mua gần đây trước (asc) = lastOrderAt desc
 		return bson.D{{Key: "lastOrderAt", Value: -sortOrder}}
@@ -239,23 +247,28 @@ func buildDashboardSortBson(sortField string, sortOrder int) bson.D {
 }
 
 // toDashboardItem chuyển CrmCustomer sang CrmDashboardCustomerItem.
+// Đọc metrics từ currentMetrics khi có; fallback top-level (backward compat).
 func (s *CrmCustomerService) toDashboardItem(c *crmmodels.CrmCustomer) CrmDashboardCustomerItem {
+	totalSpent := GetTotalSpentFromCustomer(c)
+	orderCount := GetOrderCountFromCustomer(c)
+	lastOrderAt := GetLastOrderAtFromCustomer(c)
 	avgOrderValue := 0.0
-	if c.OrderCount > 0 {
-		avgOrderValue = c.TotalSpent / float64(c.OrderCount)
+	if orderCount > 0 {
+		avgOrderValue = totalSpent / float64(orderCount)
 	}
 	daysSince := int64(-1)
-	if c.LastOrderAt > 0 {
-		daysSince = (time.Now().UnixMilli() - c.LastOrderAt) / (24 * 60 * 60 * 1000)
+	if lastOrderAt > 0 {
+		daysSince = (time.Now().UnixMilli() - lastOrderAt) / (24 * 60 * 60 * 1000)
 	}
 	lastOrderAtStr := ""
-	if c.LastOrderAt > 0 {
-		lastOrderAtStr = time.UnixMilli(c.LastOrderAt).Format("2006-01-02T15:04:05")
+	if lastOrderAt > 0 {
+		lastOrderAtStr = time.UnixMilli(lastOrderAt).Format("2006-01-02T15:04:05")
 	}
 
+	phones := GetPhoneNumbersFromCustomer(c)
 	phone := ""
-	if len(c.PhoneNumbers) > 0 {
-		phone = c.PhoneNumbers[0]
+	if len(phones) > 0 {
+		phone = phones[0]
 	}
 	sources := []string{}
 	if c.SourceIds.Pos != "" {
@@ -264,29 +277,33 @@ func (s *CrmCustomerService) toDashboardItem(c *crmmodels.CrmCustomer) CrmDashbo
 	if c.SourceIds.Fb != "" {
 		sources = append(sources, "fb")
 	}
-	if len(sources) == 0 {
-		sources = []string{}
-	}
 
-	// Dùng classification đã lưu trong crm_customers (cập nhật qua hooks, backfill).
 	return CrmDashboardCustomerItem{
-		CustomerID:     c.UnifiedId,
-		Name:           c.Name,
-		Phone:          phone,
-		JourneyStage:   c.JourneyStage,
-		Channel:        c.Channel,
-		ValueTier:      c.ValueTier,
-		LifecycleStage: c.LifecycleStage,
-		LoyaltyStage:   c.LoyaltyStage,
-		MomentumStage:  c.MomentumStage,
-		TotalSpend:     c.TotalSpent,
-		OrderCount:     c.OrderCount,
-		RevenueLast30d: c.RevenueLast30d,
-		RevenueLast90d: c.RevenueLast90d,
-		AvgOrderValue:  avgOrderValue,
-		LastOrderAt:    lastOrderAtStr,
-		DaysSinceLast:  daysSince,
-		Sources:        sources,
+		CustomerID:          c.UnifiedId,
+		Name:                GetNameFromCustomer(c),
+		Phone:               phone,
+		JourneyStage:        c.JourneyStage,
+		Channel:             c.Channel,
+		ValueTier:           c.ValueTier,
+		LifecycleStage:      c.LifecycleStage,
+		LoyaltyStage:        c.LoyaltyStage,
+		MomentumStage:       c.MomentumStage,
+		TotalSpend:          totalSpent,
+		OrderCount:          orderCount,
+		RevenueLast30d:      GetFloatFromCustomer(c, "revenueLast30d"),
+		RevenueLast90d:      GetFloatFromCustomer(c, "revenueLast90d"),
+		AvgOrderValue:       avgOrderValue,
+		LastOrderAt:         lastOrderAtStr,
+		DaysSinceLast:       daysSince,
+		Sources:             sources,
+		LastOrderAtMs:       lastOrderAt,
+		SecondLastOrderAt:   GetInt64FromCustomer(c, "secondLastOrderAt"),
+		LastConversationAt:  GetInt64FromCustomer(c, "lastConversationAt"),
+		CancelledOrderCount: GetIntFromCustomer(c, "cancelledOrderCount"),
+		OrdersLast30d:       GetIntFromCustomer(c, "ordersLast30d"),
+		OwnedSkuCount:       len(c.OwnedSkuQuantities),
+		TotalMessages:       GetIntFromCustomer(c, "totalMessages"),
+		ConversationFromAds: GetBoolFromCustomer(c, "conversationFromAds"),
 	}
 }
 

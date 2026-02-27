@@ -42,11 +42,12 @@ GET /api/v1/dashboard/inbox
 | Param | Type | Mặc định | Mô tả |
 |-------|------|-----------|-------|
 | pageId | string | — | Lọc theo Page FB (optional) |
-| filter | string | all | `backlog` \| `unassigned` \| `all` |
+| filter | string | all | `backlog` \| `unassigned` \| `engaged` \| `all` |
 | limit | int | 50 | Số dòng conversation (max 200) |
 | offset | int | 0 | Phân trang |
-| sort | string | updated_desc | `waiting_desc` \| `updated_desc` \| `updated_asc` |
+| sort | string | updated_desc | `waiting_desc` \| `updated_desc` \| `updated_asc` \| `care_priority` |
 | period | string | month | Cho Conversion: `day` \| `week` \| `month` \| `60d` \| `90d` |
+| engaged | bool | false | Chỉ hiện hội thoại từ khách Engaged (chưa mua) |
 
 **Response format (chuẩn):**
 
@@ -62,7 +63,11 @@ GET /api/v1/dashboard/inbox
       "medianResponseMin": 0,
       "p90ResponseMin": 0,
       "unassignedCount": 0,
-      "conversionRate": 0
+      "conversionRate": 0,
+      "engagedCount": 0,
+      "engagedAging1d": 0,
+      "engagedAging3d": 0,
+      "engagedAging7d": 0
     },
     "conversations": [...],
     "salePerformance": [...],
@@ -162,6 +167,20 @@ Hiển thị tối đa 10 mục mỗi loại, sort theo `waitingMinutes` giảm 
 
 ---
 
-## 9. Changelog
+## 9. Engaged Intelligence (Phase 1)
+
+Thêm phân loại theo Engaged Intelligence Layer để phân bổ nguồn lực chăm sóc:
+
+- **Mỗi conversation item:** engaged: { temperature, engagementDepth, sourceType, carePriority }, isEngaged
+- **Summary:** engagedCount, engagedAging1d, engagedAging3d, engagedAging7d
+- **Filter:** filter=engaged, query engaged=true
+- **Sort:** sort=care_priority
+
+Chi tiết: `docs/02-architecture/ENGAGED_INTELLIGENCE_LAYER_EVALUATION.md`
+
+---
+
+## 10. Changelog
 
 - v1.0: Thiết kế ban đầu — API, DTO, Service, Handler, Route. Data mapping từ fb_conversations, fb_message_items, fb_pages, pc_pos_orders.
+- v1.1: Engaged Intelligence Phase 1 — temperature, depth, source, carePriority, engaged stats.

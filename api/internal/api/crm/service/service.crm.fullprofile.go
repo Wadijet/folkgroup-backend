@@ -83,8 +83,14 @@ func (s *CrmCustomerService) GetFullProfile(ctx context.Context, unifiedId strin
 		})
 	}
 
-	// currentMetrics: số liệu hiện tại — cùng cấu trúc với metadata.metricsSnapshot để frontend so sánh lịch sử vs now
-	currentMetrics := BuildCurrentMetricsSnapshot(&customer)
+	// currentMetrics: ưu tiên từ DB (đã lưu); fallback compute khi document cũ chưa có.
+	// Đảm bảo có layer3 (derive bổ sung khi thiếu — dữ liệu cũ hoặc recalculate chưa ghi đủ).
+	currentMetrics := customer.CurrentMetrics
+	if len(currentMetrics) == 0 {
+		currentMetrics = BuildCurrentMetricsSnapshot(&customer)
+	} else {
+		currentMetrics = ensureLayer3InMetrics(currentMetrics)
+	}
 
 	return &crmdto.CrmCustomerFullProfileResponse{
 		Profile:         *profile,
@@ -173,6 +179,7 @@ func (s *CrmCustomerService) fetchRecentOrders(ctx context.Context, customerIds 
 }
 
 // fetchConversations lấy hội thoại từ fb_conversations.
+// Match theo customerId (root), panCakeData.customer_id, panCakeData.customer.id, panCakeData.customers.id — đồng nhất với aggregateConversationMetricsForCustomer.
 func (s *CrmCustomerService) fetchConversations(ctx context.Context, customerIds []string, ownerOrgID primitive.ObjectID) []crmdto.CrmConversationSummary {
 	if len(customerIds) == 0 {
 		return []crmdto.CrmConversationSummary{}
@@ -182,10 +189,7 @@ func (s *CrmCustomerService) fetchConversations(ctx context.Context, customerIds
 		return []crmdto.CrmConversationSummary{}
 	}
 
-	filter := bson.M{
-		"ownerOrganizationId": ownerOrgID,
-		"customerId":          bson.M{"$in": customerIds},
-	}
+	filter := buildConversationFilterForCustomerIds(customerIds, ownerOrgID)
 	opts := mongoopts.Find().SetLimit(20).SetSort(bson.D{{Key: "panCakeUpdatedAt", Value: -1}})
 	cursor, err := coll.Find(ctx, filter, opts)
 	if err != nil {

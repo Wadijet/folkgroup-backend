@@ -12,24 +12,39 @@ type CrmCustomerSourceIds struct {
 	Fb  string `json:"fb,omitempty" bson:"fb,omitempty"`   // UUID từ fb_customers
 }
 
+// CrmCustomerProfile thông tin profile khách — gộp trong 1 field cho gọn, đồng nhất với profileSnapshot trong activity.
+type CrmCustomerProfile struct {
+	Name        string        `json:"name,omitempty" bson:"name,omitempty"`
+	PhoneNumbers []string     `json:"phoneNumbers,omitempty" bson:"phoneNumbers,omitempty"`
+	Emails      []string     `json:"emails,omitempty" bson:"emails,omitempty"`
+	Birthday    string       `json:"birthday,omitempty" bson:"birthday,omitempty"`
+	Gender      string       `json:"gender,omitempty" bson:"gender,omitempty"`
+	LivesIn     string       `json:"livesIn,omitempty" bson:"livesIn,omitempty"`
+	Addresses   []interface{} `json:"addresses,omitempty" bson:"addresses,omitempty"`
+	ReferralCode string      `json:"referralCode,omitempty" bson:"referralCode,omitempty"`
+}
+
 // CrmCustomer lưu khách hàng đã merge (crm_customers).
 type CrmCustomer struct {
 	ID primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"`
 
 	// Identity
-	UnifiedId      string `json:"unifiedId" bson:"unifiedId" index:"single:1,compound:crm_customer_org_unified_unique"`
-	SourceIds      CrmCustomerSourceIds `json:"sourceIds" bson:"sourceIds"`
-	PrimarySource  string `json:"primarySource" bson:"primarySource"` // pos | fb
-	Name           string   `json:"name" bson:"name"`
-	PhoneNumbers   []string `json:"phoneNumbers" bson:"phoneNumbers" index:"single:1,compound:crm_customer_org_phones"`
-	Emails         []string `json:"emails" bson:"emails"`
+	UnifiedId     string               `json:"unifiedId" bson:"unifiedId" index:"single:1,compound:crm_customer_org_unified_unique"`
+	SourceIds     CrmCustomerSourceIds `json:"sourceIds" bson:"sourceIds"`
+	PrimarySource string               `json:"primarySource" bson:"primarySource"` // pos | fb
 
-	// Thông tin bổ sung (merge từ POS/FB/conversation/order)
-	Birthday   string        `json:"birthday,omitempty" bson:"birthday,omitempty"`       // Ngày sinh (date_of_birth, birthday)
-	Gender     string        `json:"gender,omitempty" bson:"gender,omitempty"`           // Giới tính
-	LivesIn    string        `json:"livesIn,omitempty" bson:"livesIn,omitempty"`         // Nơi ở (từ FB)
-	Addresses  []interface{} `json:"addresses,omitempty" bson:"addresses,omitempty"`     // Địa chỉ (từ POS shop_customer_address)
-	ReferralCode string      `json:"referralCode,omitempty" bson:"referralCode,omitempty"` // Mã giới thiệu (từ posData.referral_code)
+	// Profile — thông tin cá nhân gộp trong 1 field; đồng nhất với profileSnapshot trong crm_activity_history.
+	Profile CrmCustomerProfile `json:"profile" bson:"profile"`
+
+	// Legacy — document cũ có name, phoneNumbers... ở top-level; dùng khi Profile trống (chưa migrate).
+	LegacyName         string        `json:"-" bson:"name,omitempty"`
+	LegacyPhoneNumbers []string      `json:"-" bson:"phoneNumbers,omitempty"`
+	LegacyEmails       []string      `json:"-" bson:"emails,omitempty"`
+	LegacyBirthday     string        `json:"-" bson:"birthday,omitempty"`
+	LegacyGender       string        `json:"-" bson:"gender,omitempty"`
+	LegacyLivesIn      string        `json:"-" bson:"livesIn,omitempty"`
+	LegacyAddresses    []interface{} `json:"-" bson:"addresses,omitempty"`
+	LegacyReferralCode string        `json:"-" bson:"referralCode,omitempty"`
 
 	// Flags
 	HasConversation bool `json:"hasConversation" bson:"hasConversation"`
@@ -69,21 +84,25 @@ type CrmCustomer struct {
 	ConversationFromAds       bool  `json:"conversationFromAds" bson:"conversationFromAds"`         // Có hội thoại từ quảng cáo
 	ConversationTags         []string `json:"conversationTags,omitempty" bson:"conversationTags,omitempty"` // Tag từ panCakeData.tags (union)
 
+	// CurrentMetrics: trạng thái metrics hiện tại (nested raw/layer1/layer2/layer3).
+	// Luôn mới nhất — phục vụ phân tích, thống kê real-time. Cập nhật cùng lúc với scalars qua hooks/merge.
+	CurrentMetrics map[string]interface{} `json:"currentMetrics,omitempty" bson:"currentMetrics,omitempty"`
+
 	// Phân loại hiện tại (cập nhật cùng lúc với metrics qua hooks).
 	// Dùng cho filter/sort dashboard; activity history giữ snapshot lịch sử theo từng sự kiện.
-	ValueTier      string `json:"valueTier,omitempty" bson:"valueTier,omitempty"`             // vip|high|medium|low|new
-	LifecycleStage string `json:"lifecycleStage,omitempty" bson:"lifecycleStage,omitempty"`   // active|cooling|inactive|dead|never_purchased
-	JourneyStage   string `json:"journeyStage,omitempty" bson:"journeyStage,omitempty"`       // visitor|engaged|first|repeat|vip|inactive
-	Channel        string `json:"channel,omitempty" bson:"channel,omitempty"`                 // online|offline|omnichannel
-	LoyaltyStage   string `json:"loyaltyStage,omitempty" bson:"loyaltyStage,omitempty"`       // core|repeat|one_time
-	MomentumStage  string `json:"momentumStage,omitempty" bson:"momentumStage,omitempty"`    // rising|stable|declining|lost
+	ValueTier      string `json:"valueTier,omitempty" bson:"valueTier,omitempty" index:"single:1,compound:crm_customer_org_value"`             // vip|high|medium|low|new
+	LifecycleStage string `json:"lifecycleStage,omitempty" bson:"lifecycleStage,omitempty" index:"single:1,compound:crm_customer_org_lifecycle"`   // active|cooling|inactive|dead|never_purchased
+	JourneyStage   string `json:"journeyStage,omitempty" bson:"journeyStage,omitempty" index:"single:1,compound:crm_customer_org_journey"`       // visitor|engaged|first|repeat|vip|inactive
+	Channel        string `json:"channel,omitempty" bson:"channel,omitempty" index:"single:1,compound:crm_customer_org_channel"`                 // online|offline|omnichannel
+	LoyaltyStage   string `json:"loyaltyStage,omitempty" bson:"loyaltyStage,omitempty" index:"single:1,compound:crm_customer_org_loyalty"`       // core|repeat|one_time
+	MomentumStage  string `json:"momentumStage,omitempty" bson:"momentumStage,omitempty" index:"single:1,compound:crm_customer_org_momentum"`    // rising|stable|declining|lost
 
 	// Merge metadata
 	MergeMethod string `json:"mergeMethod" bson:"mergeMethod"` // customer_id | fb_id | phone | single_source
 	MergedAt    int64  `json:"mergedAt" bson:"mergedAt"`
 
 	// Phân quyền
-	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:crm_customer_org_unified_unique,compound:crm_customer_org_lastorder,compound:crm_customer_org_phones,compound:crm_customer_org_totalspent"`
+	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:crm_customer_org_unified_unique,compound:crm_customer_org_lastorder,compound:crm_customer_org_totalspent,compound:crm_customer_org_value,compound:crm_customer_org_journey,compound:crm_customer_org_lifecycle,compound:crm_customer_org_channel,compound:crm_customer_org_loyalty,compound:crm_customer_org_momentum"`
 
 	// Metadata
 	CreatedAt int64 `json:"createdAt" bson:"createdAt" index:"single:1"`

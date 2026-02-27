@@ -14,7 +14,7 @@ func init() {
 }
 
 // handleReportDataChange xử lý event thay đổi dữ liệu: đánh dấu dirty các báo cáo theo chu kỳ.
-// Xử lý: pc_pos_orders (order_daily, customer_daily, ...), pc_pos_customers (customer_*).
+// Xử lý: pc_pos_orders (order_*), pc_pos_customers (customer_*), crm_activity_history (customer_* — snapshot tính từ đây).
 func handleReportDataChange(ctx context.Context, e events.DataChangeEvent) {
 	if e.Document == nil {
 		return
@@ -58,6 +58,26 @@ func handleReportDataChange(ctx context.Context, e events.DataChangeEvent) {
 		if ts == 0 {
 			ts = events.GetInt64Field(e.Document, "LastOrderAt")
 		}
+		if ts == 0 {
+			ts = events.GetInt64Field(e.Document, "CreatedAt")
+		}
+		if ts == 0 {
+			ts = time.Now().Unix()
+		}
+		if ts > 1e12 {
+			ts = ts / 1000
+		}
+		customerReportKeys := []string{"customer_daily", "customer_weekly", "customer_monthly", "customer_yearly"}
+		periodKeys, err := reportSvc.GetDirtyPeriodKeysForReportKeys(ctx, customerReportKeys, ts)
+		if err != nil || len(periodKeys) == 0 {
+			return
+		}
+		for reportKey, periodKey := range periodKeys {
+			_ = reportSvc.MarkDirty(ctx, reportKey, periodKey, ownerOrgID)
+		}
+	case global.MongoDB_ColNames.CrmActivityHistory:
+		// Snapshot customer tính từ crm_activity_history — khi activity mới/đổi cần recompute.
+		ts = events.GetInt64Field(e.Document, "ActivityAt")
 		if ts == 0 {
 			ts = events.GetInt64Field(e.Document, "CreatedAt")
 		}

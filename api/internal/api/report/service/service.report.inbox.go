@@ -62,6 +62,12 @@ func (s *ReportService) GetInboxSnapshot(ctx context.Context, ownerOrganizationI
 		return nil, fmt.Errorf("load converted customers: %w", err)
 	}
 
+	// 4b. Load customers có đơn (bất kỳ thời điểm) — để xác định Engaged (chưa mua)
+	customersWithOrders, err := s.loadCustomersWithOrders(ctx, ownerOrganizationID)
+	if err != nil {
+		return nil, fmt.Errorf("load customers with orders: %w", err)
+	}
+
 	// 5. Build page names map
 	pageNames := make(map[string]string)
 	for _, p := range pages {
@@ -74,7 +80,7 @@ func (s *ReportService) GetInboxSnapshot(ctx context.Context, ownerOrganizationI
 	var responseMins []float64
 
 	for _, c := range convs {
-		item, isBacklog, isUnassigned, _, respMin := buildInboxConversationItem(c, pageNames[c.PageId], responseTimes[c.ConversationId])
+		item, isBacklog, isUnassigned, _, respMin := buildInboxConversationItem(c, pageNames[c.PageId], responseTimes[c.ConversationId], customersWithOrders)
 		items = append(items, item)
 
 		if c.UpdatedAt >= todayStart.Unix() && c.UpdatedAt <= todayEnd.Unix() {
@@ -91,8 +97,8 @@ func (s *ReportService) GetInboxSnapshot(ctx context.Context, ownerOrganizationI
 		}
 	}
 
-	// 7. Filter items theo params.Filter
-	items = filterInboxConversations(items, params.Filter)
+	// 7. Filter items theo params.Filter (và params.Engaged)
+	items = filterInboxConversations(items, params.Filter, params.Engaged)
 	// 8. Sort
 	sortInboxConversations(items, params.Sort)
 	// 9. Paginate
@@ -121,15 +127,22 @@ func (s *ReportService) GetInboxSnapshot(ctx context.Context, ownerOrganizationI
 	// 13. Alerts
 	alerts := s.buildInboxAlerts(convs, pageNames)
 
+	// 14. Engaged Intelligence stats (Phase 1)
+	engagedCount, aging1d, aging3d, aging7d := computeEngagedStats(convs, customersWithOrders, now.Unix())
+
 	return &reportdto.InboxSnapshotResult{
 		Pages:   pages,
 		Summary: reportdto.InboxSummary{
 			ConversationsToday: convToday,
 			BacklogCount:       backlogCount,
-			MedianResponseMin: medianResp,
-			P90ResponseMin:    p90Resp,
+			MedianResponseMin:  medianResp,
+			P90ResponseMin:     p90Resp,
 			UnassignedCount:    unassignedCount,
 			ConversionRate:     conversionRate,
+			EngagedCount:       engagedCount,
+			EngagedAging1d:     aging1d,
+			EngagedAging3d:     aging3d,
+			EngagedAging7d:     aging7d,
 		},
 		Conversations:   items,
 		SalePerformance: salePerf,
@@ -551,8 +564,56 @@ func (s *ReportService) loadConvertedCustomers(ctx context.Context, ownerOrgID p
 	return result, nil
 }
 
+// loadCustomersWithOrders trả về map customerId → true cho khách đã có ít nhất 1 đơn hoàn thành (bất kỳ thời điểm).
+// Dùng để xác định Engaged: có conversation nhưng chưa có đơn.
+func (s *ReportService) loadCustomersWithOrders(ctx context.Context, ownerOrgID primitive.ObjectID) (map[string]bool, error) {
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
+	if !ok {
+		return make(map[string]bool), nil
+	}
+	filter := bson.M{
+		"ownerOrganizationId": ownerOrgID,
+		"$or": []bson.M{
+			{"posData.status": bson.M{"$in": []int{2, 3, 16}}},
+			{"status": bson.M{"$in": []int{2, 3, 16}}},
+		},
+	}
+	opts := options.Find().SetProjection(bson.M{"customerId": 1, "posData.customer.id": 1})
+	cursor, err := coll.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, common.ConvertMongoError(err)
+	}
+	defer cursor.Close(ctx)
+	result := make(map[string]bool)
+	for cursor.Next(ctx) {
+		var doc struct {
+			CustomerId string `bson:"customerId"`
+			PosData    struct {
+				Customer struct {
+					ID string `bson:"id"`
+				} `bson:"customer"`
+			} `bson:"posData"`
+		}
+		if err := cursor.Decode(&doc); err != nil {
+			continue
+		}
+		cid := doc.CustomerId
+		if cid == "" {
+			cid = doc.PosData.Customer.ID
+		}
+		if cid != "" {
+			result[cid] = true
+		}
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, common.ConvertMongoError(err)
+	}
+	return result, nil
+}
+
 // buildInboxConversationItem tạo InboxConversationItem từ inboxConvData.
-func buildInboxConversationItem(c inboxConvData, pageName string, respMin float64) (reportdto.InboxConversationItem, bool, bool, int64, float64) {
+// customersWithOrders: map customerId đã có đơn — dùng để set isEngaged = chưa mua.
+func buildInboxConversationItem(c inboxConvData, pageName string, respMin float64, customersWithOrders map[string]bool) (reportdto.InboxConversationItem, bool, bool, int64, float64) {
 	isBacklog := isLastSentByCustomer(c.PanCakeData)
 	isUnassigned := isBacklog && isCurrentAssignEmpty(c.PanCakeData)
 	waitingMins := int64(0)
@@ -571,45 +632,172 @@ func buildInboxConversationItem(c inboxConvData, pageName string, respMin float6
 	if isBacklog {
 		respMinOut = -1
 	}
+
+	// Engaged Intelligence (Phase 1)
+	temperature := computeTemperature(c.UpdatedAt, isBacklog)
+	engagementDepth := computeEngagementDepth(c.PanCakeData)
+	sourceType := computeSourceType(c.PanCakeData)
+	carePriority := computeCarePriority(isBacklog, isUnassigned, waitingMins, temperature)
+	isEngaged := c.CustomerId != "" && !customersWithOrders[c.CustomerId]
+
 	return reportdto.InboxConversationItem{
-		ConversationID:      c.ConversationId,
-		PageID:              c.PageId,
-		PageName:            pageName,
-		CustomerName:        c.CustomerName,
-		LastMessageAt:       lastMsgAt,
-		LastMessageSnippet:  extractLastMessageSnippet(c.PanCakeData),
-		Status:              status,
-		WaitingMinutes:      waitingMins,
-		ResponseTimeMin:     respMinOut,
-		AssignedSale:        extractAssignedSaleName(c.PanCakeData),
-		Tags:                extractTags(c.PanCakeData),
-		IsBacklog:           isBacklog,
-		IsUnassigned:        isUnassigned,
+		ConversationID:     c.ConversationId,
+		PageID:             c.PageId,
+		PageName:           pageName,
+		CustomerID:         c.CustomerId,
+		CustomerName:       c.CustomerName,
+		LastMessageAt:      lastMsgAt,
+		LastMessageSnippet: extractLastMessageSnippet(c.PanCakeData),
+		Status:             status,
+		WaitingMinutes:     waitingMins,
+		ResponseTimeMin:    respMinOut,
+		AssignedSale:       extractAssignedSaleName(c.PanCakeData),
+		Tags:               extractTags(c.PanCakeData),
+		IsBacklog:          isBacklog,
+		IsUnassigned:       isUnassigned,
+		Engaged: &reportdto.EngagedMetrics{
+			Temperature:     temperature,
+			EngagementDepth: engagementDepth,
+			SourceType:      sourceType,
+			CarePriority:    carePriority,
+		},
+		IsEngaged: isEngaged,
 	}, isBacklog, isUnassigned, waitingMins, respMin
 }
 
-func filterInboxConversations(items []reportdto.InboxConversationItem, filter string) []reportdto.InboxConversationItem {
-	switch filter {
-	case "backlog":
-		var out []reportdto.InboxConversationItem
-		for _, it := range items {
-			if it.IsBacklog {
-				out = append(out, it)
-			}
-		}
-		return out
-	case "unassigned":
-		var out []reportdto.InboxConversationItem
-		for _, it := range items {
-			if it.IsUnassigned {
-				out = append(out, it)
-			}
-		}
-		return out
-	default:
-		return items
+// computeTemperature tính nhiệt độ hội thoại: hot|warm|cooling|cold.
+// Dựa trên panCakeUpdatedAt và backlog.
+func computeTemperature(updatedAt int64, isBacklog bool) string {
+	daysSince := (time.Now().Unix() - updatedAt) / 86400
+	if isBacklog && daysSince <= 1 {
+		return "hot"
 	}
+	if daysSince <= 1 {
+		return "hot"
+	}
+	if daysSince <= 3 {
+		return "warm"
+	}
+	if daysSince <= 7 {
+		return "cooling"
+	}
+	return "cold"
 }
+
+// computeEngagementDepth tính độ sâu tương tác: light|medium|deep.
+// Dựa trên panCakeData.message_count.
+func computeEngagementDepth(pc map[string]interface{}) string {
+	count := 0
+	if pc != nil {
+		if mc, ok := pc["message_count"]; ok {
+			switch x := mc.(type) {
+			case int:
+				count = x
+			case int64:
+				count = int(x)
+			case float64:
+				count = int(x)
+			}
+		}
+	}
+	if count <= 3 {
+		return "light"
+	}
+	if count <= 10 {
+		return "medium"
+	}
+	return "deep"
+}
+
+// computeSourceType xác định nguồn: organic|ads.
+// Dựa trên panCakeData.ad_ids.
+func computeSourceType(pc map[string]interface{}) string {
+	if pc == nil {
+		return "organic"
+	}
+	if arr, ok := pc["ad_ids"].([]interface{}); ok && len(arr) > 0 {
+		return "ads"
+	}
+	if arr, ok := pc["ads"].([]interface{}); ok && len(arr) > 0 {
+		return "ads"
+	}
+	return "organic"
+}
+
+// computeCarePriority tính mức ưu tiên chăm sóc: P0|P1|P2|P3|P4.
+// P0: backlog + chờ > 30p. P1: backlog + unassigned. P2: backlog. P3: đã reply (hot/warm). P4: cooling/cold.
+func computeCarePriority(isBacklog, isUnassigned bool, waitingMins int64, temperature string) string {
+	if isBacklog {
+		if waitingMins > BacklogWaitingCriticalMinutes {
+			return "P0"
+		}
+		if isUnassigned {
+			return "P1"
+		}
+		return "P2"
+	}
+	if temperature == "hot" || temperature == "warm" {
+		return "P3"
+	}
+	return "P4"
+}
+
+// computeEngagedStats tính Engaged Volume và Aging buckets.
+// Engaged = khách có conversation nhưng chưa có đơn.
+func computeEngagedStats(convs []inboxConvData, customersWithOrders map[string]bool, nowSec int64) (engagedCount, aging1d, aging3d, aging7d int64) {
+	seen := make(map[string]bool)
+	for _, c := range convs {
+		if c.CustomerId == "" || customersWithOrders[c.CustomerId] {
+			continue
+		}
+		if seen[c.CustomerId] {
+			continue
+		}
+		seen[c.CustomerId] = true
+		engagedCount++
+		daysSince := (nowSec - c.UpdatedAt) / 86400
+		if daysSince > 7 {
+			aging7d++
+		}
+		if daysSince > 3 {
+			aging3d++
+		}
+		if daysSince > 1 {
+			aging1d++
+		}
+	}
+	return engagedCount, aging1d, aging3d, aging7d
+}
+
+func filterInboxConversations(items []reportdto.InboxConversationItem, filter string, engagedOnly bool) []reportdto.InboxConversationItem {
+	var out []reportdto.InboxConversationItem
+	for _, it := range items {
+		if engagedOnly && !it.IsEngaged {
+			continue
+		}
+		switch filter {
+		case "backlog":
+			if !it.IsBacklog {
+				continue
+			}
+		case "unassigned":
+			if !it.IsUnassigned {
+				continue
+			}
+		case "engaged":
+			if !it.IsEngaged {
+				continue
+			}
+		}
+		out = append(out, it)
+	}
+	if out == nil {
+		return []reportdto.InboxConversationItem{}
+	}
+	return out
+}
+
+var carePriorityOrder = map[string]int{"P0": 0, "P1": 1, "P2": 2, "P3": 3, "P4": 4}
 
 func sortInboxConversations(items []reportdto.InboxConversationItem, sortBy string) {
 	switch sortBy {
@@ -620,6 +808,20 @@ func sortInboxConversations(items []reportdto.InboxConversationItem, sortBy stri
 	case "updated_asc":
 		sort.Slice(items, func(i, j int) bool {
 			return items[i].LastMessageAt < items[j].LastMessageAt
+		})
+	case "care_priority":
+		sort.Slice(items, func(i, j int) bool {
+			pi, pj := 99, 99
+			if items[i].Engaged != nil {
+				pi = carePriorityOrder[items[i].Engaged.CarePriority]
+			}
+			if items[j].Engaged != nil {
+				pj = carePriorityOrder[items[j].Engaged.CarePriority]
+			}
+			if pi != pj {
+				return pi < pj
+			}
+			return items[i].WaitingMinutes > items[j].WaitingMinutes
 		})
 	default:
 		// updated_desc — mặc định

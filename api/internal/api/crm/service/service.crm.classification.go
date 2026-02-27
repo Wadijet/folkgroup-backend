@@ -89,53 +89,108 @@ func ComputeLifecycleStage(lastOrderAt int64) string {
 
 // ComputeJourneyStage trả về stage Lớp 1 theo logic ưu tiên (design 4.1.2).
 // visitor | engaged | first | repeat | vip | inactive
-// Khách inactive quay lại mua → phân loại lại là REPEAT hoặc VIP (không còn stage reactivated).
-// Kênh mua (online/offline/omnichannel) xem tại trục Channel (Lớp 2).
+// Đọc metrics từ currentMetrics hoặc top-level (backward compat).
 func ComputeJourneyStage(c *crmmodels.CrmCustomer) string {
-	if c.OrderCount == 0 {
-		if c.HasConversation {
+	orderCount := getOrderCount(c)
+	if orderCount == 0 {
+		if getHasConversation(c) {
 			return "engaged"
 		}
 		return "visitor"
 	}
-
-	daysSince := daysSinceLastOrder(c.LastOrderAt)
-
-	// days_since > 90 → INACTIVE (chưa quay lại)
+	lastOrderAt := getLastOrderAt(c)
+	daysSince := daysSinceLastOrder(lastOrderAt)
 	if daysSince > lifecycleCooling {
 		return "inactive"
 	}
-
-	// days_since <= 90: total_spent >= 50M → VIP
-	if c.TotalSpent >= valueVip {
+	if getTotalSpent(c) >= valueVip {
 		return "vip"
 	}
-
-	// order_count >= 2 → REPEAT
-	if c.OrderCount >= 2 {
+	if orderCount >= 2 {
 		return "repeat"
 	}
-
-	// order_count = 1 → FIRST
 	return "first"
+}
+
+func getOrderCount(c *crmmodels.CrmCustomer) int {
+	if c == nil {
+		return 0
+	}
+	if c.CurrentMetrics != nil {
+		return GetIntFromNestedMetrics(c.CurrentMetrics, "orderCount")
+	}
+	return c.OrderCount
+}
+
+func getTotalSpent(c *crmmodels.CrmCustomer) float64 {
+	if c == nil {
+		return 0
+	}
+	if c.CurrentMetrics != nil {
+		return GetFloatFromNestedMetrics(c.CurrentMetrics, "totalSpent")
+	}
+	return c.TotalSpent
+}
+
+func getLastOrderAt(c *crmmodels.CrmCustomer) int64 {
+	if c == nil {
+		return 0
+	}
+	if c.CurrentMetrics != nil {
+		return GetInt64FromNestedMetrics(c.CurrentMetrics, "lastOrderAt")
+	}
+	return c.LastOrderAt
+}
+
+func getHasConversation(c *crmmodels.CrmCustomer) bool {
+	if c == nil {
+		return false
+	}
+	if c.CurrentMetrics != nil {
+		if v := getFromNestedMetrics(c.CurrentMetrics, "hasConversation"); v != nil {
+			if b, ok := v.(bool); ok {
+				return b
+			}
+		}
+		return false
+	}
+	return c.HasConversation
 }
 
 // ComputeChannel trả về kênh mua hàng — trục Lớp 2 (Customer Segmentation).
 // online | offline | omnichannel — rỗng nếu order_count = 0 (chưa mua).
 func ComputeChannel(c *crmmodels.CrmCustomer) string {
-	if c.OrderCount == 0 {
+	if getOrderCount(c) == 0 {
 		return ""
 	}
-	if c.OrderCountOnline > 0 && c.OrderCountOffline > 0 {
+	ocOnline := getIntFromCustomer(c, "orderCountOnline")
+	ocOffline := getIntFromCustomer(c, "orderCountOffline")
+	if ocOnline > 0 && ocOffline > 0 {
 		return "omnichannel"
 	}
-	if c.OrderCountOnline > 0 {
+	if ocOnline > 0 {
 		return "online"
 	}
-	if c.OrderCountOffline > 0 {
+	if ocOffline > 0 {
 		return "offline"
 	}
 	return ""
+}
+
+func getIntFromCustomer(c *crmmodels.CrmCustomer, key string) int {
+	if c == nil {
+		return 0
+	}
+	if c.CurrentMetrics != nil {
+		return GetIntFromNestedMetrics(c.CurrentMetrics, key)
+	}
+	switch key {
+	case "orderCountOnline":
+		return c.OrderCountOnline
+	case "orderCountOffline":
+		return c.OrderCountOffline
+	}
+	return 0
 }
 
 // ComputeLoyaltyStage trả về stage theo order_count.
@@ -156,45 +211,55 @@ func ComputeLoyaltyStage(orderCount int) string {
 // ComputeMomentumStage trả về stage theo revenue_last_30d vs revenue_last_90d.
 // rising | stable | declining | lost
 func ComputeMomentumStage(c *crmmodels.CrmCustomer) string {
-	daysSince := daysSinceLastOrder(c.LastOrderAt)
-	rev30 := c.RevenueLast30d
-	rev90 := c.RevenueLast90d
+	lastOrderAt := getLastOrderAt(c)
+	daysSince := daysSinceLastOrder(lastOrderAt)
+	rev30 := getFloatFromCustomer(c, "revenueLast30d")
+	rev90 := getFloatFromCustomer(c, "revenueLast90d")
+	totalSpent := getTotalSpent(c)
 
-	// Lost: days_since > 90 hoặc (revenue_last_90d = 0 và có historical)
 	if daysSince > lifecycleCooling {
 		return "lost"
 	}
-	if rev90 <= 0 && c.TotalSpent > 0 {
+	if rev90 <= 0 && totalSpent > 0 {
 		return "lost"
 	}
-
-	// Declining: revenue_last_90d > 0, revenue_last_30d = 0, days_since ≤ 90
 	if rev90 > 0 && rev30 <= 0 && daysSince <= lifecycleCooling {
 		return "declining"
 	}
-
-	// Rising / Stable: cần revenue_last_30d > 0
 	if rev30 <= 0 {
 		return "lost"
 	}
-
 	denom := rev90
 	if denom < 1 {
 		denom = 1
 	}
 	ratio := rev30 / denom
-
 	if ratio > momentumRising {
 		return "rising"
 	}
 	if ratio >= momentumStableLo && ratio <= momentumStableHi {
 		return "stable"
 	}
-	// ratio < 0.2: vẫn có đơn 30d nhưng tỷ lệ thấp — coi là stable hoặc declining
 	if ratio < momentumStableLo {
 		return "stable"
 	}
 	return "stable"
+}
+
+func getFloatFromCustomer(c *crmmodels.CrmCustomer, key string) float64 {
+	if c == nil {
+		return 0
+	}
+	if c.CurrentMetrics != nil {
+		return GetFloatFromNestedMetrics(c.CurrentMetrics, key)
+	}
+	switch key {
+	case "revenueLast30d":
+		return c.RevenueLast30d
+	case "revenueLast90d":
+		return c.RevenueLast90d
+	}
+	return 0
 }
 
 // ComputeClassificationFromMetrics trả về map các field phân loại để $set vào crm_customers.

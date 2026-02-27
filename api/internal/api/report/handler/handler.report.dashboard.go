@@ -3,9 +3,11 @@ package reporthdl
 
 import (
 	"strconv"
+	"time"
 
 	basehdl "meta_commerce/internal/api/base/handler"
 	reportdto "meta_commerce/internal/api/report/dto"
+	"meta_commerce/internal/api/report/layer3"
 	crmvc "meta_commerce/internal/api/crm/service"
 	"meta_commerce/internal/common"
 
@@ -325,6 +327,18 @@ func (h *ReportHandler) HandleGetCustomers(c fiber.Ctx) error {
 			LoyaltyDistribution:    snapData.LoyaltyDistribution,
 			MomentumDistribution:   snapData.MomentumDistribution,
 			CeoGroupDistribution:  snapData.CeoGroupDistribution,
+			ValueLTV:               snapData.ValueLTV,
+			JourneyLTV:             snapData.JourneyLTV,
+			LifecycleLTV:           snapData.LifecycleLTV,
+			ChannelLTV:             snapData.ChannelLTV,
+			LoyaltyLTV:             snapData.LoyaltyLTV,
+			MomentumLTV:            snapData.MomentumLTV,
+			CeoGroupLTV:            snapData.CeoGroupLTV,
+			FirstLayer3:            snapData.FirstLayer3,
+			RepeatLayer3:           snapData.RepeatLayer3,
+			VipLayer3:              snapData.VipLayer3,
+			InactiveLayer3:         snapData.InactiveLayer3,
+			EngagedLayer3:          snapData.EngagedLayer3,
 			Customers:              paginateAndMapCustomers(allItems, offset, limit),
 			VipInactiveCustomers:   buildVipInactiveFromCrm(allItems, params.VipInactiveLimit),
 			TotalCount:             total,
@@ -339,10 +353,11 @@ func (h *ReportHandler) HandleGetCustomers(c fiber.Ctx) error {
 	})
 }
 
-// buildCustomersDashboardDataFromCrm build KPI và phân bố từ danh sách CRM (fallback khi không có snapshot).
+// buildCustomersDashboardDataFromCrm build KPI, phân bố và LTV theo nhóm từ danh sách CRM (fallback khi không có snapshot).
+// Gồm cả phân bố Lớp 3 (First, Repeat, VIP, Inactive) để dashboard có đủ số tổng hợp.
 func buildCustomersDashboardDataFromCrm(items []crmvc.CrmDashboardCustomerItem, total int) *reportdto.CustomersDashboardSnapshotData {
 	var customersWithOrder, customersRepeat int64
-	var reactivationValue float64
+	var reactivationValue, totalLTV, vipLTV float64
 	valueDist := reportdto.ValueDistribution{}
 	journeyDist := reportdto.JourneyDistribution{}
 	lifecycleDist := reportdto.LifecycleDistribution{}
@@ -350,6 +365,21 @@ func buildCustomersDashboardDataFromCrm(items []crmvc.CrmDashboardCustomerItem, 
 	loyaltyDist := reportdto.LoyaltyDistribution{}
 	momentumDist := reportdto.MomentumDistribution{}
 	ceoDist := reportdto.CeoGroupDistribution{}
+	valueLTV := reportdto.ValueLTV{}
+	journeyLTV := reportdto.JourneyLTV{}
+	lifecycleLTV := reportdto.LifecycleLTV{}
+	channelLTV := reportdto.ChannelLTV{}
+	loyaltyLTV := reportdto.LoyaltyLTV{}
+	momentumLTV := reportdto.MomentumLTV{}
+	ceoGroupLTV := reportdto.CeoGroupLTV{}
+	// Phân bố Lớp 3 — map tiêu chí -> số lượng
+	firstPQ, firstEQ, firstEng, firstRT, firstRP := make(map[string]int64), make(map[string]int64), make(map[string]int64), make(map[string]int64), make(map[string]int64)
+	repeatRD, repeatRF, repeatSM, repeatPE, repeatEE, repeatUP := make(map[string]int64), make(map[string]int64), make(map[string]int64), make(map[string]int64), make(map[string]int64), make(map[string]int64)
+	vipVD, vipST, vipPD, vipEL, vipRS := make(map[string]int64), make(map[string]int64), make(map[string]int64), make(map[string]int64), make(map[string]int64)
+	inactiveED, inactiveRP := make(map[string]int64), make(map[string]int64)
+	engagedTemp, engagedDepth, engagedSource := make(map[string]int64), make(map[string]int64), make(map[string]int64)
+	inc := func(m map[string]int64, k string) { m[k]++ }
+	endMs := time.Now().UnixMilli()
 
 	for _, it := range items {
 		if it.OrderCount >= 1 {
@@ -361,6 +391,10 @@ func buildCustomersDashboardDataFromCrm(items []crmvc.CrmDashboardCustomerItem, 
 		if it.ValueTier == "vip" && (it.LifecycleStage == "inactive" || it.LifecycleStage == "dead") {
 			reactivationValue += it.TotalSpend
 		}
+		totalLTV += it.TotalSpend
+		if it.ValueTier == "vip" {
+			vipLTV += it.TotalSpend
+		}
 		incValueDistribution(&valueDist, it.ValueTier)
 		incJourneyDistribution(&journeyDist, it.JourneyStage)
 		incLifecycleDistribution(&lifecycleDist, it.LifecycleStage, it.ValueTier)
@@ -368,19 +402,71 @@ func buildCustomersDashboardDataFromCrm(items []crmvc.CrmDashboardCustomerItem, 
 		incLoyaltyDistribution(&loyaltyDist, it.LoyaltyStage)
 		incMomentumDistribution(&momentumDist, it.MomentumStage)
 		incCeoDistribution(&ceoDist, it.ValueTier, it.LifecycleStage, it.JourneyStage, it.LoyaltyStage, it.MomentumStage)
+		incValueLTV(&valueLTV, it.ValueTier, it.TotalSpend)
+		incJourneyLTV(&journeyLTV, it.JourneyStage, it.TotalSpend)
+		incLifecycleLTV(&lifecycleLTV, it.LifecycleStage, it.ValueTier, it.TotalSpend)
+		incChannelLTV(&channelLTV, it.Channel, it.TotalSpend)
+		incLoyaltyLTV(&loyaltyLTV, it.LoyaltyStage, it.TotalSpend)
+		incMomentumLTV(&momentumLTV, it.MomentumStage, it.TotalSpend)
+		incCeoGroupLTV(&ceoGroupLTV, it.ValueTier, it.LifecycleStage, it.JourneyStage, it.LoyaltyStage, it.MomentumStage, it.TotalSpend)
+		// Lớp 3: derive và aggregate phân bố
+		m := crmItemToLayer3Map(it)
+		agg := layer3.DeriveFromMap(m, endMs)
+		if agg != nil {
+			if agg.First != nil {
+				inc(firstPQ, agg.First.PurchaseQuality)
+				inc(firstEQ, agg.First.ExperienceQuality)
+				inc(firstEng, agg.First.EngagementAfterPurchase)
+				inc(firstRT, agg.First.ReorderTiming)
+				inc(firstRP, agg.First.RepeatProbability)
+			}
+			if agg.Repeat != nil {
+				inc(repeatRD, agg.Repeat.RepeatDepth)
+				inc(repeatRF, agg.Repeat.RepeatFrequency)
+				inc(repeatSM, agg.Repeat.SpendMomentum)
+				inc(repeatPE, agg.Repeat.ProductExpansion)
+				inc(repeatEE, agg.Repeat.EmotionalEngagement)
+				inc(repeatUP, agg.Repeat.UpgradePotential)
+			}
+			if agg.Vip != nil {
+				inc(vipVD, agg.Vip.VipDepth)
+				inc(vipST, agg.Vip.SpendTrend)
+				inc(vipPD, agg.Vip.ProductDiversity)
+				inc(vipEL, agg.Vip.EngagementLevel)
+				inc(vipRS, agg.Vip.RiskScore)
+			}
+			if agg.Inactive != nil {
+				inc(inactiveED, agg.Inactive.EngagementDrop)
+				inc(inactiveRP, agg.Inactive.ReactivationPotential)
+			}
+			if agg.Engaged != nil {
+				inc(engagedTemp, agg.Engaged.ConversationTemperature)
+				inc(engagedDepth, agg.Engaged.EngagementDepth)
+				inc(engagedSource, agg.Engaged.SourceType)
+			}
+		}
 	}
 	repeatRate := 0.0
 	if customersWithOrder > 0 {
 		repeatRate = float64(customersRepeat) / float64(customersWithOrder)
 	}
+	avgLTV := 0.0
+	if total > 0 {
+		avgLTV = totalLTV / float64(total)
+	}
 	return &reportdto.CustomersDashboardSnapshotData{
 		Summary: reportdto.CustomerSummary{
 			TotalCustomers:       int64(total),
+			CustomersWithOrder:   customersWithOrder,
+			CustomersRepeat:      customersRepeat,
 			NewCustomersInPeriod: 0,
 			RepeatRate:           repeatRate,
 			VipInactiveCount:     ceoDist.VipInactive,
 			ReactivationValue:    int64(reactivationValue),
 			ActiveTodayCount:     0,
+			TotalLTV:             totalLTV,
+			AvgLTV:               avgLTV,
+			VipLTV:               vipLTV,
 		},
 		ValueDistribution:     valueDist,
 		JourneyDistribution:   journeyDist,
@@ -389,7 +475,135 @@ func buildCustomersDashboardDataFromCrm(items []crmvc.CrmDashboardCustomerItem, 
 		LoyaltyDistribution:   loyaltyDist,
 		MomentumDistribution:  momentumDist,
 		CeoGroupDistribution:  ceoDist,
+		ValueLTV:              valueLTV,
+		JourneyLTV:            journeyLTV,
+		LifecycleLTV:          lifecycleLTV,
+		ChannelLTV:            channelLTV,
+		LoyaltyLTV:            loyaltyLTV,
+		MomentumLTV:           momentumLTV,
+		CeoGroupLTV:           ceoGroupLTV,
+		FirstLayer3:           reportdto.FirstLayer3Distribution{PurchaseQuality: firstPQ, ExperienceQuality: firstEQ, EngagementAfterPurchase: firstEng, ReorderTiming: firstRT, RepeatProbability: firstRP},
+		RepeatLayer3:          reportdto.RepeatLayer3Distribution{RepeatDepth: repeatRD, RepeatFrequency: repeatRF, SpendMomentum: repeatSM, ProductExpansion: repeatPE, EmotionalEngagement: repeatEE, UpgradePotential: repeatUP},
+		VipLayer3:             reportdto.VipLayer3Distribution{VipDepth: vipVD, SpendTrend: vipST, ProductDiversity: vipPD, EngagementLevel: vipEL, RiskScore: vipRS},
+		InactiveLayer3:       reportdto.InactiveLayer3Distribution{EngagementDrop: inactiveED, ReactivationPotential: inactiveRP},
+		EngagedLayer3:        reportdto.EngagedLayer3Distribution{ConversationTemperature: engagedTemp, EngagementDepth: engagedDepth, SourceType: engagedSource},
 	}
+}
+
+// crmItemToLayer3Map chuyển CrmDashboardCustomerItem sang map để layer3.DeriveFromMap có thể đọc.
+// Keys theo chuẩn metricsSnapshot: journeyStage, orderCount, valueTier, lifecycleStage, totalSpent, avgOrderValue, lastOrderAt, secondLastOrderAt, lastConversationAt, cancelledOrderCount, revenueLast30d, ordersLast30d, ownedSkuCount, totalMessages, conversationFromAds (cho Engaged).
+func crmItemToLayer3Map(it crmvc.CrmDashboardCustomerItem) map[string]interface{} {
+	m := map[string]interface{}{
+		"journeyStage":        it.JourneyStage,
+		"orderCount":          it.OrderCount,
+		"valueTier":           it.ValueTier,
+		"lifecycleStage":      it.LifecycleStage,
+		"totalSpent":          it.TotalSpend,
+		"avgOrderValue":       it.AvgOrderValue,
+		"lastOrderAt":         it.LastOrderAtMs,
+		"secondLastOrderAt":   it.SecondLastOrderAt,
+		"lastConversationAt":  it.LastConversationAt,
+		"cancelledOrderCount": it.CancelledOrderCount,
+		"revenueLast30d":      it.RevenueLast30d,
+		"ordersLast30d":       it.OrdersLast30d,
+		"ownedSkuCount":       it.OwnedSkuCount,
+		"totalMessages":       it.TotalMessages,
+		"conversationFromAds": it.ConversationFromAds,
+	}
+	return m
+}
+
+func incValueLTV(d *reportdto.ValueLTV, v string, spend float64) {
+	switch v {
+	case "vip": d.Vip += spend
+	case "high": d.High += spend
+	case "medium": d.Medium += spend
+	case "low": d.Low += spend
+	case "new", "": d.New += spend
+	default: d.New += spend
+	}
+}
+func incJourneyLTV(d *reportdto.JourneyLTV, v string, spend float64) {
+	switch v {
+	case "visitor": d.Visitor += spend
+	case "engaged": d.Engaged += spend
+	case "first": d.First += spend
+	case "repeat": d.Repeat += spend
+	case "vip": d.Vip += spend
+	case "inactive", "": d.Inactive += spend
+	default: d.Inactive += spend
+	}
+}
+func incLifecycleLTV(d *reportdto.LifecycleLTV, lifecycle, valueTier string, spend float64) {
+	switch lifecycle {
+	case "active": d.Active += spend
+	case "cooling": d.Cooling += spend
+	case "inactive": d.Inactive += spend
+	case "dead": d.Dead += spend
+	case "never_purchased", "": d.NeverPurchased += spend
+	default: d.NeverPurchased += spend
+	}
+}
+func incChannelLTV(d *reportdto.ChannelLTV, v string, spend float64) {
+	switch v {
+	case "online": d.Online += spend
+	case "offline": d.Offline += spend
+	case "omnichannel": d.Omnichannel += spend
+	case "", "_unspecified": d.Unspecified += spend
+	default: d.Unspecified += spend
+	}
+}
+func incLoyaltyLTV(d *reportdto.LoyaltyLTV, v string, spend float64) {
+	switch v {
+	case "core": d.Core += spend
+	case "repeat": d.Repeat += spend
+	case "one_time": d.OneTime += spend
+	case "", "_unspecified": d.Unspecified += spend
+	default: d.Unspecified += spend
+	}
+}
+func incMomentumLTV(d *reportdto.MomentumLTV, v string, spend float64) {
+	switch v {
+	case "rising": d.Rising += spend
+	case "stable": d.Stable += spend
+	case "declining": d.Declining += spend
+	case "lost": d.Lost += spend
+	case "", "_unspecified": d.Unspecified += spend
+	default: d.Unspecified += spend
+	}
+}
+func incCeoGroupLTV(d *reportdto.CeoGroupLTV, valueTier, lifecycleStage, journeyStage, loyaltyStage, momentumStage string, spend float64) {
+	ceoGroup := buildCeoGroupForLTV(valueTier, lifecycleStage, journeyStage, loyaltyStage, momentumStage)
+	switch ceoGroup {
+	case "vip_active": d.VipActive += spend
+	case "vip_inactive": d.VipInactive += spend
+	case "rising": d.Rising += spend
+	case "new": d.New += spend
+	case "one_time": d.OneTime += spend
+	case "dead": d.Dead += spend
+	default: d.Other += spend
+	}
+}
+func buildCeoGroupForLTV(valueTier, lifecycleStage, journeyStage, loyaltyStage, momentumStage string) string {
+	if valueTier == "vip" && lifecycleStage == "active" {
+		return "vip_active"
+	}
+	if valueTier == "vip" && (lifecycleStage == "inactive" || lifecycleStage == "dead") {
+		return "vip_inactive"
+	}
+	if momentumStage == "rising" {
+		return "rising"
+	}
+	if journeyStage == "first" || valueTier == "new" {
+		return "new"
+	}
+	if loyaltyStage == "one_time" {
+		return "one_time"
+	}
+	if lifecycleStage == "dead" {
+		return "dead"
+	}
+	return "_other"
 }
 
 func incValueDistribution(d *reportdto.ValueDistribution, v string) {
@@ -490,8 +704,9 @@ func paginateAndMapCustomers(items []crmvc.CrmDashboardCustomerItem, offset, lim
 }
 
 // crmDashboardItemToCustomerItem map CrmDashboardCustomerItem sang CustomerItem.
+// Dùng layer3.DeriveFromMap thống nhất logic với snapshot aggregation, tránh duplicate.
 func crmDashboardItemToCustomerItem(it crmvc.CrmDashboardCustomerItem) reportdto.CustomerItem {
-	return reportdto.CustomerItem{
+	item := reportdto.CustomerItem{
 		CustomerID:       it.CustomerID,
 		Name:             it.Name,
 		Phone:            it.Phone,
@@ -511,6 +726,44 @@ func crmDashboardItemToCustomerItem(it crmvc.CrmDashboardCustomerItem) reportdto
 		AvgOrderValue:    it.AvgOrderValue,
 		Sources:          it.Sources,
 	}
+	agg := layer3.DeriveFromMap(crmItemToLayer3Map(it), time.Now().UnixMilli())
+	if agg != nil {
+		if agg.First != nil {
+			item.First = &reportdto.FirstMetrics{
+				PurchaseQuality:        agg.First.PurchaseQuality,
+				ExperienceQuality:      agg.First.ExperienceQuality,
+				EngagementAfterPurchase: agg.First.EngagementAfterPurchase,
+				ReorderTiming:          agg.First.ReorderTiming,
+				RepeatProbability:      agg.First.RepeatProbability,
+			}
+		}
+		if agg.Repeat != nil {
+			item.Repeat = &reportdto.RepeatMetrics{
+				RepeatDepth:         agg.Repeat.RepeatDepth,
+				RepeatFrequency:     agg.Repeat.RepeatFrequency,
+				SpendMomentum:       agg.Repeat.SpendMomentum,
+				ProductExpansion:    agg.Repeat.ProductExpansion,
+				EmotionalEngagement: agg.Repeat.EmotionalEngagement,
+				UpgradePotential:    agg.Repeat.UpgradePotential,
+			}
+		}
+		if agg.Vip != nil {
+			item.Vip = &reportdto.VipMetrics{
+				VipDepth:         agg.Vip.VipDepth,
+				SpendTrend:       agg.Vip.SpendTrend,
+				ProductDiversity: agg.Vip.ProductDiversity,
+				EngagementLevel:  agg.Vip.EngagementLevel,
+				RiskScore:        agg.Vip.RiskScore,
+			}
+		}
+		if agg.Inactive != nil {
+			item.Inactive = &reportdto.InactiveMetrics{
+				EngagementDrop:        agg.Inactive.EngagementDrop,
+				ReactivationPotential: agg.Inactive.ReactivationPotential,
+			}
+		}
+	}
+	return item
 }
 
 // buildVipInactiveFromCrm lấy top VIP inactive từ danh sách CRM.
@@ -597,6 +850,17 @@ func (h *ReportHandler) HandleGetCustomersTrend(c fiber.Ctx) error {
 					result.CurrentSnapshot.LoyaltyDistribution = snapData.LoyaltyDistribution
 					result.CurrentSnapshot.MomentumDistribution = snapData.MomentumDistribution
 					result.CurrentSnapshot.CeoGroupDistribution = snapData.CeoGroupDistribution
+					result.CurrentSnapshot.ValueLTV = snapData.ValueLTV
+					result.CurrentSnapshot.JourneyLTV = snapData.JourneyLTV
+					result.CurrentSnapshot.LifecycleLTV = snapData.LifecycleLTV
+					result.CurrentSnapshot.ChannelLTV = snapData.ChannelLTV
+					result.CurrentSnapshot.LoyaltyLTV = snapData.LoyaltyLTV
+					result.CurrentSnapshot.MomentumLTV = snapData.MomentumLTV
+					result.CurrentSnapshot.CeoGroupLTV = snapData.CeoGroupLTV
+					result.CurrentSnapshot.FirstLayer3 = snapData.FirstLayer3
+					result.CurrentSnapshot.RepeatLayer3 = snapData.RepeatLayer3
+					result.CurrentSnapshot.VipLayer3 = snapData.VipLayer3
+					result.CurrentSnapshot.InactiveLayer3 = snapData.InactiveLayer3
 				}
 			}
 		}
@@ -815,7 +1079,7 @@ func (h *ReportHandler) HandleGetMatrixValueLoyalty(c fiber.Ctx) error {
 }
 
 // HandleGetInbox xử lý GET /dashboard/inbox — snapshot Tab 7 Inbox Operations.
-// Query: pageId, filter (backlog|unassigned|all), limit, offset, sort, period.
+// Query: pageId, filter (backlog|unassigned|all|engaged), limit, offset, sort (waiting_desc|updated_desc|updated_asc|care_priority), period, engaged (bool).
 func (h *ReportHandler) HandleGetInbox(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {
 		orgID := getActiveOrganizationID(c)

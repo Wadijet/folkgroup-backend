@@ -20,6 +20,23 @@ import (
 	mongoopts "go.mongodb.org/mongo-driver/mongo/options"
 )
 
+// unsetRawFields — các field raw không còn lưu top-level (chỉ trong currentMetrics).
+var unsetRawFields = bson.M{
+	"hasConversation": "", "hasOrder": "", "orderCountOnline": "", "orderCountOffline": "",
+	"firstOrderChannel": "", "lastOrderChannel": "", "isOmnichannel": "",
+	"avgOrderValue": "", "cancelledOrderCount": "", "secondLastOrderAt": "",
+	"revenueLast30d": "", "revenueLast90d": "",
+	"ordersLast30d": "", "ordersLast90d": "", "ordersFromAds": "", "ordersFromOrganic": "", "ordersFromDirect": "",
+	"conversationCount": "", "conversationCountByInbox": "", "conversationCountByComment": "",
+	"lastConversationAt": "", "firstConversationAt": "", "totalMessages": "",
+	"lastMessageFromCustomer": "", "conversationFromAds": "",
+}
+
+// unsetProfileLegacyFields — các field profile cũ ở top-level (đã chuyển vào profile).
+var unsetProfileLegacyFields = bson.M{
+	"name": "", "phoneNumbers": "", "emails": "", "birthday": "", "gender": "", "livesIn": "", "addresses": "", "referralCode": "",
+}
+
 // MergeFromPosCustomer xử lý khi pc_pos_customers thay đổi — upsert crm_customers.
 func (s *CrmCustomerService) MergeFromPosCustomer(ctx context.Context, doc *pcmodels.PcPosCustomer) error {
 	if doc == nil {
@@ -116,55 +133,36 @@ func (s *CrmCustomerService) MergeFromPosCustomer(ctx context.Context, doc *pcmo
 	convMetrics := s.aggregateConversationMetricsForCustomer(ctx, ids, ownerOrgID, 0)
 	hasConv := convMetrics.ConversationCount > 0 || s.checkHasConversation(ctx, ids, ownerOrgID)
 
-	avgOrderValue := 0.0
-	if metrics.OrderCount > 0 {
-		avgOrderValue = metrics.TotalSpent / float64(metrics.OrderCount)
-	}
+	// Raw metrics chỉ lưu trong currentMetrics; top-level chỉ giữ denormalized cho filter/sort.
+	cm := BuildCurrentMetricsFromOrderAndConv(metrics, convMetrics, hasConv)
+	class := ComputeClassificationFromMetrics(metrics.TotalSpent, metrics.OrderCount, metrics.LastOrderAt, metrics.RevenueLast30d, metrics.RevenueLast90d, metrics.OrderCountOnline, metrics.OrderCountOffline, hasConv)
 
+	profileObj := crmmodels.CrmCustomerProfile{
+		Name: name, PhoneNumbers: phones, Emails: emails,
+		Birthday: birthday, Gender: gender, LivesIn: "", Addresses: addresses, ReferralCode: referralCode,
+	}
 	filter := bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}
 	setFields := bson.M{
-		"sourceIds": sourceIds, "primarySource": primarySource, "name": name,
-		"phoneNumbers": phones, "emails": emails,
-		"hasConversation": hasConv, "hasOrder": metrics.OrderCount > 0,
-		"orderCountOnline": metrics.OrderCountOnline, "orderCountOffline": metrics.OrderCountOffline,
-		"firstOrderChannel": metrics.FirstOrderChannel, "lastOrderChannel": metrics.LastOrderChannel,
-		"isOmnichannel": metrics.OrderCountOnline > 0 && metrics.OrderCountOffline > 0,
-		"totalSpent": metrics.TotalSpent, "orderCount": metrics.OrderCount,
-		"lastOrderAt": metrics.LastOrderAt, "secondLastOrderAt": metrics.SecondLastOrderAt,
-		"revenueLast30d": metrics.RevenueLast30d, "revenueLast90d": metrics.RevenueLast90d,
-		"avgOrderValue": avgOrderValue, "cancelledOrderCount": metrics.CancelledOrderCount,
-		"ordersLast30d": metrics.OrdersLast30d, "ordersLast90d": metrics.OrdersLast90d,
-		"ordersFromAds": metrics.OrdersFromAds, "ordersFromOrganic": metrics.OrdersFromOrganic,
-		"ordersFromDirect": metrics.OrdersFromDirect, "ownedSkuQuantities": metrics.OwnedSkuQuantities,
-		"conversationCount": convMetrics.ConversationCount,
-		"conversationCountByInbox": convMetrics.ConversationCountByInbox,
-		"conversationCountByComment": convMetrics.ConversationCountByComment,
-		"lastConversationAt": convMetrics.LastConversationAt,
-		"firstConversationAt": convMetrics.FirstConversationAt,
-		"totalMessages": convMetrics.TotalMessages,
-		"lastMessageFromCustomer": convMetrics.LastMessageFromCustomer,
-		"conversationFromAds": convMetrics.ConversationFromAds,
+		"sourceIds": sourceIds, "primarySource": primarySource, "profile": profileObj,
+		"totalSpent": metrics.TotalSpent, "orderCount": metrics.OrderCount, "lastOrderAt": metrics.LastOrderAt,
+		"ownedSkuQuantities": metrics.OwnedSkuQuantities,
 		"conversationTags": convMetrics.ConversationTags,
 		"mergeMethod": mergeMethod, "mergedAt": now, "updatedAt": now,
+		"currentMetrics": cm,
 	}
-	if birthday != "" {
-		setFields["birthday"] = birthday
-	}
-	if gender != "" {
-		setFields["gender"] = gender
-	}
-	if len(addresses) > 0 {
-		setFields["addresses"] = addresses
-	}
-	if referralCode != "" {
-		setFields["referralCode"] = referralCode
-	}
-	// Cập nhật phân loại hiện tại (classification) theo metrics đã aggregate.
-	for k, v := range ComputeClassificationFromMetrics(metrics.TotalSpent, metrics.OrderCount, metrics.LastOrderAt, metrics.RevenueLast30d, metrics.RevenueLast90d, metrics.OrderCountOnline, metrics.OrderCountOffline, hasConv) {
+	for k, v := range class {
 		setFields[k] = v
+	}
+	unsetAll := make(bson.M)
+	for k, v := range unsetRawFields {
+		unsetAll[k] = v
+	}
+	for k, v := range unsetProfileLegacyFields {
+		unsetAll[k] = v
 	}
 	update := bson.M{
 		"$set":         setFields,
+		"$unset":       unsetAll,
 		"$setOnInsert": bson.M{"createdAt": now},
 	}
 	opts := mongoopts.Update().SetUpsert(true)
@@ -186,7 +184,9 @@ func (s *CrmCustomerService) MergeFromPosCustomer(ctx context.Context, doc *pcmo
 		} else {
 			metadata := map[string]interface{}{"source": "pos", "name": name, "mergeMethod": mergeMethod}
 			if cust, err := s.FindOne(ctx, bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}, nil); err == nil {
-				MergeSnapshotIntoMetadata(metadata, BuildSnapshotForNewCustomer(&cust, activityAt, true))
+				// Dùng metrics as-of activityAt (timeline đúng) thay vì empty — có Lớp 3, đồng nhất với order/conversation
+				metricsOverride := s.GetMetricsForSnapshotAt(ctx, &cust, activityAt)
+				MergeSnapshotIntoMetadata(metadata, BuildSnapshotForNewCustomer(&cust, activityAt, true, metricsOverride))
 			}
 			errLog := actSvc.LogActivity(ctx, LogActivityInput{
 				UnifiedId:    unifiedId,
@@ -297,55 +297,36 @@ func (s *CrmCustomerService) MergeFromFbCustomer(ctx context.Context, doc *fbmod
 	convMetrics := s.aggregateConversationMetricsForCustomer(ctx, fbIds, ownerOrgID, 0)
 	hasConv := convMetrics.ConversationCount > 0 || s.checkHasConversation(ctx, fbIds, ownerOrgID)
 
-	avgOrderValue := 0.0
-	if metrics.OrderCount > 0 {
-		avgOrderValue = metrics.TotalSpent / float64(metrics.OrderCount)
-	}
+	// Raw metrics chỉ lưu trong currentMetrics; top-level chỉ giữ denormalized.
+	fbCm := BuildCurrentMetricsFromOrderAndConv(metrics, convMetrics, hasConv)
+	fbClass := ComputeClassificationFromMetrics(metrics.TotalSpent, metrics.OrderCount, metrics.LastOrderAt, metrics.RevenueLast30d, metrics.RevenueLast90d, metrics.OrderCountOnline, metrics.OrderCountOffline, hasConv)
 
+	fbProfile := crmmodels.CrmCustomerProfile{
+		Name: name, PhoneNumbers: phones, Emails: emails,
+		Birthday: fbBirthday, Gender: fbGender, LivesIn: fbLivesIn, Addresses: fbAddresses, ReferralCode: "",
+	}
 	filter := bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}
 	fbSetFields := bson.M{
-		"sourceIds": sourceIds, "primarySource": primarySource, "name": name,
-		"phoneNumbers": phones, "emails": emails,
-		"hasConversation": hasConv, "hasOrder": metrics.OrderCount > 0,
-		"orderCountOnline": metrics.OrderCountOnline, "orderCountOffline": metrics.OrderCountOffline,
-		"firstOrderChannel": metrics.FirstOrderChannel, "lastOrderChannel": metrics.LastOrderChannel,
-		"isOmnichannel": metrics.OrderCountOnline > 0 && metrics.OrderCountOffline > 0,
-		"totalSpent": metrics.TotalSpent, "orderCount": metrics.OrderCount,
-		"lastOrderAt": metrics.LastOrderAt, "secondLastOrderAt": metrics.SecondLastOrderAt,
-		"revenueLast30d": metrics.RevenueLast30d, "revenueLast90d": metrics.RevenueLast90d,
-		"avgOrderValue": avgOrderValue, "cancelledOrderCount": metrics.CancelledOrderCount,
-		"ordersLast30d": metrics.OrdersLast30d, "ordersLast90d": metrics.OrdersLast90d,
-		"ordersFromAds": metrics.OrdersFromAds, "ordersFromOrganic": metrics.OrdersFromOrganic,
-		"ordersFromDirect": metrics.OrdersFromDirect, "ownedSkuQuantities": metrics.OwnedSkuQuantities,
-		"conversationCount": convMetrics.ConversationCount,
-		"conversationCountByInbox": convMetrics.ConversationCountByInbox,
-		"conversationCountByComment": convMetrics.ConversationCountByComment,
-		"lastConversationAt": convMetrics.LastConversationAt,
-		"firstConversationAt": convMetrics.FirstConversationAt,
-		"totalMessages": convMetrics.TotalMessages,
-		"lastMessageFromCustomer": convMetrics.LastMessageFromCustomer,
-		"conversationFromAds": convMetrics.ConversationFromAds,
+		"sourceIds": sourceIds, "primarySource": primarySource, "profile": fbProfile,
+		"totalSpent": metrics.TotalSpent, "orderCount": metrics.OrderCount, "lastOrderAt": metrics.LastOrderAt,
+		"ownedSkuQuantities": metrics.OwnedSkuQuantities,
 		"conversationTags": convMetrics.ConversationTags,
 		"mergeMethod": mergeMethod, "mergedAt": now, "updatedAt": now,
+		"currentMetrics": fbCm,
 	}
-	if fbBirthday != "" {
-		fbSetFields["birthday"] = fbBirthday
-	}
-	if fbGender != "" {
-		fbSetFields["gender"] = fbGender
-	}
-	if fbLivesIn != "" {
-		fbSetFields["livesIn"] = fbLivesIn
-	}
-	if len(fbAddresses) > 0 {
-		fbSetFields["addresses"] = fbAddresses
-	}
-	// Cập nhật phân loại hiện tại (classification) theo metrics đã aggregate.
-	for k, v := range ComputeClassificationFromMetrics(metrics.TotalSpent, metrics.OrderCount, metrics.LastOrderAt, metrics.RevenueLast30d, metrics.RevenueLast90d, metrics.OrderCountOnline, metrics.OrderCountOffline, hasConv) {
+	for k, v := range fbClass {
 		fbSetFields[k] = v
+	}
+	fbUnsetAll := make(bson.M)
+	for k, v := range unsetRawFields {
+		fbUnsetAll[k] = v
+	}
+	for k, v := range unsetProfileLegacyFields {
+		fbUnsetAll[k] = v
 	}
 	update := bson.M{
 		"$set":         fbSetFields,
+		"$unset":       fbUnsetAll,
 		"$setOnInsert": bson.M{"createdAt": now},
 	}
 	opts := mongoopts.Update().SetUpsert(true)
@@ -369,7 +350,9 @@ func (s *CrmCustomerService) MergeFromFbCustomer(ctx context.Context, doc *fbmod
 		} else {
 			metadata := map[string]interface{}{"source": "fb", "name": name, "mergeMethod": mergeMethod}
 			if cust, err := s.FindOne(ctx, bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}, nil); err == nil {
-				MergeSnapshotIntoMetadata(metadata, BuildSnapshotForNewCustomer(&cust, activityAt, true))
+				// Dùng metrics as-of activityAt (timeline đúng) thay vì empty — có Lớp 3, đồng nhất với order/conversation
+				metricsOverride := s.GetMetricsForSnapshotAt(ctx, &cust, activityAt)
+				MergeSnapshotIntoMetadata(metadata, BuildSnapshotForNewCustomer(&cust, activityAt, true, metricsOverride))
 			}
 			errLog := actSvc.LogActivity(ctx, LogActivityInput{
 				UnifiedId:    unifiedId,
@@ -410,6 +393,15 @@ func (s *CrmCustomerService) UpsertMinimalFromPosId(ctx context.Context, custome
 	}
 	now := time.Now().UnixMilli()
 	filter := bson.M{"unifiedId": customerId, "ownerOrganizationId": ownerOrgID}
+	emptyMetrics := buildEmptyMetricsSnapshot()
+	posProfile := crmmodels.CrmCustomerProfile{}
+	if custData != nil {
+		posProfile = crmmodels.CrmCustomerProfile{
+			Name: custData.Name, PhoneNumbers: normalizePhones(custData.Phones), Emails: uniqueStrings(custData.Emails),
+			Birthday: custData.Birthday, Gender: custData.Gender, LivesIn: custData.LivesIn,
+			Addresses: custData.Addresses, ReferralCode: custData.ReferralCode,
+		}
+	}
 	setOnInsert := bson.M{
 		"unifiedId":           customerId,
 		"sourceIds":           crmmodels.CrmCustomerSourceIds{Pos: customerId},
@@ -418,32 +410,17 @@ func (s *CrmCustomerService) UpsertMinimalFromPosId(ctx context.Context, custome
 		"ownerOrganizationId": ownerOrgID,
 		"createdAt":           now,
 		"mergedAt":            now,
-	}
-	if custData != nil {
-		if custData.Name != "" {
-			setOnInsert["name"] = custData.Name
-		}
-		if len(custData.Phones) > 0 {
-			setOnInsert["phoneNumbers"] = normalizePhones(custData.Phones)
-		}
-		if len(custData.Emails) > 0 {
-			setOnInsert["emails"] = uniqueStrings(custData.Emails)
-		}
-		if custData.Birthday != "" {
-			setOnInsert["birthday"] = custData.Birthday
-		}
-		if custData.Gender != "" {
-			setOnInsert["gender"] = custData.Gender
-		}
-		if custData.LivesIn != "" {
-			setOnInsert["livesIn"] = custData.LivesIn
-		}
-		if len(custData.Addresses) > 0 {
-			setOnInsert["addresses"] = custData.Addresses
-		}
-		if custData.ReferralCode != "" {
-			setOnInsert["referralCode"] = custData.ReferralCode
-		}
+		"currentMetrics":      emptyMetrics,
+		"profile":             posProfile,
+		"totalSpent":          0,
+		"orderCount":          0,
+		"lastOrderAt":         0,
+		"valueTier":           "new",
+		"journeyStage":        "visitor",
+		"lifecycleStage":      "never_purchased",
+		"channel":             "",
+		"loyaltyStage":        "",
+		"momentumStage":       "lost",
 	}
 	update := bson.M{
 		"$setOnInsert": setOnInsert,
@@ -479,6 +456,15 @@ func (s *CrmCustomerService) UpsertMinimalFromFbId(ctx context.Context, customer
 	}
 	now := time.Now().UnixMilli()
 	filter := bson.M{"unifiedId": customerId, "ownerOrganizationId": ownerOrgID}
+	fbEmptyMetrics := buildEmptyMetricsSnapshot()
+	fbProfile := crmmodels.CrmCustomerProfile{}
+	if custData != nil {
+		fbProfile = crmmodels.CrmCustomerProfile{
+			Name: custData.Name, PhoneNumbers: normalizePhones(custData.Phones), Emails: uniqueStrings(custData.Emails),
+			Birthday: custData.Birthday, Gender: custData.Gender, LivesIn: custData.LivesIn,
+			Addresses: custData.Addresses, ReferralCode: custData.ReferralCode,
+		}
+	}
 	setOnInsert := bson.M{
 		"unifiedId":           customerId,
 		"sourceIds":           crmmodels.CrmCustomerSourceIds{Fb: customerId},
@@ -487,32 +473,17 @@ func (s *CrmCustomerService) UpsertMinimalFromFbId(ctx context.Context, customer
 		"ownerOrganizationId": ownerOrgID,
 		"createdAt":           now,
 		"mergedAt":            now,
-	}
-	if custData != nil {
-		if custData.Name != "" {
-			setOnInsert["name"] = custData.Name
-		}
-		if len(custData.Phones) > 0 {
-			setOnInsert["phoneNumbers"] = normalizePhones(custData.Phones)
-		}
-		if len(custData.Emails) > 0 {
-			setOnInsert["emails"] = uniqueStrings(custData.Emails)
-		}
-		if custData.Birthday != "" {
-			setOnInsert["birthday"] = custData.Birthday
-		}
-		if custData.Gender != "" {
-			setOnInsert["gender"] = custData.Gender
-		}
-		if custData.LivesIn != "" {
-			setOnInsert["livesIn"] = custData.LivesIn
-		}
-		if len(custData.Addresses) > 0 {
-			setOnInsert["addresses"] = custData.Addresses
-		}
-		if custData.ReferralCode != "" {
-			setOnInsert["referralCode"] = custData.ReferralCode
-		}
+		"currentMetrics":      fbEmptyMetrics,
+		"profile":             fbProfile,
+		"totalSpent":          0,
+		"orderCount":          0,
+		"lastOrderAt":         0,
+		"valueTier":           "new",
+		"journeyStage":        "visitor",
+		"lifecycleStage":      "never_purchased",
+		"channel":             "",
+		"loyaltyStage":        "",
+		"momentumStage":       "lost",
 	}
 	update := bson.M{
 		"$setOnInsert": setOnInsert,
@@ -545,29 +516,29 @@ func (s *CrmCustomerService) MergeProfileFromOrder(ctx context.Context, unifiedI
 		return
 	}
 	setFields := bson.M{}
-	if existing.Name == "" && custData.Name != "" {
-		setFields["name"] = custData.Name
+	if GetNameFromCustomer(&existing) == "" && custData.Name != "" {
+		setFields["profile.name"] = custData.Name
 	}
-	if len(existing.PhoneNumbers) == 0 && len(custData.Phones) > 0 {
-		setFields["phoneNumbers"] = normalizePhones(custData.Phones)
+	if len(GetPhoneNumbersFromCustomer(&existing)) == 0 && len(custData.Phones) > 0 {
+		setFields["profile.phoneNumbers"] = normalizePhones(custData.Phones)
 	}
-	if len(existing.Emails) == 0 && len(custData.Emails) > 0 {
-		setFields["emails"] = uniqueStrings(custData.Emails)
+	if len(GetEmailsFromCustomer(&existing)) == 0 && len(custData.Emails) > 0 {
+		setFields["profile.emails"] = uniqueStrings(custData.Emails)
 	}
-	if existing.Birthday == "" && custData.Birthday != "" {
-		setFields["birthday"] = custData.Birthday
+	if GetBirthdayFromCustomer(&existing) == "" && custData.Birthday != "" {
+		setFields["profile.birthday"] = custData.Birthday
 	}
-	if existing.Gender == "" && custData.Gender != "" {
-		setFields["gender"] = custData.Gender
+	if GetGenderFromCustomer(&existing) == "" && custData.Gender != "" {
+		setFields["profile.gender"] = custData.Gender
 	}
-	if existing.LivesIn == "" && custData.LivesIn != "" {
-		setFields["livesIn"] = custData.LivesIn
+	if GetLivesInFromCustomer(&existing) == "" && custData.LivesIn != "" {
+		setFields["profile.livesIn"] = custData.LivesIn
 	}
-	if len(existing.Addresses) == 0 && len(custData.Addresses) > 0 {
-		setFields["addresses"] = custData.Addresses
+	if len(GetAddressesFromCustomer(&existing)) == 0 && len(custData.Addresses) > 0 {
+		setFields["profile.addresses"] = custData.Addresses
 	}
-	if existing.ReferralCode == "" && custData.ReferralCode != "" {
-		setFields["referralCode"] = custData.ReferralCode
+	if GetReferralCodeFromCustomer(&existing) == "" && custData.ReferralCode != "" {
+		setFields["profile.referralCode"] = custData.ReferralCode
 	}
 	if len(setFields) == 0 {
 		return
@@ -589,26 +560,29 @@ func (s *CrmCustomerService) MergeProfileFromConversation(ctx context.Context, u
 		return
 	}
 	setFields := bson.M{}
-	if existing.Name == "" && custData.Name != "" {
-		setFields["name"] = custData.Name
+	if GetNameFromCustomer(&existing) == "" && custData.Name != "" {
+		setFields["profile.name"] = custData.Name
 	}
-	if len(existing.PhoneNumbers) == 0 && len(custData.Phones) > 0 {
-		setFields["phoneNumbers"] = normalizePhones(custData.Phones)
+	if len(GetPhoneNumbersFromCustomer(&existing)) == 0 && len(custData.Phones) > 0 {
+		setFields["profile.phoneNumbers"] = normalizePhones(custData.Phones)
 	}
-	if len(existing.Emails) == 0 && len(custData.Emails) > 0 {
-		setFields["emails"] = uniqueStrings(custData.Emails)
+	if len(GetEmailsFromCustomer(&existing)) == 0 && len(custData.Emails) > 0 {
+		setFields["profile.emails"] = uniqueStrings(custData.Emails)
 	}
-	if existing.Birthday == "" && custData.Birthday != "" {
-		setFields["birthday"] = custData.Birthday
+	if GetBirthdayFromCustomer(&existing) == "" && custData.Birthday != "" {
+		setFields["profile.birthday"] = custData.Birthday
 	}
-	if existing.Gender == "" && custData.Gender != "" {
-		setFields["gender"] = custData.Gender
+	if GetGenderFromCustomer(&existing) == "" && custData.Gender != "" {
+		setFields["profile.gender"] = custData.Gender
 	}
-	if existing.LivesIn == "" && custData.LivesIn != "" {
-		setFields["livesIn"] = custData.LivesIn
+	if GetLivesInFromCustomer(&existing) == "" && custData.LivesIn != "" {
+		setFields["profile.livesIn"] = custData.LivesIn
 	}
-	if len(existing.Addresses) == 0 && len(custData.Addresses) > 0 {
-		setFields["addresses"] = custData.Addresses
+	if len(GetAddressesFromCustomer(&existing)) == 0 && len(custData.Addresses) > 0 {
+		setFields["profile.addresses"] = custData.Addresses
+	}
+	if GetReferralCodeFromCustomer(&existing) == "" && custData.ReferralCode != "" {
+		setFields["profile.referralCode"] = custData.ReferralCode
 	}
 	if len(setFields) == 0 {
 		return
@@ -630,7 +604,8 @@ func (s *CrmCustomerService) logCustomerCreatedFromSource(ctx context.Context, u
 	}
 	metadata := map[string]interface{}{"source": source}
 	if cust, err := s.FindOne(ctx, bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}, nil); err == nil {
-		MergeSnapshotIntoMetadata(metadata, BuildSnapshotForNewCustomer(&cust, activityAt, true))
+		metricsOverride := s.GetMetricsForSnapshotAt(ctx, &cust, activityAt)
+		MergeSnapshotIntoMetadata(metadata, BuildSnapshotForNewCustomer(&cust, activityAt, true, metricsOverride))
 	}
 	sourceRef := map[string]interface{}{"sourceCustomerId": unifiedId}
 	_ = actSvc.LogActivity(ctx, LogActivityInput{

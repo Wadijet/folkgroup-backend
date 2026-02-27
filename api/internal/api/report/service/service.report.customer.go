@@ -10,6 +10,7 @@ import (
 
 	crmvc "meta_commerce/internal/api/crm/service"
 	reportdto "meta_commerce/internal/api/report/dto"
+	"meta_commerce/internal/api/report/layer3"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -99,6 +100,15 @@ func (s *ReportService) computeCustomerMetricsFromActivityHistory(ctx context.Co
 	momentumDist := make(map[string]int64)
 	ceoDist := make(map[string]int64)
 
+	// LTV theo từng nhóm (7 dimensions) — client derive totalLTV, vipLTV, avgLTV từ đây
+	valueLTV := make(map[string]float64)
+	journeyLTV := make(map[string]float64)
+	lifecycleLTV := make(map[string]float64)
+	channelLTV := make(map[string]float64)
+	loyaltyLTV := make(map[string]float64)
+	momentumLTV := make(map[string]float64)
+	ceoGroupLTV := make(map[string]float64)
+
 	totalCustomers := int64(0)
 	customersWithOrder := int64(0)
 	customersRepeat := int64(0)
@@ -106,17 +116,49 @@ func (s *ReportService) computeCustomerMetricsFromActivityHistory(ctx context.Co
 	vipInactiveCount := int64(0)
 	reactivationValue := 0.0
 	activeInPeriod := int64(0)
+	totalLTV := 0.0
+	vipLTV := 0.0
+
+	// Phân bố Lớp 3
+	firstPQ := make(map[string]int64)
+	firstEQ := make(map[string]int64)
+	firstEng := make(map[string]int64)
+	firstRT := make(map[string]int64)
+	firstRP := make(map[string]int64)
+	repeatRD := make(map[string]int64)
+	repeatRF := make(map[string]int64)
+	repeatSM := make(map[string]int64)
+	repeatPE := make(map[string]int64)
+	repeatEE := make(map[string]int64)
+	repeatUP := make(map[string]int64)
+	vipVD := make(map[string]int64)
+	vipST := make(map[string]int64)
+	vipPD := make(map[string]int64)
+	vipEL := make(map[string]int64)
+	vipRS := make(map[string]int64)
+	inactiveED := make(map[string]int64)
+	inactiveRP := make(map[string]int64)
+	engagedTemp := make(map[string]int64)
+	engagedDepth := make(map[string]int64)
+	engagedSource := make(map[string]int64)
+
+	inc := func(m map[string]int64, k string) {
+		if k == "" {
+			return
+		}
+		m[k]++
+	}
 
 	for _, m := range snapshotMap {
-		valueTier := getStrFromSnapshotMap(m, "valueTier")
-		lifecycleStage := getStrFromSnapshotMap(m, "lifecycleStage")
-		journeyStage := getStrFromSnapshotMap(m, "journeyStage")
-		channel := getStrFromSnapshotMap(m, "channel")
-		loyaltyStage := getStrFromSnapshotMap(m, "loyaltyStage")
-		momentumStage := getStrFromSnapshotMap(m, "momentumStage")
-		orderCount := getIntFromSnapshotMap(m, "orderCount")
-		totalSpent := getFloatFromSnapshotMap(m, "totalSpent")
-		lastOrderAt := getInt64FromSnapshotMap(m, "lastOrderAt")
+		valueTier := crmvc.GetStrFromNestedMetrics(m, "valueTier")
+		lifecycleStage := crmvc.GetStrFromNestedMetrics(m, "lifecycleStage")
+		journeyStage := crmvc.GetStrFromNestedMetrics(m, "journeyStage")
+		channel := crmvc.GetStrFromNestedMetrics(m, "channel")
+		loyaltyStage := crmvc.GetStrFromNestedMetrics(m, "loyaltyStage")
+		momentumStage := crmvc.GetStrFromNestedMetrics(m, "momentumStage")
+		orderCount := crmvc.GetIntFromNestedMetrics(m, "orderCount")
+		totalSpent := crmvc.GetFloatFromNestedMetrics(m, "totalSpent")
+		lastOrderAt := crmvc.GetInt64FromNestedMetrics(m, "lastOrderAt")
 
 		// Chuẩn hóa rỗng
 		if valueTier == "" {
@@ -145,6 +187,16 @@ func (s *ReportService) computeCustomerMetricsFromActivityHistory(ctx context.Co
 		loyaltyDist[loyaltyStage]++
 		momentumDist[momentumStage]++
 
+		// LTV theo từng nhóm
+		valueLTV[valueTier] += totalSpent
+		journeyLTV[journeyStage] += totalSpent
+		lifecycleLTV[lifecycleStage] += totalSpent
+		channelLTV[channel] += totalSpent
+		loyaltyLTV[loyaltyStage] += totalSpent
+		momentumLTV[momentumStage] += totalSpent
+		ceoGroup := computeCeoGroupForLTV(valueTier, lifecycleStage, journeyStage, loyaltyStage, momentumStage)
+		ceoGroupLTV[ceoGroup] += totalSpent
+
 		// CEO groups
 		if valueTier == "vip" && lifecycleStage == "active" {
 			ceoDist["vip_active"]++
@@ -153,6 +205,11 @@ func (s *ReportService) computeCustomerMetricsFromActivityHistory(ctx context.Co
 			ceoDist["vip_inactive"]++
 			vipInactiveCount++
 			reactivationValue += totalSpent
+		}
+		// Tổng giá trị tài sản (LTV)
+		totalLTV += totalSpent
+		if valueTier == "vip" {
+			vipLTV += totalSpent
 		}
 		if momentumStage == "rising" {
 			ceoDist["rising"]++
@@ -196,6 +253,42 @@ func (s *ReportService) computeCustomerMetricsFromActivityHistory(ctx context.Co
 				activeInPeriod++
 			}
 		}
+
+		// Lớp 3: derive và aggregate phân bố
+		agg := layer3.DeriveFromNested(m, endMs)
+		if agg != nil {
+			if agg.First != nil {
+				inc(firstPQ, agg.First.PurchaseQuality)
+				inc(firstEQ, agg.First.ExperienceQuality)
+				inc(firstEng, agg.First.EngagementAfterPurchase)
+				inc(firstRT, agg.First.ReorderTiming)
+				inc(firstRP, agg.First.RepeatProbability)
+			}
+			if agg.Repeat != nil {
+				inc(repeatRD, agg.Repeat.RepeatDepth)
+				inc(repeatRF, agg.Repeat.RepeatFrequency)
+				inc(repeatSM, agg.Repeat.SpendMomentum)
+				inc(repeatPE, agg.Repeat.ProductExpansion)
+				inc(repeatEE, agg.Repeat.EmotionalEngagement)
+				inc(repeatUP, agg.Repeat.UpgradePotential)
+			}
+			if agg.Vip != nil {
+				inc(vipVD, agg.Vip.VipDepth)
+				inc(vipST, agg.Vip.SpendTrend)
+				inc(vipPD, agg.Vip.ProductDiversity)
+				inc(vipEL, agg.Vip.EngagementLevel)
+				inc(vipRS, agg.Vip.RiskScore)
+			}
+			if agg.Inactive != nil {
+				inc(inactiveED, agg.Inactive.EngagementDrop)
+				inc(inactiveRP, agg.Inactive.ReactivationPotential)
+			}
+			if agg.Engaged != nil {
+				inc(engagedTemp, agg.Engaged.ConversationTemperature)
+				inc(engagedDepth, agg.Engaged.EngagementDepth)
+				inc(engagedSource, agg.Engaged.SourceType)
+			}
+		}
 	}
 
 	repeatRate := 0.0
@@ -203,15 +296,25 @@ func (s *ReportService) computeCustomerMetricsFromActivityHistory(ctx context.Co
 		repeatRate = float64(customersRepeat) / float64(customersWithOrder)
 	}
 
+	avgLTV := 0.0
+	if totalCustomers > 0 {
+		avgLTV = totalLTV / float64(totalCustomers)
+	}
+
 	// Cấu trúc nested — dễ đọc, dễ mở rộng
 	metrics := map[string]interface{}{
 		"summary": map[string]interface{}{
 			"totalCustomers":       totalCustomers,
+			"customersWithOrder":   customersWithOrder,
+			"customersRepeat":      customersRepeat,
 			"newCustomersInPeriod": newInPeriod,
 			"repeatRate":           repeatRate,
 			"vipInactiveCount":     vipInactiveCount,
 			"reactivationValue":    int64(reactivationValue),
 			"activeInPeriod":       activeInPeriod,
+			"totalLTV":             totalLTV,
+			"avgLTV":               avgLTV,
+			"vipLTV":               vipLTV,
 		},
 		"valueDistribution": map[string]interface{}{
 			"vip": valueDist["vip"], "high": valueDist["high"], "medium": valueDist["medium"],
@@ -241,69 +344,78 @@ func (s *ReportService) computeCustomerMetricsFromActivityHistory(ctx context.Co
 			"vip_active": ceoDist["vip_active"], "vip_inactive": ceoDist["vip_inactive"], "rising": ceoDist["rising"],
 			"new": ceoDist["new"], "one_time": ceoDist["one_time"], "dead": ceoDist["dead"],
 		},
+		"valueLTV": map[string]interface{}{
+			"vip": valueLTV["vip"], "high": valueLTV["high"], "medium": valueLTV["medium"],
+			"low": valueLTV["low"], "new": valueLTV["new"],
+		},
+		"journeyLTV": map[string]interface{}{
+			"visitor": journeyLTV["visitor"], "engaged": journeyLTV["engaged"], "first": journeyLTV["first"],
+			"repeat": journeyLTV["repeat"], "vip": journeyLTV["vip"], "inactive": journeyLTV["inactive"],
+		},
+		"lifecycleLTV": map[string]interface{}{
+			"active": lifecycleLTV["active"], "cooling": lifecycleLTV["cooling"], "inactive": lifecycleLTV["inactive"],
+			"dead": lifecycleLTV["dead"], "never_purchased": lifecycleLTV["never_purchased"],
+		},
+		"channelLTV": map[string]interface{}{
+			"online": channelLTV["online"], "offline": channelLTV["offline"],
+			"omnichannel": channelLTV["omnichannel"], "unspecified": channelLTV["_unspecified"],
+		},
+		"loyaltyLTV": map[string]interface{}{
+			"core": loyaltyLTV["core"], "repeat": loyaltyLTV["repeat"],
+			"one_time": loyaltyLTV["one_time"], "unspecified": loyaltyLTV["_unspecified"],
+		},
+		"momentumLTV": map[string]interface{}{
+			"rising": momentumLTV["rising"], "stable": momentumLTV["stable"], "declining": momentumLTV["declining"],
+			"lost": momentumLTV["lost"], "unspecified": momentumLTV["_unspecified"],
+		},
+		"ceoGroupLTV": map[string]interface{}{
+			"vip_active": ceoGroupLTV["vip_active"], "vip_inactive": ceoGroupLTV["vip_inactive"],
+			"rising": ceoGroupLTV["rising"], "new": ceoGroupLTV["new"],
+			"one_time": ceoGroupLTV["one_time"], "dead": ceoGroupLTV["dead"], "other": ceoGroupLTV["_other"],
+		},
+		"firstLayer3": map[string]interface{}{
+			"purchaseQuality": firstPQ, "experienceQuality": firstEQ, "engagementAfterPurchase": firstEng,
+			"reorderTiming": firstRT, "repeatProbability": firstRP,
+		},
+		"repeatLayer3": map[string]interface{}{
+			"repeatDepth": repeatRD, "repeatFrequency": repeatRF, "spendMomentum": repeatSM,
+			"productExpansion": repeatPE, "emotionalEngagement": repeatEE, "upgradePotential": repeatUP,
+		},
+		"vipLayer3": map[string]interface{}{
+			"vipDepth": vipVD, "spendTrend": vipST, "productDiversity": vipPD,
+			"engagementLevel": vipEL, "riskScore": vipRS,
+		},
+		"inactiveLayer3": map[string]interface{}{
+			"engagementDrop": inactiveED, "reactivationPotential": inactiveRP,
+		},
+		"engagedLayer3": map[string]interface{}{
+			"conversationTemperature": engagedTemp, "engagementDepth": engagedDepth, "sourceType": engagedSource,
+		},
 	}
 	return metrics, nil
 }
 
-func getStrFromSnapshotMap(m map[string]interface{}, key string) string {
-	v, ok := m[key]
-	if !ok || v == nil {
-		return ""
+// computeCeoGroupForLTV gán mỗi khách vào đúng 1 nhóm CEO (mutually exclusive) để tính LTV.
+func computeCeoGroupForLTV(valueTier, lifecycleStage, journeyStage, loyaltyStage, momentumStage string) string {
+	if valueTier == "vip" && lifecycleStage == "active" {
+		return "vip_active"
 	}
-	if s, ok := v.(string); ok {
-		return s
+	if valueTier == "vip" && (lifecycleStage == "inactive" || lifecycleStage == "dead") {
+		return "vip_inactive"
 	}
-	return ""
-}
-
-func getIntFromSnapshotMap(m map[string]interface{}, key string) int {
-	v, ok := m[key]
-	if !ok || v == nil {
-		return 0
+	if momentumStage == "rising" {
+		return "rising"
 	}
-	switch x := v.(type) {
-	case int:
-		return x
-	case int64:
-		return int(x)
-	case float64:
-		return int(x)
-	case int32:
-		return int(x)
+	if journeyStage == "first" || valueTier == "new" {
+		return "new"
 	}
-	return 0
-}
-
-func getInt64FromSnapshotMap(m map[string]interface{}, key string) int64 {
-	v, ok := m[key]
-	if !ok || v == nil {
-		return 0
+	if loyaltyStage == "one_time" {
+		return "one_time"
 	}
-	switch x := v.(type) {
-	case int64:
-		return x
-	case int:
-		return int64(x)
-	case float64:
-		return int64(x)
+	if lifecycleStage == "dead" {
+		return "dead"
 	}
-	return 0
-}
-
-func getFloatFromSnapshotMap(m map[string]interface{}, key string) float64 {
-	v, ok := m[key]
-	if !ok || v == nil {
-		return 0
-	}
-	switch x := v.(type) {
-	case float64:
-		return x
-	case int:
-		return float64(x)
-	case int64:
-		return float64(x)
-	}
-	return 0
+	return "_other"
 }
 
 // GetSnapshotForCustomersDashboard lấy KPI và phân bố từ report_snapshots cho period cuối (hệ CRM).
@@ -331,11 +443,16 @@ func (s *ReportService) GetSnapshotForCustomersDashboard(ctx context.Context, ow
 	data := &reportdto.CustomersDashboardSnapshotData{
 		Summary: reportdto.CustomerSummary{
 			TotalCustomers:       metricAt(m, "summary", "totalCustomers", "totalCustomers"),
+			CustomersWithOrder:   metricAt(m, "summary", "customersWithOrder", "customersWithOrder"),
+			CustomersRepeat:     metricAt(m, "summary", "customersRepeat", "customersRepeat"),
 			NewCustomersInPeriod: metricAt(m, "summary", "newCustomersInPeriod", "newCustomersInPeriod"),
 			RepeatRate:           metricAtFloat(m, "summary", "repeatRate", "repeatRate"),
 			VipInactiveCount:     metricAt(m, "summary", "vipInactiveCount", "vipInactiveCount"),
 			ReactivationValue:    metricAt(m, "summary", "reactivationValue", "reactivationValue"),
 			ActiveTodayCount:     metricAt(m, "summary", "activeInPeriod", "activeInPeriod"),
+			TotalLTV:             metricAtFloat(m, "summary", "totalLTV", "totalLTV"),
+			AvgLTV:               metricAtFloat(m, "summary", "avgLTV", "avgLTV"),
+			VipLTV:               metricAtFloat(m, "summary", "vipLTV", "vipLTV"),
 		},
 		ValueDistribution: reportdto.ValueDistribution{
 			Vip:    metricAtDist(m, "valueDistribution", "value", "vip"),
@@ -386,6 +503,87 @@ func (s *ReportService) GetSnapshotForCustomersDashboard(ctx context.Context, ow
 			OneTime:     metricAtDist(m, "ceoGroupDistribution", "ceo", "one_time"),
 			Dead:        metricAtDist(m, "ceoGroupDistribution", "ceo", "dead"),
 		},
+		ValueLTV: reportdto.ValueLTV{
+			Vip:    metricAtDistFloat(m, "valueLTV", "vip"),
+			High:   metricAtDistFloat(m, "valueLTV", "high"),
+			Medium: metricAtDistFloat(m, "valueLTV", "medium"),
+			Low:    metricAtDistFloat(m, "valueLTV", "low"),
+			New:    metricAtDistFloat(m, "valueLTV", "new"),
+		},
+		JourneyLTV: reportdto.JourneyLTV{
+			Visitor:  metricAtDistFloat(m, "journeyLTV", "visitor"),
+			Engaged:  metricAtDistFloat(m, "journeyLTV", "engaged"),
+			First:    metricAtDistFloat(m, "journeyLTV", "first"),
+			Repeat:   metricAtDistFloat(m, "journeyLTV", "repeat"),
+			Vip:      metricAtDistFloat(m, "journeyLTV", "vip"),
+			Inactive: metricAtDistFloat(m, "journeyLTV", "inactive"),
+		},
+		LifecycleLTV: reportdto.LifecycleLTV{
+			Active:         metricAtDistFloat(m, "lifecycleLTV", "active"),
+			Cooling:        metricAtDistFloat(m, "lifecycleLTV", "cooling"),
+			Inactive:       metricAtDistFloat(m, "lifecycleLTV", "inactive"),
+			Dead:           metricAtDistFloat(m, "lifecycleLTV", "dead"),
+			NeverPurchased: metricAtDistFloat(m, "lifecycleLTV", "never_purchased"),
+		},
+		ChannelLTV: reportdto.ChannelLTV{
+			Online:      metricAtDistFloat(m, "channelLTV", "online"),
+			Offline:     metricAtDistFloat(m, "channelLTV", "offline"),
+			Omnichannel: metricAtDistFloat(m, "channelLTV", "omnichannel"),
+			Unspecified: metricAtDistFloat(m, "channelLTV", "unspecified"),
+		},
+		LoyaltyLTV: reportdto.LoyaltyLTV{
+			Core:        metricAtDistFloat(m, "loyaltyLTV", "core"),
+			Repeat:      metricAtDistFloat(m, "loyaltyLTV", "repeat"),
+			OneTime:     metricAtDistFloat(m, "loyaltyLTV", "one_time"),
+			Unspecified: metricAtDistFloat(m, "loyaltyLTV", "unspecified"),
+		},
+		MomentumLTV: reportdto.MomentumLTV{
+			Rising:      metricAtDistFloat(m, "momentumLTV", "rising"),
+			Stable:     metricAtDistFloat(m, "momentumLTV", "stable"),
+			Declining:  metricAtDistFloat(m, "momentumLTV", "declining"),
+			Lost:       metricAtDistFloat(m, "momentumLTV", "lost"),
+			Unspecified: metricAtDistFloat(m, "momentumLTV", "unspecified"),
+		},
+		CeoGroupLTV: reportdto.CeoGroupLTV{
+			VipActive:   metricAtDistFloat(m, "ceoGroupLTV", "vip_active"),
+			VipInactive: metricAtDistFloat(m, "ceoGroupLTV", "vip_inactive"),
+			Rising:      metricAtDistFloat(m, "ceoGroupLTV", "rising"),
+			New:         metricAtDistFloat(m, "ceoGroupLTV", "new"),
+			OneTime:     metricAtDistFloat(m, "ceoGroupLTV", "one_time"),
+			Dead:        metricAtDistFloat(m, "ceoGroupLTV", "dead"),
+			Other:       metricAtDistFloat(m, "ceoGroupLTV", "other"),
+		},
+		FirstLayer3: reportdto.FirstLayer3Distribution{
+			PurchaseQuality:        metricAtLayer3Map(m, "firstLayer3", "purchaseQuality"),
+			ExperienceQuality:      metricAtLayer3Map(m, "firstLayer3", "experienceQuality"),
+			EngagementAfterPurchase: metricAtLayer3Map(m, "firstLayer3", "engagementAfterPurchase"),
+			ReorderTiming:          metricAtLayer3Map(m, "firstLayer3", "reorderTiming"),
+			RepeatProbability:      metricAtLayer3Map(m, "firstLayer3", "repeatProbability"),
+		},
+		RepeatLayer3: reportdto.RepeatLayer3Distribution{
+			RepeatDepth:         metricAtLayer3Map(m, "repeatLayer3", "repeatDepth"),
+			RepeatFrequency:     metricAtLayer3Map(m, "repeatLayer3", "repeatFrequency"),
+			SpendMomentum:       metricAtLayer3Map(m, "repeatLayer3", "spendMomentum"),
+			ProductExpansion:    metricAtLayer3Map(m, "repeatLayer3", "productExpansion"),
+			EmotionalEngagement: metricAtLayer3Map(m, "repeatLayer3", "emotionalEngagement"),
+			UpgradePotential:    metricAtLayer3Map(m, "repeatLayer3", "upgradePotential"),
+		},
+		VipLayer3: reportdto.VipLayer3Distribution{
+			VipDepth:         metricAtLayer3Map(m, "vipLayer3", "vipDepth"),
+			SpendTrend:       metricAtLayer3Map(m, "vipLayer3", "spendTrend"),
+			ProductDiversity: metricAtLayer3Map(m, "vipLayer3", "productDiversity"),
+			EngagementLevel:  metricAtLayer3Map(m, "vipLayer3", "engagementLevel"),
+			RiskScore:        metricAtLayer3Map(m, "vipLayer3", "riskScore"),
+		},
+		InactiveLayer3: reportdto.InactiveLayer3Distribution{
+			EngagementDrop:        metricAtLayer3Map(m, "inactiveLayer3", "engagementDrop"),
+			ReactivationPotential: metricAtLayer3Map(m, "inactiveLayer3", "reactivationPotential"),
+		},
+		EngagedLayer3: reportdto.EngagedLayer3Distribution{
+			ConversationTemperature: metricAtLayer3Map(m, "engagedLayer3", "conversationTemperature"),
+			EngagementDepth:         metricAtLayer3Map(m, "engagedLayer3", "engagementDepth"),
+			SourceType:              metricAtLayer3Map(m, "engagedLayer3", "sourceType"),
+		},
 	}
 	return data, periodKey, snap.ComputedAt, nil
 }
@@ -412,6 +610,31 @@ func metricAtDist(m map[string]interface{}, distKey, flatPrefix, key string) int
 		return snapshotMetricToInt64(g[key])
 	}
 	return snapshotMetricToInt64(m[flatPrefix+"_"+key])
+}
+
+// metricAtDistFloat lấy float64 từ LTV distribution nested (m[LTVKey][key]).
+func metricAtDistFloat(m map[string]interface{}, ltvKey, key string) float64 {
+	if g, ok := m[ltvKey].(map[string]interface{}); ok {
+		return snapshotMetricToFloat64(g[key])
+	}
+	return 0
+}
+
+// metricAtLayer3Map lấy map[string]int64 từ Lớp 3 distribution (m[group][key]).
+func metricAtLayer3Map(m map[string]interface{}, group, key string) map[string]int64 {
+	groupMap, ok := m[group].(map[string]interface{})
+	if !ok || groupMap == nil {
+		return nil
+	}
+	inner, ok := groupMap[key].(map[string]interface{})
+	if !ok || inner == nil {
+		return nil
+	}
+	out := make(map[string]int64)
+	for k, v := range inner {
+		out[k] = snapshotMetricToInt64(v)
+	}
+	return out
 }
 
 // snapshotMetricToInt64 chuyển giá trị metric từ snapshot sang int64 (an toàn).

@@ -25,7 +25,7 @@ const (
 type Priority int
 
 const (
-	PriorityCritical Priority = 1 // CRM Ingest — real-time từ hook, cần ưu tiên cao nhất
+	PriorityCritical Priority = 1 // CRM Ingest, Delivery Processor — real-time + cảnh báo hệ thống, không dừng hẳn
 	PriorityHigh     Priority = 2 // Report Dirty — báo cáo dashboard
 	PriorityNormal   Priority = 3 // CRM Bulk — user gọi API
 	PriorityLow      Priority = 4 // Command Cleanup, Agent Command Cleanup

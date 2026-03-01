@@ -16,6 +16,7 @@ import (
 	"meta_commerce/internal/delivery/channels"
 	"meta_commerce/internal/logger"
 	"meta_commerce/internal/notification"
+	"meta_commerce/internal/worker"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -324,10 +325,14 @@ func (p *Processor) StartCleanupJob(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				if worker.ShouldThrottle(worker.PriorityLow) {
+					continue
+				}
 				log := logger.GetAppLogger()
 				
 				// Tìm items bị kẹt
-				stuckItems, err := p.queueService.FindStuckItems(ctx, staleMinutes, batchSize)
+				effBatch := worker.GetEffectiveBatchSize(batchSize, worker.PriorityLow)
+				stuckItems, err := p.queueService.FindStuckItems(ctx, staleMinutes, effBatch)
 				if err != nil {
 					log.WithError(err).Error("📦 [CLEANUP] Failed to find stuck queue items")
 					continue
@@ -438,8 +443,16 @@ func (p *Processor) Start(ctx context.Context) {
 				case <-ctx.Done():
 					return
 				case <-ticker.C:
+					if worker.ShouldThrottle(worker.PriorityCritical) {
+						continue
+					}
+					effInterval := worker.GetEffectiveInterval(interval, worker.PriorityCritical)
+					if effInterval > interval {
+						time.Sleep(effInterval - interval)
+					}
 					log := logger.GetAppLogger()
-					items, err := p.queueService.FindPending(ctx, batchSize)
+					effBatch := worker.GetEffectiveBatchSize(batchSize, worker.PriorityCritical)
+					items, err := p.queueService.FindPending(ctx, effBatch)
 					if err != nil {
 						log.WithError(err).Error("📦 [DELIVERY] Failed to find pending queue items")
 						continue

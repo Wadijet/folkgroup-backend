@@ -43,7 +43,7 @@ func (s *CrmCustomerService) SyncAllCustomers(ctx context.Context, ownerOrgID pr
 		for posCursor.Next(ctx) {
 			var doc pcmodels.PcPosCustomer
 			if posCursor.Decode(&doc) == nil {
-				if e := s.MergeFromPosCustomer(ctx, &doc); e == nil {
+				if e := s.MergeFromPosCustomer(ctx, &doc, 0); e == nil {
 					posCount++
 				}
 			}

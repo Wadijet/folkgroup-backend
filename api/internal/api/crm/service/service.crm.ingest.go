@@ -29,7 +29,7 @@ func (s *CrmCustomerService) IngestOrderTouchpoint(ctx context.Context, customer
 		if posColl != nil {
 			var posCustomer pcmodels.PcPosCustomer
 			if posColl.FindOne(ctx, bson.M{"customerId": customerId, "ownerOrganizationId": ownerOrgID}).Decode(&posCustomer) == nil {
-				_ = s.MergeFromPosCustomer(ctx, &posCustomer)
+				_ = s.MergeFromPosCustomer(ctx, &posCustomer, getOrderTimestamp(orderDoc))
 				unifiedId, found = s.ResolveUnifiedId(ctx, customerId, ownerOrgID)
 			}
 		}
@@ -364,7 +364,7 @@ func (s *CrmCustomerService) IngestConversationTouchpoint(ctx context.Context, c
 		if posColl != nil {
 			var posCustomer pcmodels.PcPosCustomer
 			if posColl.FindOne(ctx, bson.M{"customerId": customerId, "ownerOrganizationId": ownerOrgID}).Decode(&posCustomer) == nil {
-				_ = s.MergeFromPosCustomer(ctx, &posCustomer)
+				_ = s.MergeFromPosCustomer(ctx, &posCustomer, getConversationTimestamp(convDoc))
 				unifiedId, found = s.ResolveUnifiedId(ctx, customerId, ownerOrgID)
 			}
 		}

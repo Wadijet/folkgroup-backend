@@ -169,6 +169,48 @@ func (h *CrmCustomerHandler) HandleRebuildCrm(c fiber.Ctx) error {
 	})
 }
 
+// HandleRecalculateAllCustomers xử lý POST /customers/recalculate-all — tính toán lại tất cả khách hàng hiện có.
+// Body: ownerOrganizationId, limit (0 = tất cả).
+func (h *CrmCustomerHandler) HandleRecalculateAllCustomers(c fiber.Ctx) error {
+	return basehdl.SafeHandlerWrapper(c, func() error {
+		var input struct {
+			OwnerOrganizationId string `json:"ownerOrganizationId"`
+			Limit               int    `json:"limit"`
+		}
+		_ = c.Bind().Body(&input)
+		orgID := getActiveOrganizationID(c)
+		if input.OwnerOrganizationId != "" {
+			parsed, err := primitive.ObjectIDFromHex(input.OwnerOrganizationId)
+			if err != nil {
+				c.Status(common.StatusBadRequest).JSON(fiber.Map{
+					"code": common.ErrCodeValidationInput.Code, "message": "ownerOrganizationId không hợp lệ", "status": "error",
+				})
+				return nil
+			}
+			orgID = &parsed
+		}
+		if orgID == nil || orgID.IsZero() {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationInput.Code, "message": "Vui lòng cung cấp ownerOrganizationId hoặc chọn tổ chức", "status": "error",
+			})
+			return nil
+		}
+		result, err := h.CustomerService.RecalculateAllCustomers(c.Context(), *orgID, input.Limit)
+		if err != nil {
+			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
+				"code": common.ErrCodeDatabase.Code, "message": "Lỗi tính toán lại khách hàng: " + err.Error(), "status": "error",
+			})
+			return nil
+		}
+		c.Status(common.StatusOK).JSON(fiber.Map{
+			"code": common.StatusOK, "message": "Đã tính toán lại tất cả khách hàng",
+			"data": result,
+			"status": "success",
+		})
+		return nil
+	})
+}
+
 // HandleRecalculateCustomer xử lý POST /customers/:unifiedId/recalculate — cập nhật toàn bộ thông tin khách từ tất cả nguồn.
 func (h *CrmCustomerHandler) HandleRecalculateCustomer(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {

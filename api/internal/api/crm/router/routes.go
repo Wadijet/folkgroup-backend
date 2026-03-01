@@ -35,6 +35,9 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 	// POST /customers/rebuild — sync rồi backfill. Query: sources=pos,fb types=order,conversation,note
 	apirouter.RegisterRouteWithMiddleware(v1, "/customers", "POST", "/rebuild", middlewares, customerHandler.HandleRebuildCrm)
 
+	// POST /customers/recalculate-all — tính toán lại tất cả khách hàng hiện có. Body: ownerOrganizationId, limit (0=tất cả)
+	apirouter.RegisterRouteWithMiddleware(v1, "/customers", "POST", "/recalculate-all", middlewares, customerHandler.HandleRecalculateAllCustomers)
+
 	// POST /customers/:unifiedId/recalculate — cập nhật toàn bộ thông tin khách từ tất cả nguồn
 	apirouter.RegisterRouteWithMiddleware(v1, "/customers", "POST", "/:unifiedId/recalculate", middlewares, customerHandler.HandleRecalculateCustomer)
 

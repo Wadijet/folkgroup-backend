@@ -149,3 +149,16 @@ type CrmSyncResult struct {
 	PosProcessed int `json:"posProcessed"`
 	FbProcessed  int `json:"fbProcessed"`
 }
+
+// CrmRecalculateAllInput input cho recalculate tất cả khách hàng (ngược với backfill).
+type CrmRecalculateAllInput struct {
+	OwnerOrganizationId string `json:"ownerOrganizationId"` // Bắt buộc
+	Limit               int    `json:"limit,omitempty"`    // Giới hạn số khách xử lý (0 = tất cả)
+}
+
+// CrmRecalculateAllResult kết quả recalculate tất cả khách hàng.
+type CrmRecalculateAllResult struct {
+	TotalProcessed int `json:"totalProcessed"` // Số khách đã tính toán lại thành công
+	TotalFailed    int `json:"totalFailed"`    // Số khách lỗi khi tính toán
+	FailedIds      []string `json:"failedIds,omitempty"` // Danh sách unifiedId lỗi (tối đa 10 mẫu)
+}

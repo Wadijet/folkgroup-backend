@@ -33,7 +33,7 @@ func handleCrmDataChange(ctx context.Context, e events.DataChangeEvent) {
 	switch e.CollectionName {
 	case global.MongoDB_ColNames.PcPosCustomers:
 		if doc, ok := toPcPosCustomer(e.Document); ok {
-			if err := customerSvc.MergeFromPosCustomer(ctx, doc); err != nil {
+			if err := customerSvc.MergeFromPosCustomer(ctx, doc, 0); err != nil {
 				logger.GetAppLogger().WithError(err).WithField("customerId", doc.CustomerId).Warn("[CRM] MergeFromPosCustomer lỗi")
 			}
 		}

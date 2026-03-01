@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	crmdto "meta_commerce/internal/api/crm/dto"
 	crmmodels "meta_commerce/internal/api/crm/models"
 	fbmodels "meta_commerce/internal/api/fb/models"
 	pcmodels "meta_commerce/internal/api/pc/models"
@@ -144,6 +145,36 @@ func (s *CrmCustomerService) RecalculateCustomerFromAllSources(ctx context.Conte
 		ClassificationUpdated: true,
 		ActivitiesBackfilled:  activitiesBackfilled,
 	}, nil
+}
+
+// RecalculateAllCustomers tính toán lại tất cả khách hàng hiện có của org (ngược với backfill).
+// Lặp qua crm_customers theo ownerOrganizationId, gọi RecalculateCustomerFromAllSources cho từng khách.
+// limit <= 0: xử lý tất cả; limit > 0: giới hạn số khách.
+func (s *CrmCustomerService) RecalculateAllCustomers(ctx context.Context, ownerOrgID primitive.ObjectID, limit int) (*crmdto.CrmRecalculateAllResult, error) {
+	useLimit := limit > 0
+	filter := bson.M{"ownerOrganizationId": ownerOrgID}
+	opts := mongoopts.Find().SetProjection(bson.M{"unifiedId": 1})
+	if useLimit {
+		opts.SetLimit(int64(limit))
+	}
+	customers, err := s.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, common.ConvertMongoError(err)
+	}
+	result := &crmdto.CrmRecalculateAllResult{}
+	const maxFailedIds = 10
+	for _, c := range customers {
+		_, err := s.RecalculateCustomerFromAllSources(ctx, c.UnifiedId, ownerOrgID)
+		if err != nil {
+			result.TotalFailed++
+			if len(result.FailedIds) < maxFailedIds {
+				result.FailedIds = append(result.FailedIds, c.UnifiedId)
+			}
+			continue
+		}
+		result.TotalProcessed++
+	}
+	return result, nil
 }
 
 // rebuildProfileFromAllSources xây dựng profile từ POS + FB + orders + conversations.

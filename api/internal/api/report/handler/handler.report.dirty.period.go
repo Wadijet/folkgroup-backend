@@ -26,7 +26,7 @@ func NewReportDirtyPeriodHandler() (*ReportDirtyPeriodHandler, error) {
 	}
 	hdl.SetFilterOptions(basehdl.FilterOptions{
 		DeniedFields:     []string{},
-		AllowedOperators: []string{"$eq", "$gt", "$gte", "$lt", "$lte", "$in", "$nin", "$exists"},
+		AllowedOperators: []string{"$eq", "$ne", "$gt", "$gte", "$lt", "$lte", "$in", "$nin", "$exists"},
 		MaxFields:        10,
 	})
 	return hdl, nil

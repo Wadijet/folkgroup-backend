@@ -77,18 +77,6 @@ func ParseFilterValues(s string) []string {
 	return out
 }
 
-// CeoGroupItem 1 nhóm trong 6 nhóm CEO.
-type CeoGroupItem struct {
-	Group   string                    `json:"group"`   // vip_active|vip_inactive|rising|new|one_time|dead
-	Count   int                       `json:"count"`
-	TopItems []CrmDashboardCustomerItem `json:"topItems,omitempty"`
-}
-
-// CeoGroupsResult kết quả GET /dashboard/customers/ceo-groups.
-type CeoGroupsResult struct {
-	Groups []CeoGroupItem `json:"groups"`
-}
-
 // JourneyFunnelItem 1 stage trong funnel, kèm breakdown theo channel/value/lifecycle/loyalty/momentum.
 type JourneyFunnelItem struct {
 	Stage      string                 `json:"stage"`
@@ -461,46 +449,6 @@ func sortDashboardItems(items []CrmDashboardCustomerItem, field string, order in
 		// daysSinceLast
 		sort.Slice(items, cmpDaysSince)
 	}
-}
-
-// GetCeoGroups trả về 6 nhóm CEO với count và top items.
-func (s *CrmCustomerService) GetCeoGroups(ctx context.Context, ownerOrgID primitive.ObjectID, topLimit int) (*CeoGroupsResult, error) {
-	if topLimit <= 0 {
-		topLimit = 5
-	}
-	if topLimit > 20 {
-		topLimit = 20
-	}
-
-	items, _, err := s.ListCustomersForDashboard(ctx, ownerOrgID, &CrmDashboardFilters{Limit: aggregationLimit})
-	if err != nil {
-		return nil, err
-	}
-
-	groups := []string{"vip_active", "vip_inactive", "rising", "new", "one_time", "dead"}
-	result := make([]CeoGroupItem, 0, len(groups))
-
-	for _, g := range groups {
-		var groupItems []CrmDashboardCustomerItem
-		for _, it := range items {
-			if matchCeoGroup(it, g) {
-				groupItems = append(groupItems, it)
-			}
-		}
-		// Sort by totalSpend desc cho top items
-		sort.Slice(groupItems, func(i, j int) bool { return groupItems[i].TotalSpend > groupItems[j].TotalSpend })
-		topItems := groupItems
-		if len(topItems) > topLimit {
-			topItems = topItems[:topLimit]
-		}
-		result = append(result, CeoGroupItem{
-			Group:    g,
-			Count:    len(groupItems),
-			TopItems: topItems,
-		})
-	}
-
-	return &CeoGroupsResult{Groups: result}, nil
 }
 
 // GetJourneyFunnel trả về số lượng từng stage Journey, mỗi stage có breakdown theo value/lifecycle/loyalty/momentum.

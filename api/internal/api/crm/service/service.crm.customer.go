@@ -63,7 +63,7 @@ func (s *CrmCustomerService) tryMergeFromSource(ctx context.Context, customerId 
 	if ok {
 		var doc pcmodels.PcPosCustomer
 		if posColl.FindOne(ctx, bson.M{"customerId": customerId, "ownerOrganizationId": ownerOrgID}).Decode(&doc) == nil {
-			return s.MergeFromPosCustomer(ctx, &doc) == nil
+			return s.MergeFromPosCustomer(ctx, &doc, 0) == nil
 		}
 	}
 	fbColl, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.FbCustomers)

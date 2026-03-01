@@ -33,40 +33,21 @@ func (s *ReportService) GetCustomersTrendWithComparison(ctx context.Context, own
 	}
 	applyCustomersDefaults(params)
 
-	// 1. Snapshot hiện tại từ report_snapshots (hệ CRM)
-	snapData, snapPeriodKey, snapComputedAt, err := s.GetSnapshotForCustomersDashboard(ctx, ownerOrgID, params)
-	if err != nil {
-		return nil, fmt.Errorf("get snapshot: %w", err)
+	// 1. Snapshot: phát sinh (ceoGroupIn/Out) từ report_snapshots; Summary, CeoGroupDistribution từ CRM/API (Handler merge)
+	snapData, snapPeriodKey, snapComputedAt, _ := s.GetSnapshotForCustomersDashboard(ctx, ownerOrgID, params)
+	currentSnapshot := &reportdto.CustomersSnapshotResult{
+		Customers: nil, VipInactiveCustomers: nil, TotalCount: 0,
+		SnapshotSource: "realtime", SnapshotPeriodKey: snapPeriodKey, SnapshotComputedAt: snapComputedAt,
 	}
-	var currentSnapshot *reportdto.CustomersSnapshotResult
 	if snapData != nil {
-		currentSnapshot = &reportdto.CustomersSnapshotResult{
-			Summary:                snapData.Summary,
-			ValueDistribution:      snapData.ValueDistribution,
-			JourneyDistribution:    snapData.JourneyDistribution,
-			LifecycleDistribution:  snapData.LifecycleDistribution,
-			ChannelDistribution:    snapData.ChannelDistribution,
-			LoyaltyDistribution:    snapData.LoyaltyDistribution,
-			MomentumDistribution:   snapData.MomentumDistribution,
-			CeoGroupDistribution:  snapData.CeoGroupDistribution,
-			ValueLTV:               snapData.ValueLTV,
-			JourneyLTV:             snapData.JourneyLTV,
-			LifecycleLTV:           snapData.LifecycleLTV,
-			ChannelLTV:             snapData.ChannelLTV,
-			LoyaltyLTV:             snapData.LoyaltyLTV,
-			MomentumLTV:            snapData.MomentumLTV,
-			CeoGroupLTV:            snapData.CeoGroupLTV,
-			Customers:              nil, // Handler sẽ fill từ CrmCustomerService
-			VipInactiveCustomers:   nil,
-			TotalCount:             int(snapData.Summary.TotalCustomers),
-			SnapshotSource:         "report_snapshots",
-			SnapshotPeriodKey:      snapPeriodKey,
-			SnapshotComputedAt:     snapComputedAt,
-		}
-	} else {
-		// Fallback: build từ CrmCustomerService (Handler sẽ gọi và merge)
-		currentSnapshot = &reportdto.CustomersSnapshotResult{
-			SnapshotSource: "realtime",
+		currentSnapshot.CeoGroupIn = snapData.CeoGroupIn
+		currentSnapshot.CeoGroupOut = snapData.CeoGroupOut
+		currentSnapshot.SnapshotSource = "report_snapshots"
+	}
+	if endMs, err := s.GetEndMsForCustomersParams(params); err == nil {
+		startMs, _ := s.GetStartMsForCustomersParams(params)
+		if balance, err := s.GetPeriodEndBalance(ctx, ownerOrgID, endMs, startMs); err == nil {
+			currentSnapshot.CeoGroupDistribution = CeoGroupDistributionFromBalance(balance)
 		}
 	}
 
@@ -190,90 +171,51 @@ func getMondayOfWeek(t time.Time) time.Time {
 
 func buildComparison(curr, prev map[string]interface{}) map[string]reportdto.ComparisonItem {
 	out := make(map[string]reportdto.ComparisonItem)
-	// Flatten nested metrics để so sánh (path -> key trong comparison)
+	// Snapshot phát sinh: cấu trúc raw/layer1/layer2/layer3 (giống metricsSnapshot trong customer activity).
+	// Cấu trúc mới: mỗi metric có in/out trong cùng nhóm — path = raw.totalCustomers.in, layer2.valueTier.vip.in
 	pairs := []struct{ nested, flat string }{
-		{"summary.totalCustomers", "totalCustomers"},
-		{"summary.customersWithOrder", "customersWithOrder"},
-		{"summary.customersRepeat", "customersRepeat"},
-		{"summary.newCustomersInPeriod", "newCustomersInPeriod"},
-		{"summary.repeatRate", "repeatRate"},
-		{"summary.vipInactiveCount", "vipInactiveCount"},
-		{"summary.reactivationValue", "reactivationValue"},
-		{"summary.activeInPeriod", "activeInPeriod"},
-		{"summary.totalLTV", "totalLTV"},
-		{"summary.avgLTV", "avgLTV"},
-		{"summary.vipLTV", "vipLTV"},
-		{"valueDistribution.vip", "value_vip"},
-		{"valueDistribution.high", "value_high"},
-		{"valueDistribution.medium", "value_medium"},
-		{"valueDistribution.low", "value_low"},
-		{"valueDistribution.new", "value_new"},
-		{"journeyDistribution.visitor", "journey_visitor"},
-		{"journeyDistribution.engaged", "journey_engaged"},
-		{"journeyDistribution.first", "journey_first"},
-		{"journeyDistribution.repeat", "journey_repeat"},
-		{"journeyDistribution.vip", "journey_vip"},
-		{"journeyDistribution.inactive", "journey_inactive"},
-		{"lifecycleDistribution.active", "lifecycle_active"},
-		{"lifecycleDistribution.cooling", "lifecycle_cooling"},
-		{"lifecycleDistribution.inactive", "lifecycle_inactive"},
-		{"lifecycleDistribution.dead", "lifecycle_dead"},
-		{"lifecycleDistribution.never_purchased", "lifecycle_never_purchased"},
-		{"channelDistribution.online", "channel_online"},
-		{"channelDistribution.offline", "channel_offline"},
-		{"channelDistribution.omnichannel", "channel_omnichannel"},
-		{"channelDistribution.unspecified", "channel_unspecified"},
-		{"loyaltyDistribution.core", "loyalty_core"},
-		{"loyaltyDistribution.repeat", "loyalty_repeat"},
-		{"loyaltyDistribution.one_time", "loyalty_one_time"},
-		{"loyaltyDistribution.unspecified", "loyalty_unspecified"},
-		{"momentumDistribution.rising", "momentum_rising"},
-		{"momentumDistribution.stable", "momentum_stable"},
-		{"momentumDistribution.declining", "momentum_declining"},
-		{"momentumDistribution.lost", "momentum_lost"},
-		{"momentumDistribution.unspecified", "momentum_unspecified"},
-		{"ceoGroupDistribution.vip_active", "ceo_vip_active"},
-		{"ceoGroupDistribution.vip_inactive", "ceo_vip_inactive"},
-		{"ceoGroupDistribution.rising", "ceo_rising"},
-		{"ceoGroupDistribution.new", "ceo_new"},
-		{"ceoGroupDistribution.one_time", "ceo_one_time"},
-		{"ceoGroupDistribution.dead", "ceo_dead"},
-		{"valueLTV.vip", "valueLTV_vip"},
-		{"valueLTV.high", "valueLTV_high"},
-		{"valueLTV.medium", "valueLTV_medium"},
-		{"valueLTV.low", "valueLTV_low"},
-		{"valueLTV.new", "valueLTV_new"},
-		{"journeyLTV.visitor", "journeyLTV_visitor"},
-		{"journeyLTV.engaged", "journeyLTV_engaged"},
-		{"journeyLTV.first", "journeyLTV_first"},
-		{"journeyLTV.repeat", "journeyLTV_repeat"},
-		{"journeyLTV.vip", "journeyLTV_vip"},
-		{"journeyLTV.inactive", "journeyLTV_inactive"},
-		{"lifecycleLTV.active", "lifecycleLTV_active"},
-		{"lifecycleLTV.cooling", "lifecycleLTV_cooling"},
-		{"lifecycleLTV.inactive", "lifecycleLTV_inactive"},
-		{"lifecycleLTV.dead", "lifecycleLTV_dead"},
-		{"lifecycleLTV.never_purchased", "lifecycleLTV_never_purchased"},
-		{"channelLTV.online", "channelLTV_online"},
-		{"channelLTV.offline", "channelLTV_offline"},
-		{"channelLTV.omnichannel", "channelLTV_omnichannel"},
-		{"channelLTV.unspecified", "channelLTV_unspecified"},
-		{"loyaltyLTV.core", "loyaltyLTV_core"},
-		{"loyaltyLTV.repeat", "loyaltyLTV_repeat"},
-		{"loyaltyLTV.one_time", "loyaltyLTV_one_time"},
-		{"loyaltyLTV.unspecified", "loyaltyLTV_unspecified"},
-		{"momentumLTV.rising", "momentumLTV_rising"},
-		{"momentumLTV.stable", "momentumLTV_stable"},
-		{"momentumLTV.declining", "momentumLTV_declining"},
-		{"momentumLTV.lost", "momentumLTV_lost"},
-		{"momentumLTV.unspecified", "momentumLTV_unspecified"},
-		{"ceoGroupLTV.vip_active", "ceoGroupLTV_vip_active"},
-		{"ceoGroupLTV.vip_inactive", "ceoGroupLTV_vip_inactive"},
-		{"ceoGroupLTV.rising", "ceoGroupLTV_rising"},
-		{"ceoGroupLTV.new", "ceoGroupLTV_new"},
-		{"ceoGroupLTV.one_time", "ceoGroupLTV_one_time"},
-		{"ceoGroupLTV.dead", "ceoGroupLTV_dead"},
-		{"ceoGroupLTV.other", "ceoGroupLTV_other"},
+		{"raw.totalCustomers.in", "totalCustomersIn"},
+		{"raw.totalCustomers.out", "totalCustomersOut"},
+		{"raw.newCustomersInPeriod.in", "newCustomersInPeriod"},
+		{"raw.activeInPeriod.in", "activeInPeriod"},
+		{"raw.reactivationValue.in", "reactivationValueIn"},
+		{"raw.reactivationValue.out", "reactivationValueOut"},
+		{"layer2.valueTier.vip.in", "value_in_vip"},
+		{"layer2.valueTier.high.in", "value_in_high"},
+		{"layer2.valueTier.medium.in", "value_in_medium"},
+		{"layer2.valueTier.low.in", "value_in_low"},
+		{"layer2.valueTier.new.in", "value_in_new"},
+		{"layer2.valueTier.vip.out", "value_out_vip"},
+		{"layer2.valueTier.high.out", "value_out_high"},
+		{"layer1.journeyStage.visitor.in", "journey_in_visitor"},
+		{"layer1.journeyStage.engaged.in", "journey_in_engaged"},
+		{"layer1.journeyStage.first.in", "journey_in_first"},
+		{"layer1.journeyStage.repeat.in", "journey_in_repeat"},
+		{"layer1.journeyStage.vip.in", "journey_in_vip"},
+		{"layer1.journeyStage.inactive.in", "journey_in_inactive"},
+		{"layer2.lifecycleStage.active.in", "lifecycle_in_active"},
+		{"layer2.lifecycleStage.cooling.in", "lifecycle_in_cooling"},
+		{"layer2.lifecycleStage.inactive.in", "lifecycle_in_inactive"},
+		{"layer2.lifecycleStage.dead.in", "lifecycle_in_dead"},
+		{"layer2.ceoGroup.vip_active.in", "ceo_in_vip_active"},
+		{"layer2.ceoGroup.vip_inactive.in", "ceo_in_vip_inactive"},
+		{"layer2.ceoGroup.rising.in", "ceo_in_rising"},
+		{"layer2.ceoGroup.new.in", "ceo_in_new"},
+		{"layer2.ceoGroup.one_time.in", "ceo_in_one_time"},
+		{"layer2.ceoGroup.dead.in", "ceo_in_dead"},
+		{"layer2.ceoGroup.vip_active.out", "ceo_out_vip_active"},
+		{"layer2.ceoGroup.vip_inactive.out", "ceo_out_vip_inactive"},
+		{"layer2.ceoGroup.rising.out", "ceo_out_rising"},
+		{"layer2.ceoGroup.new.out", "ceo_out_new"},
+		{"layer2.ceoGroup.one_time.out", "ceo_out_one_time"},
+		{"layer2.ceoGroup.dead.out", "ceo_out_dead"},
+		{"layer2.valueTierLTV.vip.in", "valueLTV_in_vip"},
+		{"layer2.valueTierLTV.high.in", "valueLTV_in_high"},
+		{"layer2.valueTierLTV.vip.out", "valueLTV_out_vip"},
+		{"layer2.ceoGroupLTV.vip_active.in", "ceoGroupLTV_in_vip_active"},
+		{"layer2.ceoGroupLTV.vip_inactive.in", "ceoGroupLTV_in_vip_inactive"},
+		{"layer2.ceoGroupLTV.vip_active.out", "ceoGroupLTV_out_vip_active"},
+		{"layer2.ceoGroupLTV.vip_inactive.out", "ceoGroupLTV_out_vip_inactive"},
 	}
 	for _, p := range pairs {
 		cv := getMetricValue(curr, p.nested, p.flat)
@@ -289,17 +231,23 @@ func buildComparison(curr, prev map[string]interface{}) map[string]reportdto.Com
 	return out
 }
 
-// getMetricValue lấy float64 từ nested (group.key) hoặc flat (key) để backward compat.
+// getMetricValue lấy float64 từ nested path (vd: "summary.in.totalCustomers") hoặc flat key.
 func getMetricValue(m map[string]interface{}, nestedPath, flatKey string) float64 {
 	if m == nil {
 		return 0
 	}
-	// Thử nested: "summary.totalCustomers" -> m["summary"]["totalCustomers"]
-	if idx := strings.Index(nestedPath, "."); idx > 0 {
-		group, key := nestedPath[:idx], nestedPath[idx+1:]
-		if g, ok := m[group].(map[string]interface{}); ok {
-			return getFloatOrInt64(g[key])
+	// Thử nested: "summary.in.totalCustomers" -> m["summary"]["in"]["totalCustomers"]
+	parts := strings.Split(nestedPath, ".")
+	cur := m
+	for i := 0; i < len(parts)-1 && cur != nil; i++ {
+		if g, ok := cur[parts[i]].(map[string]interface{}); ok {
+			cur = g
+		} else {
+			return 0
 		}
+	}
+	if len(parts) > 0 && cur != nil {
+		return getFloatOrInt64(cur[parts[len(parts)-1]])
 	}
 	return getFloatOrInt64(m[flatKey])
 }
@@ -324,19 +272,20 @@ func getFloatOrInt64(v interface{}) float64 {
 
 // GetTransitionMatrix tính ma trận chuyển đổi giữa 2 chu kỳ theo dimension CRM.
 // dimension: journey|channel|value|lifecycle|loyalty|momentum|ceoGroup
+// periodType: day|week|month|year — xác định cách parse periodKey (vd: weekly thì periodKey là thứ Hai, endMs = cuối Chủ nhật).
 //
 // Cách đếm: Với mỗi unifiedId:
-//   1. getCustomerStateMapForPeriod(fromPeriod) → trạng thái khách tại cuối fromPeriod (snapshot cuối trước endMs)
-//   2. getCustomerStateMapForPeriod(toPeriod) → trạng thái khách tại cuối toPeriod
+//   1. getCustomerStateMapForPeriod(fromPeriod, periodType) → trạng thái khách tại cuối fromPeriod (snapshot cuối trước endMs)
+//   2. getCustomerStateMapForPeriod(toPeriod, periodType) → trạng thái khách tại cuối toPeriod
 //   3. Chỉ đếm khách CÓ Ở CẢ HAI period (có trong cả stateFrom và stateTo)
 //   4. matrix[fromGroup][toGroup]++ nếu khách chuyển từ fromGroup sang toGroup
 // Khách chỉ có ở from (rời bỏ) hoặc chỉ có ở to (mới) không nằm trong matrix.
-func (s *ReportService) GetTransitionMatrix(ctx context.Context, ownerOrgID primitive.ObjectID, fromPeriod, toPeriod, dimension string, includeSankey bool) (*reportdto.TransitionMatrixResult, error) {
-	stateFrom, _, err := s.getCustomerStateMapForPeriod(ctx, ownerOrgID, fromPeriod)
+func (s *ReportService) GetTransitionMatrix(ctx context.Context, ownerOrgID primitive.ObjectID, fromPeriod, toPeriod, dimension, periodType string, includeSankey bool) (*reportdto.TransitionMatrixResult, error) {
+	stateFrom, _, err := s.getCustomerStateMapForPeriod(ctx, ownerOrgID, fromPeriod, periodType)
 	if err != nil {
 		return nil, fmt.Errorf("get state from: %w", err)
 	}
-	stateTo, _, err := s.getCustomerStateMapForPeriod(ctx, ownerOrgID, toPeriod)
+	stateTo, _, err := s.getCustomerStateMapForPeriod(ctx, ownerOrgID, toPeriod, periodType)
 	if err != nil {
 		return nil, fmt.Errorf("get state to: %w", err)
 	}
@@ -407,7 +356,8 @@ func (s *ReportService) GetTransitionMatrix(ctx context.Context, ownerOrgID prim
 }
 
 // getCustomerStateMapForPeriod trả về map[unifiedId]state tại cuối chu kỳ — lấy từ metricsSnapshot trong crm_activity_history.
-func (s *ReportService) getCustomerStateMapForPeriod(ctx context.Context, ownerOrgID primitive.ObjectID, periodKey string) (map[string]customerStateAtPeriod, int64, error) {
+// periodType: day|week|month|year — khi "week", periodKey YYYY-MM-DD là thứ Hai, endMs = cuối Chủ nhật; khi "day" là cuối ngày đó.
+func (s *ReportService) getCustomerStateMapForPeriod(ctx context.Context, ownerOrgID primitive.ObjectID, periodKey, periodType string) (map[string]customerStateAtPeriod, int64, error) {
 	loc, _ := time.LoadLocation(ReportTimezone)
 	var endSec int64
 	if len(periodKey) == 10 {
@@ -415,7 +365,14 @@ func (s *ReportService) getCustomerStateMapForPeriod(ctx context.Context, ownerO
 		if err != nil {
 			return nil, 0, fmt.Errorf("parse periodKey %s: %w", periodKey, err)
 		}
-		endSec = t.AddDate(0, 0, 1).Unix() - 1
+		if periodType == "week" {
+			// Chuẩn hóa về thứ Hai: periodKey có thể được truyền sai (vd: thứ Ba), cần lấy thứ Hai của tuần đó.
+			monday := getMondayOfWeek(t)
+			// endMs = cuối Chủ nhật (thứ Hai + 7 ngày - 1 giây)
+			endSec = monday.AddDate(0, 0, 7).Unix() - 1
+		} else {
+			endSec = t.AddDate(0, 0, 1).Unix() - 1
+		}
 	} else if len(periodKey) == 7 {
 		t, err := time.ParseInLocation("2006-01", periodKey, loc)
 		if err != nil {
@@ -450,9 +407,10 @@ func (s *ReportService) getCustomerStateMapForPeriod(ctx context.Context, ownerO
 		channel := crmvc.GetStrFromNestedMetrics(m, "channel")
 		loyaltyStage := crmvc.GetStrFromNestedMetrics(m, "loyaltyStage")
 		momentumStage := crmvc.GetStrFromNestedMetrics(m, "momentumStage")
-		if valueTier == "" { valueTier = "new" }
-		if lifecycleStage == "" { lifecycleStage = "never_purchased" }
-		if journeyStage == "" { journeyStage = "visitor" }
+		// Chuẩn hóa rỗng: dùng _unspecified, không tự gán ý nghĩa nghiệp vụ (đọc từ metricsSnapshot).
+		if valueTier == "" { valueTier = "_unspecified" }
+		if lifecycleStage == "" { lifecycleStage = "_unspecified" }
+		if journeyStage == "" { journeyStage = "_unspecified" }
 		if channel == "" { channel = "_unspecified" }
 		if loyaltyStage == "" { loyaltyStage = "_unspecified" }
 		if momentumStage == "" { momentumStage = "_unspecified" }
@@ -507,12 +465,13 @@ func buildSankeyData(matrix map[string]map[string]int64, dimension string) *repo
 
 // GetGroupChanges trả về chi tiết khách chuyển nhóm (upgraded, downgraded, unchanged).
 // dimension: journey|channel|value|lifecycle|loyalty|momentum|ceoGroup
-func (s *ReportService) GetGroupChanges(ctx context.Context, ownerOrgID primitive.ObjectID, fromPeriod, toPeriod, dimension string) (*reportdto.GroupChangesResult, error) {
-	stateFrom, _, err := s.getCustomerStateMapForPeriod(ctx, ownerOrgID, fromPeriod)
+// periodType: day|week|month|year — xác định cách parse periodKey.
+func (s *ReportService) GetGroupChanges(ctx context.Context, ownerOrgID primitive.ObjectID, fromPeriod, toPeriod, dimension, periodType string) (*reportdto.GroupChangesResult, error) {
+	stateFrom, _, err := s.getCustomerStateMapForPeriod(ctx, ownerOrgID, fromPeriod, periodType)
 	if err != nil {
 		return nil, err
 	}
-	stateTo, _, err := s.getCustomerStateMapForPeriod(ctx, ownerOrgID, toPeriod)
+	stateTo, _, err := s.getCustomerStateMapForPeriod(ctx, ownerOrgID, toPeriod, periodType)
 	if err != nil {
 		return nil, err
 	}

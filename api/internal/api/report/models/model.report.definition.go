@@ -23,7 +23,7 @@ type ReportMetricDefinition struct {
 // ReportDefinition định nghĩa một báo cáo theo chu kỳ (lưu trong report_definitions)
 type ReportDefinition struct {
 	ID               primitive.ObjectID     `json:"id,omitempty" bson:"_id,omitempty"`                         // MongoDB _id (tự sinh nếu không gửi)
-	Key              string                 `json:"key" bson:"key" index:"unique"`                             // Unique report key (vd: order_daily)
+	Key              string                 `json:"key" bson:"key" index:"unique,compound:report_def_key_active"`                             // Unique report key (vd: order_daily)
 	Name             string                   `json:"name" bson:"name"`                                         // Tên báo cáo
 	PeriodType       string                   `json:"periodType" bson:"periodType"`                             // day | week | month | year
 	PeriodLabel      string                   `json:"periodLabel,omitempty" bson:"periodLabel,omitempty"`       // Tên hiển thị chu kỳ (vd: Theo ngày)
@@ -33,7 +33,7 @@ type ReportDefinition struct {
 	Dimensions       []string                 `json:"dimensions" bson:"dimensions"`                             // Group by (vd: ["ownerOrganizationId"])
 	Metrics          []ReportMetricDefinition `json:"metrics" bson:"metrics"`                                    // Danh sách metric (outputKey, aggType, fieldPath, countIfExpr)
 	Metadata         map[string]interface{}   `json:"metadata,omitempty" bson:"metadata,omitempty"`              // description, category, tags
-	IsActive         bool                     `json:"isActive" bson:"isActive"`                                  // Mặc định true
+	IsActive         bool                     `json:"isActive" bson:"isActive" index:"compound:report_def_key_active"`                         // LoadDefinition filter key + isActive
 	CreatedAt        int64                    `json:"createdAt" bson:"createdAt"`                               // Unix seconds
 	UpdatedAt        int64                    `json:"updatedAt" bson:"updatedAt"`                             // Unix seconds
 }

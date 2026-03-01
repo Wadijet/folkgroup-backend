@@ -9,17 +9,17 @@ import (
 )
 
 // ReportDirtyWorker worker xử lý report_dirty_periods: đọc các chu kỳ chưa xử lý (processedAt = null), gọi engine Compute rồi đánh dấu processedAt.
-// Chạy định kỳ (mặc định 5 phút), mỗi lần xử lý tối đa batchSize bản ghi.
+// Chạy định kỳ (mặc định 5 phút), mỗi lần xử lý hết hàng đợi (lấy theo batch batchSize cho đến khi rỗng).
 type ReportDirtyWorker struct {
 	reportService *reportsvc.ReportService
 	interval      time.Duration // Khoảng thời gian giữa các lần chạy
-	batchSize     int           // Số bản ghi tối đa mỗi lần (vd: 50)
+	batchSize     int           // Số bản ghi mỗi lần lấy từ DB (vd: 50); xử lý hết hàng đợi
 }
 
 // NewReportDirtyWorker tạo mới ReportDirtyWorker.
 // Tham số:
 //   - interval: Khoảng thời gian giữa các lần chạy (mặc định: 5 phút)
-//   - batchSize: Số bản ghi tối đa mỗi lần (mặc định: 50)
+//   - batchSize: Số bản ghi mỗi lần lấy từ DB (mặc định: 50); worker xử lý hết hàng đợi
 func NewReportDirtyWorker(interval time.Duration, batchSize int) (*ReportDirtyWorker, error) {
 	reportService, err := reportsvc.NewReportService()
 	if err != nil {
@@ -38,7 +38,7 @@ func NewReportDirtyWorker(interval time.Duration, batchSize int) (*ReportDirtyWo
 	}, nil
 }
 
-// Start chạy worker trong vòng lặp: mỗi interval đọc batch dirty chưa xử lý, gọi Compute từng bản ghi, sau đó set processedAt.
+// Start chạy worker trong vòng lặp: mỗi interval xử lý hết hàng đợi dirty (lấy theo batch, xử lý tuần tự đến khi rỗng).
 func (w *ReportDirtyWorker) Start(ctx context.Context) {
 	log := logger.GetAppLogger()
 
@@ -66,40 +66,42 @@ func (w *ReportDirtyWorker) Start(ctx context.Context) {
 				}()
 
 				batchCtx := ctx
-				list, err := w.reportService.GetUnprocessedDirtyPeriods(batchCtx, w.batchSize)
-				if err != nil {
-					log.WithError(err).Error("📊 [REPORT_DIRTY] Lỗi lấy danh sách dirty periods")
-					return
-				}
-				if len(list) == 0 {
-					return
+				totalProcessed := 0
+
+				for {
+					list, err := w.reportService.GetUnprocessedDirtyPeriods(batchCtx, w.batchSize)
+					if err != nil {
+						log.WithError(err).Error("📊 [REPORT_DIRTY] Lỗi lấy danh sách dirty periods")
+						return
+					}
+					if len(list) == 0 {
+						break
+					}
+
+					for _, d := range list {
+						if err := w.reportService.Compute(batchCtx, d.ReportKey, d.PeriodKey, d.OwnerOrganizationID); err != nil {
+							log.WithError(err).WithFields(map[string]interface{}{
+								"reportKey":  d.ReportKey,
+								"periodKey":  d.PeriodKey,
+								"orgId":      d.OwnerOrganizationID.Hex(),
+							}).Warn("📊 [REPORT_DIRTY] Compute thất bại, bỏ qua và sẽ thử lại lần sau")
+							continue
+						}
+						if err := w.reportService.SetDirtyProcessed(batchCtx, d.ReportKey, d.PeriodKey, d.OwnerOrganizationID); err != nil {
+							log.WithError(err).WithFields(map[string]interface{}{
+								"reportKey": d.ReportKey,
+								"periodKey": d.PeriodKey,
+							}).Warn("📊 [REPORT_DIRTY] SetDirtyProcessed thất bại")
+							continue
+						}
+						totalProcessed++
+					}
 				}
 
-				processed := 0
-				for _, d := range list {
-					if err := w.reportService.Compute(batchCtx, d.ReportKey, d.PeriodKey, d.OwnerOrganizationID); err != nil {
-						log.WithError(err).WithFields(map[string]interface{}{
-							"reportKey":  d.ReportKey,
-							"periodKey":  d.PeriodKey,
-							"orgId":      d.OwnerOrganizationID.Hex(),
-						}).Warn("📊 [REPORT_DIRTY] Compute thất bại, bỏ qua và sẽ thử lại lần sau")
-						continue
-					}
-					if err := w.reportService.SetDirtyProcessed(batchCtx, d.ReportKey, d.PeriodKey, d.OwnerOrganizationID); err != nil {
-						log.WithError(err).WithFields(map[string]interface{}{
-							"reportKey": d.ReportKey,
-							"periodKey": d.PeriodKey,
-						}).Warn("📊 [REPORT_DIRTY] SetDirtyProcessed thất bại")
-						continue
-					}
-					processed++
-				}
-
-				if processed > 0 {
+				if totalProcessed > 0 {
 					log.WithFields(map[string]interface{}{
-						"processed": processed,
-						"total":     len(list),
-					}).Info("📊 [REPORT_DIRTY] Đã xử lý dirty periods")
+						"processed": totalProcessed,
+					}).Info("📊 [REPORT_DIRTY] Đã xử lý hết dirty periods trong hàng đợi")
 				}
 			}()
 		}

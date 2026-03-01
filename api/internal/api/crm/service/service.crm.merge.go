@@ -38,7 +38,8 @@ var unsetProfileLegacyFields = bson.M{
 }
 
 // MergeFromPosCustomer xử lý khi pc_pos_customers thay đổi — upsert crm_customers.
-func (s *CrmCustomerService) MergeFromPosCustomer(ctx context.Context, doc *pcmodels.PcPosCustomer) error {
+// fallbackActivityAt: khi > 0 và getSourceCustomerTimestamp trả 0, dùng thay vì now (vd: từ order/conversation khi backfill).
+func (s *CrmCustomerService) MergeFromPosCustomer(ctx context.Context, doc *pcmodels.PcPosCustomer, fallbackActivityAt int64) error {
 	if doc == nil {
 		return nil
 	}
@@ -170,9 +171,13 @@ func (s *CrmCustomerService) MergeFromPosCustomer(ctx context.Context, doc *pcmo
 	if err != nil {
 		return common.ConvertMongoError(err)
 	}
-	// Ghi lịch sử khởi tạo khách khi tạo mới (ưu tiên created_at/inserted_at từ PosData API)
+	// Ghi lịch sử khởi tạo khách khi tạo mới (ưu tiên created_at/inserted_at từ PosData API).
+	// Khi backfill: nếu PosData không có timestamp, dùng fallbackActivityAt (từ order đang xử lý) thay vì now.
 	if result.UpsertedCount > 0 {
 		activityAt := getSourceCustomerTimestamp(doc.PosData)
+		if activityAt <= 0 && fallbackActivityAt > 0 {
+			activityAt = fallbackActivityAt
+		}
 		if activityAt <= 0 {
 			activityAt = now
 		}

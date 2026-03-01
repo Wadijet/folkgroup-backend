@@ -174,7 +174,24 @@ func periodKeyFromTime(t time.Time, periodType string) string {
 }
 
 // MarkDirty đánh dấu chu kỳ cần tính lại.
+// Nếu đã có bản ghi cùng reportKey, periodKey, ownerOrganizationId và processedAt = null (đang chờ) thì bỏ qua, không ghi thêm.
 func (s *ReportService) MarkDirty(ctx context.Context, reportKey, periodKey string, ownerOrganizationID primitive.ObjectID) error {
+	filter := bson.M{
+		"reportKey":           reportKey,
+		"periodKey":           periodKey,
+		"ownerOrganizationId": ownerOrganizationID,
+		"processedAt":         nil,
+	}
+	var existing reportmodels.ReportDirtyPeriod
+	err := s.dirtyColl.FindOne(ctx, filter).Decode(&existing)
+	if err == nil {
+		// Đã có bản ghi cùng loại đang chờ xử lý — không tạo thêm
+		return nil
+	}
+	if err != mongo.ErrNoDocuments {
+		return common.ConvertMongoError(err)
+	}
+
 	now := time.Now().Unix()
 	doc := reportmodels.ReportDirtyPeriod{
 		ReportKey:           reportKey,
@@ -183,13 +200,13 @@ func (s *ReportService) MarkDirty(ctx context.Context, reportKey, periodKey stri
 		MarkedAt:            now,
 		ProcessedAt:         nil,
 	}
-	filter := bson.M{
+	upsertFilter := bson.M{
 		"reportKey":           reportKey,
 		"periodKey":           periodKey,
 		"ownerOrganizationId": ownerOrganizationID,
 	}
 	opts := options.Replace().SetUpsert(true)
-	_, err := s.dirtyColl.ReplaceOne(ctx, filter, doc, opts)
+	_, err = s.dirtyColl.ReplaceOne(ctx, upsertFilter, doc, opts)
 	return common.ConvertMongoError(err)
 }
 

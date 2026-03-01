@@ -235,7 +235,7 @@ func main() {
 	}
 
 	// Worker báo cáo theo chu kỳ: xử lý report_dirty_periods (Compute → set processedAt)
-	reportDirtyWorker, err := worker.NewReportDirtyWorker(5*time.Minute, 50)
+	reportDirtyWorker, err := worker.NewReportDirtyWorker(1*time.Minute, 50)
 	if err != nil {
 		log.WithError(err).Warn("Failed to create report dirty worker, continuing without report worker")
 	} else {

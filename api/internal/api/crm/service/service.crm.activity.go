@@ -8,6 +8,7 @@ import (
 
 	crmmodels "meta_commerce/internal/api/crm/models"
 	basesvc "meta_commerce/internal/api/base/service"
+	"meta_commerce/internal/api/events"
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/logger"
@@ -150,7 +151,22 @@ func (s *CrmActivityService) logActivityUpsert(ctx context.Context, input LogAct
 	}
 	opts := mongoopts.Update().SetUpsert(true)
 	_, err := s.Collection().UpdateOne(ctx, filter, update, opts)
-	return err
+	if err != nil {
+		return err
+	}
+	// Phát event để report hook MarkDirty báo cáo customer (customer_daily, customer_weekly, ...).
+	// logActivityUpsert dùng Collection().UpdateOne trực tiếp nên không qua BaseServiceMongoImpl → không tự emit.
+	doc := &crmmodels.CrmActivityHistory{
+		OwnerOrganizationID: input.OwnerOrgID,
+		ActivityAt:          activityAt,
+		CreatedAt:           now,
+	}
+	events.EmitDataChanged(ctx, events.DataChangeEvent{
+		CollectionName: global.MongoDB_ColNames.CrmActivityHistory,
+		Operation:      events.OpUpsert,
+		Document:       doc,
+	})
+	return nil
 }
 
 func buildSetOnInsert(input LogActivityInput, domain string, now int64) bson.M {
@@ -305,6 +321,18 @@ func (s *CrmActivityService) UpdateActivityMetadata(ctx context.Context, activit
 	}
 	_, err := s.Collection().UpdateOne(ctx, bson.M{"_id": activityID}, bson.M{"$set": set})
 	return err
+}
+
+// GetActivitiesInPeriod lấy các activity trong khoảng [startMs, endMs] có metricsSnapshot, sắp xếp theo unifiedId, activityAt tăng dần.
+// Dùng cho report customer phát sinh: so sánh classification giữa các activity để tính in/out.
+func (s *CrmActivityService) GetActivitiesInPeriod(ctx context.Context, ownerOrgID primitive.ObjectID, startMs, endMs int64) ([]crmmodels.CrmActivityHistory, error) {
+	filter := bson.M{
+		"ownerOrganizationId": ownerOrgID,
+		"activityAt":          bson.M{"$gte": startMs, "$lte": endMs},
+		"metadata.metricsSnapshot": bson.M{"$exists": true},
+	}
+	opts := mongoopts.Find().SetSort(bson.D{{Key: "unifiedId", Value: 1}, {Key: "activityAt", Value: 1}})
+	return s.Find(ctx, filter, opts)
 }
 
 // GetLastSnapshotPerCustomerBeforeEndMs lấy metricsSnapshot cuối cùng của mỗi khách trước endMs (dùng cho report).

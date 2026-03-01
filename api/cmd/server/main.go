@@ -32,16 +32,37 @@ func initLogger() {
 }
 
 // main_thread khởi tạo và chạy Fiber server
+// normalizeListenAddress chuẩn hóa địa chỉ listen (hỗ trợ cả "8080" và ":8080")
+func normalizeListenAddress(addr string) string {
+	if addr == "" {
+		return ":8080"
+	}
+	if addr[0] == ':' {
+		return addr
+	}
+	return ":" + addr
+}
+
 func main_thread() {
 	// Khởi tạo app với cấu hình
 	app := InitFiberApp()
 
 	// Khởi động server với cấu hình listen
 	cfg := global.MongoDB_ServerConfig
-	address := ":" + cfg.Address
-	
+	address := normalizeListenAddress(cfg.Address)
+
 	log := logger.GetAppLogger()
 	log.Info("Starting Fiber server...")
+
+	// Kiểm tra port có sẵn sàng trước khi Listen (tránh crash im lặng khi port đã bị chiếm)
+	if ln, err := net.Listen("tcp", address); err != nil {
+		errMsg := fmt.Sprintf("❌ [SERVER] Không thể bind port %s: %v. Có thể port đã được sử dụng bởi process khác. Thử đổi ADDRESS trong env hoặc tắt process đang dùng port.", address, err)
+		log.Error(errMsg)
+		fmt.Fprintln(os.Stderr, errMsg)
+		os.Exit(1)
+	} else {
+		ln.Close()
+	}
 	
 	// Helper function để resolve đường dẫn từ thư mục api
 	resolvePath := func(path string) string {
@@ -74,22 +95,34 @@ func main_thread() {
 		
 		// Kiểm tra file certificate và key tồn tại
 		if _, err := os.Stat(certPath); os.IsNotExist(err) {
-			log.Fatalf("TLS certificate file not found: %s (resolved from: %s)", certPath, cfg.TLSCertFile)
+			errMsg := fmt.Sprintf("TLS certificate file not found: %s (resolved from: %s)", certPath, cfg.TLSCertFile)
+			log.Error(errMsg)
+			fmt.Fprintln(os.Stderr, errMsg)
+			os.Exit(1)
 		}
 		if _, err := os.Stat(keyPath); os.IsNotExist(err) {
-			log.Fatalf("TLS key file not found: %s (resolved from: %s)", keyPath, cfg.TLSKeyFile)
+			errMsg := fmt.Sprintf("TLS key file not found: %s (resolved from: %s)", keyPath, cfg.TLSKeyFile)
+			log.Error(errMsg)
+			fmt.Fprintln(os.Stderr, errMsg)
+			os.Exit(1)
 		}
-		
+
 		// Load certificate và key
 		cert, err := tls.LoadX509KeyPair(certPath, keyPath)
 		if err != nil {
-			log.Fatalf("Error loading TLS certificate: %v", err)
+			errMsg := fmt.Sprintf("Error loading TLS certificate: %v", err)
+			log.Error(errMsg)
+			fmt.Fprintln(os.Stderr, errMsg)
+			os.Exit(1)
 		}
-		
+
 		// Tạo listener với TLS
 		ln, err := net.Listen("tcp", address)
 		if err != nil {
-			log.Fatalf("Error creating listener: %v", err)
+			errMsg := fmt.Sprintf("Error creating listener: %v", err)
+			log.Error(errMsg)
+			fmt.Fprintln(os.Stderr, errMsg)
+			os.Exit(1)
 		}
 		
 		// Cấu hình TLS
@@ -109,7 +142,10 @@ func main_thread() {
 		
 		// Khởi động server với TLS listener
 		if err := app.Listener(tlsListener); err != nil {
-			log.Fatalf("Error in Fiber Listener with TLS: %v", err)
+			errMsg := fmt.Sprintf("❌ [SERVER] Fiber Listener với TLS thất bại: %v", err)
+			log.Error(errMsg)
+			fmt.Fprintln(os.Stderr, errMsg)
+			os.Exit(1)
 		}
 	} else {
 		// Khởi động server HTTP thông thường
@@ -117,10 +153,13 @@ func main_thread() {
 			"address":  address,
 			"protocol": "HTTP",
 		}).Info("Starting server with HTTP")
-		
+
 		listenConfig := fiber.ListenConfig{}
 		if err := app.Listen(address, listenConfig); err != nil {
-			log.Fatalf("Error in Fiber Listen: %v", err)
+			errMsg := fmt.Sprintf("❌ [SERVER] Fiber Listen thất bại trên %s: %v", address, err)
+			log.Error(errMsg)
+			fmt.Fprintln(os.Stderr, errMsg)
+			os.Exit(1)
 		}
 	}
 }

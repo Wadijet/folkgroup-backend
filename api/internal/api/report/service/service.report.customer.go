@@ -85,6 +85,15 @@ func (s *ReportService) computeCustomerPhatSinh(ctx context.Context, ownerOrgID 
 	return computeAllPhatSinh(ctx, actSvc, ownerOrgID, startMs, endMs)
 }
 
+// computeCustomerPhatSinhBatch tính phát sinh cho nhiều kỳ trong 1 lần (2 DB calls thay vì 2*N). Dùng cho trend-from-crm.
+func (s *ReportService) computeCustomerPhatSinhBatch(ctx context.Context, ownerOrgID primitive.ObjectID, reportKey string, periodKeys []string) ([]map[string]interface{}, error) {
+	actSvc, err := crmvc.NewCrmActivityService()
+	if err != nil {
+		return nil, fmt.Errorf("tạo CrmActivityService: %w", err)
+	}
+	return computeAllPhatSinhBatch(ctx, actSvc, ownerOrgID, reportKey, periodKeys)
+}
+
 // computeCeoGroupForLTV gán mỗi khách vào đúng 1 nhóm CEO (mutually exclusive) để tính LTV.
 func computeCeoGroupForLTV(valueTier, lifecycleStage, journeyStage, loyaltyStage, momentumStage string) string {
 	if valueTier == "vip" && lifecycleStage == "active" {

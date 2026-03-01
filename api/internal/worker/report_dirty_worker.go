@@ -56,6 +56,12 @@ func (w *ReportDirtyWorker) Start(ctx context.Context) {
 			log.Info("📊 [REPORT_DIRTY] Report Dirty Worker stopped")
 			return
 		case <-ticker.C:
+			if ShouldThrottle(PriorityHigh) {
+				continue
+			}
+			if effInterval := GetEffectiveInterval(w.interval, PriorityHigh); effInterval > w.interval {
+				time.Sleep(effInterval - w.interval)
+			}
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
@@ -67,9 +73,10 @@ func (w *ReportDirtyWorker) Start(ctx context.Context) {
 
 				batchCtx := ctx
 				totalProcessed := 0
+				batchSize := GetEffectiveBatchSize(w.batchSize, PriorityHigh)
 
 				for {
-					list, err := w.reportService.GetUnprocessedDirtyPeriods(batchCtx, w.batchSize)
+					list, err := w.reportService.GetUnprocessedDirtyPeriods(batchCtx, batchSize)
 					if err != nil {
 						log.WithError(err).Error("📊 [REPORT_DIRTY] Lỗi lấy danh sách dirty periods")
 						return

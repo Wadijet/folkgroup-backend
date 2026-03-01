@@ -94,7 +94,15 @@ func extractConversationCustomerId(doc *fbmodels.FbConversation) string {
 	if s, ok := pd["customer_id"].(string); ok && s != "" {
 		return s
 	}
+	if n, ok := pd["customer_id"].(float64); ok {
+		return fmt.Sprintf("%.0f", n)
+	}
 	return ""
+}
+
+// ExtractConversationCustomerId lấy customerId từ FbConversation (exported cho worker).
+func ExtractConversationCustomerId(doc *fbmodels.FbConversation) string {
+	return extractConversationCustomerId(doc)
 }
 
 // extractIdFromMap lấy id từ map (string, float64, int).

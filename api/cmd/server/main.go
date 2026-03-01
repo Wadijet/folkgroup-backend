@@ -178,6 +178,18 @@ func main() {
 		log.Info("📦 [DELIVERY] Delivery Processor started successfully")
 	}
 
+	// Worker Controller: lấy mẫu CPU định kỳ, throttle workers khi CPU quá tải
+	ctxWorkerCtrl, cancelWorkerCtrl := context.WithCancel(context.Background())
+	defer cancelWorkerCtrl()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.WithFields(map[string]interface{}{"panic": r}).Error("⚙️ [WORKER_CONTROLLER] Panic")
+			}
+		}()
+		worker.DefaultController().Start(ctxWorkerCtrl)
+	}()
+
 	// Khởi tạo và chạy Command Cleanup Worker (background worker - Module 2)
 	// Worker này tự động giải phóng các AI workflow commands bị stuck
 	commandCleanupWorker, err := worker.NewCommandCleanupWorker(1*time.Minute, 300) // Chạy mỗi 1 phút, timeout 5 phút
@@ -257,6 +269,38 @@ func main() {
 
 		log.Info("📊 [REPORT_DIRTY] Report Dirty Worker started successfully")
 	}
+
+	// Worker CRM Ingest: xử lý crm_pending_ingest (Merge/Ingest thay vì chạy trong hook)
+	crmIngestWorker := worker.NewCrmIngestWorker(30*time.Second, 30)
+	ctxCrmIngest, cancelCrmIngest := context.WithCancel(context.Background())
+	defer cancelCrmIngest()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.WithFields(map[string]interface{}{"panic": r}).Error("📋 [CRM_INGEST] Worker goroutine panic")
+			}
+		}()
+		log.Info("📋 [CRM_INGEST] Starting CRM Ingest Worker...")
+		crmIngestWorker.Start(ctxCrmIngest)
+		log.Warn("📋 [CRM_INGEST] Worker đã dừng")
+	}()
+	log.Info("📋 [CRM_INGEST] CRM Ingest Worker started successfully")
+
+	// Worker CRM Bulk: xử lý crm_bulk_jobs (sync, backfill, rebuild, recalculate)
+	crmBulkWorker := worker.NewCrmBulkWorker(1*time.Minute, 3)
+	ctxCrmBulk, cancelCrmBulk := context.WithCancel(context.Background())
+	defer cancelCrmBulk()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.WithFields(map[string]interface{}{"panic": r}).Error("📋 [CRM_BULK] Worker goroutine panic")
+			}
+		}()
+		log.Info("📋 [CRM_BULK] Starting CRM Bulk Worker...")
+		crmBulkWorker.Start(ctxCrmBulk)
+		log.Warn("📋 [CRM_BULK] Worker đã dừng")
+	}()
+	log.Info("📋 [CRM_BULK] CRM Bulk Worker started successfully")
 
 	// Worker tính lại phân loại khách hàng (full: hàng ngày; smart: mỗi 6h, chỉ khách gần ngưỡng)
 	classificationRefreshFullWorker, err := worker.NewClassificationRefreshWorker(24*time.Hour, 200, worker.ClassificationRefreshModeFull)

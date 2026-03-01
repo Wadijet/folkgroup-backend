@@ -111,6 +111,8 @@ func initColNames() {
 	global.MongoDB_ColNames.CrmCustomers = "crm_customers"
 	global.MongoDB_ColNames.CrmActivityHistory = "crm_activity_history"
 	global.MongoDB_ColNames.CrmNotes = "crm_notes"
+	global.MongoDB_ColNames.CrmPendingIngest = "crm_pending_ingest"
+	global.MongoDB_ColNames.CrmBulkJobs = "crm_bulk_jobs"
 
 	logrus.Info("Initialized collection names") // Ghi log thông báo đã khởi tạo tên các collection
 }
@@ -217,6 +219,8 @@ func initDatabase_MongoDB() {
 	database.CreateCrmCustomerProfileIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmCustomers))
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmActivityHistory), crmmodels.CrmActivityHistory{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmNotes), crmmodels.CrmNote{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmPendingIngest), crmmodels.CrmPendingIngest{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmBulkJobs), crmmodels.CrmBulkJob{})
 }
 
 // initFirebase khởi tạo Firebase Admin SDK

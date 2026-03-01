@@ -162,3 +162,9 @@ type CrmRecalculateAllResult struct {
 	TotalFailed    int `json:"totalFailed"`    // Số khách lỗi khi tính toán
 	FailedIds      []string `json:"failedIds,omitempty"` // Danh sách unifiedId lỗi (tối đa 10 mẫu)
 }
+
+// CrmCustomerCreateInput DTO cho Insert — CrmCustomer thường tạo qua sync, dùng struct rỗng cho ReadOnly CRUD.
+type CrmCustomerCreateInput struct{}
+
+// CrmCustomerUpdateInput DTO cho Update — CrmCustomer classification tính từ nguồn, dùng struct rỗng cho ReadOnly CRUD.
+type CrmCustomerUpdateInput struct{}

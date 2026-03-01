@@ -238,8 +238,9 @@ func CreateIndexes(ctx context.Context, collection *mongo.Collection, model inte
 
 	compoundGroups := map[string]bson.D{}
 	compoundOptions := map[string]*options.IndexOptions{}
-	compoundUnique := map[string]bool{} // Track compound indexes cần unique
-	compoundSparse := map[string]bool{} // Track compound indexes cần sparse
+	compoundUnique := map[string]bool{}       // Track compound indexes cần unique
+	compoundSparse := map[string]bool{}       // Track compound indexes cần sparse
+	compoundPartialFilter := map[string]string{} // Track compound indexes cần partial filter (path -> $exists:true)
 
 	for i := 0; i < modelType.NumField(); i++ {
 		field := modelType.Field(i)
@@ -251,6 +252,10 @@ func CreateIndexes(ctx context.Context, collection *mongo.Collection, model inte
 		bsonField := field.Tag.Get("bson")
 		if bsonField == "" || bsonField == "-" {
 			continue
+		}
+		// Bỏ qua phần ",omitempty" trong bson tag
+		if idx := strings.Index(bsonField, ","); idx > 0 {
+			bsonField = bsonField[:idx]
 		}
 
 		indexConfigs := parseIndexTag(tag)
@@ -309,10 +314,18 @@ func CreateIndexes(ctx context.Context, collection *mongo.Collection, model inte
 			}
 
 			if groupName, ok := config["compound"]; ok {
-				order := parseOrder(tag)
-				compoundGroups[groupName] = append(compoundGroups[groupName], bson.E{Key: bsonField, Value: order})
-				if _, exists := compoundOptions[groupName]; !exists {
-					compoundOptions[groupName] = options.Index().SetName(groupName)
+				// partial:1 — field dùng cho partialFilterExpression ($exists:true), không thêm vào keys
+				if _, hasPartial := config["partial"]; hasPartial {
+					compoundPartialFilter[groupName] = bsonField
+					if _, exists := compoundOptions[groupName]; !exists {
+						compoundOptions[groupName] = options.Index().SetName(groupName)
+					}
+				} else {
+					order := parseOrder(tag)
+					compoundGroups[groupName] = append(compoundGroups[groupName], bson.E{Key: bsonField, Value: order})
+					if _, exists := compoundOptions[groupName]; !exists {
+						compoundOptions[groupName] = options.Index().SetName(groupName)
+					}
 				}
 				// Kiểm tra xem compound index có cần unique không (từ tên group có chứa "_unique")
 				if strings.Contains(groupName, "_unique") {
@@ -335,6 +348,10 @@ func CreateIndexes(ctx context.Context, collection *mongo.Collection, model inte
 		}
 		if compoundSparse[groupName] {
 			opts = opts.SetSparse(true)
+		}
+		// Apply partial filter nếu có (chỉ index document có field tồn tại)
+		if partialPath := compoundPartialFilter[groupName]; partialPath != "" {
+			opts = opts.SetPartialFilterExpression(bson.M{partialPath: bson.M{"$exists": true}})
 		}
 		if err := checkAndReplaceIndex(ctx, collection, existingIndexes, groupName, fields, opts); err != nil {
 			return err

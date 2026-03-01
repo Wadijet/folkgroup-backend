@@ -21,10 +21,12 @@ const (
 
 // DataChangeEvent mô tả sự kiện thay đổi dữ liệu.
 // Document là bản ghi sau khi thay đổi (nil nếu delete).
+// PreviousDocument có khi Operation = update (từ UpdateOne); nil cho insert/upsert/delete.
 type DataChangeEvent struct {
-	CollectionName string
-	Operation      string
-	Document       interface{}
+	CollectionName    string
+	Operation         string
+	Document          interface{}
+	PreviousDocument  interface{} // Document trước khi update; dùng để so sánh skip MarkDirty/Merge
 }
 
 // DataChangeHandler xử lý sự kiện thay đổi dữ liệu.
@@ -105,6 +107,50 @@ func GetOwnerOrganizationIDFromDocument(doc interface{}) primitive.ObjectID {
 	default:
 		return primitive.NilObjectID
 	}
+}
+
+// GetPeriodTimestamp lấy timestamp quyết định period cho report (theo collection).
+// Dùng để so sánh prev vs new — nếu bằng nhau thì skip MarkDirty.
+func GetPeriodTimestamp(doc interface{}, collectionName string) int64 {
+	if doc == nil {
+		return 0
+	}
+	switch collectionName {
+	case "pc_pos_orders":
+		ts := GetInt64Field(doc, "PosCreatedAt")
+		if ts == 0 {
+			ts = GetInt64Field(doc, "InsertedAt")
+		}
+		if ts == 0 {
+			ts = GetInt64Field(doc, "CreatedAt")
+		}
+		if ts > 1e12 {
+			ts = ts / 1000
+		}
+		return ts
+	case "pc_pos_customers":
+		ts := GetInt64Field(doc, "UpdatedAt")
+		if ts == 0 {
+			ts = GetInt64Field(doc, "LastOrderAt")
+		}
+		if ts == 0 {
+			ts = GetInt64Field(doc, "CreatedAt")
+		}
+		if ts > 1e12 {
+			ts = ts / 1000
+		}
+		return ts
+	case "crm_activity_history":
+		ts := GetInt64Field(doc, "ActivityAt")
+		if ts == 0 {
+			ts = GetInt64Field(doc, "CreatedAt")
+		}
+		if ts > 1e12 {
+			ts = ts / 1000
+		}
+		return ts
+	}
+	return 0
 }
 
 // GetInt64Field lấy giá trị int64 của field từ document (dùng reflection).

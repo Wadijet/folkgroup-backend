@@ -18,15 +18,17 @@ type CrmActivityHistory struct {
 	ID primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"`
 
 	UnifiedId           string                 `json:"unifiedId" bson:"unifiedId" index:"single:1,compound:crm_activity_org_unified_at,compound:crm_activity_org_unified_type,compound:crm_activity_org_unified_domain_at"`
-	OwnerOrganizationID primitive.ObjectID    `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:crm_activity_org_unified_at,compound:crm_activity_org_type_at,compound:crm_activity_org_source_at,compound:crm_activity_org_unified_type,compound:crm_activity_org_unified_domain_at,compound:crm_activity_org_snapshot_at,compound:crm_activity_org_at_report,compound:crm_activity_org_created"`
+	OwnerOrganizationID primitive.ObjectID    `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:crm_activity_org_unified_at,compound:crm_activity_org_type_at,compound:crm_activity_org_source_at,compound:crm_activity_org_unified_type,compound:crm_activity_org_unified_domain_at,compound:crm_activity_org_snapshot_at,compound:crm_activity_org_at_report,compound:crm_activity_org_at_report_snapshot,compound:crm_activity_org_created"`
 	Domain              string                 `json:"domain" bson:"domain" index:"single:1,compound:crm_activity_org_unified_domain_at"` // order, conversation, note, profile, customer, ...
 	ActivityType       string                 `json:"activityType" bson:"activityType" index:"single:1,compound:crm_activity_org_type_at,compound:crm_activity_org_source_at,compound:crm_activity_org_unified_type"`
-	ActivityAt         int64                  `json:"activityAt" bson:"activityAt" index:"single:-1,compound:crm_activity_org_unified_at,compound:crm_activity_org_type_at,compound:crm_activity_org_source_at,compound:crm_activity_org_unified_domain_at,compound:crm_activity_org_at_report,order:-1"`
+	ActivityAt         int64                  `json:"activityAt" bson:"activityAt" index:"single:-1,compound:crm_activity_org_unified_at,compound:crm_activity_org_type_at,compound:crm_activity_org_source_at,compound:crm_activity_org_unified_domain_at,compound:crm_activity_org_at_report,compound:crm_activity_org_at_report_snapshot,order:-1"`
 	Source             string                 `json:"source" bson:"source" index:"single:1,compound:crm_activity_org_source_at"` // pos | fb | system
 	SourceRef          map[string]interface{} `json:"sourceRef,omitempty" bson:"sourceRef,omitempty"`
 	Metadata           map[string]interface{} `json:"metadata,omitempty" bson:"metadata,omitempty"`
 	// MetadataSnapshotAt chỉ dùng cho index (metadata.snapshotAt). Giá trị thực nằm trong Metadata["snapshotAt"].
 	MetadataSnapshotAt int64 `json:"-" bson:"metadata.snapshotAt,omitempty" index:"compound:crm_activity_org_snapshot_at,order:-1"`
+	// MetadataMetricsSnapshot chỉ dùng cho partial index (metadata.metricsSnapshot exists). Tối ưu query report.
+	MetadataMetricsSnapshot interface{} `json:"-" bson:"metadata.metricsSnapshot,omitempty" index:"compound:crm_activity_org_at_report_snapshot,partial:1"`
 
 	DisplayLabel   string `json:"displayLabel,omitempty" bson:"displayLabel,omitempty"`
 	DisplayIcon    string `json:"displayIcon,omitempty" bson:"displayIcon,omitempty"`

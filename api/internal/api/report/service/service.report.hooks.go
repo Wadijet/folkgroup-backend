@@ -33,6 +33,14 @@ func handleReportDataChange(ctx context.Context, e events.DataChangeEvent) {
 
 	switch e.CollectionName {
 	case global.MongoDB_ColNames.PcPosOrders:
+		// Chỉ MarkDirty khi field ảnh hưởng period thay đổi (OpUpdate + PreviousDocument)
+		if e.Operation == events.OpUpdate && e.PreviousDocument != nil {
+			tsNew := events.GetPeriodTimestamp(e.Document, e.CollectionName)
+			tsPrev := events.GetPeriodTimestamp(e.PreviousDocument, e.CollectionName)
+			if tsNew == tsPrev && tsNew != 0 {
+				return
+			}
+		}
 		ts = events.GetInt64Field(e.Document, "PosCreatedAt")
 		if ts == 0 {
 			ts = events.GetInt64Field(e.Document, "InsertedAt")
@@ -54,6 +62,13 @@ func handleReportDataChange(ctx context.Context, e events.DataChangeEvent) {
 			_ = reportSvc.MarkDirty(ctx, reportKey, periodKey, ownerOrgID)
 		}
 	case global.MongoDB_ColNames.PcPosCustomers:
+		if e.Operation == events.OpUpdate && e.PreviousDocument != nil {
+			tsNew := events.GetPeriodTimestamp(e.Document, e.CollectionName)
+			tsPrev := events.GetPeriodTimestamp(e.PreviousDocument, e.CollectionName)
+			if tsNew == tsPrev && tsNew != 0 {
+				return
+			}
+		}
 		ts = events.GetInt64Field(e.Document, "UpdatedAt")
 		if ts == 0 {
 			ts = events.GetInt64Field(e.Document, "LastOrderAt")
@@ -76,6 +91,13 @@ func handleReportDataChange(ctx context.Context, e events.DataChangeEvent) {
 			_ = reportSvc.MarkDirty(ctx, reportKey, periodKey, ownerOrgID)
 		}
 	case global.MongoDB_ColNames.CrmActivityHistory:
+		if e.Operation == events.OpUpdate && e.PreviousDocument != nil {
+			tsNew := events.GetPeriodTimestamp(e.Document, e.CollectionName)
+			tsPrev := events.GetPeriodTimestamp(e.PreviousDocument, e.CollectionName)
+			if tsNew == tsPrev && tsNew != 0 {
+				return
+			}
+		}
 		// Snapshot customer tính từ crm_activity_history — khi activity mới/đổi cần recompute.
 		ts = events.GetInt64Field(e.Document, "ActivityAt")
 		if ts == 0 {

@@ -26,6 +26,10 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 	orgContextMiddleware := middleware.OrganizationContextMiddleware()
 	middlewares := []fiber.Handler{crmReadMiddleware, orgContextMiddleware}
 
+	// CRUD customers (chỉ đọc) — find, find-one, find-by-id, find-with-pagination, count. Filter theo ownerOrganizationId + classification.
+	// Đăng ký trước các route /:unifiedId để tránh conflict.
+	r.RegisterCRUDRoutes(v1, "/customers", customerHandler, apirouter.ReadOnlyConfig, "Report")
+
 	// POST /customers/sync — đồng bộ crm_customers từ POS + FB. Query: sources=pos,fb
 	apirouter.RegisterRouteWithMiddleware(v1, "/customers", "POST", "/sync", middlewares, customerHandler.HandleSyncCustomers)
 

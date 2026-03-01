@@ -7,15 +7,19 @@ import (
 	"strings"
 
 	basehdl "meta_commerce/internal/api/base/handler"
+	crmdto "meta_commerce/internal/api/crm/dto"
+	crmmodels "meta_commerce/internal/api/crm/models"
 	crmvc "meta_commerce/internal/api/crm/service"
 	"meta_commerce/internal/common"
 
 	"github.com/gofiber/fiber/v3"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// CrmCustomerHandler xử lý API profile khách hàng.
+// CrmCustomerHandler xử lý API profile khách hàng và CRUD (find, find-one, find-by-id, find-with-pagination, count).
 type CrmCustomerHandler struct {
+	*basehdl.BaseHandler[crmmodels.CrmCustomer, crmdto.CrmCustomerCreateInput, crmdto.CrmCustomerUpdateInput]
 	CustomerService *crmvc.CrmCustomerService
 }
 
@@ -25,10 +29,20 @@ func NewCrmCustomerHandler() (*CrmCustomerHandler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("tạo CrmCustomerService: %w", err)
 	}
-	return &CrmCustomerHandler{CustomerService: svc}, nil
+	hdl := &CrmCustomerHandler{
+		BaseHandler:     basehdl.NewBaseHandler[crmmodels.CrmCustomer, crmdto.CrmCustomerCreateInput, crmdto.CrmCustomerUpdateInput](svc.BaseServiceMongoImpl),
+		CustomerService: svc,
+	}
+	// Filter cho CRUD: cho phép filter theo classification và unifiedId (dashboard, bảng khách).
+	hdl.SetFilterOptions(basehdl.FilterOptions{
+		DeniedFields:     []string{},
+		AllowedOperators: []string{"$eq", "$in", "$gt", "$gte", "$lt", "$lte", "$exists", "$regex", "$or"},
+		MaxFields:        15,
+	})
+	return hdl, nil
 }
 
-// HandleSyncCustomers xử lý POST /customers/sync — đồng bộ crm_customers từ POS và FB.
+// HandleSyncCustomers xử lý POST /customers/sync — đưa job đồng bộ vào queue, worker sẽ xử lý.
 // Query: sources=pos,fb (rỗng = tất cả). Body: ownerOrganizationId.
 func (h *CrmCustomerHandler) HandleSyncCustomers(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {
@@ -54,23 +68,27 @@ func (h *CrmCustomerHandler) HandleSyncCustomers(c fiber.Ctx) error {
 			return nil
 		}
 		sources := splitAndTrim(c.Query("sources"), ",")
-		posCount, fbCount, err := h.CustomerService.SyncAllCustomers(c.Context(), *orgID, sources)
+		params := bson.M{}
+		if len(sources) > 0 {
+			params["sources"] = sources
+		}
+		jobID, err := crmvc.EnqueueCrmBulkJob(c.Context(), crmmodels.CrmBulkJobSync, *orgID, params)
 		if err != nil {
 			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
-				"code": common.ErrCodeDatabase.Code, "message": "Lỗi đồng bộ CRM: "+err.Error(), "status": "error",
+				"code": common.ErrCodeDatabase.Code, "message": "Lỗi đưa job vào queue: " + err.Error(), "status": "error",
 			})
 			return nil
 		}
-		c.Status(common.StatusOK).JSON(fiber.Map{
-			"code": common.StatusOK, "message": "Đồng bộ thành công",
-			"data": fiber.Map{"posProcessed": posCount, "fbProcessed": fbCount},
+		c.Status(common.StatusAccepted).JSON(fiber.Map{
+			"code": common.StatusAccepted, "message": "Job đồng bộ đã được đưa vào queue, worker sẽ xử lý",
+			"data": fiber.Map{"jobId": jobID.Hex(), "status": "queued"},
 			"status": "success",
 		})
 		return nil
 	})
 }
 
-// HandleBackfillActivity xử lý POST /customers/backfill-activity — job bên ngoài gọi để backfill activity từ dữ liệu cũ.
+// HandleBackfillActivity xử lý POST /customers/backfill-activity — đưa job backfill vào queue, worker sẽ xử lý.
 // Query: types=order,conversation,note (rỗng = tất cả). Body: ownerOrganizationId, limit.
 func (h *CrmCustomerHandler) HandleBackfillActivity(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {
@@ -102,29 +120,30 @@ func (h *CrmCustomerHandler) HandleBackfillActivity(c fiber.Ctx) error {
 			return nil
 		}
 		types := splitAndTrim(c.Query("types"), ",")
-		result, err := h.CustomerService.BackfillActivity(c.Context(), *orgID, input.Limit, types)
+		params := bson.M{}
+		if input.Limit > 0 {
+			params["limit"] = input.Limit
+		}
+		if len(types) > 0 {
+			params["types"] = types
+		}
+		jobID, err := crmvc.EnqueueCrmBulkJob(c.Context(), crmmodels.CrmBulkJobBackfill, *orgID, params)
 		if err != nil {
 			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
-				"code": common.ErrCodeDatabase.Code, "message": "Lỗi backfill: " + err.Error(), "status": "error",
+				"code": common.ErrCodeDatabase.Code, "message": "Lỗi đưa job vào queue: " + err.Error(), "status": "error",
 			})
 			return nil
 		}
-		msg := "Backfill hoàn tất"
-		if result.ConversationsSkippedNoResolve > 0 && result.ConversationsSkippedNoResolve == result.ConversationsProcessed {
-			msg = "Backfill hoàn tất. Lưu ý: tất cả conversations không resolve được — chạy trước: go run scripts/backfill_fb_customers_from_conversations.go " + orgID.Hex()
-		} else if result.OrdersProcessed == 0 && result.ConversationsProcessed == 0 && result.NotesProcessed == 0 {
-			msg = "Backfill hoàn tất. Không có dữ liệu để xử lý — kiểm tra: 1) ownerOrganizationId đúng; 2) fb_conversations/pc_pos_orders có ownerOrganizationId (chạy scripts/backfill_conversation_ownerorg.go nếu thiếu); 3) fb_customers đã có (chạy scripts/backfill_fb_customers_from_conversations.go)"
-		}
-		c.Status(common.StatusOK).JSON(fiber.Map{
-			"code": common.StatusOK, "message": msg,
-			"data": result,
+		c.Status(common.StatusAccepted).JSON(fiber.Map{
+			"code": common.StatusAccepted, "message": "Job backfill đã được đưa vào queue, worker sẽ xử lý",
+			"data": fiber.Map{"jobId": jobID.Hex(), "status": "queued"},
 			"status": "success",
 		})
 		return nil
 	})
 }
 
-// HandleRebuildCrm xử lý POST /customers/rebuild — sync rồi backfill.
+// HandleRebuildCrm xử lý POST /customers/rebuild — đưa job rebuild vào queue, worker sẽ xử lý (sync rồi backfill).
 // Query: sources=pos,fb (rỗng=tất cả), types=order,conversation,note (rỗng=tất cả).
 // Body: ownerOrganizationId, limit.
 func (h *CrmCustomerHandler) HandleRebuildCrm(c fiber.Ctx) error {
@@ -153,23 +172,33 @@ func (h *CrmCustomerHandler) HandleRebuildCrm(c fiber.Ctx) error {
 		}
 		sources := splitAndTrim(c.Query("sources"), ",")
 		types := splitAndTrim(c.Query("types"), ",")
-		result, err := h.CustomerService.RebuildCrm(c.Context(), *orgID, input.Limit, sources, types)
+		params := bson.M{}
+		if input.Limit > 0 {
+			params["limit"] = input.Limit
+		}
+		if len(sources) > 0 {
+			params["sources"] = sources
+		}
+		if len(types) > 0 {
+			params["types"] = types
+		}
+		jobID, err := crmvc.EnqueueCrmBulkJob(c.Context(), crmmodels.CrmBulkJobRebuild, *orgID, params)
 		if err != nil {
 			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
-				"code": common.ErrCodeDatabase.Code, "message": "Lỗi rebuild CRM: " + err.Error(), "status": "error",
+				"code": common.ErrCodeDatabase.Code, "message": "Lỗi đưa job vào queue: " + err.Error(), "status": "error",
 			})
 			return nil
 		}
-		c.Status(common.StatusOK).JSON(fiber.Map{
-			"code": common.StatusOK, "message": "Rebuild hoàn tất",
-			"data": result,
+		c.Status(common.StatusAccepted).JSON(fiber.Map{
+			"code": common.StatusAccepted, "message": "Job rebuild đã được đưa vào queue, worker sẽ xử lý",
+			"data": fiber.Map{"jobId": jobID.Hex(), "status": "queued"},
 			"status": "success",
 		})
 		return nil
 	})
 }
 
-// HandleRecalculateAllCustomers xử lý POST /customers/recalculate-all — tính toán lại tất cả khách hàng hiện có.
+// HandleRecalculateAllCustomers xử lý POST /customers/recalculate-all — đưa job tính toán lại tất cả khách vào queue.
 // Body: ownerOrganizationId, limit (0 = tất cả).
 func (h *CrmCustomerHandler) HandleRecalculateAllCustomers(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {
@@ -195,23 +224,27 @@ func (h *CrmCustomerHandler) HandleRecalculateAllCustomers(c fiber.Ctx) error {
 			})
 			return nil
 		}
-		result, err := h.CustomerService.RecalculateAllCustomers(c.Context(), *orgID, input.Limit)
+		params := bson.M{}
+		if input.Limit > 0 {
+			params["limit"] = input.Limit
+		}
+		jobID, err := crmvc.EnqueueCrmBulkJob(c.Context(), crmmodels.CrmBulkJobRecalculateAll, *orgID, params)
 		if err != nil {
 			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
-				"code": common.ErrCodeDatabase.Code, "message": "Lỗi tính toán lại khách hàng: " + err.Error(), "status": "error",
+				"code": common.ErrCodeDatabase.Code, "message": "Lỗi đưa job vào queue: " + err.Error(), "status": "error",
 			})
 			return nil
 		}
-		c.Status(common.StatusOK).JSON(fiber.Map{
-			"code": common.StatusOK, "message": "Đã tính toán lại tất cả khách hàng",
-			"data": result,
+		c.Status(common.StatusAccepted).JSON(fiber.Map{
+			"code": common.StatusAccepted, "message": "Job tính toán lại tất cả khách đã được đưa vào queue, worker sẽ xử lý",
+			"data": fiber.Map{"jobId": jobID.Hex(), "status": "queued"},
 			"status": "success",
 		})
 		return nil
 	})
 }
 
-// HandleRecalculateCustomer xử lý POST /customers/:unifiedId/recalculate — cập nhật toàn bộ thông tin khách từ tất cả nguồn.
+// HandleRecalculateCustomer xử lý POST /customers/:unifiedId/recalculate — đưa job tính toán lại 1 khách vào queue.
 func (h *CrmCustomerHandler) HandleRecalculateCustomer(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {
 		unifiedId := c.Params("unifiedId")
@@ -228,22 +261,17 @@ func (h *CrmCustomerHandler) HandleRecalculateCustomer(c fiber.Ctx) error {
 			})
 			return nil
 		}
-		result, err := h.CustomerService.RecalculateCustomerFromAllSources(c.Context(), unifiedId, *orgID)
+		params := bson.M{"unifiedId": unifiedId}
+		jobID, err := crmvc.EnqueueCrmBulkJob(c.Context(), crmmodels.CrmBulkJobRecalculateOne, *orgID, params)
 		if err != nil {
-			if errors.Is(err, common.ErrNotFound) {
-				c.Status(common.StatusNotFound).JSON(fiber.Map{
-					"code": common.ErrCodeDatabaseQuery.Code, "message": "Không tìm thấy khách hàng", "status": "error",
-				})
-				return nil
-			}
 			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
-				"code": common.ErrCodeDatabase.Code, "message": "Lỗi cập nhật khách hàng: " + err.Error(), "status": "error",
+				"code": common.ErrCodeDatabase.Code, "message": "Lỗi đưa job vào queue: " + err.Error(), "status": "error",
 			})
 			return nil
 		}
-		c.Status(common.StatusOK).JSON(fiber.Map{
-			"code": common.StatusOK, "message": "Đã cập nhật toàn bộ thông tin khách hàng",
-			"data": result,
+		c.Status(common.StatusAccepted).JSON(fiber.Map{
+			"code": common.StatusAccepted, "message": "Job tính toán lại khách hàng đã được đưa vào queue, worker sẽ xử lý",
+			"data": fiber.Map{"jobId": jobID.Hex(), "status": "queued"},
 			"status": "success",
 		})
 		return nil

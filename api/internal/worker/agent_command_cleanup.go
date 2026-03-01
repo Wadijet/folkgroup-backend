@@ -64,6 +64,12 @@ func (w *AgentCommandCleanupWorker) Start(ctx context.Context) {
 			log.Info("🔄 [AGENT_COMMAND_CLEANUP] Agent Command Cleanup Worker stopped")
 			return
 		case <-ticker.C:
+			if ShouldThrottle(PriorityLow) {
+				continue
+			}
+			if effInterval := GetEffectiveInterval(w.interval, PriorityLow); effInterval > w.interval {
+				time.Sleep(effInterval - w.interval)
+			}
 			func() {
 				defer func() {
 					if r := recover(); r != nil {

@@ -84,9 +84,11 @@ type MongoDB_Auth_CollectionName struct {
 	ReportDirtyPeriods string // report_dirty_periods: đánh dấu chu kỳ cần tính lại
 
 	// Module CRM (tiền tố crm_)
-	CrmCustomers        string // crm_customers: khách đã merge
+	CrmCustomers         string // crm_customers: khách đã merge
 	CrmActivityHistory  string // crm_activity_history: lịch sử hoạt động
 	CrmNotes            string // crm_notes: ghi chú khách
+	CrmPendingIngest    string // crm_pending_ingest: queue cho worker xử lý Merge/Ingest
+	CrmBulkJobs        string // crm_bulk_jobs: queue cho worker xử lý sync, backfill, recalculate
 }
 
 // Các biến toàn cục

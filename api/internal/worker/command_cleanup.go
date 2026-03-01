@@ -64,6 +64,12 @@ func (w *CommandCleanupWorker) Start(ctx context.Context) {
 			log.Info("🔄 [COMMAND_CLEANUP] Command Cleanup Worker stopped")
 			return
 		case <-ticker.C:
+			if ShouldThrottle(PriorityLow) {
+				continue
+			}
+			if effInterval := GetEffectiveInterval(w.interval, PriorityLow); effInterval > w.interval {
+				time.Sleep(effInterval - w.interval)
+			}
 			func() {
 				defer func() {
 					if r := recover(); r != nil {

@@ -82,6 +82,12 @@ func (w *ClassificationRefreshWorker) Start(ctx context.Context) {
 			log.Info("📊 [CLASSIFICATION_REFRESH] Classification Refresh Worker stopped")
 			return
 		case <-ticker.C:
+			if ShouldThrottle(PriorityLowest) {
+				continue
+			}
+			if effInterval := GetEffectiveInterval(w.interval, PriorityLowest); effInterval > w.interval {
+				time.Sleep(effInterval - w.interval)
+			}
 			w.runBatch(ctx, log)
 		}
 	}
@@ -89,6 +95,7 @@ func (w *ClassificationRefreshWorker) Start(ctx context.Context) {
 
 // runBatch chạy một đợt refresh: lấy batch khách → RefreshMetrics từng người.
 func (w *ClassificationRefreshWorker) runBatch(ctx context.Context, log *logrus.Logger) {
+	batchSize := GetEffectiveBatchSize(w.batchSize, PriorityLowest)
 	defer func() {
 		if r := recover(); r != nil {
 			log.WithFields(map[string]interface{}{
@@ -101,7 +108,7 @@ func (w *ClassificationRefreshWorker) runBatch(ctx context.Context, log *logrus.
 	totalProcessed := 0
 
 	for {
-		list, err := w.crmService.ListCustomerIdsForClassificationRefresh(ctx, w.mode, w.batchSize, skip)
+		list, err := w.crmService.ListCustomerIdsForClassificationRefresh(ctx, w.mode, batchSize, skip)
 		if err != nil {
 			log.WithError(err).Error("📊 [CLASSIFICATION_REFRESH] Lỗi lấy danh sách khách cần refresh")
 			return
@@ -132,7 +139,7 @@ func (w *ClassificationRefreshWorker) runBatch(ctx context.Context, log *logrus.
 		}
 
 		// Chế độ smart: chỉ 1 batch (ít khách gần ngưỡng). Full: tiếp tục đến hết.
-		if w.mode == ClassificationRefreshModeSmart || len(list) < w.batchSize {
+		if w.mode == ClassificationRefreshModeSmart || len(list) < batchSize {
 			break
 		}
 		skip += w.batchSize

@@ -1,5 +1,6 @@
 // Package reportsvc - Số dư cuối kỳ tính từ report_snapshots (phát sinh).
-// Số dư đầu kỳ = 0, cộng tất cả phát sinh (in - out) trong kỳ. Tối ưu: dùng snapshot dài trước (yearly > monthly > weekly > daily).
+// Số đầu kỳ = 0, cộng phát sinh từng kỳ qua snapshots (không query từng khách → nhanh hơn CRM).
+// Ưu tiên chu kỳ dài: thay 3 chu kỳ ngày bằng 1 chu kỳ tháng để ít snapshot nhất.
 package reportsvc
 
 import (
@@ -24,6 +25,7 @@ type periodRangeCandidate struct {
 }
 
 // getCandidateReportKeysAndRanges trả về danh sách ứng viên theo thứ tự ưu tiên: chu kỳ dài trước (ít snapshot).
+// Chỉ thêm chu kỳ dài khi [startMs, endMs] KHỚP ranh giới chu kỳ — tránh thừa/thiếu phát sinh.
 // Dùng để thử lần lượt: nếu chu kỳ dài không có snapshot thì thử chu kỳ ngắn hơn.
 func getCandidateReportKeysAndRanges(startMs, endMs int64) []periodRangeCandidate {
 	loc, err := time.LoadLocation(ReportTimezone)
@@ -80,16 +82,13 @@ func getCandidateReportKeysAndRanges(startMs, endMs int64) []periodRangeCandidat
 }
 
 // periodRangeForReportKey tính fromStr, toStr và count periods cho reportKey trong [startT, endT].
-// Report align: yearly = đầu năm (1/1), monthly = đầu tháng (1), weekly = đầu tuần (thứ 2).
+// Chỉ dùng chu kỳ dài khi range [startT, endT] KHỚP ranh giới chu kỳ — tránh thừa/thiếu phát sinh.
+// Report align: yearly = 1/1–31/12, monthly = đầu tháng–cuối tháng, weekly = T2 00:00–CN 23:59:59.
 func periodRangeForReportKey(reportKey string, startT, endT time.Time, loc *time.Location) (fromStr, toStr string, count int) {
 	switch reportKey {
 	case "customer_yearly":
-		// Chỉ dùng yearly khi range trùng ranh giới năm: bắt đầu 1/1, kết thúc 31/12.
-		// Tránh dùng yearly cho range partial (vd: 15/1–20/3) vì sẽ thừa phát sinh.
-		if startT.Day() != 1 || startT.Month() != 1 {
-			return "", "", 999999
-		}
-		if endT.Day() != 31 || endT.Month() != 12 {
+		// Chỉ dùng yearly khi range trùng ranh giới năm: bắt đầu 1/1 00:00, kết thúc 31/12 23:59:59.
+		if !isStartOfYear(startT) || !isEndOfYear(endT, loc) {
 			return "", "", 999999
 		}
 		yFrom := startT.Year()
@@ -97,7 +96,10 @@ func periodRangeForReportKey(reportKey string, startT, endT time.Time, loc *time
 		return fmt.Sprintf("%d", yFrom), fmt.Sprintf("%d", yTo), yTo - yFrom + 1
 
 	case "customer_monthly":
-		// Đầu tháng: periodKey = "YYYY-MM" (ngày 1).
+		// Chỉ dùng monthly khi range khớp ranh giới tháng: start = 1st 00:00, end = cuối tháng 23:59:59.
+		if !isStartOfMonth(startT) || !isEndOfMonth(endT, loc) {
+			return "", "", 999999
+		}
 		from := time.Date(startT.Year(), startT.Month(), 1, 0, 0, 0, 0, loc)
 		to := time.Date(endT.Year(), endT.Month(), 1, 0, 0, 0, 0, loc)
 		months := 0
@@ -107,7 +109,10 @@ func periodRangeForReportKey(reportKey string, startT, endT time.Time, loc *time
 		return from.Format("2006-01"), to.Format("2006-01"), months
 
 	case "customer_weekly":
-		// Đầu tuần (thứ 2): periodKey = "YYYY-MM-DD" (ngày thứ 2).
+		// Chỉ dùng weekly khi range khớp ranh giới tuần: start = T2 00:00, end = CN 23:59:59.
+		if !isStartOfWeek(startT) || !isEndOfWeek(endT, loc) {
+			return "", "", 999999
+		}
 		mondayStart := getMondayOfWeek(startT)
 		mondayEnd := getMondayOfWeek(endT)
 		weeks := 1
@@ -117,6 +122,7 @@ func periodRangeForReportKey(reportKey string, startT, endT time.Time, loc *time
 		return mondayStart.Format("2006-01-02"), mondayEnd.Format("2006-01-02"), weeks
 
 	case "customer_daily":
+		// Daily luôn dùng được; ranh giới tùy startT/endT.
 		days := int(endT.Sub(startT).Hours()/24) + 1
 		if days < 1 {
 			days = 1
@@ -128,21 +134,73 @@ func periodRangeForReportKey(reportKey string, startT, endT time.Time, loc *time
 	}
 }
 
-// GetPeriodEndBalanceFromSnapshots lấy số dư cuối kỳ bằng cách cộng phát sinh từ report_snapshots.
-// Số dư đầu kỳ = 0. Tối ưu: dùng snapshot dài trước (yearly > monthly > weekly > daily) để ít snapshot nhất.
+// isStartOfYear true nếu t = 1/1 00:00:00.
+func isStartOfYear(t time.Time) bool {
+	return t.Day() == 1 && t.Month() == 1 && t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0
+}
+
+// isEndOfYear true nếu t = 31/12 và gần cuối ngày (23:59).
+func isEndOfYear(t time.Time, _ *time.Location) bool {
+	return t.Month() == 12 && t.Day() == 31 && t.Hour() == 23 && t.Minute() >= 59
+}
+
+// isStartOfMonth true nếu t = ngày 1 00:00:00.
+func isStartOfMonth(t time.Time) bool {
+	return t.Day() == 1 && t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0
+}
+
+// isEndOfMonth true nếu t = ngày cuối tháng và 23:59.
+func isEndOfMonth(t time.Time, loc *time.Location) bool {
+	lastDay := time.Date(t.Year(), t.Month()+1, 0, 0, 0, 0, 0, loc)
+	return t.Day() == lastDay.Day() && t.Hour() == 23 && t.Minute() >= 59
+}
+
+// isStartOfWeek true nếu t = thứ Hai 00:00:00.
+func isStartOfWeek(t time.Time) bool {
+	return t.Weekday() == time.Monday && t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0
+}
+
+// isEndOfWeek true nếu t = Chủ nhật và 23:59 (cuối tuần).
+func isEndOfWeek(t time.Time, _ *time.Location) bool {
+	return t.Weekday() == time.Sunday && t.Hour() == 23 && t.Minute() >= 59
+}
+
+// earliestPeriodKey chu kỳ sớm nhất để bắt đầu tích lũy (tính từ đầu).
+var earliestPeriodKey = map[string]string{
+	"customer_yearly":  "2000",
+	"customer_monthly": "2000-01",
+	"customer_weekly":  "2000-01-03", // Thứ Hai đầu tiên của 2000
+	"customer_daily":   "2000-01-01",
+}
+
+// GetPeriodEndBalanceFromSnapshots lấy số dư cuối kỳ = 0 + tổng phát sinh từ đầu đến endMs.
+// Phải tích lũy TỪ ĐẦU mới khớp GetPeriodEndBalance (CRM). Tối ưu: ưu tiên chu kỳ dài.
 func (s *ReportService) GetPeriodEndBalanceFromSnapshots(ctx context.Context, ownerOrgID primitive.ObjectID, params *reportdto.CustomersQueryParams) (map[string]interface{}, error) {
 	if params == nil {
 		params = &reportdto.CustomersQueryParams{}
 	}
 	applyCustomersDefaults(params)
 
-	startMs, endMs, err := getStartEndMsFromParams(params)
+	_, endMs, err := getStartEndMsFromParams(params)
 	if err != nil {
 		return nil, err
 	}
 
-	// Thử lần lượt chu kỳ dài → ngắn: dùng chu kỳ đầu tiên có snapshot trong DB.
-	candidates := getCandidateReportKeysAndRanges(startMs, endMs)
+	// Số cuối kỳ = 0 + sum(phát sinh từ đầu đến endMs). Bỏ qua startMs từ params.
+	endT := time.UnixMilli(endMs).In(mustLoadLoc())
+	toStrDaily := endT.Format("2006-01-02")
+	toStrMonthly := endT.Format("2006-01")
+	toStrYearly := fmt.Sprintf("%d", endT.Year())
+	mondayEnd := getMondayOfWeek(endT)
+	toStrWeekly := mondayEnd.Format("2006-01-02")
+
+	// Thử chu kỳ dài → ngắn: dùng chu kỳ đầu tiên có snapshot.
+	candidates := []periodRangeCandidate{
+		{"customer_yearly", earliestPeriodKey["customer_yearly"], toStrYearly},
+		{"customer_monthly", earliestPeriodKey["customer_monthly"], toStrMonthly},
+		{"customer_weekly", earliestPeriodKey["customer_weekly"], toStrWeekly},
+		{"customer_daily", earliestPeriodKey["customer_daily"], toStrDaily},
+	}
 	var snapshots []reportmodels.ReportSnapshot
 	for _, c := range candidates {
 		list, err := s.FindSnapshotsForTrend(ctx, c.reportKey, ownerOrgID, c.fromStr, c.toStr)
@@ -156,6 +214,14 @@ func (s *ReportService) GetPeriodEndBalanceFromSnapshots(ctx context.Context, ow
 	}
 
 	return sumPhatSinhToBalance(snapshots), nil
+}
+
+func mustLoadLoc() *time.Location {
+	loc, _ := time.LoadLocation(ReportTimezone)
+	if loc == nil {
+		loc = time.UTC
+	}
+	return loc
 }
 
 // getStartEndMsFromParams chuyển params thành startMs, endMs.

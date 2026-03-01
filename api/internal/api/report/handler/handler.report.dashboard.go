@@ -10,7 +10,6 @@ import (
 	"meta_commerce/internal/common"
 	reportdto "meta_commerce/internal/api/report/dto"
 	"meta_commerce/internal/api/report/layer3"
-	reportsvc "meta_commerce/internal/api/report/service"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -256,106 +255,6 @@ func (h *ReportHandler) HandleGetInventoryProductVariations(c fiber.Ctx) error {
 				"code": common.ErrCodeDatabase.Code, "message": "Lỗi truy vấn mẫu mã tồn kho", "status": "error",
 			})
 			return nil
-		}
-		c.Status(common.StatusOK).JSON(fiber.Map{
-			"code": common.StatusOK, "message": "Thành công", "data": result, "status": "success",
-		})
-		return nil
-	})
-}
-
-// HandleGetCustomers xử lý GET /dashboard/customers — snapshot Tab 4 Customer Intelligence (chỉ dùng CRM).
-// Query: from, to, period, filter, limit, offset, sortField, sortOrder, journey, valueTier, lifecycle, loyalty, momentum, ceoGroup.
-func (h *ReportHandler) HandleGetCustomers(c fiber.Ctx) error {
-	return basehdl.SafeHandlerWrapper(c, func() error {
-		orgID := getActiveOrganizationID(c)
-		if orgID == nil || orgID.IsZero() {
-			c.Status(common.StatusBadRequest).JSON(fiber.Map{
-				"code": common.ErrCodeValidationInput.Code, "message": "Vui lòng chọn tổ chức (active organization)", "status": "error",
-			})
-			return nil
-		}
-		var params reportdto.CustomersQueryParams
-		_ = c.Bind().Query(&params)
-		limit := params.Limit
-		if limit <= 0 {
-			limit = 20
-		}
-		offset := params.Offset
-		if offset < 0 {
-			offset = 0
-		}
-		sortField, sortOrder := reportdto.ParseCustomerSortParams(params.SortField, params.SortOrder)
-		filters := &crmvc.CrmDashboardFilters{
-			Journey:   crmvc.ParseFilterValues(params.Journey),
-			Channel:   crmvc.ParseFilterValues(params.Channel),
-			ValueTier: crmvc.ParseFilterValues(params.ValueTier),
-			Lifecycle: crmvc.ParseFilterValues(params.Lifecycle),
-			Loyalty:   crmvc.ParseFilterValues(params.Loyalty),
-			Momentum:  crmvc.ParseFilterValues(params.Momentum),
-			CeoGroup:  crmvc.ParseFilterValues(params.CeoGroup),
-			Limit:     100000,
-			Offset:    0,
-			SortField: sortField,
-			SortOrder: sortOrder,
-		}
-		allItems, total, err := h.CrmCustomerService.ListCustomersForDashboard(c.Context(), *orgID, filters)
-		if err != nil {
-			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
-				"code": common.ErrCodeDatabase.Code, "message": "Lỗi truy vấn Customer Intelligence: " + err.Error(), "status": "error",
-			})
-			return nil
-		}
-
-		// Ưu tiên KPI và phân bố từ report_snapshots (thống kê theo chu kỳ)
-		snapshotSource := "realtime"
-		var snapshotPeriodKey string
-		var snapshotComputedAt int64
-		baseData := buildCustomersDashboardDataFromCrm(allItems, total)
-		phatSinhSnap, pPeriodKey, pComputedAt, _ := h.ReportService.GetSnapshotForCustomersDashboard(c.Context(), *orgID, &params)
-		if phatSinhSnap != nil {
-			baseData.CeoGroupIn = phatSinhSnap.CeoGroupIn
-			baseData.CeoGroupOut = phatSinhSnap.CeoGroupOut
-			snapshotSource = "report_snapshots"
-			snapshotPeriodKey = pPeriodKey
-			snapshotComputedAt = pComputedAt
-		}
-		if endMs, err := h.ReportService.GetEndMsForCustomersParams(&params); err == nil {
-			startMs, _ := h.ReportService.GetStartMsForCustomersParams(&params)
-			if balance, err := h.ReportService.GetPeriodEndBalance(c.Context(), *orgID, endMs, startMs); err == nil {
-				baseData.CeoGroupDistribution = reportsvc.CeoGroupDistributionFromBalance(balance)
-			}
-		}
-
-		result := &reportdto.CustomersSnapshotResult{
-			Summary:                baseData.Summary,
-			ValueDistribution:      baseData.ValueDistribution,
-			JourneyDistribution:    baseData.JourneyDistribution,
-			LifecycleDistribution:  baseData.LifecycleDistribution,
-			ChannelDistribution:    baseData.ChannelDistribution,
-			LoyaltyDistribution:    baseData.LoyaltyDistribution,
-			MomentumDistribution:   baseData.MomentumDistribution,
-			CeoGroupDistribution:  baseData.CeoGroupDistribution,
-			CeoGroupIn:            baseData.CeoGroupIn,
-			CeoGroupOut:           baseData.CeoGroupOut,
-			ValueLTV:              baseData.ValueLTV,
-			JourneyLTV:             baseData.JourneyLTV,
-			LifecycleLTV:           baseData.LifecycleLTV,
-			ChannelLTV:             baseData.ChannelLTV,
-			LoyaltyLTV:             baseData.LoyaltyLTV,
-			MomentumLTV:            baseData.MomentumLTV,
-			CeoGroupLTV:            baseData.CeoGroupLTV,
-			FirstLayer3:            baseData.FirstLayer3,
-			RepeatLayer3:           baseData.RepeatLayer3,
-			VipLayer3:              baseData.VipLayer3,
-			InactiveLayer3:         baseData.InactiveLayer3,
-			EngagedLayer3:          baseData.EngagedLayer3,
-			Customers:              paginateAndMapCustomers(allItems, offset, limit),
-			VipInactiveCustomers:   buildVipInactiveFromCrm(allItems, params.VipInactiveLimit),
-			TotalCount:             total,
-			SnapshotSource:         snapshotSource,
-			SnapshotPeriodKey:      snapshotPeriodKey,
-			SnapshotComputedAt:     snapshotComputedAt,
 		}
 		c.Status(common.StatusOK).JSON(fiber.Map{
 			"code": common.StatusOK, "message": "Thành công", "data": result, "status": "success",
@@ -814,9 +713,9 @@ func buildVipInactiveFromCrm(items []crmvc.CrmDashboardCustomerItem, limit int) 
 	return result
 }
 
-// HandleGetCustomersTrend xử lý GET /dashboard/customers/trend — snapshot hiện tại + trend data + comparison (% change vs kỳ trước).
+// HandleGetCustomersTrendFromSnapshots xử lý GET /dashboard/customers/trend-from-snapshots — trend từ report_snapshots (nhanh).
 // Bổ sung Customers và VipInactiveCustomers từ CrmCustomerService.
-func (h *ReportHandler) HandleGetCustomersTrend(c fiber.Ctx) error {
+func (h *ReportHandler) HandleGetCustomersTrendFromSnapshots(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {
 		orgID := getActiveOrganizationID(c)
 		if orgID == nil || orgID.IsZero() {
@@ -827,7 +726,7 @@ func (h *ReportHandler) HandleGetCustomersTrend(c fiber.Ctx) error {
 		}
 		var params reportdto.CustomersQueryParams
 		_ = c.Bind().Query(&params)
-		result, err := h.ReportService.GetCustomersTrendWithComparison(c.Context(), *orgID, &params)
+		result, err := h.ReportService.GetCustomersTrendFromSnapshots(c.Context(), *orgID, &params)
 		if err != nil {
 			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
 				"code": common.ErrCodeDatabase.Code, "message": "Lỗi truy vấn Customer Trend: " + err.Error(), "status": "error",
@@ -1014,8 +913,79 @@ func (h *ReportHandler) HandleGetPeriodEndBalance(c fiber.Ctx) error {
 	})
 }
 
+// HandleGetCustomersTrendFromCrm xử lý GET /dashboard/customers/trend-from-crm — trend từ CRM (chính xác, chậm hơn).
+// Cùng format với trend-from-snapshots, khác nguồn dữ liệu.
+func (h *ReportHandler) HandleGetCustomersTrendFromCrm(c fiber.Ctx) error {
+	return basehdl.SafeHandlerWrapper(c, func() error {
+		orgID := getActiveOrganizationID(c)
+		if orgID == nil || orgID.IsZero() {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationInput.Code, "message": "Vui lòng chọn tổ chức (active organization)", "status": "error",
+			})
+			return nil
+		}
+		var params reportdto.CustomersQueryParams
+		_ = c.Bind().Query(&params)
+		result, err := h.ReportService.GetCustomersTrendFromCrm(c.Context(), *orgID, &params)
+		if err != nil {
+			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
+				"code": common.ErrCodeDatabase.Code, "message": "Lỗi truy vấn trend từ CRM: " + err.Error(), "status": "error",
+			})
+			return nil
+		}
+		// Bổ sung Customers và VipInactiveCustomers từ CRM nếu còn trống
+		if result != nil && result.CurrentSnapshot != nil && len(result.CurrentSnapshot.Customers) == 0 {
+			if params.Limit <= 0 { params.Limit = 20 }
+			if params.Offset < 0 { params.Offset = 0 }
+			if params.VipInactiveLimit <= 0 { params.VipInactiveLimit = 15 }
+			limit := params.Limit
+			if limit <= 0 { limit = 20 }
+			sortField, sortOrder := reportdto.ParseCustomerSortParams(params.SortField, params.SortOrder)
+			filters := &crmvc.CrmDashboardFilters{
+				Journey:   crmvc.ParseFilterValues(params.Journey),
+				Channel:   crmvc.ParseFilterValues(params.Channel),
+				ValueTier: crmvc.ParseFilterValues(params.ValueTier),
+				Lifecycle: crmvc.ParseFilterValues(params.Lifecycle),
+				Loyalty:   crmvc.ParseFilterValues(params.Loyalty),
+				Momentum:  crmvc.ParseFilterValues(params.Momentum),
+				CeoGroup:  crmvc.ParseFilterValues(params.CeoGroup),
+				Limit:     100000, Offset: 0, SortField: sortField, SortOrder: sortOrder,
+			}
+			allItems, total, err := h.CrmCustomerService.ListCustomersForDashboard(c.Context(), *orgID, filters)
+			if err == nil {
+				result.CurrentSnapshot.Customers = paginateAndMapCustomers(allItems, params.Offset, limit)
+				result.CurrentSnapshot.VipInactiveCustomers = buildVipInactiveFromCrm(allItems, params.VipInactiveLimit)
+				result.CurrentSnapshot.TotalCount = total
+				realtimeData := buildCustomersDashboardDataFromCrm(allItems, total)
+				result.CurrentSnapshot.Summary = realtimeData.Summary
+				result.CurrentSnapshot.ValueDistribution = realtimeData.ValueDistribution
+				result.CurrentSnapshot.JourneyDistribution = realtimeData.JourneyDistribution
+				result.CurrentSnapshot.LifecycleDistribution = realtimeData.LifecycleDistribution
+				result.CurrentSnapshot.ChannelDistribution = realtimeData.ChannelDistribution
+				result.CurrentSnapshot.LoyaltyDistribution = realtimeData.LoyaltyDistribution
+				result.CurrentSnapshot.MomentumDistribution = realtimeData.MomentumDistribution
+				result.CurrentSnapshot.ValueLTV = realtimeData.ValueLTV
+				result.CurrentSnapshot.JourneyLTV = realtimeData.JourneyLTV
+				result.CurrentSnapshot.LifecycleLTV = realtimeData.LifecycleLTV
+				result.CurrentSnapshot.ChannelLTV = realtimeData.ChannelLTV
+				result.CurrentSnapshot.LoyaltyLTV = realtimeData.LoyaltyLTV
+				result.CurrentSnapshot.MomentumLTV = realtimeData.MomentumLTV
+				result.CurrentSnapshot.CeoGroupLTV = realtimeData.CeoGroupLTV
+				result.CurrentSnapshot.FirstLayer3 = realtimeData.FirstLayer3
+				result.CurrentSnapshot.RepeatLayer3 = realtimeData.RepeatLayer3
+				result.CurrentSnapshot.VipLayer3 = realtimeData.VipLayer3
+				result.CurrentSnapshot.InactiveLayer3 = realtimeData.InactiveLayer3
+			}
+		}
+		c.Status(common.StatusOK).JSON(fiber.Map{
+			"code": common.StatusOK, "message": "Thành công", "data": result, "status": "success",
+		})
+		return nil
+	})
+}
+
 // HandleGetPeriodEndBalanceFromSnapshots xử lý GET /dashboard/customers/period-end-balance-from-snapshots.
-// Số dư = 0 + tổng phát sinh từ report_snapshots. Tối ưu: dùng snapshot dài trước (yearly > monthly > weekly > daily).
+// Số cuối kỳ = 0 + phát sinh từ snapshots (tối ưu hiệu suất, ưu tiên chu kỳ dài).
 // Query: period/from/to (giống GET /customers).
 func (h *ReportHandler) HandleGetPeriodEndBalanceFromSnapshots(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {

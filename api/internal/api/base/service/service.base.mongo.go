@@ -427,9 +427,10 @@ func (s *BaseServiceMongoImpl[T]) UpdateOne(ctx context.Context, filter interfac
 	}
 
 	events.EmitDataChanged(ctx, events.DataChangeEvent{
-		CollectionName: s.collection.Name(),
-		Operation:      events.OpUpdate,
-		Document:       updated,
+		CollectionName:   s.collection.Name(),
+		Operation:        events.OpUpdate,
+		Document:         updated,
+		PreviousDocument: existing,
 	})
 	return updated, nil
 }

@@ -1,4 +1,4 @@
-// Package reportsvc - API trend cho Tab 4 Customer: GET /dashboard/customers/trend, transition-matrix, group-changes.
+// Package reportsvc - API trend cho Tab 4 Customer: trend-from-snapshots (nhanh), trend-from-crm (chính xác), transition-matrix, group-changes.
 // Dùng metricsSnapshot từ crm_activity_history (hệ CRM).
 package reportsvc
 
@@ -25,9 +25,8 @@ type customerStateAtPeriod struct {
 	CeoGroup      string
 }
 
-// GetCustomersTrendWithComparison trả về snapshot hiện tại + trend data + comparison (KPI % change vs kỳ trước).
-// CurrentSnapshot: KPI + distributions từ report_snapshots; Customers và VipInactiveCustomers để trống (Handler sẽ fill từ CrmCustomerService).
-func (s *ReportService) GetCustomersTrendWithComparison(ctx context.Context, ownerOrgID primitive.ObjectID, params *reportdto.CustomersQueryParams) (*reportdto.CustomersTrendResult, error) {
+// GetCustomersTrendFromSnapshots trả về snapshot + trend data + comparison. Nguồn: report_snapshots (nhanh).
+func (s *ReportService) GetCustomersTrendFromSnapshots(ctx context.Context, ownerOrgID primitive.ObjectID, params *reportdto.CustomersQueryParams) (*reportdto.CustomersTrendResult, error) {
 	if params == nil {
 		params = &reportdto.CustomersQueryParams{}
 	}
@@ -86,6 +85,124 @@ func (s *ReportService) GetCustomersTrendWithComparison(ctx context.Context, own
 		TrendData:       trendData,
 		Comparison:     comparison,
 	}, nil
+}
+
+// GetCustomersTrendFromCrm trả về snapshot + trend data + comparison. Nguồn: CRM (chính xác, chậm hơn).
+// Cùng format với GetCustomersTrendFromSnapshots, khác nguồn dữ liệu.
+func (s *ReportService) GetCustomersTrendFromCrm(ctx context.Context, ownerOrgID primitive.ObjectID, params *reportdto.CustomersQueryParams) (*reportdto.CustomersTrendResult, error) {
+	if params == nil {
+		params = &reportdto.CustomersQueryParams{}
+	}
+	applyCustomersDefaults(params)
+
+	reportKey, fromStr, toStr, err := paramsToTrendRange(params)
+	if err != nil {
+		return nil, err
+	}
+
+	periodKeys := getPeriodKeysInRange(reportKey, fromStr, toStr)
+	metricsList, err := s.computeCustomerPhatSinhBatch(ctx, ownerOrgID, reportKey, periodKeys)
+	if err != nil {
+		return nil, fmt.Errorf("tính phát sinh batch: %w", err)
+	}
+	trendData := make([]reportdto.CustomersTrendDataItem, 0, len(periodKeys))
+	for i, pk := range periodKeys {
+		metrics := map[string]interface{}{}
+		if i < len(metricsList) {
+			metrics = metricsList[i]
+		}
+		trendData = append(trendData, reportdto.CustomersTrendDataItem{
+			PeriodKey:  pk,
+			PeriodType: reportKeyToPeriodType(reportKey),
+			Metrics:    metrics,
+		})
+	}
+
+	currentSnapshot := &reportdto.CustomersSnapshotResult{
+		Customers: nil, VipInactiveCustomers: nil, TotalCount: 0,
+		SnapshotSource: "crm", SnapshotPeriodKey: "", SnapshotComputedAt: 0,
+	}
+	if endMs, err := s.GetEndMsForCustomersParams(params); err == nil {
+		startMs, _ := s.GetStartMsForCustomersParams(params)
+		if balance, err := s.GetPeriodEndBalance(ctx, ownerOrgID, endMs, startMs); err == nil {
+			currentSnapshot.CeoGroupDistribution = CeoGroupDistributionFromBalance(balance)
+		}
+	}
+	if len(trendData) > 0 {
+		last := trendData[len(trendData)-1].Metrics
+		currentSnapshot.CeoGroupIn = metricAtPhatSinhFromLayer2(last, "ceoGroup", "in")
+		currentSnapshot.CeoGroupOut = metricAtPhatSinhFromLayer2(last, "ceoGroup", "out")
+		currentSnapshot.SnapshotPeriodKey = trendData[len(trendData)-1].PeriodKey
+	}
+
+	comparison := make(map[string]reportdto.ComparisonItem)
+	if len(trendData) >= 2 {
+		curr := trendData[len(trendData)-1].Metrics
+		prev := trendData[len(trendData)-2].Metrics
+		comparison = buildComparison(curr, prev)
+	}
+
+	return &reportdto.CustomersTrendResult{
+		CurrentSnapshot: currentSnapshot,
+		TrendData:       trendData,
+		Comparison:     comparison,
+	}, nil
+}
+
+// getPeriodKeysInRange trả về danh sách periodKey trong [fromStr, toStr] theo reportKey.
+func getPeriodKeysInRange(reportKey, fromStr, toStr string) []string {
+	loc, _ := time.LoadLocation("Asia/Ho_Chi_Minh")
+	var keys []string
+	switch reportKey {
+	case "customer_daily":
+		from, _ := time.ParseInLocation("2006-01-02", fromStr, loc)
+		to, _ := time.ParseInLocation("2006-01-02", toStr, loc)
+		for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
+			keys = append(keys, d.Format("2006-01-02"))
+		}
+	case "customer_weekly":
+		from, _ := time.ParseInLocation("2006-01-02", fromStr, loc)
+		to, _ := time.ParseInLocation("2006-01-02", toStr, loc)
+		mondayFrom := getMondayOfWeek(from)
+		mondayTo := getMondayOfWeek(to)
+		for d := mondayFrom; !d.After(mondayTo); d = d.AddDate(0, 0, 7) {
+			keys = append(keys, d.Format("2006-01-02"))
+		}
+	case "customer_monthly":
+		from, _ := time.ParseInLocation("2006-01", fromStr, loc)
+		to, _ := time.ParseInLocation("2006-01", toStr, loc)
+		for d := from; !d.After(to); d = d.AddDate(0, 1, 0) {
+			keys = append(keys, d.Format("2006-01"))
+		}
+	case "customer_yearly":
+		fromY, _ := time.ParseInLocation("2006", fromStr, loc)
+		toY, _ := time.ParseInLocation("2006", toStr, loc)
+		for y := fromY.Year(); y <= toY.Year(); y++ {
+			keys = append(keys, fmt.Sprintf("%d", y))
+		}
+	default:
+		from, _ := time.ParseInLocation("2006-01-02", fromStr, loc)
+		to, _ := time.ParseInLocation("2006-01-02", toStr, loc)
+		for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
+			keys = append(keys, d.Format("2006-01-02"))
+		}
+	}
+	return keys
+}
+
+func reportKeyToPeriodType(reportKey string) string {
+	switch reportKey {
+	case "customer_daily":
+		return "day"
+	case "customer_weekly":
+		return "week"
+	case "customer_monthly":
+		return "month"
+	case "customer_yearly":
+		return "year"
+	default:
+		return "day"
+	}
 }
 
 // paramsToTrendRange chuyển params (period, from, to) thành reportKey và from/to string cho query.

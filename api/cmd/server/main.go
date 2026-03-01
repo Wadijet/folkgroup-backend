@@ -14,6 +14,7 @@ import (
 	"meta_commerce/internal/delivery"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/logger"
+	"meta_commerce/internal/systemalert"
 	"meta_commerce/internal/worker"
 )
 
@@ -179,6 +180,8 @@ func main() {
 	}
 
 	// Worker Controller: lấy mẫu CPU định kỳ, throttle workers khi CPU quá tải
+	// Đăng ký callback gửi cảnh báo khi CPU/RAM/disk quá tải cho team system
+	systemalert.Register()
 	ctxWorkerCtrl, cancelWorkerCtrl := context.WithCancel(context.Background())
 	defer cancelWorkerCtrl()
 	go func() {

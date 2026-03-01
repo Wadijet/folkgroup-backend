@@ -1593,6 +1593,26 @@ Trân trọng,
 Hệ thống thông báo`,
 			variables: []string{"timestamp", "alertType", "alertMessage", "ipAddress", "username"},
 		},
+		{
+			eventType: "system_resource_overload",
+			subject:   "⚠️ [Cảnh báo VPS] Tài nguyên quá tải",
+			content: `Xin chào,
+
+VPS đang quá tải tài nguyên (CPU, RAM hoặc dung lượng disk).
+
+Thông tin:
+- Thời gian: {{timestamp}}
+- Trạng thái: {{state}}
+- CPU: {{cpuPercent}}%
+- RAM: {{ramPercent}}%
+- Disk: {{diskPercent}}%
+
+Hệ thống đã tự động throttle workers. Vui lòng kiểm tra và xử lý.
+
+Trân trọng,
+Hệ thống thông báo`,
+			variables: []string{"timestamp", "state", "cpuPercent", "ramPercent", "diskPercent"},
+		},
 	}
 
 	// Tạo templates cho mỗi system event (Email, Telegram, Webhook)

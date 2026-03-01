@@ -1,4 +1,4 @@
-// Package worker - WorkerController quản lý throttle workers theo tải CPU.
+// Package worker - WorkerController quản lý throttle workers theo tải CPU, RAM, disk.
 package worker
 
 import (
@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/disk"
+	"github.com/shirou/gopsutil/v3/mem"
 	"meta_commerce/internal/logger"
 )
 
@@ -32,18 +34,45 @@ const (
 	PriorityLowest   Priority = 5 // Classification Refresh — batch định kỳ
 )
 
+// ResourceMetrics chứa CPU, RAM, disk hiện tại.
+type ResourceMetrics struct {
+	CPUPercent  float64
+	RAMPercent  float64
+	DiskPercent float64
+}
+
+// OverloadAlertCallback được gọi khi tài nguyên quá tải. state: throttled|paused.
+type OverloadAlertCallback func(metrics ResourceMetrics, state string)
+
+var (
+	overloadAlertCallback OverloadAlertCallback
+	overloadCallbackMu    sync.RWMutex
+)
+
+// RegisterOverloadAlertCallback đăng ký callback khi CPU/RAM/disk quá tải.
+func RegisterOverloadAlertCallback(fn OverloadAlertCallback) {
+	overloadCallbackMu.Lock()
+	overloadAlertCallback = fn
+	overloadCallbackMu.Unlock()
+}
+
 // Controller singleton quản lý throttle workers theo CPU.
 type Controller struct {
-	mu               sync.RWMutex
-	state            ThrottleState
-	cpuPercent       float64
-	lastSampleAt     time.Time
-	enabled          bool
-	thresholdThrottle float64
-	thresholdPause   float64
-	sampleInterval   time.Duration
+	mu                 sync.RWMutex
+	state              ThrottleState
+	cpuPercent         float64
+	ramPercent         float64
+	diskPercent        float64
+	lastSampleAt       time.Time
+	enabled            bool
+	thresholdThrottle  float64
+	thresholdPause    float64
+	thresholdRAMAlert  float64
+	thresholdDiskAlert float64
+	sampleInterval     time.Duration
 	intervalMultiplier int
-	batchDivisor     int
+	batchDivisor       int
+	lastAlertAt        int64 // Unix sec — cooldown
 }
 
 var (
@@ -95,12 +124,26 @@ func newController() *Controller {
 			batchDivisor = n
 		}
 	}
+	thresholdRAMAlert := 85.0
+	if v := os.Getenv("WORKER_RAM_THRESHOLD_ALERT"); v != "" {
+		if n, err := strconv.ParseFloat(v, 64); err == nil && n > 0 {
+			thresholdRAMAlert = n
+		}
+	}
+	thresholdDiskAlert := 90.0
+	if v := os.Getenv("WORKER_DISK_THRESHOLD_ALERT"); v != "" {
+		if n, err := strconv.ParseFloat(v, 64); err == nil && n > 0 {
+			thresholdDiskAlert = n
+		}
+	}
 
 	return &Controller{
 		state:              StateNormal,
 		enabled:            enabled,
 		thresholdThrottle:  thresholdThrottle,
 		thresholdPause:     thresholdPause,
+		thresholdRAMAlert:  thresholdRAMAlert,
+		thresholdDiskAlert: thresholdDiskAlert,
 		sampleInterval:     sampleInterval,
 		intervalMultiplier: intervalMultiplier,
 		batchDivisor:       batchDivisor,
@@ -138,20 +181,29 @@ func (c *Controller) Start(ctx context.Context) {
 	}
 }
 
-// sampleCPU lấy mẫu CPU và cập nhật trạng thái.
+// sampleCPU lấy mẫu CPU, RAM, disk và cập nhật trạng thái.
 // Dùng gopsutil (cross-platform: Windows + Linux).
 func (c *Controller) sampleCPU() {
-	percent, err := cpu.Percent(time.Second, false)
-	if err != nil {
-		return
-	}
 	cpuPct := 0.0
-	if len(percent) > 0 {
+	if percent, err := cpu.Percent(time.Second, false); err == nil && len(percent) > 0 {
 		cpuPct = percent[0]
 	}
+	ramPct := 0.0
+	if v, err := mem.VirtualMemory(); err == nil && v.Total > 0 {
+		ramPct = v.UsedPercent
+	}
+	diskPct := 0.0
+	if v, err := disk.Usage("/"); err == nil && v.Total > 0 {
+		diskPct = v.UsedPercent
+	} else if v, err := disk.Usage("."); err == nil && v.Total > 0 {
+		diskPct = v.UsedPercent
+	}
+
 	c.mu.Lock()
 	prev := c.state
 	c.cpuPercent = cpuPct
+	c.ramPercent = ramPct
+	c.diskPercent = diskPct
 	c.lastSampleAt = time.Now()
 	if cpuPct >= c.thresholdPause {
 		c.state = StatePaused
@@ -162,12 +214,36 @@ func (c *Controller) sampleCPU() {
 	}
 	if prev != c.state {
 		logger.GetAppLogger().WithFields(map[string]interface{}{
-			"cpuPercent": cpuPct,
-			"state":     string(c.state),
-			"prev":      string(prev),
+			"cpuPercent":  cpuPct,
+			"ramPercent":  ramPct,
+			"diskPercent": diskPct,
+			"state":       string(c.state),
+			"prev":        string(prev),
 		}).Info("⚙️ [WORKER_CONTROLLER] Trạng thái CPU thay đổi")
 	}
+	now := time.Now().Unix()
+	shouldAlert := (cpuPct >= c.thresholdThrottle || ramPct >= c.thresholdRAMAlert || diskPct >= c.thresholdDiskAlert) &&
+		(now-c.lastAlertAt >= 1800) // Cooldown 30 phút
+	if shouldAlert {
+		c.lastAlertAt = now
+	}
+	metrics := ResourceMetrics{CPUPercent: cpuPct, RAMPercent: ramPct, DiskPercent: diskPct}
+	stateStr := string(c.state)
 	c.mu.Unlock()
+
+	if shouldAlert {
+		c.trySendOverloadAlert(metrics, stateStr)
+	}
+}
+
+// trySendOverloadAlert gọi callback nếu đã đăng ký.
+func (c *Controller) trySendOverloadAlert(metrics ResourceMetrics, state string) {
+	overloadCallbackMu.RLock()
+	fn := overloadAlertCallback
+	overloadCallbackMu.RUnlock()
+	if fn != nil {
+		go fn(metrics, state)
+	}
 }
 
 // getIntervalMultiplier trả về multiplier theo priority khi Throttled. Ưu tiên cao = multiplier nhỏ.
@@ -271,6 +347,17 @@ func (c *Controller) GetState() (ThrottleState, float64) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.state, c.cpuPercent
+}
+
+// GetResourceMetrics trả về CPU, RAM, disk hiện tại.
+func (c *Controller) GetResourceMetrics() ResourceMetrics {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return ResourceMetrics{
+		CPUPercent:  c.cpuPercent,
+		RAMPercent:  c.ramPercent,
+		DiskPercent: c.diskPercent,
+	}
 }
 
 // ShouldThrottle package-level helper. Truyền priority để xác định có skip khi CPU quá tải không.

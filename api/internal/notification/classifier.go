@@ -41,7 +41,8 @@ func GetSeverityFromEventType(eventType string) string {
 	}
 	if strings.Contains(eventType, "_failed") ||
 		strings.Contains(eventType, "_alert") ||
-		strings.Contains(eventType, "_timeout") {
+		strings.Contains(eventType, "_timeout") ||
+		strings.Contains(eventType, "_overload") {
 		return SeverityHigh
 	}
 	if strings.Contains(eventType, "_warning") ||

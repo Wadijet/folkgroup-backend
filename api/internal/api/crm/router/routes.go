@@ -21,6 +21,14 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 	if err != nil {
 		return fmt.Errorf("tạo CrmNoteHandler: %w", err)
 	}
+	pendingIngestHandler, err := crmhdl.NewCrmPendingIngestHandler()
+	if err != nil {
+		return fmt.Errorf("tạo CrmPendingIngestHandler: %w", err)
+	}
+	bulkJobHandler, err := crmhdl.NewCrmBulkJobHandler()
+	if err != nil {
+		return fmt.Errorf("tạo CrmBulkJobHandler: %w", err)
+	}
 
 	crmReadMiddleware := middleware.AuthMiddleware("Report.Read")
 	orgContextMiddleware := middleware.OrganizationContextMiddleware()
@@ -29,6 +37,12 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 	// CRUD customers (chỉ đọc) — find, find-one, find-by-id, find-with-pagination, count. Filter theo ownerOrganizationId + classification.
 	// Đăng ký trước các route /:unifiedId để tránh conflict.
 	r.RegisterCRUDRoutes(v1, "/customers", customerHandler, apirouter.ReadOnlyConfig, "Report")
+
+	// CRUD crm-pending-ingest (chỉ đọc) — queue Merge/Ingest, xem trạng thái job.
+	r.RegisterCRUDRoutes(v1, "/crm-pending-ingest", pendingIngestHandler, apirouter.ReadOnlyConfig, "Report")
+
+	// CRUD crm-bulk-jobs (chỉ đọc) — queue sync/backfill/recalculate, xem trạng thái job.
+	r.RegisterCRUDRoutes(v1, "/crm-bulk-jobs", bulkJobHandler, apirouter.ReadOnlyConfig, "Report")
 
 	// POST /customers/sync — đồng bộ crm_customers từ POS + FB. Query: sources=pos,fb
 	apirouter.RegisterRouteWithMiddleware(v1, "/customers", "POST", "/sync", middlewares, customerHandler.HandleSyncCustomers)

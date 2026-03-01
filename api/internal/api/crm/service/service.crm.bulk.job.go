@@ -11,8 +11,26 @@ import (
 	mongoopts "go.mongodb.org/mongo-driver/mongo/options"
 
 	crmmodels "meta_commerce/internal/api/crm/models"
+	basesvc "meta_commerce/internal/api/base/service"
+	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
 )
+
+// CrmBulkJobService service CRUD cho crm_bulk_jobs (dùng cho API đọc queue).
+type CrmBulkJobService struct {
+	*basesvc.BaseServiceMongoImpl[crmmodels.CrmBulkJob]
+}
+
+// NewCrmBulkJobService tạo service CRUD cho crm_bulk_jobs.
+func NewCrmBulkJobService() (*CrmBulkJobService, error) {
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CrmBulkJobs)
+	if !ok {
+		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.CrmBulkJobs, common.ErrNotFound)
+	}
+	return &CrmBulkJobService{
+		BaseServiceMongoImpl: basesvc.NewBaseServiceMongo[crmmodels.CrmBulkJob](coll),
+	}, nil
+}
 
 // EnqueueCrmBulkJob thêm job vào queue crm_bulk_jobs.
 // Trả về jobID và error.

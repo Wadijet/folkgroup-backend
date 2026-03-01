@@ -93,32 +93,34 @@ func newController() *Controller {
 	if v := os.Getenv("WORKER_CPU_THROTTLE_ENABLED"); v != "" {
 		enabled = v == "true" || v == "1"
 	}
-	thresholdThrottle := 70.0
+	// Ngưỡng thấp hơn (50/70) để throttle sớm, tránh CPU chạm 100% trước khi phản ứng.
+	thresholdThrottle := 50.0
 	if v := os.Getenv("WORKER_CPU_THRESHOLD_THROTTLE"); v != "" {
 		if n, err := strconv.ParseFloat(v, 64); err == nil && n > 0 {
 			thresholdThrottle = n
 		}
 	}
-	thresholdPause := 90.0
+	thresholdPause := 70.0
 	if v := os.Getenv("WORKER_CPU_THRESHOLD_PAUSE"); v != "" {
 		if n, err := strconv.ParseFloat(v, 64); err == nil && n > 0 {
 			thresholdPause = n
 		}
 	}
-	// Mặc định 15s/lần — gopsutil hoạt động trên Windows và Linux
-	sampleInterval := 15 * time.Second
+	// Mặc định 5s/lần — phản ứng nhanh hơn để tránh CPU kịp spike lên 100%.
+	sampleInterval := 5 * time.Second
 	if v := os.Getenv("WORKER_CPU_SAMPLE_INTERVAL"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			sampleInterval = time.Duration(n) * time.Second
 		}
 	}
-	intervalMultiplier := 3
+	// Multiplier/divisor mạnh hơn để giảm tải nhanh khi vừa chạm ngưỡng.
+	intervalMultiplier := 4
 	if v := os.Getenv("WORKER_THROTTLE_INTERVAL_MULTIPLIER"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 1 {
 			intervalMultiplier = n
 		}
 	}
-	batchDivisor := 2
+	batchDivisor := 3
 	if v := os.Getenv("WORKER_THROTTLE_BATCH_DIVISOR"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 1 {
 			batchDivisor = n

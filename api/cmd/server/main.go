@@ -289,7 +289,8 @@ func main() {
 	}
 
 	// Worker báo cáo theo chu kỳ: xử lý report_dirty_periods (Compute → set processedAt)
-	reportDirtyWorker, err := worker.NewReportDirtyWorker(1*time.Minute, 50)
+	// Interval 2 phút, batch 30 — giảm tải mặc định để tránh CPU spike.
+	reportDirtyWorker, err := worker.NewReportDirtyWorker(2*time.Minute, 30)
 	if err != nil {
 		log.WithError(err).Warn("Failed to create report dirty worker, continuing without report worker")
 	} else {
@@ -313,7 +314,8 @@ func main() {
 	}
 
 	// Worker CRM Ingest: xử lý crm_pending_ingest (Merge/Ingest thay vì chạy trong hook)
-	crmIngestWorker := worker.NewCrmIngestWorker(30*time.Second, 30)
+	// Interval 45s, batch 20 — giảm tải mặc định để tránh CPU spike.
+	crmIngestWorker := worker.NewCrmIngestWorker(45*time.Second, 20)
 	ctxCrmIngest, cancelCrmIngest := context.WithCancel(context.Background())
 	defer cancelCrmIngest()
 	go func() {
@@ -329,7 +331,8 @@ func main() {
 	log.Info("📋 [CRM_INGEST] CRM Ingest Worker started successfully")
 
 	// Worker CRM Bulk: xử lý crm_bulk_jobs (sync, backfill, rebuild, recalculate)
-	crmBulkWorker := worker.NewCrmBulkWorker(1*time.Minute, 3)
+	// Interval 2 phút, batch 2 — giảm tải mặc định để tránh CPU spike.
+	crmBulkWorker := worker.NewCrmBulkWorker(2*time.Minute, 2)
 	ctxCrmBulk, cancelCrmBulk := context.WithCancel(context.Background())
 	defer cancelCrmBulk()
 	go func() {

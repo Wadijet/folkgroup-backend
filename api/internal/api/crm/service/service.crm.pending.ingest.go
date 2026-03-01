@@ -11,8 +11,26 @@ import (
 	mongoopts "go.mongodb.org/mongo-driver/mongo/options"
 
 	crmmodels "meta_commerce/internal/api/crm/models"
+	basesvc "meta_commerce/internal/api/base/service"
+	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
 )
+
+// CrmPendingIngestService service CRUD cho crm_pending_ingest (dùng cho API đọc queue).
+type CrmPendingIngestService struct {
+	*basesvc.BaseServiceMongoImpl[crmmodels.CrmPendingIngest]
+}
+
+// NewCrmPendingIngestService tạo service CRUD cho crm_pending_ingest.
+func NewCrmPendingIngestService() (*CrmPendingIngestService, error) {
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CrmPendingIngest)
+	if !ok {
+		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.CrmPendingIngest, common.ErrNotFound)
+	}
+	return &CrmPendingIngestService{
+		BaseServiceMongoImpl: basesvc.NewBaseServiceMongo[crmmodels.CrmPendingIngest](coll),
+	}, nil
+}
 
 // EnqueueCrmIngest thêm hoặc cập nhật job trong queue crm_pending_ingest (deduplicate theo businessKey).
 // Cùng (collectionName, businessKey) → upsert, chỉ giữ job mới nhất.

@@ -33,8 +33,9 @@ func NewCrmPendingIngestService() (*CrmPendingIngestService, error) {
 }
 
 // EnqueueCrmIngest thêm hoặc cập nhật job trong queue crm_pending_ingest (deduplicate theo businessKey).
-// Cùng (collectionName, businessKey) → upsert, chỉ giữ job mới nhất.
-func EnqueueCrmIngest(ctx context.Context, collectionName, operation string, document interface{}, ownerOrgID primitive.ObjectID) error {
+// Cùng businessKey → upsert, chỉ giữ job mới nhất.
+// prevDoc: optional — dùng để tính UpdatedAtDeltaMs (chênh lệch updated_at mới - cũ, ms).
+func EnqueueCrmIngest(ctx context.Context, collectionName, operation string, document interface{}, prevDoc interface{}, ownerOrgID primitive.ObjectID) error {
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CrmPendingIngest)
 	if !ok {
 		return fmt.Errorf("không tìm thấy collection %s", global.MongoDB_ColNames.CrmPendingIngest)
@@ -49,15 +50,31 @@ func EnqueueCrmIngest(ctx context.Context, collectionName, operation string, doc
 	}
 	now := time.Now().Unix()
 
-	filter := bson.M{"collectionName": collectionName, "businessKey": businessKey}
+	// Trích updated_at mới/cũ để debug và tính delta
+	updatedAtNew := extractUpdatedAtFromDoc(collectionName, document)
+	updatedAtOld := int64(0)
+	if prevDoc != nil {
+		updatedAtOld = extractUpdatedAtFromDoc(collectionName, prevDoc)
+	}
+	updatedAtDeltaMs := int64(-1)
+	if updatedAtNew > 0 && updatedAtOld > 0 {
+		updatedAtDeltaMs = updatedAtNew - updatedAtOld
+	}
+
+	// businessKey đã chứa collectionName (format: collectionName|org|part) nên chỉ cần filter theo businessKey
+	filter := bson.M{"businessKey": businessKey}
 	update := bson.M{
 		"$set": bson.M{
+			"collectionName":       collectionName,
 			"operation":            operation,
 			"document":             docMap,
 			"ownerOrganizationId":  ownerOrgID,
 			"createdAt":            now,
 			"processedAt":          nil,
 			"processError":         "",
+			"updatedAtNew":         updatedAtNew,
+			"updatedAtOld":         updatedAtOld,
+			"updatedAtDeltaMs":     updatedAtDeltaMs,
 		},
 	}
 	opts := mongoopts.Update().SetUpsert(true)
@@ -111,7 +128,16 @@ func documentToBsonM(doc interface{}) (bson.M, error) {
 	return m, nil
 }
 
-// GetUnprocessedCrmIngest lấy tối đa limit job chưa xử lý, sort theo createdAt asc.
+// CountUnprocessedCrmIngest đếm số job chưa xử lý trong queue (để adaptive batch, monitoring).
+func CountUnprocessedCrmIngest(ctx context.Context) (int64, error) {
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CrmPendingIngest)
+	if !ok {
+		return 0, fmt.Errorf("không tìm thấy collection %s", global.MongoDB_ColNames.CrmPendingIngest)
+	}
+	return coll.CountDocuments(ctx, bson.M{"processedAt": nil})
+}
+
+// GetUnprocessedCrmIngest lấy tối đa limit job chưa xử lý, sort theo createdAt desc (job mới trước).
 func GetUnprocessedCrmIngest(ctx context.Context, limit int) ([]crmmodels.CrmPendingIngest, error) {
 	if limit <= 0 {
 		limit = 50
@@ -121,7 +147,7 @@ func GetUnprocessedCrmIngest(ctx context.Context, limit int) ([]crmmodels.CrmPen
 		return nil, fmt.Errorf("không tìm thấy collection %s", global.MongoDB_ColNames.CrmPendingIngest)
 	}
 	filter := bson.M{"processedAt": nil}
-	opts := mongoopts.Find().SetSort(bson.D{{Key: "createdAt", Value: 1}}).SetLimit(int64(limit))
+	opts := mongoopts.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}).SetLimit(int64(limit))
 	cursor, err := coll.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, err

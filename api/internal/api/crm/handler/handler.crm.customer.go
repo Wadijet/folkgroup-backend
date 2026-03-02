@@ -42,115 +42,17 @@ func NewCrmCustomerHandler() (*CrmCustomerHandler, error) {
 	return hdl, nil
 }
 
-// HandleSyncCustomers xử lý POST /customers/sync — đưa job đồng bộ vào queue, worker sẽ xử lý.
-// Query: sources=pos,fb (rỗng = tất cả). Body: ownerOrganizationId.
-func (h *CrmCustomerHandler) HandleSyncCustomers(c fiber.Ctx) error {
-	return basehdl.SafeHandlerWrapper(c, func() error {
-		var input struct {
-			OwnerOrganizationId string `json:"ownerOrganizationId"`
-		}
-		_ = c.Bind().Body(&input)
-		orgID := getActiveOrganizationID(c)
-		if input.OwnerOrganizationId != "" {
-			parsed, err := primitive.ObjectIDFromHex(input.OwnerOrganizationId)
-			if err != nil {
-				c.Status(common.StatusBadRequest).JSON(fiber.Map{
-					"code": common.ErrCodeValidationInput.Code, "message": "ownerOrganizationId không hợp lệ", "status": "error",
-				})
-				return nil
-			}
-			orgID = &parsed
-		}
-		if orgID == nil || orgID.IsZero() {
-			c.Status(common.StatusBadRequest).JSON(fiber.Map{
-				"code": common.ErrCodeValidationInput.Code, "message": "Vui lòng cung cấp ownerOrganizationId hoặc chọn tổ chức", "status": "error",
-			})
-			return nil
-		}
-		sources := splitAndTrim(c.Query("sources"), ",")
-		params := bson.M{}
-		if len(sources) > 0 {
-			params["sources"] = sources
-		}
-		jobID, err := crmvc.EnqueueCrmBulkJob(c.Context(), crmmodels.CrmBulkJobSync, *orgID, params)
-		if err != nil {
-			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
-				"code": common.ErrCodeDatabase.Code, "message": "Lỗi đưa job vào queue: " + err.Error(), "status": "error",
-			})
-			return nil
-		}
-		c.Status(common.StatusAccepted).JSON(fiber.Map{
-			"code": common.StatusAccepted, "message": "Job đồng bộ đã được đưa vào queue, worker sẽ xử lý",
-			"data": fiber.Map{"jobId": jobID.Hex(), "status": "queued"},
-			"status": "success",
-		})
-		return nil
-	})
-}
-
-// HandleBackfillActivity xử lý POST /customers/backfill-activity — đưa job backfill vào queue, worker sẽ xử lý.
-// Query: types=order,conversation,note (rỗng = tất cả). Body: ownerOrganizationId, limit.
-func (h *CrmCustomerHandler) HandleBackfillActivity(c fiber.Ctx) error {
-	return basehdl.SafeHandlerWrapper(c, func() error {
-		var input struct {
-			OwnerOrganizationId string `json:"ownerOrganizationId"`
-			Limit               int    `json:"limit"`
-		}
-		if err := c.Bind().Body(&input); err != nil {
-			c.Status(common.StatusBadRequest).JSON(fiber.Map{
-				"code": common.ErrCodeValidationFormat.Code, "message": "Dữ liệu gửi lên không đúng định dạng JSON", "status": "error",
-			})
-			return nil
-		}
-		orgID := getActiveOrganizationID(c)
-		if input.OwnerOrganizationId != "" {
-			parsed, err := primitive.ObjectIDFromHex(input.OwnerOrganizationId)
-			if err != nil {
-				c.Status(common.StatusBadRequest).JSON(fiber.Map{
-					"code": common.ErrCodeValidationInput.Code, "message": "ownerOrganizationId không hợp lệ", "status": "error",
-				})
-				return nil
-			}
-			orgID = &parsed
-		}
-		if orgID == nil || orgID.IsZero() {
-			c.Status(common.StatusBadRequest).JSON(fiber.Map{
-				"code": common.ErrCodeValidationInput.Code, "message": "Vui lòng cung cấp ownerOrganizationId hoặc chọn tổ chức", "status": "error",
-			})
-			return nil
-		}
-		types := splitAndTrim(c.Query("types"), ",")
-		params := bson.M{}
-		if input.Limit > 0 {
-			params["limit"] = input.Limit
-		}
-		if len(types) > 0 {
-			params["types"] = types
-		}
-		jobID, err := crmvc.EnqueueCrmBulkJob(c.Context(), crmmodels.CrmBulkJobBackfill, *orgID, params)
-		if err != nil {
-			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
-				"code": common.ErrCodeDatabase.Code, "message": "Lỗi đưa job vào queue: " + err.Error(), "status": "error",
-			})
-			return nil
-		}
-		c.Status(common.StatusAccepted).JSON(fiber.Map{
-			"code": common.StatusAccepted, "message": "Job backfill đã được đưa vào queue, worker sẽ xử lý",
-			"data": fiber.Map{"jobId": jobID.Hex(), "status": "queued"},
-			"status": "success",
-		})
-		return nil
-	})
-}
-
-// HandleRebuildCrm xử lý POST /customers/rebuild — đưa job rebuild vào queue, worker sẽ xử lý (sync rồi backfill).
-// Query: sources=pos,fb (rỗng=tất cả), types=order,conversation,note (rỗng=tất cả).
-// Body: ownerOrganizationId, limit.
+// HandleRebuildCrm xử lý POST /customers/rebuild — API hợp nhất sync + backfill, đưa job vào queue.
+// Query hoặc Body: sources=pos,fb,order,conversation,note (rỗng = tất cả nguồn).
+//   - pos, fb: đồng bộ profile từ pc_pos_customers, fb_customers
+//   - order, conversation, note: backfill activity từ orders, conversations, notes
+// Body: ownerOrganizationId, limit (0 = không giới hạn).
 func (h *CrmCustomerHandler) HandleRebuildCrm(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {
 		var input struct {
 			OwnerOrganizationId string `json:"ownerOrganizationId"`
 			Limit               int    `json:"limit"`
+			Sources             string `json:"sources"`
 		}
 		_ = c.Bind().Body(&input)
 		orgID := getActiveOrganizationID(c)
@@ -170,17 +72,21 @@ func (h *CrmCustomerHandler) HandleRebuildCrm(c fiber.Ctx) error {
 			})
 			return nil
 		}
-		sources := splitAndTrim(c.Query("sources"), ",")
-		types := splitAndTrim(c.Query("types"), ",")
+		// sources: pos,fb,order,conversation,note — rỗng = tất cả. Ưu tiên query, fallback body.
+		sourcesRaw := c.Query("sources")
+		if sourcesRaw == "" {
+			sourcesRaw = input.Sources
+		}
+		sources := splitAndTrim(sourcesRaw, ",")
+		syncSources, backfillTypes := splitSourcesIntoSyncAndBackfill(sources)
 		params := bson.M{}
 		if input.Limit > 0 {
 			params["limit"] = input.Limit
 		}
+		// Khi user chỉ định sources: truyền cả syncSources và backfillTypes. [] = bỏ qua phần đó.
 		if len(sources) > 0 {
-			params["sources"] = sources
-		}
-		if len(types) > 0 {
-			params["types"] = types
+			params["sources"] = syncSources
+			params["types"] = backfillTypes
 		}
 		jobID, err := crmvc.EnqueueCrmBulkJob(c.Context(), crmmodels.CrmBulkJobRebuild, *orgID, params)
 		if err != nil {
@@ -331,6 +237,29 @@ func splitAndTrim(s, sep string) []string {
 		}
 	}
 	return result
+}
+
+// splitSourcesIntoSyncAndBackfill tách sources thành sync (pos,fb) và backfill (order,conversation,note).
+// Rỗng = tất cả. Giá trị không hợp lệ bị bỏ qua.
+func splitSourcesIntoSyncAndBackfill(sources []string) (syncSources, backfillTypes []string) {
+	if len(sources) == 0 {
+		return nil, nil // nil = tất cả (worker sẽ chạy full)
+	}
+	for _, v := range sources {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "pos":
+			syncSources = append(syncSources, "pos")
+		case "fb":
+			syncSources = append(syncSources, "fb")
+		case "order":
+			backfillTypes = append(backfillTypes, "order")
+		case "conversation":
+			backfillTypes = append(backfillTypes, "conversation")
+		case "note":
+			backfillTypes = append(backfillTypes, "note")
+		}
+	}
+	return syncSources, backfillTypes
 }
 
 // getActiveOrganizationID lấy active organization ID từ context.

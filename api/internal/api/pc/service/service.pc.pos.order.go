@@ -45,6 +45,7 @@ func (s *PcPosOrderService) SyncFlattenedFromPosData(ctx context.Context, id pri
 	if len(order.PosData) == 0 {
 		return zero, fmt.Errorf("document không có posData để sync")
 	}
+	prevOrder := order // Lưu bản cũ trước khi mutate để truyền PreviousDocument
 	if err := utility.ExtractDataIfExists(&order); err != nil {
 		return zero, fmt.Errorf("extract từ posData thất bại: %w", err)
 	}
@@ -58,9 +59,10 @@ func (s *PcPosOrderService) SyncFlattenedFromPosData(ctx context.Context, id pri
 		return zero, common.ConvertMongoError(err)
 	}
 	events.EmitDataChanged(ctx, events.DataChangeEvent{
-		CollectionName: global.MongoDB_ColNames.PcPosOrders,
-		Operation:      events.OpUpdate,
-		Document:       order,
+		CollectionName:   global.MongoDB_ColNames.PcPosOrders,
+		Operation:        events.OpUpdate,
+		Document:         order,
+		PreviousDocument: prevOrder,
 	})
 	return order, nil
 }

@@ -205,9 +205,7 @@ func (h *PancakeWebhookHandler) handleConversationEvent(ctx context.Context, pay
 }
 
 // upsertCustomerFromConversation upsert customer từ conversation payload vào fb_customers.
-// Giúp IngestConversationTouchpoint resolve customerId khi khách chưa nhận webhook customer_updated.
-// Nếu customer object không có inserted_at/created_at, merge thời gian từ conversation (khi hội thoại bắt đầu)
-// để activity "Khởi tạo khách từ Facebook" dùng đúng thời điểm nguồn sự kiện.
+// Dùng Upsert qua BaseService để emit DataChangeEvent → tạo ingest cho CRM Merge.
 func upsertCustomerFromConversation(ctx context.Context, fbCustomerSvc *fbsvc.FbCustomerService, conversationData map[string]interface{}, pageId string, ownerOrgID primitive.ObjectID) {
 	customerData := extractCustomerObjectFromConversation(conversationData)
 	if customerData == nil {
@@ -224,19 +222,16 @@ func upsertCustomerFromConversation(ctx context.Context, fbCustomerSvc *fbsvc.Fb
 	if customerId == "" {
 		return
 	}
-	// Merge thời gian nguồn từ conversation khi customer object chưa có — để activityAt dùng đúng inserted_at của sự kiện.
 	panCakeDataToStore := mergeSourceTimestampIntoCustomerData(customerData, conversationData)
-	now := time.Now().UnixMilli()
-	filter := bson.M{"customerId": customerId}
-	update := bson.M{
+	filter := bson.M{"customerId": customerId, "ownerOrganizationId": ownerOrgID}
+	data := bson.M{
 		"$set": bson.M{
 			"panCakeData": panCakeDataToStore, "pageId": pageId,
-			"ownerOrganizationId": ownerOrgID, "updatedAt": now,
+			"ownerOrganizationId": ownerOrgID,
 		},
-		"$setOnInsert": bson.M{"customerId": customerId, "createdAt": now},
+		"$setOnInsert": bson.M{"customerId": customerId, "ownerOrganizationId": ownerOrgID},
 	}
-	opts := options.Update().SetUpsert(true)
-	_, _ = fbCustomerSvc.Collection().UpdateOne(ctx, filter, update, opts)
+	_, _ = fbCustomerSvc.Upsert(ctx, filter, data)
 }
 
 // mergeSourceTimestampIntoCustomerData merge inserted_at/created_at từ conversation vào customerData nếu customer chưa có.
@@ -295,25 +290,13 @@ func extractCustomerObjectFromConversation(data map[string]interface{}) map[stri
 	return nil
 }
 
-// extractCustomerIdFromConversation lấy customer ID từ conversation data (nhiều cấu trúc Pancake).
+// extractCustomerIdFromConversation lấy customer ID từ conversation data.
+// Ưu tiên customers[0].id (match fb_customers) để hợp nhất sync/backfill — thông tin đến trước tạo trước, sau cập nhật thêm.
 func extractCustomerIdFromConversation(data map[string]interface{}) string {
 	if data == nil {
 		return ""
 	}
-	if s, ok := data["customer_id"].(string); ok && s != "" {
-		return s
-	}
-	if n, ok := data["customer_id"].(float64); ok {
-		return fmt.Sprintf("%.0f", n)
-	}
-	if cust, ok := data["customer"].(map[string]interface{}); ok {
-		if s, ok := cust["id"].(string); ok && s != "" {
-			return s
-		}
-		if n, ok := cust["id"].(float64); ok {
-			return fmt.Sprintf("%.0f", n)
-		}
-	}
+	// 1. customers[0].id — canonical, match fb_customers từ upsertCustomerFromConversation
 	if arr, ok := data["customers"].([]interface{}); ok && len(arr) > 0 {
 		if m, ok := arr[0].(map[string]interface{}); ok {
 			if s, ok := m["id"].(string); ok && s != "" {
@@ -323,6 +306,31 @@ func extractCustomerIdFromConversation(data map[string]interface{}) string {
 				return fmt.Sprintf("%.0f", n)
 			}
 		}
+	}
+	// 2. page_customer.id
+	if pc, ok := data["page_customer"].(map[string]interface{}); ok && pc != nil {
+		if s, ok := pc["id"].(string); ok && s != "" {
+			return s
+		}
+		if n, ok := pc["id"].(float64); ok {
+			return fmt.Sprintf("%.0f", n)
+		}
+	}
+	// 3. customer.id
+	if cust, ok := data["customer"].(map[string]interface{}); ok {
+		if s, ok := cust["id"].(string); ok && s != "" {
+			return s
+		}
+		if n, ok := cust["id"].(float64); ok {
+			return fmt.Sprintf("%.0f", n)
+		}
+	}
+	// 4. customer_id (Pancake format)
+	if s, ok := data["customer_id"].(string); ok && s != "" {
+		return s
+	}
+	if n, ok := data["customer_id"].(float64); ok {
+		return fmt.Sprintf("%.0f", n)
 	}
 	return ""
 }

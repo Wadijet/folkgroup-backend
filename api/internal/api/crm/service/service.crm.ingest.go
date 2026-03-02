@@ -348,13 +348,23 @@ func (s *CrmCustomerService) IngestConversationTouchpoint(ctx context.Context, c
 	}
 	unifiedId, found := s.ResolveUnifiedId(ctx, customerId, ownerOrgID)
 	if !found {
-		// Thử merge từ fb_customers (Pancake customer_id thường trỏ tới FB customer)
+		// Thử merge từ fb_customers. Pancake dùng 2 ID khác nhau: customer_id vs customers[0].id — cần thử cả hai.
 		fbColl, _ := global.RegistryCollections.Get(global.MongoDB_ColNames.FbCustomers)
 		if fbColl != nil {
-			var fbCustomer fbmodels.FbCustomer
-			if fbColl.FindOne(ctx, bson.M{"customerId": customerId, "ownerOrganizationId": ownerOrgID}).Decode(&fbCustomer) == nil {
-				_ = s.MergeFromFbCustomer(ctx, &fbCustomer, getConversationTimestamp(convDoc))
-				unifiedId, found = s.ResolveUnifiedId(ctx, customerId, ownerOrgID)
+			tryIds := collectConversationCustomerIds(convDoc, customerId)
+			for _, cid := range tryIds {
+				if cid == "" {
+					continue
+				}
+				var fbCustomer fbmodels.FbCustomer
+				if fbColl.FindOne(ctx, bson.M{"customerId": cid, "ownerOrganizationId": ownerOrgID}).Decode(&fbCustomer) == nil {
+					_ = s.MergeFromFbCustomer(ctx, &fbCustomer, getConversationTimestamp(convDoc))
+					unifiedId, found = s.ResolveUnifiedId(ctx, customerId, ownerOrgID)
+					if !found {
+						unifiedId, found = s.ResolveUnifiedId(ctx, cid, ownerOrgID)
+					}
+					break
+				}
 			}
 		}
 	}
@@ -370,7 +380,7 @@ func (s *CrmCustomerService) IngestConversationTouchpoint(ctx context.Context, c
 		}
 	}
 	if !found {
-		// Backfill: tạo crm_customer tối thiểu từ conversation — sync sẽ cập nhật sau khi có fb_customers
+		// Tạo crm_customer tối thiểu từ conversation — thông tin đến trước tạo trước, fb_customers đến sau sẽ MergeFromFbCustomer cập nhật thêm
 		custData := extractCustomerDataFromConv(convDoc)
 		activityAt := getConversationTimestamp(convDoc)
 		unifiedId, _ = s.UpsertMinimalFromFbId(ctx, customerId, ownerOrgID, &custData, activityAt)
@@ -667,6 +677,42 @@ type convCustomerData struct {
 	LivesIn             string
 	Addresses           []interface{}
 	ReferralCode        string
+}
+
+// collectConversationCustomerIds thu thập tất cả customer ID có thể từ conversation (để thử merge fb_customers).
+// Pancake dùng customer_id và customers[0].id khác nhau — cần thử cả hai khi lookup fb_customers.
+func collectConversationCustomerIds(convDoc *fbmodels.FbConversation, primaryCustomerId string) []string {
+	seen := make(map[string]bool)
+	var ids []string
+	add := func(s string) {
+		if s != "" && !seen[s] {
+			seen[s] = true
+			ids = append(ids, s)
+		}
+	}
+	add(primaryCustomerId)
+	if convDoc == nil || convDoc.PanCakeData == nil {
+		return ids
+	}
+	pd := convDoc.PanCakeData
+	if arr, ok := pd["customers"].([]interface{}); ok && len(arr) > 0 {
+		if m, ok := arr[0].(map[string]interface{}); ok {
+			add(extractIdFromMap(m))
+		}
+	}
+	if cust, ok := pd["customer"].(map[string]interface{}); ok {
+		add(extractIdFromMap(cust))
+	}
+	if pc, ok := pd["page_customer"].(map[string]interface{}); ok {
+		add(extractIdFromMap(pc))
+	}
+	if s, ok := pd["customer_id"].(string); ok && s != "" {
+		add(s)
+	}
+	if n, ok := pd["customer_id"].(float64); ok {
+		add(fmt.Sprintf("%.0f", n))
+	}
+	return ids
 }
 
 // extractCustomerDataFromConv lấy tất cả thông tin khách từ panCakeData: customer, customers[0], page_customer, root.

@@ -1,4 +1,5 @@
-// Package crmvc - Sync initial crm_customers từ pc_pos_customers và fb_customers.
+// Package crmvc - Sync profile crm_customers từ pc_pos_customers và fb_customers.
+// Hợp nhất với backfill: thông tin đến trước tạo trước, thông tin sau cập nhật thêm.
 package crmvc
 
 import (
@@ -21,10 +22,10 @@ const (
 	SyncSourceFb  = "fb"
 )
 
-// SyncAllCustomers đồng bộ khách từ POS và FB vào crm_customers.
-// sources: []string{"pos","fb"} — rỗng hoặc nil = chạy tất cả (pos, fb).
-// BẮT BUỘC: xử lý từ cũ đến mới (posData/panCakeData inserted_at, updated_at asc).
-// Gọi khi cần sync lần đầu hoặc rebuild.
+// SyncAllCustomers cập nhật profile crm_customers từ pc_pos_customers và fb_customers.
+// Tạo mới nếu chưa có (MergeFromPosCustomer/MergeFromFbCustomer). Cập nhật thêm nếu đã có (từ order/conv).
+// sources: []string{"pos","fb"} — rỗng hoặc nil = chạy tất cả.
+// Xử lý từ cũ đến mới (posData/panCakeData inserted_at, updated_at asc).
 func (s *CrmCustomerService) SyncAllCustomers(ctx context.Context, ownerOrgID primitive.ObjectID, sources []string) (posCount, fbCount int, err error) {
 	runPos, runFb := parseSyncSources(sources)
 
@@ -91,22 +92,29 @@ func parseSyncSources(sources []string) (runPos, runFb bool) {
 	return runPos, runFb
 }
 
-// RebuildCrm chạy sync rồi backfill. sources/types rỗng = tất cả.
-// Thứ tự: sync profile trước, backfill activity sau.
+// RebuildCrm chạy backfill rồi sync. Thứ tự: backfill trước, sync sau.
+// sources/types: nil = chạy tất cả; [] (rỗng) = bỏ qua phần đó; [a,b] = chỉ chạy a,b.
+// Hợp nhất flow: thông tin đến trước tạo trước, thông tin sau cập nhật thêm.
 func (s *CrmCustomerService) RebuildCrm(ctx context.Context, ownerOrgID primitive.ObjectID, limit int, sources, types []string) (*crmdto.CrmRebuildResult, error) {
-	posCount, fbCount, err := s.SyncAllCustomers(ctx, ownerOrgID, sources)
-	if err != nil {
-		return nil, err
+	result := &crmdto.CrmRebuildResult{}
+
+	// Backfill: nil = tất cả, [] = bỏ qua
+	if types == nil || len(types) > 0 {
+		backfillResult, err := s.BackfillActivity(ctx, ownerOrgID, limit, types)
+		if err != nil {
+			return nil, err
+		}
+		result.Backfill = *backfillResult
 	}
-	backfillResult, err := s.BackfillActivity(ctx, ownerOrgID, limit, types)
-	if err != nil {
-		return nil, err
+
+	// Sync: nil = tất cả, [] = bỏ qua
+	if sources == nil || len(sources) > 0 {
+		posCount, fbCount, err := s.SyncAllCustomers(ctx, ownerOrgID, sources)
+		if err != nil {
+			return nil, err
+		}
+		result.Sync = crmdto.CrmSyncResult{PosProcessed: posCount, FbProcessed: fbCount}
 	}
-	return &crmdto.CrmRebuildResult{
-		Sync: crmdto.CrmSyncResult{
-			PosProcessed: posCount,
-			FbProcessed:  fbCount,
-		},
-		Backfill: *backfillResult,
-	}, nil
+
+	return result, nil
 }

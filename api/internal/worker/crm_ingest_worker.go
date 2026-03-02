@@ -3,6 +3,7 @@ package worker
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -64,7 +65,22 @@ func (w *CrmIngestWorker) Start(ctx context.Context) {
 				}()
 
 				totalProcessed := 0
-				batchSize := GetEffectiveBatchSize(w.batchSize, PriorityCritical)
+				baseBatchSize := GetEffectiveBatchSize(w.batchSize, PriorityCritical)
+				// Adaptive batch: khi backlog lớn thì tăng batch size để xử lý nhanh hơn (giảm DB round-trips).
+				batchSize := baseBatchSize
+				if count, err := crmvc.CountUnprocessedCrmIngest(ctx); err == nil && count > int64(baseBatchSize*3) {
+					adaptive := int(count / 2)
+					if adaptive > 100 {
+						adaptive = 100
+					}
+					if adaptive > batchSize {
+						batchSize = adaptive
+						log.WithFields(map[string]interface{}{
+							"backlog":    count,
+							"batchSize":  batchSize,
+						}).Info("📋 [CRM_INGEST] Backlog cao, tăng batch size adaptive")
+					}
+				}
 				for {
 					list, err := crmvc.GetUnprocessedCrmIngest(ctx, batchSize)
 					if err != nil {
@@ -100,7 +116,14 @@ func (w *CrmIngestWorker) Start(ctx context.Context) {
 				}
 
 				if totalProcessed > 0 {
-					log.WithFields(map[string]interface{}{"processed": totalProcessed}).Info("📋 [CRM_INGEST] Đã xử lý xong batch")
+					remaining, _ := crmvc.CountUnprocessedCrmIngest(ctx)
+					log.WithFields(map[string]interface{}{
+						"processed": totalProcessed,
+						"remaining": remaining,
+					}).Info("📋 [CRM_INGEST] Đã xử lý xong batch")
+					if remaining > 50 {
+						log.WithFields(map[string]interface{}{"remaining": remaining}).Warn("📋 [CRM_INGEST] Backlog còn cao, agent có thể đang sync nhanh hơn worker xử lý")
+					}
 				}
 			}()
 		}
@@ -114,7 +137,15 @@ func (w *CrmIngestWorker) processItem(ctx context.Context, customerSvc *crmvc.Cr
 		return nil
 	}
 
-	switch item.CollectionName {
+	// collectionName có thể rỗng với job cũ (EnqueueCrmIngest trước đây không set) — lấy từ businessKey
+	collectionName := item.CollectionName
+	if collectionName == "" && item.BusinessKey != "" {
+		if idx := strings.Index(item.BusinessKey, "|"); idx > 0 {
+			collectionName = item.BusinessKey[:idx]
+		}
+	}
+
+	switch collectionName {
 	case global.MongoDB_ColNames.PcPosCustomers:
 		var doc pcmodels.PcPosCustomer
 		if err := bsonMapToStruct(item.Document, &doc); err != nil {

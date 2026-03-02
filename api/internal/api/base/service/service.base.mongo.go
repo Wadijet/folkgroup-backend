@@ -648,10 +648,15 @@ func (s *BaseServiceMongoImpl[T]) FindOneAndUpdate(ctx context.Context, filter i
 	if !isExisting {
 		op = events.OpUpsert
 	}
+	var prevDoc interface{}
+	if isExisting {
+		prevDoc = existing
+	}
 	events.EmitDataChanged(ctx, events.DataChangeEvent{
-		CollectionName: s.collection.Name(),
-		Operation:      op,
-		Document:       result,
+		CollectionName:   s.collection.Name(),
+		Operation:        op,
+		Document:         result,
+		PreviousDocument: prevDoc,
 	})
 	return result, nil
 }
@@ -917,9 +922,10 @@ func (s *BaseServiceMongoImpl[T]) UpdateById(ctx context.Context, id primitive.O
 	}
 
 	events.EmitDataChanged(ctx, events.DataChangeEvent{
-		CollectionName: s.collection.Name(),
-		Operation:      events.OpUpdate,
-		Document:       updated,
+		CollectionName:   s.collection.Name(),
+		Operation:        events.OpUpdate,
+		Document:         updated,
+		PreviousDocument: existing,
 	})
 	return updated, nil
 }
@@ -1178,10 +1184,15 @@ func (s *BaseServiceMongoImpl[T]) Upsert(ctx context.Context, filter interface{}
 		"collection": s.collection.Name(),
 	}).Debug("Upsert: Upsert thành công")
 
+	var prevDoc interface{}
+	if isExisting {
+		prevDoc = existing
+	}
 	events.EmitDataChanged(ctx, events.DataChangeEvent{
-		CollectionName: s.collection.Name(),
-		Operation:      events.OpUpsert,
-		Document:       upserted,
+		CollectionName:   s.collection.Name(),
+		Operation:        events.OpUpsert,
+		Document:         upserted,
+		PreviousDocument: prevDoc,
 	})
 	return upserted, nil
 }

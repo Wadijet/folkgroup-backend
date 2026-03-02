@@ -11,11 +11,14 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
+	crmvc "meta_commerce/internal/api/crm/service"
 	"meta_commerce/internal/delivery"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/logger"
 	"meta_commerce/internal/systemalert"
 	"meta_commerce/internal/worker"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // initLogger khởi tạo và cấu hình logger cho toàn bộ ứng dụng
@@ -29,6 +32,35 @@ func initLogger() {
 	// Log thông tin khởi tạo bằng logger mới
 	log := logger.GetAppLogger()
 	log.Info("Logger system initialized successfully")
+}
+
+// runBackfillConvAndExit chạy BackfillActivity(types=conversation) rồi thoát. Dùng khi token hết hạn.
+func runBackfillConvAndExit(argIdx int) {
+	orgIDStr := "698c341c977ebc6295312ad8"
+	if argIdx+1 < len(os.Args) && os.Args[argIdx+1] != "" && os.Args[argIdx+1][0] != '-' {
+		orgIDStr = os.Args[argIdx+1]
+	}
+	orgID, err := primitive.ObjectIDFromHex(orgIDStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ownerOrganizationId không hợp lệ: %v\n", err)
+		os.Exit(1)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	svc, err := crmvc.NewCrmCustomerService()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "NewCrmCustomerService: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Chạy BackfillActivity(types=conversation) cho org %s...\n", orgIDStr)
+	result, err := svc.BackfillActivity(ctx, orgID, 0, []string{"conversation"})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "BackfillActivity: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("✓ Xong. Conversations processed: %d, logged: %d, skipped: %d\n",
+		result.ConversationsProcessed, result.ConversationsLogged, result.ConversationsSkippedNoResolve)
+	os.Exit(0)
 }
 
 // main_thread khởi tạo và chạy Fiber server
@@ -175,6 +207,13 @@ func main() {
 	// Khởi tạo registry
 	InitRegistry()
 
+	// Subcommand: --backfill-conv [ownerOrganizationId] — chạy backfill conversation rồi thoát
+	for i, arg := range os.Args {
+		if arg == "--backfill-conv" {
+			runBackfillConvAndExit(i)
+		}
+	}
+
 	// Khởi tạo dữ liệu mặc định
 	InitDefaultData()
 
@@ -314,8 +353,8 @@ func main() {
 	}
 
 	// Worker CRM Ingest: xử lý crm_pending_ingest (Merge/Ingest thay vì chạy trong hook)
-	// Interval 45s, batch 20 — giảm tải mặc định để tránh CPU spike.
-	crmIngestWorker := worker.NewCrmIngestWorker(45*time.Second, 20)
+	// Interval 30s, batch 50 — tăng throughput để theo kịp agent sync; adaptive batch khi backlog cao.
+	crmIngestWorker := worker.NewCrmIngestWorker(30*time.Second, 50)
 	ctxCrmIngest, cancelCrmIngest := context.WithCancel(context.Background())
 	defer cancelCrmIngest()
 	go func() {

@@ -1,4 +1,5 @@
-// Package crmvc - Backfill activity từ dữ liệu cũ (job bên ngoài gọi endpoint).
+// Package crmvc - Backfill activity từ orders, conversations, notes.
+// Hợp nhất với sync: thông tin đến trước tạo trước (UpsertMinimal từ order/conv), thông tin sau cập nhật thêm (Sync profile).
 package crmvc
 
 import (
@@ -24,13 +25,10 @@ const (
 	BackfillTypeNote         = "note"
 )
 
-// BackfillActivity quét dữ liệu cũ (orders, conversations, notes) và đẩy qua Ingest*Touchpoint.
+// BackfillActivity quét orders, conversations, notes và đẩy qua Ingest*Touchpoint.
+// Tạo crm_customer từ order/conv nếu chưa có (UpsertMinimalFromPosId/UpsertMinimalFromFbId), log activity.
 // types: []string{"order","conversation","note"} — rỗng/nil = chạy tất cả.
-// BẮT BUỘC: xử lý theo thứ tự thời gian cũ trước, mới sau (orderDate/convUpdatedAt/createdAt asc)
-// để tránh lệch số liệu snapshot. Khi phát sinh activity cũ hơn, recomputeSnapshotsForNewerActivities
-// sẽ tính lại snapshot của các activity mới hơn.
-// skipIfExists=true để tránh ghi trùng khi chạy nhiều lần.
-// limit <= 0: xử lý toàn bộ; limit > 0: giới hạn số bản ghi mỗi loại.
+// Xử lý theo thứ tự thời gian cũ trước, mới sau. limit <= 0: toàn bộ; limit > 0: giới hạn mỗi loại.
 func (s *CrmCustomerService) BackfillActivity(ctx context.Context, ownerOrgID primitive.ObjectID, limit int, types []string) (*crmdto.CrmBackfillActivityResult, error) {
 	useLimit := limit > 0
 	if !useLimit {
@@ -64,38 +62,45 @@ func (s *CrmCustomerService) BackfillActivity(ctx context.Context, ownerOrgID pr
 	return result, nil
 }
 
-// extractConversationCustomerId lấy customerId từ FbConversation — ưu tiên panCakeData.customers[0].id (match fb_customers) trước customer_id.
+// extractConversationCustomerId lấy customerId từ FbConversation.
+// Ưu tiên customers[0].id (match fb_customers từ upsertCustomerFromConversation) để hợp nhất sync/backfill.
+// Thông tin nào đến trước tạo trước, thông tin sau cập nhật thêm.
 func extractConversationCustomerId(doc *fbmodels.FbConversation) string {
 	if doc == nil {
 		return ""
 	}
-	if doc.CustomerId != "" {
-		return doc.CustomerId
-	}
-	if doc.PanCakeData == nil {
-		return ""
-	}
-	pd := doc.PanCakeData
-	// 1. Ưu tiên customers[0].id — match fb_customers.customerId (crm sourceIds.fb)
-	if arr, ok := pd["customers"].([]interface{}); ok && len(arr) > 0 {
-		if m, ok := arr[0].(map[string]interface{}); ok {
-			if id := extractIdFromMap(m); id != "" {
+	if doc.PanCakeData != nil {
+		pd := doc.PanCakeData
+		// 1. customers[0].id — match fb_customers.customerId (canonical cho fb flow)
+		if arr, ok := pd["customers"].([]interface{}); ok && len(arr) > 0 {
+			if m, ok := arr[0].(map[string]interface{}); ok {
+				if id := extractIdFromMap(m); id != "" {
+					return id
+				}
+			}
+		}
+		// 2. page_customer.id
+		if pc, ok := pd["page_customer"].(map[string]interface{}); ok {
+			if id := extractIdFromMap(pc); id != "" {
 				return id
 			}
 		}
-	}
-	// 2. customer.id
-	if cust, ok := pd["customer"].(map[string]interface{}); ok {
-		if id := extractIdFromMap(cust); id != "" {
-			return id
+		// 3. customer.id
+		if cust, ok := pd["customer"].(map[string]interface{}); ok {
+			if id := extractIdFromMap(cust); id != "" {
+				return id
+			}
+		}
+		// 4. customer_id (Pancake format)
+		if s, ok := pd["customer_id"].(string); ok && s != "" {
+			return s
+		}
+		if n, ok := pd["customer_id"].(float64); ok {
+			return fmt.Sprintf("%.0f", n)
 		}
 	}
-	// 3. customer_id (Pancake format — có thể khác fb_customers)
-	if s, ok := pd["customer_id"].(string); ok && s != "" {
-		return s
-	}
-	if n, ok := pd["customer_id"].(float64); ok {
-		return fmt.Sprintf("%.0f", n)
+	if doc.CustomerId != "" {
+		return doc.CustomerId
 	}
 	return ""
 }

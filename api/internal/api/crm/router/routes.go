@@ -44,13 +44,7 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 	// CRUD crm-bulk-jobs (chỉ đọc) — queue sync/backfill/recalculate, xem trạng thái job.
 	r.RegisterCRUDRoutes(v1, "/crm-bulk-jobs", bulkJobHandler, apirouter.ReadOnlyConfig, "Report")
 
-	// POST /customers/sync — đồng bộ crm_customers từ POS + FB. Query: sources=pos,fb
-	apirouter.RegisterRouteWithMiddleware(v1, "/customers", "POST", "/sync", middlewares, customerHandler.HandleSyncCustomers)
-
-	// POST /customers/backfill-activity — backfill activity. Query: types=order,conversation,note
-	apirouter.RegisterRouteWithMiddleware(v1, "/customers", "POST", "/backfill-activity", middlewares, customerHandler.HandleBackfillActivity)
-
-	// POST /customers/rebuild — sync rồi backfill. Query: sources=pos,fb types=order,conversation,note
+	// POST /customers/rebuild — API hợp nhất sync + backfill. Query/Body: sources=pos,fb,order,conversation,note (rỗng=tất cả)
 	apirouter.RegisterRouteWithMiddleware(v1, "/customers", "POST", "/rebuild", middlewares, customerHandler.HandleRebuildCrm)
 
 	// POST /customers/recalculate-all — tính toán lại tất cả khách hàng hiện có. Body: ownerOrganizationId, limit (0=tất cả)

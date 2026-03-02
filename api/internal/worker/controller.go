@@ -14,7 +14,7 @@ import (
 	"meta_commerce/internal/logger"
 )
 
-// ThrottleState trạng thái CPU: Normal, Throttled, Paused.
+// ThrottleState trạng thái tài nguyên (CPU/RAM): Normal, Throttled, Paused.
 type ThrottleState string
 
 const (
@@ -23,7 +23,7 @@ const (
 	StatePaused    ThrottleState = "paused"
 )
 
-// Priority mức ưu tiên worker khi CPU quá tải. Số nhỏ = ưu tiên cao hơn.
+// Priority mức ưu tiên worker khi CPU/RAM quá tải. Số nhỏ = ưu tiên cao hơn.
 type Priority int
 
 const (
@@ -56,23 +56,25 @@ func RegisterOverloadAlertCallback(fn OverloadAlertCallback) {
 	overloadCallbackMu.Unlock()
 }
 
-// Controller singleton quản lý throttle workers theo CPU.
+// Controller singleton quản lý throttle workers theo CPU và RAM.
 type Controller struct {
-	mu                 sync.RWMutex
-	state              ThrottleState
-	cpuPercent         float64
-	ramPercent         float64
-	diskPercent        float64
-	lastSampleAt       time.Time
-	enabled            bool
-	thresholdThrottle  float64
-	thresholdPause    float64
-	thresholdRAMAlert  float64
-	thresholdDiskAlert float64
-	sampleInterval     time.Duration
-	intervalMultiplier int
-	batchDivisor       int
-	lastAlertAt        int64 // Unix sec — cooldown
+	mu                   sync.RWMutex
+	state                ThrottleState
+	cpuPercent           float64
+	ramPercent           float64
+	diskPercent          float64
+	lastSampleAt         time.Time
+	enabled              bool
+	thresholdThrottle    float64
+	thresholdPause       float64
+	thresholdRAMThrottle float64
+	thresholdRAMPause    float64
+	thresholdRAMAlert    float64
+	thresholdDiskAlert   float64
+	sampleInterval       time.Duration
+	intervalMultiplier   int
+	batchDivisor         int
+	lastAlertAt          int64 // Unix sec — cooldown
 }
 
 var (
@@ -126,6 +128,19 @@ func newController() *Controller {
 			batchDivisor = n
 		}
 	}
+	// Ngưỡng RAM để throttle/pause — kiểm soát tràn RAM như CPU.
+	thresholdRAMThrottle := 80.0
+	if v := os.Getenv("WORKER_RAM_THRESHOLD_THROTTLE"); v != "" {
+		if n, err := strconv.ParseFloat(v, 64); err == nil && n > 0 {
+			thresholdRAMThrottle = n
+		}
+	}
+	thresholdRAMPause := 92.0
+	if v := os.Getenv("WORKER_RAM_THRESHOLD_PAUSE"); v != "" {
+		if n, err := strconv.ParseFloat(v, 64); err == nil && n > 0 {
+			thresholdRAMPause = n
+		}
+	}
 	thresholdRAMAlert := 85.0
 	if v := os.Getenv("WORKER_RAM_THRESHOLD_ALERT"); v != "" {
 		if n, err := strconv.ParseFloat(v, 64); err == nil && n > 0 {
@@ -140,15 +155,17 @@ func newController() *Controller {
 	}
 
 	return &Controller{
-		state:              StateNormal,
-		enabled:            enabled,
-		thresholdThrottle:  thresholdThrottle,
-		thresholdPause:     thresholdPause,
-		thresholdRAMAlert:  thresholdRAMAlert,
-		thresholdDiskAlert: thresholdDiskAlert,
-		sampleInterval:     sampleInterval,
-		intervalMultiplier: intervalMultiplier,
-		batchDivisor:       batchDivisor,
+		state:                StateNormal,
+		enabled:              enabled,
+		thresholdThrottle:    thresholdThrottle,
+		thresholdPause:       thresholdPause,
+		thresholdRAMThrottle: thresholdRAMThrottle,
+		thresholdRAMPause:    thresholdRAMPause,
+		thresholdRAMAlert:    thresholdRAMAlert,
+		thresholdDiskAlert:   thresholdDiskAlert,
+		sampleInterval:       sampleInterval,
+		intervalMultiplier:   intervalMultiplier,
+		batchDivisor:         batchDivisor,
 	}
 }
 
@@ -169,10 +186,12 @@ func (c *Controller) Start(ctx context.Context) {
 	ticker := time.NewTicker(c.sampleInterval)
 	defer ticker.Stop()
 	log.WithFields(map[string]interface{}{
-		"sampleInterval":     c.sampleInterval.String(),
-		"thresholdThrottle":  c.thresholdThrottle,
-		"thresholdPause":     c.thresholdPause,
-	}).Info("⚙️ [WORKER_CONTROLLER] Worker CPU throttle controller started")
+		"sampleInterval":         c.sampleInterval.String(),
+		"thresholdThrottle":      c.thresholdThrottle,
+		"thresholdPause":         c.thresholdPause,
+		"thresholdRAMThrottle":   c.thresholdRAMThrottle,
+		"thresholdRAMPause":      c.thresholdRAMPause,
+	}).Info("⚙️ [WORKER_CONTROLLER] Worker CPU/RAM throttle controller started")
 	for {
 		select {
 		case <-ctx.Done():
@@ -183,7 +202,7 @@ func (c *Controller) Start(ctx context.Context) {
 	}
 }
 
-// sampleCPU lấy mẫu CPU, RAM, disk và cập nhật trạng thái.
+// sampleCPU lấy mẫu CPU, RAM, disk và cập nhật trạng thái (throttle/pause theo cả CPU và RAM).
 // Dùng gopsutil (cross-platform: Windows + Linux).
 func (c *Controller) sampleCPU() {
 	cpuPct := 0.0
@@ -207,9 +226,14 @@ func (c *Controller) sampleCPU() {
 	c.ramPercent = ramPct
 	c.diskPercent = diskPct
 	c.lastSampleAt = time.Now()
-	if cpuPct >= c.thresholdPause {
+	// Quyết định trạng thái theo cả CPU và RAM — bất kỳ tài nguyên nào vượt ngưỡng đều kích hoạt throttle/pause.
+	cpuPaused := cpuPct >= c.thresholdPause
+	ramPaused := ramPct >= c.thresholdRAMPause
+	cpuThrottled := cpuPct >= c.thresholdThrottle
+	ramThrottled := ramPct >= c.thresholdRAMThrottle
+	if cpuPaused || ramPaused {
 		c.state = StatePaused
-	} else if cpuPct >= c.thresholdThrottle {
+	} else if cpuThrottled || ramThrottled {
 		c.state = StateThrottled
 	} else {
 		c.state = StateNormal
@@ -221,7 +245,7 @@ func (c *Controller) sampleCPU() {
 			"diskPercent": diskPct,
 			"state":       string(c.state),
 			"prev":        string(prev),
-		}).Info("⚙️ [WORKER_CONTROLLER] Trạng thái CPU thay đổi")
+		}).Info("⚙️ [WORKER_CONTROLLER] Trạng thái CPU/RAM thay đổi")
 	}
 	now := time.Now().Unix()
 	shouldAlert := (cpuPct >= c.thresholdThrottle || ramPct >= c.thresholdRAMAlert || diskPct >= c.thresholdDiskAlert) &&
@@ -285,8 +309,8 @@ func (c *Controller) getBatchDivisor(p Priority) int {
 }
 
 // ShouldThrottle trả về true nếu worker nên bỏ qua chu kỳ này.
-// Khi Paused: chỉ Critical và High chạy; Normal/Low/Lowest skip.
-// Khi Throttled: Lowest skip (để dành CPU cho ưu tiên cao hơn).
+// Khi Paused (CPU hoặc RAM vượt ngưỡng): chỉ Critical và High chạy; Normal/Low/Lowest skip.
+// Khi Throttled: Lowest skip (để dành CPU/RAM cho ưu tiên cao hơn).
 func (c *Controller) ShouldThrottle(p Priority) bool {
 	if !c.enabled {
 		return false
@@ -362,7 +386,7 @@ func (c *Controller) GetResourceMetrics() ResourceMetrics {
 	}
 }
 
-// ShouldThrottle package-level helper. Truyền priority để xác định có skip khi CPU quá tải không.
+// ShouldThrottle package-level helper. Truyền priority để xác định có skip khi CPU/RAM quá tải không.
 func ShouldThrottle(p Priority) bool {
 	return DefaultController().ShouldThrottle(p)
 }

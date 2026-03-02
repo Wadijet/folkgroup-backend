@@ -7,10 +7,20 @@ import (
 
 	"meta_commerce/internal/api/events"
 	"meta_commerce/internal/global"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 func init() {
 	events.OnDataChanged(handleReportDataChange)
+}
+
+// markDirtyForPeriods gọi MarkDirty cho từng (reportKey, periodKey).
+// Chu kỳ tắt được chặn trong MarkDirty — không cần lọc ở đây.
+func markDirtyForPeriods(ctx context.Context, reportSvc *ReportService, periodKeys map[string]string, ownerOrgID primitive.ObjectID) {
+	for reportKey, periodKey := range periodKeys {
+		_ = reportSvc.MarkDirty(ctx, reportKey, periodKey, ownerOrgID)
+	}
 }
 
 // handleReportDataChange xử lý event thay đổi dữ liệu: đánh dấu dirty các báo cáo theo chu kỳ.
@@ -54,13 +64,13 @@ func handleReportDataChange(ctx context.Context, e events.DataChangeEvent) {
 		if ts > 1e12 {
 			ts = ts / 1000
 		}
-		periodKeys, err := reportSvc.GetDirtyPeriodKeysForCollection(ctx, e.CollectionName, ts)
+		// Chỉ MarkDirty order_daily; weekly/monthly/yearly tính on-demand khi xem (giống customer).
+		orderReportKeys := GetActiveOrderReportKeys()
+		periodKeys, err := reportSvc.GetDirtyPeriodKeysForReportKeys(ctx, orderReportKeys, ts)
 		if err != nil || len(periodKeys) == 0 {
 			return
 		}
-		for reportKey, periodKey := range periodKeys {
-			_ = reportSvc.MarkDirty(ctx, reportKey, periodKey, ownerOrgID)
-		}
+		markDirtyForPeriods(ctx, reportSvc, periodKeys, ownerOrgID)
 	case global.MongoDB_ColNames.PcPosCustomers:
 		if e.Operation == events.OpUpdate && e.PreviousDocument != nil {
 			tsNew := events.GetPeriodTimestamp(e.Document, e.CollectionName)
@@ -82,14 +92,12 @@ func handleReportDataChange(ctx context.Context, e events.DataChangeEvent) {
 		if ts > 1e12 {
 			ts = ts / 1000
 		}
-		customerReportKeys := []string{"customer_daily", "customer_weekly", "customer_monthly", "customer_yearly"}
+		customerReportKeys := GetActiveCustomerReportKeys()
 		periodKeys, err := reportSvc.GetDirtyPeriodKeysForReportKeys(ctx, customerReportKeys, ts)
 		if err != nil || len(periodKeys) == 0 {
 			return
 		}
-		for reportKey, periodKey := range periodKeys {
-			_ = reportSvc.MarkDirty(ctx, reportKey, periodKey, ownerOrgID)
-		}
+		markDirtyForPeriods(ctx, reportSvc, periodKeys, ownerOrgID)
 	case global.MongoDB_ColNames.CrmActivityHistory:
 		if e.Operation == events.OpUpdate && e.PreviousDocument != nil {
 			tsNew := events.GetPeriodTimestamp(e.Document, e.CollectionName)
@@ -109,14 +117,12 @@ func handleReportDataChange(ctx context.Context, e events.DataChangeEvent) {
 		if ts > 1e12 {
 			ts = ts / 1000
 		}
-		customerReportKeys := []string{"customer_daily", "customer_weekly", "customer_monthly", "customer_yearly"}
+		customerReportKeys := GetActiveCustomerReportKeys()
 		periodKeys, err := reportSvc.GetDirtyPeriodKeysForReportKeys(ctx, customerReportKeys, ts)
 		if err != nil || len(periodKeys) == 0 {
 			return
 		}
-		for reportKey, periodKey := range periodKeys {
-			_ = reportSvc.MarkDirty(ctx, reportKey, periodKey, ownerOrgID)
-		}
+		markDirtyForPeriods(ctx, reportSvc, periodKeys, ownerOrgID)
 	default:
 		return
 	}

@@ -10,6 +10,7 @@ import (
 
 	crmvc "meta_commerce/internal/api/crm/service"
 	"meta_commerce/internal/logger"
+	"meta_commerce/internal/worker/metrics"
 )
 
 // ClassificationRefreshMode chế độ chạy worker.
@@ -95,6 +96,10 @@ func (w *ClassificationRefreshWorker) Start(ctx context.Context) {
 
 // runBatch chạy một đợt refresh: lấy batch khách → RefreshMetrics từng người.
 func (w *ClassificationRefreshWorker) runBatch(ctx context.Context, log *logrus.Logger) {
+	start := time.Now()
+	defer func() {
+		metrics.RecordDuration("classification_refresh:"+w.mode, time.Since(start))
+	}()
 	batchSize := GetEffectiveBatchSize(w.batchSize, PriorityLowest)
 	defer func() {
 		if r := recover(); r != nil {

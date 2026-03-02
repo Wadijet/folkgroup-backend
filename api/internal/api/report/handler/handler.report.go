@@ -177,6 +177,13 @@ func (h *ReportHandler) HandleRecompute(c fiber.Ctx) error {
 			})
 			return nil
 		}
+		// Chặn chu kỳ customer bị tắt (customer_monthly, customer_yearly).
+		if reportsvc.IsCustomerReportKeyDisabled(body.ReportKey) {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationInput.Code, "message": "Chu kỳ báo cáo này đã bị tắt tạm thời", "status": "error",
+			})
+			return nil
+		}
 
 		ctx := c.Context()
 		count := 0

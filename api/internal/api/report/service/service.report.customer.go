@@ -269,31 +269,34 @@ func CeoGroupDistributionFromBalance(balance map[string]interface{}) reportdto.C
 }
 
 // GetSnapshotForCustomersDashboard lấy phát sinh (ceoGroupIn, ceoGroupOut) từ report_snapshots cho period cuối.
-// Snapshot chỉ lưu in/out; Summary, CeoGroupDistribution, LTV... lấy từ realtime hoặc API số dư.
+// Ưu tiên chu kỳ dài: thử yearly → monthly → weekly → daily, dùng chu kỳ đầu có snapshot.
 func (s *ReportService) GetSnapshotForCustomersDashboard(ctx context.Context, ownerOrgID primitive.ObjectID, params *reportdto.CustomersQueryParams) (*reportdto.CustomersDashboardSnapshotData, string, int64, error) {
 	if params == nil {
 		params = &reportdto.CustomersQueryParams{}
 	}
 	applyCustomersDefaults(params)
 
-	reportKey, _, periodKey, err := paramsToTrendRange(params)
+	endMs, err := s.GetEndMsForCustomersParams(params)
 	if err != nil {
 		return nil, "", 0, err
 	}
 
-	snap, err := s.GetReportSnapshot(ctx, reportKey, periodKey, ownerOrgID)
-	if err != nil || snap == nil || snap.Metrics == nil {
-		return nil, "", 0, nil
+	// Thử chu kỳ dài → ngắn, dùng chu kỳ đầu có snapshot.
+	for _, rk := range reportKeyOrder {
+		periodKey := getPeriodKeyForEndMs(endMs, rk)
+		snap, err := s.GetReportSnapshot(ctx, rk, periodKey, ownerOrgID)
+		if err != nil || snap == nil || snap.Metrics == nil {
+			continue
+		}
+		m := snap.Metrics
+		ceoIn := metricAtPhatSinhFromLayer2(m, "ceoGroup", "in")
+		ceoOut := metricAtPhatSinhFromLayer2(m, "ceoGroup", "out")
+		return &reportdto.CustomersDashboardSnapshotData{
+			CeoGroupIn:  ceoIn,
+			CeoGroupOut: ceoOut,
+		}, periodKey, snap.ComputedAt, nil
 	}
-
-	m := snap.Metrics
-	// Cấu trúc giống metricsSnapshot: raw, layer1, layer2, layer3. CeoGroup nằm trong layer2.in/out.ceoGroup.
-	ceoIn := metricAtPhatSinhFromLayer2(m, "ceoGroup", "in")
-	ceoOut := metricAtPhatSinhFromLayer2(m, "ceoGroup", "out")
-	return &reportdto.CustomersDashboardSnapshotData{
-		CeoGroupIn:  ceoIn,
-		CeoGroupOut: ceoOut,
-	}, periodKey, snap.ComputedAt, nil
+	return nil, "", 0, nil
 }
 
 // metricAtPhatSinhFromLayer2 đọc CeoGroupPhatSinh từ metrics phát sinh (cấu trúc raw/layer1/layer2/layer3).

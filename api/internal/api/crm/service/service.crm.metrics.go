@@ -673,15 +673,23 @@ func (s *CrmCustomerService) GetProfileForSnapshotAt(ctx context.Context, c *crm
 }
 
 // RefreshMetrics cập nhật metrics cho customer theo unifiedId.
-func (s *CrmCustomerService) RefreshMetrics(ctx context.Context, unifiedId string, ownerOrgID primitive.ObjectID) error {
-	customer, err := s.FindOne(ctx, bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}, nil)
-	if err != nil {
-		return err
+// customerOptional: nếu có, dùng thay vì FindOne — tối ưu khi caller đã có customer (vd: IngestConversationTouchpoint).
+func (s *CrmCustomerService) RefreshMetrics(ctx context.Context, unifiedId string, ownerOrgID primitive.ObjectID, customerOptional ...*crmmodels.CrmCustomer) error {
+	var customer crmmodels.CrmCustomer
+	if len(customerOptional) > 0 && customerOptional[0] != nil {
+		customer = *customerOptional[0]
+	} else {
+		var err error
+		customer, err = s.FindOne(ctx, bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}, nil)
+		if err != nil {
+			return err
+		}
 	}
 	ids := []string{customer.SourceIds.Pos, customer.SourceIds.Fb, customer.UnifiedId}
 	metrics := s.aggregateOrderMetricsForCustomer(ctx, ids, ownerOrgID, GetPhoneNumbersFromCustomer(&customer), 0)
-	hasConv := s.checkHasConversation(ctx, ids, ownerOrgID)
+	// Tối ưu: aggregateConversationMetrics trước — nếu ConversationCount > 0 thì bỏ qua checkHasConversation (2 CountDocuments).
 	convMetrics := s.aggregateConversationMetricsForCustomer(ctx, ids, ownerOrgID, 0)
+	hasConv := convMetrics.ConversationCount > 0 || s.checkHasConversation(ctx, ids, ownerOrgID)
 
 	now := time.Now().UnixMilli()
 	cm := BuildCurrentMetricsFromOrderAndConv(metrics, convMetrics, hasConv)
@@ -705,7 +713,7 @@ func (s *CrmCustomerService) RefreshMetrics(ctx context.Context, unifiedId strin
 		"$set":   setFields,
 		"$unset": unsetRawFields,
 	}
-	_, err = s.Collection().UpdateOne(ctx, bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}, update)
+	_, err := s.Collection().UpdateOne(ctx, bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}, update)
 	if err != nil {
 		return err
 	}

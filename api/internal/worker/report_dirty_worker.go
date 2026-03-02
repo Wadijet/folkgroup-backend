@@ -6,6 +6,7 @@ import (
 
 	reportsvc "meta_commerce/internal/api/report/service"
 	"meta_commerce/internal/logger"
+	"meta_commerce/internal/worker/metrics"
 )
 
 // ReportDirtyWorker worker xử lý report_dirty_periods: đọc các chu kỳ chưa xử lý (processedAt = null), gọi engine Compute rồi đánh dấu processedAt.
@@ -45,10 +46,14 @@ func (w *ReportDirtyWorker) Start(ctx context.Context) {
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
 
-	log.WithFields(map[string]interface{}{
-		"interval":   w.interval.String(),
-		"batchSize":  w.batchSize,
-	}).Info("📊 [REPORT_DIRTY] Starting Report Dirty Worker...")
+	startFields := map[string]interface{}{
+		"interval":  w.interval.String(),
+		"batchSize": w.batchSize,
+	}
+	if disabled := reportsvc.GetDisabledCustomerReportKeys(); len(disabled) > 0 {
+		startFields["customerReportKeysDisabled"] = disabled
+	}
+	log.WithFields(startFields).Info("📊 [REPORT_DIRTY] Starting Report Dirty Worker...")
 
 	for {
 		select {
@@ -76,6 +81,10 @@ func (w *ReportDirtyWorker) Start(ctx context.Context) {
 				batchSize := GetEffectiveBatchSize(w.batchSize, PriorityHigh)
 
 				for {
+					// Kiểm tra throttle giữa mỗi batch — tránh xử lý hết hàng đợi khi CPU/RAM đã tăng trong lúc chạy.
+					if ShouldThrottle(PriorityHigh) {
+						break
+					}
 					list, err := w.reportService.GetUnprocessedDirtyPeriods(batchCtx, batchSize)
 					if err != nil {
 						log.WithError(err).Error("📊 [REPORT_DIRTY] Lỗi lấy danh sách dirty periods")
@@ -86,6 +95,23 @@ func (w *ReportDirtyWorker) Start(ctx context.Context) {
 					}
 
 					for _, d := range list {
+						// Chu kỳ bị tắt bởi config — xóa dirty period và snapshot, không tạo chu kỳ báo cáo.
+						if reportsvc.IsCustomerReportKeyDisabled(d.ReportKey) {
+							if err := w.reportService.DeleteDirtyPeriod(batchCtx, d.ReportKey, d.PeriodKey, d.OwnerOrganizationID); err != nil {
+								log.WithError(err).WithFields(map[string]interface{}{
+									"reportKey": d.ReportKey,
+									"periodKey": d.PeriodKey,
+								}).Warn("📊 [REPORT_DIRTY] DeleteDirtyPeriod thất bại")
+								continue
+							}
+							_ = w.reportService.DeleteReportSnapshot(batchCtx, d.ReportKey, d.PeriodKey, d.OwnerOrganizationID)
+							log.WithFields(map[string]interface{}{
+								"reportKey": d.ReportKey,
+								"periodKey": d.PeriodKey,
+							}).Info("📊 [REPORT_DIRTY] Đã xóa dirty period và snapshot (chu kỳ tắt)")
+							continue
+						}
+						start := time.Now()
 						if err := w.reportService.Compute(batchCtx, d.ReportKey, d.PeriodKey, d.OwnerOrganizationID); err != nil {
 							log.WithError(err).WithFields(map[string]interface{}{
 								"reportKey":  d.ReportKey,
@@ -101,6 +127,7 @@ func (w *ReportDirtyWorker) Start(ctx context.Context) {
 							}).Warn("📊 [REPORT_DIRTY] SetDirtyProcessed thất bại")
 							continue
 						}
+						metrics.RecordDuration("report_dirty:"+d.ReportKey, time.Since(start))
 						totalProcessed++
 					}
 				}

@@ -15,6 +15,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	mongoopts "go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // IngestOrderTouchpoint xử lý order: resolve unifiedId, refresh metrics, log activity.
@@ -44,9 +45,13 @@ func (s *CrmCustomerService) IngestOrderTouchpoint(ctx context.Context, customer
 	if !found || unifiedId == "" {
 		return nil
 	}
-	// Merge thông tin từ order vào profile (fill gaps khi còn thiếu)
-	s.MergeProfileFromOrder(ctx, unifiedId, ownerOrgID, orderDoc)
-	_ = s.RefreshMetrics(ctx, unifiedId, ownerOrgID)
+	// FindOne 1 lần — truyền vào MergeProfile, RefreshMetrics và snapshot (tối ưu giảm DB round-trips).
+	cust, errCust := s.FindOne(ctx, bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}, nil)
+	if errCust != nil {
+		return nil
+	}
+	s.MergeProfileFromOrder(ctx, unifiedId, ownerOrgID, orderDoc, &cust)
+	_ = s.RefreshMetrics(ctx, unifiedId, ownerOrgID, &cust)
 
 	activityType := "order_created"
 	if isUpdate {
@@ -68,8 +73,8 @@ func (s *CrmCustomerService) IngestOrderTouchpoint(ctx context.Context, customer
 	}
 	// Snapshot chỉ khi profile/metrics thay đổi (có snapshotChanges); snapshotAt = thời điểm sự kiện order
 	// Loại trừ activity của chính đơn này (order_created) để so sánh với snapshot TRƯỚC đơn — metrics mới có thay đổi
-	// Dùng metrics as of activityAt (chỉ đơn có orderDate <= activityAt) để timeline đúng
-	if cust, err := s.FindOne(ctx, bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}, nil); err == nil {
+	// Dùng metrics as of activityAt (chỉ đơn có orderDate <= activityAt) để timeline đúng (cust đã có từ FindOne phía trên)
+	{
 		lastProfile, lastMetrics, _ := actSvc.GetLastSnapshotForCustomer(ctx, unifiedId, ownerOrgID, "pos", sourceRef)
 		metricsOverride := s.GetMetricsForSnapshotAt(ctx, &cust, activityAt)
 		profileOverride := s.GetProfileForSnapshotAt(ctx, &cust, activityAt)
@@ -348,22 +353,32 @@ func (s *CrmCustomerService) IngestConversationTouchpoint(ctx context.Context, c
 	}
 	unifiedId, found := s.ResolveUnifiedId(ctx, customerId, ownerOrgID)
 	if !found {
-		// Thử merge từ fb_customers. Pancake dùng 2 ID khác nhau: customer_id vs customers[0].id — cần thử cả hai.
+		// Thử merge từ fb_customers. Pancake dùng 2 ID khác nhau: customer_id vs customers[0].id — batch lookup 1 query thay vì loop FindOne.
 		fbColl, _ := global.RegistryCollections.Get(global.MongoDB_ColNames.FbCustomers)
 		if fbColl != nil {
 			tryIds := collectConversationCustomerIds(convDoc, customerId)
+			var validIds []string
 			for _, cid := range tryIds {
-				if cid == "" {
-					continue
+				if cid != "" {
+					validIds = append(validIds, cid)
 				}
-				var fbCustomer fbmodels.FbCustomer
-				if fbColl.FindOne(ctx, bson.M{"customerId": cid, "ownerOrganizationId": ownerOrgID}).Decode(&fbCustomer) == nil {
-					_ = s.MergeFromFbCustomer(ctx, &fbCustomer, getConversationTimestamp(convDoc))
-					unifiedId, found = s.ResolveUnifiedId(ctx, customerId, ownerOrgID)
-					if !found {
-						unifiedId, found = s.ResolveUnifiedId(ctx, cid, ownerOrgID)
+			}
+			if len(validIds) > 0 {
+				filter := bson.M{"customerId": bson.M{"$in": validIds}, "ownerOrganizationId": ownerOrgID}
+				opts := mongoopts.Find().SetLimit(1)
+				cursor, err := fbColl.Find(ctx, filter, opts)
+				if err == nil {
+					if cursor.Next(ctx) {
+						var fbCustomer fbmodels.FbCustomer
+						if cursor.Decode(&fbCustomer) == nil {
+							_ = s.MergeFromFbCustomer(ctx, &fbCustomer, getConversationTimestamp(convDoc))
+							unifiedId, found = s.ResolveUnifiedId(ctx, customerId, ownerOrgID)
+							if !found {
+								unifiedId, found = s.ResolveUnifiedId(ctx, fbCustomer.CustomerId, ownerOrgID)
+							}
+						}
 					}
-					break
+					_ = cursor.Close(ctx)
 				}
 			}
 		}
@@ -389,9 +404,13 @@ func (s *CrmCustomerService) IngestConversationTouchpoint(ctx context.Context, c
 	if !found || unifiedId == "" {
 		return false, nil
 	}
-	// Merge thông tin từ conversation vào profile (fill gaps khi còn thiếu)
-	s.MergeProfileFromConversation(ctx, unifiedId, ownerOrgID, convDoc)
-	_ = s.RefreshMetrics(ctx, unifiedId, ownerOrgID)
+	// FindOne 1 lần — truyền vào MergeProfile, RefreshMetrics và snapshot (tối ưu giảm DB round-trips).
+	cust, errCust := s.FindOne(ctx, bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}, nil)
+	if errCust != nil {
+		return false, nil
+	}
+	s.MergeProfileFromConversation(ctx, unifiedId, ownerOrgID, convDoc, &cust)
+	_ = s.RefreshMetrics(ctx, unifiedId, ownerOrgID, &cust)
 
 	sourceRef := map[string]interface{}{"conversationId": conversationId}
 	metadata := map[string]interface{}{}
@@ -404,9 +423,9 @@ func (s *CrmCustomerService) IngestConversationTouchpoint(ctx context.Context, c
 		return false, errAct
 	}
 	// Snapshot chỉ khi profile/metrics thay đổi; snapshotAt = thời điểm sự kiện conversation
-	if cust, err := s.FindOne(ctx, bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}, nil); err == nil {
+	{
 		// Loại trừ activity của chính conversation này để so sánh với snapshot TRƯỚC — metrics mới có thay đổi
-		// Dùng metrics và profile as of activityAt để timeline đúng
+		// Dùng metrics và profile as of activityAt để timeline đúng (cust đã có từ FindOne phía trên)
 		lastProfile, lastMetrics, _ := actSvc.GetLastSnapshotForCustomer(ctx, unifiedId, ownerOrgID, "fb", sourceRef)
 		metricsOverride := s.GetMetricsForSnapshotAt(ctx, &cust, activityAt)
 		profileOverride := s.GetProfileForSnapshotAt(ctx, &cust, activityAt)

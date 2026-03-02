@@ -6,6 +6,7 @@ import (
 
 	agentsvc "meta_commerce/internal/api/agent/service"
 	"meta_commerce/internal/logger"
+	"meta_commerce/internal/worker/metrics"
 )
 
 // AgentCommandCleanupWorker worker để tự động giải phóng các agent commands bị stuck
@@ -80,7 +81,9 @@ func (w *AgentCommandCleanupWorker) Start(ctx context.Context) {
 				}()
 
 				// Gọi service để release stuck commands
+				start := time.Now()
 				releasedCount, err := w.commandService.ReleaseStuckCommands(ctx, w.timeoutSeconds)
+				metrics.RecordDuration("agent_command_cleanup", time.Since(start))
 				if err != nil {
 					log.WithError(err).Error("🔄 [AGENT_COMMAND_CLEANUP] Failed to release stuck commands")
 					return

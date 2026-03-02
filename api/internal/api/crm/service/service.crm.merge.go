@@ -511,14 +511,21 @@ func (s *CrmCustomerService) UpsertMinimalFromFbId(ctx context.Context, customer
 
 // MergeProfileFromOrder cập nhật profile crm_customer với thông tin từ order (fill gaps).
 // Chỉ ghi khi field hiện tại đang trống và order có giá trị.
-func (s *CrmCustomerService) MergeProfileFromOrder(ctx context.Context, unifiedId string, ownerOrgID primitive.ObjectID, orderDoc *pcmodels.PcPosOrder) {
+// existingOptional: nếu có, dùng thay vì FindOne — tối ưu khi caller đã có customer (vd: IngestOrderTouchpoint).
+func (s *CrmCustomerService) MergeProfileFromOrder(ctx context.Context, unifiedId string, ownerOrgID primitive.ObjectID, orderDoc *pcmodels.PcPosOrder, existingOptional ...*crmmodels.CrmCustomer) {
 	if orderDoc == nil || orderDoc.PosData == nil {
 		return
 	}
 	custData := extractCustomerDataFromOrder(orderDoc)
-	existing, err := s.FindOne(ctx, bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}, nil)
-	if err != nil {
-		return
+	var existing crmmodels.CrmCustomer
+	if len(existingOptional) > 0 && existingOptional[0] != nil {
+		existing = *existingOptional[0]
+	} else {
+		var err error
+		existing, err = s.FindOne(ctx, bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}, nil)
+		if err != nil {
+			return
+		}
 	}
 	setFields := bson.M{}
 	if GetNameFromCustomer(&existing) == "" && custData.Name != "" {
@@ -551,18 +558,29 @@ func (s *CrmCustomerService) MergeProfileFromOrder(ctx context.Context, unifiedI
 	setFields["updatedAt"] = time.Now().UnixMilli()
 	setFields["mergedAt"] = time.Now().UnixMilli()
 	_, _ = s.Collection().UpdateOne(ctx, bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}, bson.M{"$set": setFields})
+	// Cập nhật in-memory khi caller truyền existing — để RefreshMetrics/snapshot dùng profile đã merge.
+	if len(existingOptional) > 0 && existingOptional[0] != nil {
+		applyMergeToCustomer(existingOptional[0], custData)
+	}
 }
 
 // MergeProfileFromConversation cập nhật profile crm_customer với thông tin từ conversation (fill gaps).
 // Chỉ ghi khi field hiện tại đang trống và conversation có giá trị.
-func (s *CrmCustomerService) MergeProfileFromConversation(ctx context.Context, unifiedId string, ownerOrgID primitive.ObjectID, convDoc *fbmodels.FbConversation) {
+// existingOptional: nếu có, dùng thay vì FindOne — tối ưu khi caller đã có customer (vd: IngestConversationTouchpoint).
+func (s *CrmCustomerService) MergeProfileFromConversation(ctx context.Context, unifiedId string, ownerOrgID primitive.ObjectID, convDoc *fbmodels.FbConversation, existingOptional ...*crmmodels.CrmCustomer) {
 	if convDoc == nil || convDoc.PanCakeData == nil {
 		return
 	}
 	custData := extractCustomerDataFromConv(convDoc)
-	existing, err := s.FindOne(ctx, bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}, nil)
-	if err != nil {
-		return
+	var existing crmmodels.CrmCustomer
+	if len(existingOptional) > 0 && existingOptional[0] != nil {
+		existing = *existingOptional[0]
+	} else {
+		var err error
+		existing, err = s.FindOne(ctx, bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}, nil)
+		if err != nil {
+			return
+		}
 	}
 	setFields := bson.M{}
 	if GetNameFromCustomer(&existing) == "" && custData.Name != "" {
@@ -595,6 +613,38 @@ func (s *CrmCustomerService) MergeProfileFromConversation(ctx context.Context, u
 	setFields["updatedAt"] = time.Now().UnixMilli()
 	setFields["mergedAt"] = time.Now().UnixMilli()
 	_, _ = s.Collection().UpdateOne(ctx, bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}, bson.M{"$set": setFields})
+	// Cập nhật in-memory khi caller truyền existing — để RefreshMetrics/snapshot dùng profile đã merge.
+	if len(existingOptional) > 0 && existingOptional[0] != nil {
+		applyMergeToCustomer(existingOptional[0], custData)
+	}
+}
+
+// applyMergeToCustomer áp dụng các field đã merge vào customer in-memory (fill gaps).
+func applyMergeToCustomer(c *crmmodels.CrmCustomer, custData convCustomerData) {
+	if GetNameFromCustomer(c) == "" && custData.Name != "" {
+		c.Profile.Name = custData.Name
+	}
+	if len(GetPhoneNumbersFromCustomer(c)) == 0 && len(custData.Phones) > 0 {
+		c.Profile.PhoneNumbers = normalizePhones(custData.Phones)
+	}
+	if len(GetEmailsFromCustomer(c)) == 0 && len(custData.Emails) > 0 {
+		c.Profile.Emails = uniqueStrings(custData.Emails)
+	}
+	if GetBirthdayFromCustomer(c) == "" && custData.Birthday != "" {
+		c.Profile.Birthday = custData.Birthday
+	}
+	if GetGenderFromCustomer(c) == "" && custData.Gender != "" {
+		c.Profile.Gender = custData.Gender
+	}
+	if GetLivesInFromCustomer(c) == "" && custData.LivesIn != "" {
+		c.Profile.LivesIn = custData.LivesIn
+	}
+	if len(GetAddressesFromCustomer(c)) == 0 && len(custData.Addresses) > 0 {
+		c.Profile.Addresses = custData.Addresses
+	}
+	if GetReferralCodeFromCustomer(c) == "" && custData.ReferralCode != "" {
+		c.Profile.ReferralCode = custData.ReferralCode
+	}
 }
 
 // logCustomerCreatedFromSource ghi activity customer_created với source tùy chỉnh (order, conversation).

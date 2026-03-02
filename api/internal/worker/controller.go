@@ -95,21 +95,21 @@ func newController() *Controller {
 	if v := os.Getenv("WORKER_CPU_THROTTLE_ENABLED"); v != "" {
 		enabled = v == "true" || v == "1"
 	}
-	// Ngưỡng thấp hơn (50/70) để throttle sớm, tránh CPU chạm 100% trước khi phản ứng.
-	thresholdThrottle := 50.0
+	// Ngưỡng thấp (40/60) để throttle sớm, tránh CPU chạm 100% trước khi phản ứng.
+	thresholdThrottle := 40.0
 	if v := os.Getenv("WORKER_CPU_THRESHOLD_THROTTLE"); v != "" {
 		if n, err := strconv.ParseFloat(v, 64); err == nil && n > 0 {
 			thresholdThrottle = n
 		}
 	}
-	thresholdPause := 70.0
+	thresholdPause := 60.0
 	if v := os.Getenv("WORKER_CPU_THRESHOLD_PAUSE"); v != "" {
 		if n, err := strconv.ParseFloat(v, 64); err == nil && n > 0 {
 			thresholdPause = n
 		}
 	}
-	// Mặc định 5s/lần — phản ứng nhanh hơn để tránh CPU kịp spike lên 100%.
-	sampleInterval := 5 * time.Second
+	// Mặc định 3s/lần — phản ứng nhanh hơn để phát hiện spike CPU/RAM sớm.
+	sampleInterval := 3 * time.Second
 	if v := os.Getenv("WORKER_CPU_SAMPLE_INTERVAL"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			sampleInterval = time.Duration(n) * time.Second
@@ -129,19 +129,20 @@ func newController() *Controller {
 		}
 	}
 	// Ngưỡng RAM để throttle/pause — kiểm soát tràn RAM như CPU.
-	thresholdRAMThrottle := 80.0
-	if v := os.Getenv("WORKER_RAM_THRESHOLD_THROTTLE"); v != "" {
-		if n, err := strconv.ParseFloat(v, 64); err == nil && n > 0 {
-			thresholdRAMThrottle = n
+		// Hạ ngưỡng để phản ứng sớm trước khi swap, tránh tràn.
+		thresholdRAMThrottle := 60.0
+		if v := os.Getenv("WORKER_RAM_THRESHOLD_THROTTLE"); v != "" {
+			if n, err := strconv.ParseFloat(v, 64); err == nil && n > 0 {
+				thresholdRAMThrottle = n
+			}
 		}
-	}
-	thresholdRAMPause := 92.0
+		thresholdRAMPause := 75.0
 	if v := os.Getenv("WORKER_RAM_THRESHOLD_PAUSE"); v != "" {
 		if n, err := strconv.ParseFloat(v, 64); err == nil && n > 0 {
 			thresholdRAMPause = n
 		}
 	}
-	thresholdRAMAlert := 85.0
+	thresholdRAMAlert := 70.0
 	if v := os.Getenv("WORKER_RAM_THRESHOLD_ALERT"); v != "" {
 		if n, err := strconv.ParseFloat(v, 64); err == nil && n > 0 {
 			thresholdRAMAlert = n
@@ -309,7 +310,8 @@ func (c *Controller) getBatchDivisor(p Priority) int {
 }
 
 // ShouldThrottle trả về true nếu worker nên bỏ qua chu kỳ này.
-// Khi Paused (CPU hoặc RAM vượt ngưỡng): chỉ Critical và High chạy; Normal/Low/Lowest skip.
+// Khi Paused (CPU hoặc RAM vượt ngưỡng): chỉ Critical chạy; High/Normal/Low/Lowest skip.
+// (Report Dirty/High load nhiều data — dừng khi Paused để tránh tràn RAM.)
 // Khi Throttled: Lowest skip (để dành CPU/RAM cho ưu tiên cao hơn).
 func (c *Controller) ShouldThrottle(p Priority) bool {
 	if !c.enabled {
@@ -319,7 +321,7 @@ func (c *Controller) ShouldThrottle(p Priority) bool {
 	s := c.state
 	c.mu.RUnlock()
 	if s == StatePaused {
-		return p >= PriorityNormal
+		return p > PriorityCritical
 	}
 	if s == StateThrottled && p == PriorityLowest {
 		return true

@@ -8,10 +8,12 @@ import (
 
 	pchdl "meta_commerce/internal/api/pc/handler"
 	apirouter "meta_commerce/internal/api/router"
+	"meta_commerce/internal/api/middleware"
 )
 
 // Register đăng ký tất cả route PC (Pancake) lên v1.
 func Register(v1 fiber.Router, r *apirouter.Router) error {
+	orgContextMiddleware := middleware.OrganizationContextMiddleware()
 	accessTokenHandler, err := pchdl.NewAccessTokenHandler()
 	if err != nil {
 		return fmt.Errorf("create access token handler: %w", err)
@@ -28,6 +30,7 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 	if err != nil {
 		return fmt.Errorf("create pc pos customer handler: %w", err)
 	}
+	apirouter.RegisterRouteWithMiddleware(v1, "/pc-pos-customer", "POST", "/sync-upsert-one", []fiber.Handler{middleware.AuthMiddleware("PcPosCustomer.Update"), orgContextMiddleware}, pcPosCustomerHandler.HandleSyncUpsertOne)
 	r.RegisterCRUDRoutes(v1, "/pc-pos-customer", pcPosCustomerHandler, apirouter.ReadWriteConfig, "PcPosCustomer")
 
 	pcPosShopHandler, err := pchdl.NewPcPosShopHandler()
@@ -64,6 +67,7 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 	if err != nil {
 		return fmt.Errorf("create pancake pos order handler: %w", err)
 	}
+	apirouter.RegisterRouteWithMiddleware(v1, "/pancake-pos/order", "POST", "/sync-upsert-one", []fiber.Handler{middleware.AuthMiddleware("PcPosOrder.Update"), orgContextMiddleware}, pcPosOrderHandler.HandleSyncUpsertOne)
 	r.RegisterCRUDRoutes(v1, "/pancake-pos/order", pcPosOrderHandler, apirouter.ReadWriteConfig, "PcPosOrder")
 
 	return nil

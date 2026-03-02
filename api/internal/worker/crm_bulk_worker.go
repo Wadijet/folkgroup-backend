@@ -10,6 +10,7 @@ import (
 	crmmodels "meta_commerce/internal/api/crm/models"
 	crmvc "meta_commerce/internal/api/crm/service"
 	"meta_commerce/internal/logger"
+	"meta_commerce/internal/worker/metrics"
 )
 
 // CrmBulkWorker worker xử lý crm_bulk_jobs: đọc job chưa xử lý, gọi Sync/Backfill/Rebuild/Recalculate.
@@ -76,7 +77,9 @@ func (w *CrmBulkWorker) Start(ctx context.Context) {
 				}
 
 				for _, item := range list {
+					start := time.Now()
 					result, err := w.processJob(ctx, customerSvc, &item)
+					metrics.RecordDuration("crm_bulk:"+item.JobType, time.Since(start))
 					errStr := ""
 					if err != nil {
 						errStr = err.Error()

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"meta_commerce/internal/worker/metrics"
 )
 
 // SystemHandler xử lý các route liên quan đến system operations
@@ -70,6 +71,17 @@ func (h *SystemHandler) HandleHealth(c fiber.Ctx) error {
 		"code":    common.StatusOK,
 		"message": common.MsgSuccess,
 		"data":    healthData,
+		"status":  "success",
+	})
+}
+
+// HandleJobMetrics trả về metrics thời gian thực hiện từng loại job (avgMs, sampleCount, countLastHour).
+func (h *SystemHandler) HandleJobMetrics(c fiber.Ctx) error {
+	data := metrics.GetAll()
+	return c.Status(common.StatusOK).JSON(fiber.Map{
+		"code":    common.StatusOK,
+		"message": "Thành công",
+		"data":    data,
 		"status":  "success",
 	})
 }

@@ -228,9 +228,10 @@ func InitFiberApp() *fiber.App {
 			SkipFailedRequests:     false,
 			SkipSuccessfulRequests: false,
 			Next: func(c fiber.Ctx) bool {
-				// Bỏ qua rate limit cho health check và OPTIONS requests (preflight)
+				// Bỏ qua rate limit cho health check, metrics và OPTIONS requests (preflight)
 				return c.Path() == "/health" ||
 					c.Path() == "/api/v1/system/health" ||
+					c.Path() == "/api/v1/internal/metrics/job-metrics" ||
 					c.Method() == "OPTIONS"
 			},
 		}))
@@ -263,10 +264,11 @@ func InitFiberApp() *fiber.App {
 			})
 		},
 		Next: func(c fiber.Ctx) bool {
-			// Bỏ qua health check và một số endpoint không cần thiết
+			// Bỏ qua health check, metrics và một số endpoint không cần thiết
 			return c.Path() == "/health" ||
 				c.Path() == "/metrics" ||
-				c.Path() == "/api/v1/system/health"
+				c.Path() == "/api/v1/system/health" ||
+				c.Path() == "/api/v1/internal/metrics/job-metrics"
 		},
 	}))
 

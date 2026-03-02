@@ -83,8 +83,14 @@ func getCandidateReportKeysAndRanges(startMs, endMs int64) []periodRangeCandidat
 
 // periodRangeForReportKey tính fromStr, toStr và count periods cho reportKey trong [startT, endT].
 // Chỉ dùng chu kỳ dài khi range [startT, endT] KHỚP ranh giới chu kỳ — tránh thừa/thiếu phát sinh.
+// Mỗi chu kỳ phải khớp với số ngày thực tế (count * ngày/chu kỳ = span thực tế).
 // Report align: yearly = 1/1–31/12, monthly = đầu tháng–cuối tháng, weekly = T2 00:00–CN 23:59:59.
 func periodRangeForReportKey(reportKey string, startT, endT time.Time, loc *time.Location) (fromStr, toStr string, count int) {
+	actualDays := int(endT.Sub(startT).Hours()/24) + 1
+	if actualDays < 1 {
+		actualDays = 1
+	}
+
 	switch reportKey {
 	case "customer_yearly":
 		// Chỉ dùng yearly khi range trùng ranh giới năm: bắt đầu 1/1 00:00, kết thúc 31/12 23:59:59.
@@ -93,7 +99,12 @@ func periodRangeForReportKey(reportKey string, startT, endT time.Time, loc *time
 		}
 		yFrom := startT.Year()
 		yTo := endT.Year()
-		return fmt.Sprintf("%d", yFrom), fmt.Sprintf("%d", yTo), yTo - yFrom + 1
+		count = yTo - yFrom + 1
+		expectedDays := daysInYears(yFrom, yTo, loc)
+		if expectedDays != actualDays {
+			return "", "", 999999
+		}
+		return fmt.Sprintf("%d", yFrom), fmt.Sprintf("%d", yTo), count
 
 	case "customer_monthly":
 		// Chỉ dùng monthly khi range khớp ranh giới tháng: start = 1st 00:00, end = cuối tháng 23:59:59.
@@ -102,11 +113,15 @@ func periodRangeForReportKey(reportKey string, startT, endT time.Time, loc *time
 		}
 		from := time.Date(startT.Year(), startT.Month(), 1, 0, 0, 0, 0, loc)
 		to := time.Date(endT.Year(), endT.Month(), 1, 0, 0, 0, 0, loc)
-		months := 0
+		count = 0
 		for d := from; !d.After(to); d = d.AddDate(0, 1, 0) {
-			months++
+			count++
 		}
-		return from.Format("2006-01"), to.Format("2006-01"), months
+		expectedDays := daysInMonths(from, to, loc)
+		if expectedDays != actualDays {
+			return "", "", 999999
+		}
+		return from.Format("2006-01"), to.Format("2006-01"), count
 
 	case "customer_weekly":
 		// Chỉ dùng weekly khi range khớp ranh giới tuần: start = T2 00:00, end = CN 23:59:59.
@@ -115,23 +130,36 @@ func periodRangeForReportKey(reportKey string, startT, endT time.Time, loc *time
 		}
 		mondayStart := getMondayOfWeek(startT)
 		mondayEnd := getMondayOfWeek(endT)
-		weeks := 1
+		count = 1
 		if mondayEnd.After(mondayStart) {
-			weeks = int(mondayEnd.Sub(mondayStart).Hours()/24)/7 + 1
+			count = int(mondayEnd.Sub(mondayStart).Hours()/24)/7 + 1
 		}
-		return mondayStart.Format("2006-01-02"), mondayEnd.Format("2006-01-02"), weeks
+		expectedDays := count * 7
+		if expectedDays != actualDays {
+			return "", "", 999999
+		}
+		return mondayStart.Format("2006-01-02"), mondayEnd.Format("2006-01-02"), count
 
 	case "customer_daily":
-		// Daily luôn dùng được; ranh giới tùy startT/endT.
-		days := int(endT.Sub(startT).Hours()/24) + 1
-		if days < 1 {
-			days = 1
-		}
-		return startT.Format("2006-01-02"), endT.Format("2006-01-02"), days
+		// Daily luôn dùng được; ranh giới tùy startT/endT; count = số ngày thực tế.
+		return startT.Format("2006-01-02"), endT.Format("2006-01-02"), actualDays
 
 	default:
 		return startT.Format("2006-01-02"), endT.Format("2006-01-02"), 1
 	}
+}
+
+// daysInYears tổng số ngày từ 1/1 yFrom đến 31/12 yTo.
+func daysInYears(yFrom, yTo int, loc *time.Location) int {
+	start := time.Date(yFrom, 1, 1, 0, 0, 0, 0, loc)
+	end := time.Date(yTo, 12, 31, 23, 59, 59, 0, loc)
+	return int(end.Sub(start).Hours()/24) + 1
+}
+
+// daysInMonths tổng số ngày từ đầu tháng from đến cuối tháng to.
+func daysInMonths(from, to time.Time, loc *time.Location) int {
+	endOfLast := time.Date(to.Year(), to.Month()+1, 0, 23, 59, 59, 0, loc)
+	return int(endOfLast.Sub(from).Hours()/24) + 1
 }
 
 // isStartOfYear true nếu t = 1/1 00:00:00.
@@ -222,6 +250,24 @@ func mustLoadLoc() *time.Location {
 		loc = time.UTC
 	}
 	return loc
+}
+
+// getPeriodKeyForEndMs trả về periodKey chứa endMs cho reportKey (dùng cho fallback chu kỳ dài→ngắn).
+func getPeriodKeyForEndMs(endMs int64, reportKey string) string {
+	loc := mustLoadLoc()
+	endT := time.UnixMilli(endMs).In(loc)
+	switch reportKey {
+	case "customer_yearly":
+		return fmt.Sprintf("%d", endT.Year())
+	case "customer_monthly":
+		return endT.Format("2006-01")
+	case "customer_weekly":
+		return getMondayOfWeek(endT).Format("2006-01-02")
+	case "customer_daily":
+		return endT.Format("2006-01-02")
+	default:
+		return endT.Format("2006-01-02")
+	}
 }
 
 // getStartEndMsFromParams chuyển params thành startMs, endMs.

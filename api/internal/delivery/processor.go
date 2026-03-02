@@ -17,6 +17,7 @@ import (
 	"meta_commerce/internal/logger"
 	"meta_commerce/internal/notification"
 	"meta_commerce/internal/worker"
+	"meta_commerce/internal/worker/metrics"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -487,6 +488,14 @@ func (p *Processor) Start(ctx context.Context) {
 						}
 
 						func() {
+							start := time.Now()
+							defer func() {
+								channelType := item.ChannelType
+								if channelType == "" {
+									channelType = "unknown"
+								}
+								metrics.RecordDuration("delivery:"+channelType, time.Since(start))
+							}()
 							defer func() {
 								if r := recover(); r != nil {
 									log := logger.GetAppLogger()

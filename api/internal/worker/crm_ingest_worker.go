@@ -10,11 +10,12 @@ import (
 
 	crmmodels "meta_commerce/internal/api/crm/models"
 	crmvc "meta_commerce/internal/api/crm/service"
+	"meta_commerce/internal/api/events"
 	fbmodels "meta_commerce/internal/api/fb/models"
 	pcmodels "meta_commerce/internal/api/pc/models"
-	"meta_commerce/internal/api/events"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/logger"
+	"meta_commerce/internal/worker/metrics"
 )
 
 // CrmIngestWorker worker xử lý crm_pending_ingest: đọc job chưa xử lý, gọi Merge/Ingest.
@@ -82,6 +83,10 @@ func (w *CrmIngestWorker) Start(ctx context.Context) {
 					}
 				}
 				for {
+					// Kiểm tra throttle giữa mỗi batch — tránh xử lý hết hàng đợi khi CPU/RAM đã tăng trong lúc chạy.
+					if ShouldThrottle(PriorityCritical) {
+						break
+					}
 					list, err := crmvc.GetUnprocessedCrmIngest(ctx, batchSize)
 					if err != nil {
 						log.WithError(err).Error("📋 [CRM_INGEST] Lỗi lấy danh sách pending ingest")
@@ -98,7 +103,13 @@ func (w *CrmIngestWorker) Start(ctx context.Context) {
 					}
 
 					for _, item := range list {
+						start := time.Now()
 						err := w.processItem(ctx, customerSvc, &item)
+						jobType := "crm_ingest:" + item.CollectionName
+						if item.CollectionName == "" {
+							jobType = "crm_ingest:unknown"
+						}
+						metrics.RecordDuration(jobType, time.Since(start))
 						errStr := ""
 						if err != nil {
 							errStr = err.Error()

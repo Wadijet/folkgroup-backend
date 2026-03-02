@@ -6,6 +6,7 @@ import (
 
 	aisvc "meta_commerce/internal/api/ai/service"
 	"meta_commerce/internal/logger"
+	"meta_commerce/internal/worker/metrics"
 )
 
 // CommandCleanupWorker worker để tự động giải phóng các commands bị stuck
@@ -80,7 +81,9 @@ func (w *CommandCleanupWorker) Start(ctx context.Context) {
 				}()
 
 				// Gọi service để release stuck commands
+				start := time.Now()
 				releasedCount, err := w.commandService.ReleaseStuckCommands(ctx, w.timeoutSeconds)
+				metrics.RecordDuration("command_cleanup", time.Since(start))
 				if err != nil {
 					log.WithError(err).Error("🔄 [COMMAND_CLEANUP] Failed to release stuck commands")
 					return

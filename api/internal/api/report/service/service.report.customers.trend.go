@@ -10,6 +10,7 @@ import (
 
 	crmvc "meta_commerce/internal/api/crm/service"
 	reportdto "meta_commerce/internal/api/report/dto"
+	reportmodels "meta_commerce/internal/api/report/models"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -50,16 +51,22 @@ func (s *ReportService) GetCustomersTrendFromSnapshots(ctx context.Context, owne
 		}
 	}
 
-	// 2. Xác định reportKey và from/to cho trend
-	reportKey, fromStr, toStr, err := paramsToTrendRange(params)
+	// 2. Lấy trend data từ report_snapshots — ưu tiên chu kỳ dài, nếu không có thì fallback chu kỳ ngắn hơn.
+	startMs, endMs, err := getStartEndMsFromParams(params)
 	if err != nil {
 		return nil, err
 	}
-
-	// 3. Lấy trend data từ report_snapshots
-	snapshots, err := s.FindSnapshotsForTrend(ctx, reportKey, ownerOrgID, fromStr, toStr)
-	if err != nil {
-		return nil, fmt.Errorf("find snapshots: %w", err)
+	candidates := getCandidateReportKeysAndRanges(startMs, endMs)
+	var snapshots []reportmodels.ReportSnapshot
+	for _, c := range candidates {
+		list, err := s.FindSnapshotsForTrend(ctx, c.reportKey, ownerOrgID, c.fromStr, c.toStr)
+		if err != nil {
+			return nil, fmt.Errorf("find snapshots: %w", err)
+		}
+		if len(list) > 0 {
+			snapshots = list
+			break
+		}
 	}
 
 	trendData := make([]reportdto.CustomersTrendDataItem, 0, len(snapshots))

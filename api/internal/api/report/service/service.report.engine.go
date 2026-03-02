@@ -22,10 +22,25 @@ const ReportTimezone = "Asia/Ho_Chi_Minh"
 
 // Compute chạy engine tính báo cáo: load definition, aggregation nguồn, upsert snapshot.
 // Hỗ trợ báo cáo có tagDimension trong metadata: thống kê theo posData.tags, chia đều khi đơn có nhiều tag.
-// Báo cáo customer_* (customer_daily, customer_weekly, ...) dùng engine riêng ComputeCustomerReport.
+// Báo cáo customer_* (customer_daily, ...) dùng engine riêng ComputeCustomerReport.
+// Báo cáo order_*: chỉ order_daily được tính; order_weekly/monthly/yearly bị tắt — tính on-demand khi xem.
 func (s *ReportService) Compute(ctx context.Context, reportKey, periodKey string, ownerOrganizationID primitive.ObjectID) error {
 	if len(reportKey) >= 9 && reportKey[:9] == "customer_" {
+		// Bỏ qua chu kỳ bị tắt bởi config — xóa dirty period và snapshot rồi return.
+		if IsCustomerReportKeyDisabled(reportKey) {
+			_ = s.DeleteDirtyPeriod(ctx, reportKey, periodKey, ownerOrganizationID)
+			_ = s.DeleteReportSnapshot(ctx, reportKey, periodKey, ownerOrganizationID)
+			return nil
+		}
 		return s.ComputeCustomerReport(ctx, reportKey, periodKey, ownerOrganizationID)
+	}
+	if len(reportKey) >= 6 && reportKey[:6] == "order_" {
+		// Bỏ qua chu kỳ order bị tắt (weekly/monthly/yearly) — xóa dirty và snapshot rồi return.
+		if IsOrderReportKeyDisabled(reportKey) {
+			_ = s.DeleteDirtyPeriod(ctx, reportKey, periodKey, ownerOrganizationID)
+			_ = s.DeleteReportSnapshot(ctx, reportKey, periodKey, ownerOrganizationID)
+			return nil
+		}
 	}
 
 	def, err := s.LoadDefinition(ctx, reportKey)

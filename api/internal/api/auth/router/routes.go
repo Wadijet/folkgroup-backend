@@ -55,6 +55,7 @@ func registerSystemRoutes(router fiber.Router) error {
 		return fmt.Errorf("failed to create system handler: %w", err)
 	}
 	router.Get("/system/health", systemHandler.HandleHealth)
+	router.Get("/internal/metrics/job-metrics", systemHandler.HandleJobMetrics)
 	return nil
 }
 

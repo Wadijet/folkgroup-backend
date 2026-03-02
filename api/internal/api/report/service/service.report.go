@@ -175,7 +175,11 @@ func periodKeyFromTime(t time.Time, periodType string) string {
 
 // MarkDirty đánh dấu chu kỳ cần tính lại.
 // Nếu đã có bản ghi cùng reportKey, periodKey, ownerOrganizationId và processedAt = null (đang chờ) thì bỏ qua, không ghi thêm.
+// Không tạo dirty period cho chu kỳ customer bị tắt (điểm chặn cuối cùng — bất kể ai gọi).
 func (s *ReportService) MarkDirty(ctx context.Context, reportKey, periodKey string, ownerOrganizationID primitive.ObjectID) error {
+	if IsCustomerReportKeyDisabled(reportKey) {
+		return nil
+	}
 	filter := bson.M{
 		"reportKey":           reportKey,
 		"periodKey":           periodKey,
@@ -295,5 +299,27 @@ func (s *ReportService) SetDirtyProcessed(ctx context.Context, reportKey, period
 	}
 	update := bson.M{"$set": bson.M{"processedAt": now}}
 	_, err := s.dirtyColl.UpdateOne(ctx, filter, update)
+	return common.ConvertMongoError(err)
+}
+
+// DeleteDirtyPeriod xóa dirty period (dùng khi chu kỳ bị tắt bởi config — không tạo chu kỳ báo cáo).
+func (s *ReportService) DeleteDirtyPeriod(ctx context.Context, reportKey, periodKey string, ownerOrganizationID primitive.ObjectID) error {
+	filter := bson.M{
+		"reportKey":           reportKey,
+		"periodKey":           periodKey,
+		"ownerOrganizationId": ownerOrganizationID,
+	}
+	_, err := s.dirtyColl.DeleteOne(ctx, filter)
+	return common.ConvertMongoError(err)
+}
+
+// DeleteReportSnapshot xóa snapshot theo reportKey, periodKey, ownerOrganizationId.
+func (s *ReportService) DeleteReportSnapshot(ctx context.Context, reportKey, periodKey string, ownerOrganizationID primitive.ObjectID) error {
+	filter := bson.M{
+		"reportKey":           reportKey,
+		"periodKey":           periodKey,
+		"ownerOrganizationId": ownerOrganizationID,
+	}
+	_, err := s.snapColl.DeleteOne(ctx, filter)
 	return common.ConvertMongoError(err)
 }

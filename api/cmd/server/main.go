@@ -327,6 +327,31 @@ func main() {
 		log.Info("🔄 [AGENT_COMMAND_CLEANUP] Agent Command Cleanup Worker started successfully")
 	}
 
+	// Khởi tạo và chạy Agent Activity Cleanup Worker (xóa activity logs cũ định kỳ)
+	agentActivityCleanupWorker, err := worker.NewAgentActivityCleanupWorker(1*time.Hour, 1) // Chạy mỗi 1 giờ, giữ 1 ngày
+	if err != nil {
+		log.WithError(err).Error("Failed to create agent activity cleanup worker, continuing without cleanup worker")
+	} else {
+		ctxActCleanup, cancelActCleanup := context.WithCancel(context.Background())
+		defer cancelActCleanup()
+
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.WithFields(map[string]interface{}{
+						"panic": r,
+					}).Error("🗑️ [AGENT_ACTIVITY_CLEANUP] Worker goroutine panic, worker sẽ tự khởi động lại")
+				}
+			}()
+
+			log.Info("🗑️ [AGENT_ACTIVITY_CLEANUP] Starting Agent Activity Cleanup Worker...")
+			agentActivityCleanupWorker.Start(ctxActCleanup)
+			log.Warn("🗑️ [AGENT_ACTIVITY_CLEANUP] Worker đã dừng (có thể do context cancelled)")
+		}()
+
+		log.Info("🗑️ [AGENT_ACTIVITY_CLEANUP] Agent Activity Cleanup Worker started successfully")
+	}
+
 	// Worker báo cáo theo chu kỳ: xử lý report_dirty_periods (Compute → set processedAt)
 	// Interval 2 phút, batch 30 — giảm tải mặc định để tránh CPU spike.
 	reportDirtyWorker, err := worker.NewReportDirtyWorker(2*time.Minute, 30)

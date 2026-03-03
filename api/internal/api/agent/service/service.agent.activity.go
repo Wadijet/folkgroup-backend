@@ -9,6 +9,7 @@ import (
 	"meta_commerce/internal/global"
 	basesvc "meta_commerce/internal/api/base/service"
 
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -41,4 +42,16 @@ func (s *AgentActivityService) LogActivity(ctx context.Context, agentRegistryID 
 	}
 	_, err := s.BaseServiceMongoImpl.InsertOne(ctx, activity)
 	return err
+}
+
+// DeleteOlderThan xóa các activity log có timestamp cũ hơn cutoff (Unix seconds).
+// Dùng raw DeleteMany để tránh load toàn bộ documents vào memory.
+// Trả về số bản ghi đã xóa.
+func (s *AgentActivityService) DeleteOlderThan(ctx context.Context, cutoffUnix int64) (int64, error) {
+	filter := bson.M{"timestamp": bson.M{"$lt": cutoffUnix}}
+	result, err := s.Collection().DeleteMany(ctx, filter)
+	if err != nil {
+		return 0, err
+	}
+	return result.DeletedCount, nil
 }

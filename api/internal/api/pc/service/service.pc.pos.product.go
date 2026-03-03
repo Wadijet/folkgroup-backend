@@ -1,10 +1,11 @@
 package pcsvc
 
 import (
+	"context"
 	"fmt"
 
-	pcmodels "meta_commerce/internal/api/pc/models"
 	basesvc "meta_commerce/internal/api/base/service"
+	pcmodels "meta_commerce/internal/api/pc/models"
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
 )
@@ -24,4 +25,9 @@ func NewPcPosProductService() (*PcPosProductService, error) {
 	return &PcPosProductService{
 		BaseServiceMongoImpl: basesvc.NewBaseServiceMongo[pcmodels.PcPosProduct](productCollection),
 	}, nil
+}
+
+// SyncUpsertOne thực hiện upsert có điều kiện: chỉ ghi khi dữ liệu mới hơn (posUpdatedAt) hoặc document chưa tồn tại.
+func (s *PcPosProductService) SyncUpsertOne(ctx context.Context, filter interface{}, data interface{}) (pcmodels.PcPosProduct, bool, error) {
+	return basesvc.DoSyncUpsert(ctx, s.BaseServiceMongoImpl, filter, data, "posData", "posUpdatedAt")
 }

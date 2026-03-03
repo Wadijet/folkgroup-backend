@@ -7,7 +7,7 @@ import (
 // PcPosOrder lưu thông tin đơn hàng từ Pancake POS API
 type PcPosOrder struct {
 	ID              primitive.ObjectID     `json:"id,omitempty" bson:"_id,omitempty"`                                                                                   // ID của order trong MongoDB
-	OrderId         int64                  `json:"orderId" bson:"orderId" index:"text" extract:"PosData\\.id,converter=int64"`                                          // ID của order trên Pancake POS (extract từ PosData["id"], convert sang int64)
+	OrderId         int64                  `json:"orderId" bson:"orderId" index:"text,compound:idx_pos_order_unique" extract:"PosData\\.id,converter=int64"`                                          // ID của order trên Pancake POS (extract từ PosData["id"], convert sang int64)
 	SystemId        int64                  `json:"systemId" bson:"systemId" extract:"PosData\\.system_id,converter=int64,optional"`                                     // System ID (extract từ PosData["system_id"])
 	ShopId          int64                  `json:"shopId" bson:"shopId" index:"text" extract:"PosData\\.shop_id,converter=int64,optional"`                              // ID của shop (extract từ PosData["shop_id"])
 	Status          int                    `json:"status" bson:"status" extract:"PosData\\.status,converter=int,optional"`                                              // Trạng thái đơn hàng (extract từ PosData["status"])
@@ -33,7 +33,7 @@ type PcPosOrder struct {
 	PosData         map[string]interface{} `json:"posData" bson:"posData"`                                                                                              // Dữ liệu gốc từ Pancake POS API
 
 	// ===== ORGANIZATION =====
-	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:idx_backfill_orders"` // Tổ chức sở hữu dữ liệu
+	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:idx_backfill_orders,compound:idx_pos_order_unique"` // Tổ chức sở hữu dữ liệu
 
 	// Index backfill: sort theo thời gian gốc trong posData (dùng cho Find phân trang CRUD)
 	posDataInsertedAt int64 `bson:"posData.inserted_at,omitempty" index:"compound:idx_backfill_orders"`

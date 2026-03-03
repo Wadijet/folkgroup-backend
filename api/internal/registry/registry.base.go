@@ -1,4 +1,4 @@
-﻿// Package registry cung cấp implementation của registry pattern với generic type.
+// Package registry cung cấp implementation của registry pattern với generic type.
 // Package này cho phép quản lý các singleton instances trong ứng dụng một cách thread-safe.
 // Sử dụng generic type để có thể tái sử dụng cho nhiều loại đối tượng khác nhau.
 package registry
@@ -6,6 +6,7 @@ package registry
 import (
 	"fmt"
 	"meta_commerce/internal/common"
+	"sort"
 	"sync"
 )
 
@@ -79,6 +80,31 @@ func (r *Registry[T]) Register(name string, item T) (isNew bool, err error) {
 	_, exists := r.items[name]
 	r.items[name] = item
 	return !exists, nil
+}
+
+// ListKeys trả về danh sách tất cả các key đã đăng ký trong registry.
+//
+// Returns:
+//   - []string: Danh sách tên các item (key), sắp xếp theo thứ tự alphabet
+//
+// Thread-safety: Safe for concurrent use
+//
+// Example:
+//
+//	keys := registry.ListKeys()
+//	for _, k := range keys {
+//	    fmt.Println(k)
+//	}
+func (r *Registry[T]) ListKeys() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	keys := make([]string, 0, len(r.items))
+	for k := range r.items {
+		keys = append(keys, k)
+	}
+	// Sắp xếp để kết quả nhất quán
+	sort.Strings(keys)
+	return keys
 }
 
 // Get lấy item theo tên.

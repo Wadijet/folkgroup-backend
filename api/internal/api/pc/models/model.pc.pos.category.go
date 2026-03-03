@@ -10,11 +10,13 @@ type PcPosCategory struct {
 	CategoryId int64                  `json:"categoryId" bson:"categoryId" index:"text" extract:"PosData\\.id,converter=int64"`       // ID của category trên Pancake POS (extract từ PosData["id"], convert sang int64)
 	ShopId     int64                  `json:"shopId" bson:"shopId" index:"text" extract:"PosData\\.shop_id,converter=int64,optional"` // ID của shop (extract từ PosData["shop_id"])
 	Name       string                 `json:"name" bson:"name" index:"text" extract:"PosData\\.name,converter=string,optional"`       // Tên danh mục (extract từ PosData["name"])
-	PosData    map[string]interface{} `json:"posData" bson:"posData"`                                                                 // Dữ liệu gốc từ Pancake POS API
+	PosData map[string]interface{} `json:"posData" bson:"posData"` // Dữ liệu gốc từ Pancake POS API
 
 	// ===== ORGANIZATION =====
 	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1"` // Tổ chức sở hữu dữ liệu (phân quyền)
 
-	CreatedAt int64 `json:"createdAt" bson:"createdAt"` // Thời gian tạo
-	UpdatedAt int64 `json:"updatedAt" bson:"updatedAt"` // Thời gian cập nhật
+	// ===== METADATA =====
+	PosUpdatedAt int64 `json:"posUpdatedAt" bson:"posUpdatedAt" extract:"PosData\\.updated_at,converter=time,format=2006-01-02T15:04:05Z,optional"` // Thời gian cập nhật từ POS (extract từ PosData["updated_at"])
+	CreatedAt    int64 `json:"createdAt" bson:"createdAt"`                                                                                        // Thời gian tạo
+	UpdatedAt    int64 `json:"updatedAt" bson:"updatedAt"`                                                                                        // Thời gian cập nhật
 }

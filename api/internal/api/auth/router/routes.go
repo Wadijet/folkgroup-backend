@@ -38,6 +38,16 @@ func registerAdminRoutes(router fiber.Router) error {
 	if err != nil {
 		return fmt.Errorf("failed to create admin handler: %w", err)
 	}
+	mongoDbHandler, err := basehdl.NewMongoDbManageHandler()
+	if err != nil {
+		return fmt.Errorf("failed to create mongodb manage handler: %w", err)
+	}
+	mongoDbMiddleware := middleware.AuthMiddleware("MongoDB.Manage")
+	apirouter.RegisterRouteWithMiddleware(router, "/admin/mongodb", "GET", "/collections", []fiber.Handler{mongoDbMiddleware}, mongoDbHandler.HandleListCollections)
+	apirouter.RegisterRouteWithMiddleware(router, "/admin/mongodb", "DELETE", "/collections", []fiber.Handler{mongoDbMiddleware}, mongoDbHandler.HandleDeleteAllDocuments)
+	apirouter.RegisterRouteWithMiddleware(router, "/admin/mongodb", "GET", "/collections/export", []fiber.Handler{mongoDbMiddleware}, mongoDbHandler.HandleExportCollection)
+	apirouter.RegisterRouteWithMiddleware(router, "/admin/mongodb", "POST", "/collections/import", []fiber.Handler{mongoDbMiddleware}, mongoDbHandler.HandleImportCollection)
+	apirouter.RegisterRouteWithMiddleware(router, "/admin/mongodb", "POST", "/collections/import-file", []fiber.Handler{mongoDbMiddleware}, mongoDbHandler.HandleImportFile)
 	blockMiddleware := middleware.AuthMiddleware("User.Block")
 	apirouter.RegisterRouteWithMiddleware(router, "/admin/user", "POST", "/block", []fiber.Handler{blockMiddleware}, adminHandler.HandleBlockUser)
 	apirouter.RegisterRouteWithMiddleware(router, "/admin/user", "POST", "/unblock", []fiber.Handler{blockMiddleware}, adminHandler.HandleUnBlockUser)

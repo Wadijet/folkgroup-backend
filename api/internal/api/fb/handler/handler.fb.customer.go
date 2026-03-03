@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 
+	basehdl "meta_commerce/internal/api/base/handler"
 	fbdto "meta_commerce/internal/api/fb/dto"
 	fbmodels "meta_commerce/internal/api/fb/models"
 	fbsvc "meta_commerce/internal/api/fb/service"
-	basehdl "meta_commerce/internal/api/base/handler"
 	"meta_commerce/internal/common"
+	"meta_commerce/internal/utility"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -31,19 +32,23 @@ func NewFbCustomerHandler() (*FbCustomerHandler, error) {
 }
 
 // HandleSyncUpsertOne xử lý sync-upsert-one: chỉ ghi khi dữ liệu mới hơn (giảm tải backend).
+// Unmarshal vào FbCustomer struct để extract chạy (flatten panCakeData → customerId, psid, name, ...).
 func (h *FbCustomerHandler) HandleSyncUpsertOne(c fiber.Ctx) error {
 	filter, err := h.ProcessFilter(c)
 	if err != nil {
 		return err
 	}
-	var data map[string]interface{}
-	if err := json.Unmarshal(c.Body(), &data); err != nil {
+	var customer fbmodels.FbCustomer
+	if err := json.Unmarshal(c.Body(), &customer); err != nil {
 		return common.NewError(common.ErrCodeValidationFormat, "Body không đúng định dạng JSON", common.StatusBadRequest, err)
 	}
-	if orgID := h.GetActiveOrganizationID(c); orgID != nil && !orgID.IsZero() && data["ownerOrganizationId"] == nil {
-		data["ownerOrganizationId"] = *orgID
+	if orgID := h.GetActiveOrganizationID(c); orgID != nil && !orgID.IsZero() && customer.OwnerOrganizationID.IsZero() {
+		customer.OwnerOrganizationID = *orgID
 	}
-	result, skipped, err := h.FbCustomerService.SyncUpsertOne(c.Context(), filter, data)
+	if err := utility.ExtractDataIfExists(&customer); err != nil {
+		return common.NewError(common.ErrCodeValidationFormat, "Dữ liệu panCakeData không hợp lệ: "+err.Error(), common.StatusBadRequest, err)
+	}
+	result, skipped, err := h.FbCustomerService.SyncUpsertOne(c.Context(), filter, &customer)
 	if err != nil {
 		h.HandleResponse(c, nil, err)
 		return nil

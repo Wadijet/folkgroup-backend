@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"meta_commerce/config"
 	"github.com/gofiber/fiber/v3/middleware/cors"
 	"github.com/gofiber/fiber/v3/middleware/limiter"
 	"github.com/gofiber/fiber/v3/middleware/recover"
@@ -29,6 +30,14 @@ import (
 	"meta_commerce/internal/logger"
 )
 
+// bodyLimitFromConfig trả về BodyLimit (bytes). Dùng MongoDBImportMaxBodyMB nếu cfg có, else 10MB.
+func bodyLimitFromConfig(cfg *config.Configuration) int {
+	if cfg != nil && cfg.MongoDBImportMaxBodyMB > 0 {
+		return cfg.MongoDBImportMaxBodyMB * 1024 * 1024
+	}
+	return 10 * 1024 * 1024 // 10MB mặc định
+}
+
 // InitFiberApp khởi tạo ứng dụng Fiber với các middleware cần thiết
 func InitFiberApp() *fiber.App {
 	// Khởi tạo app với cấu hình nâng cao
@@ -46,7 +55,7 @@ func InitFiberApp() *fiber.App {
 		// =========================================
 		// 2. CẤU HÌNH PERFORMANCE
 		// =========================================
-		BodyLimit:       10 * 1024 * 1024, // Max size của request body (10MB)
+		BodyLimit:       bodyLimitFromConfig(global.MongoDB_ServerConfig), // 10MB mặc định, 500MB nếu MONGODB_IMPORT_MAX_BODY_MB
 		Concurrency:     256 * 1024,       // Số lượng goroutines tối đa
 		ReadBufferSize:  4096,             // Buffer size cho request reading
 		WriteBufferSize: 4096,             // Buffer size cho response writing

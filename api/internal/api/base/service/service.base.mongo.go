@@ -976,45 +976,18 @@ func (s *BaseServiceMongoImpl[T]) DeleteById(ctx context.Context, id primitive.O
 // 2.3 Các hàm Upsert tiện ích
 // --------------------------
 
-// Upsert thực hiện thao tác update nếu tồn tại, insert nếu chưa tồn tại
-func (s *BaseServiceMongoImpl[T]) Upsert(ctx context.Context, filter interface{}, data interface{}) (T, error) {
-	var zero T
-
-	logrus.WithFields(logrus.Fields{
-		"collection": s.collection.Name(),
-		"filter":     filter,
-	}).Debug("Upsert: Bắt đầu upsert")
-
-	// ✅ Kiểm tra document hiện tại (nếu có) để validate update
-	var existing T
-	err := s.collection.FindOne(ctx, filter).Decode(&existing)
-	isExisting := err == nil
-	if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
-		return zero, common.ConvertMongoError(err)
-	}
-
-	// Chuyển data thành UpdateData
-	updateData, err := ToUpdateData(data)
-	if err != nil {
-		logrus.WithError(err).Error("Upsert: Lỗi chuyển đổi data thành UpdateData")
-		return zero, common.ErrInvalidFormat
-	}
-
-	// ✅ Validate system data protection
+// prepareUpsertUpdateData chuẩn bị updateData cho upsert: validate system data, timestamps, defaults, sparse handling.
+// Dùng chung cho Upsert và SyncUpsert. Mutate updateData in-place.
+func prepareUpsertUpdateData[T any](ctx context.Context, zero T, updateData *UpdateData, existing interface{}, isExisting bool) error {
 	if isExisting {
-		// Document tồn tại, validate update
 		if err := validateSystemDataUpdate(ctx, existing, updateData); err != nil {
-			return zero, err
+			return err
 		}
 	} else {
-		// Document không tồn tại, sẽ tạo mới, validate insert
-		// Cần tạo model từ updateData để validate
-		// Tạm thời validate qua updateData.Set
 		if updateData.Set != nil {
 			if isSystem, ok := updateData.Set["isSystem"].(bool); ok && isSystem {
-				// Nếu context cho phép insert system data (quá trình init), bỏ qua validation
 				if !isSystemDataInsertAllowed(ctx) {
-					return zero, common.NewError(
+					return common.NewError(
 						common.ErrCodeBusinessOperation,
 						"Không thể tạo dữ liệu với IsSystem = true. Chỉ hệ thống mới có thể tạo dữ liệu system",
 						common.StatusForbidden,
@@ -1024,16 +997,12 @@ func (s *BaseServiceMongoImpl[T]) Upsert(ctx context.Context, filter interface{}
 			}
 		}
 	}
-
-	// Thêm timestamps
 	now := time.Now().UnixMilli()
 	if updateData.Set == nil {
 		updateData.Set = make(map[string]interface{})
 	}
 	updateData.Set["updatedAt"] = now
 	updateData.Set["createdAt"] = now
-
-	// Khi tạo mới: áp dụng default từ struct tag (chỉ set khi insert, qua $setOnInsert)
 	if !isExisting {
 		defaults := getInsertDefaultsFromModelType(reflect.TypeOf(zero))
 		if len(defaults) > 0 {
@@ -1047,116 +1016,101 @@ func (s *BaseServiceMongoImpl[T]) Upsert(ctx context.Context, filter interface{}
 			}
 		}
 	}
-
-	// Xử lý các field empty string cho sparse unique index
-	// Sparse index chỉ bỏ qua null/không tồn tại, không bỏ qua empty string
-	// Nếu có nhiều document với empty string, sẽ bị duplicate key error
-	// Với email và phone: nếu empty string hoặc không có trong $set, cần dùng $unset để xóa field hoàn toàn
-	// (không chỉ xóa khỏi $set) để sparse index bỏ qua nó
-	removedFromSet := []string{}
-	unsetFields := []string{}
 	if updateData.Unset == nil {
 		updateData.Unset = make(map[string]interface{})
 	}
-
-	// Xử lý các field empty string trong $set
 	for key, value := range updateData.Set {
 		if strValue, ok := value.(string); ok && strValue == "" {
-			// Chỉ xử lý email và phone empty string (các field có sparse unique index)
 			if key == "email" || key == "phone" {
-				// Xóa khỏi $set
 				delete(updateData.Set, key)
-				removedFromSet = append(removedFromSet, key)
-				// Thêm vào $unset để đảm bảo field bị xóa hoàn toàn (không phải null)
-				// Điều này quan trọng khi upsert tạo document mới
 				updateData.Unset[key] = ""
-				unsetFields = append(unsetFields, key)
 			}
 		}
 	}
-
-	// Quan trọng: Kiểm tra xem email và phone có trong $set không
-	// Nếu không có, cần thêm vào $unset để đảm bảo khi upsert tạo document mới,
-	// các field này sẽ không tồn tại (không phải null)
-	// Điều này tránh duplicate key error với sparse unique index
-	// Lưu ý: Khi upsert tạo document mới, MongoDB có thể tự động set field = null
-	// nếu field không có trong $set. Do đó, cần đảm bảo $unset được áp dụng
-	sparseFields := []string{"email", "phone"}
-	for _, field := range sparseFields {
+	for _, field := range []string{"email", "phone"} {
 		if _, exists := updateData.Set[field]; !exists {
-			// Field không có trong $set, thêm vào $unset để đảm bảo không tồn tại
-			// Khi upsert tạo document mới, $unset sẽ xóa field này
 			if _, alreadyUnset := updateData.Unset[field]; !alreadyUnset {
 				updateData.Unset[field] = ""
-				unsetFields = append(unsetFields, field)
 			}
 		}
 	}
+	return nil
+}
 
-	// Nếu có lỗi duplicate key do document cũ có phone/email = null,
-	// cần xử lý bằng cách tìm và xóa field đó từ document cũ
-	// Nhưng điều này sẽ được xử lý trong error handling
+// Upsert thực hiện thao tác update nếu tồn tại, insert nếu chưa tồn tại
+func (s *BaseServiceMongoImpl[T]) Upsert(ctx context.Context, filter interface{}, data interface{}) (T, error) {
+	var zero T
 
-	if len(removedFromSet) > 0 || len(unsetFields) > 0 {
-		logrus.WithFields(logrus.Fields{
-			"removed_from_set": removedFromSet,
-			"unset_fields":     unsetFields,
-		}).Debug("Upsert: Đã xử lý các field sparse unique index (email/phone) để tránh lỗi duplicate key")
+	logrus.WithFields(logrus.Fields{
+		"collection": s.collection.Name(),
+		"filter":     filter,
+	}).Debug("Upsert: Bắt đầu upsert")
+
+	var existing T
+	err := s.collection.FindOne(ctx, filter).Decode(&existing)
+	isExisting := err == nil
+	if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
+		return zero, common.ConvertMongoError(err)
+	}
+
+	updateData, err := ToUpdateData(data)
+	if err != nil {
+		logrus.WithError(err).Error("Upsert: Lỗi chuyển đổi data thành UpdateData")
+		return zero, common.ErrInvalidFormat
+	}
+
+	if err := prepareUpsertUpdateData(ctx, zero, updateData, existing, isExisting); err != nil {
+		return zero, err
 	}
 
 	logrus.WithFields(logrus.Fields{
 		"update_data_keys": getMapKeys(updateData.Set),
 		"unset_keys":       getMapKeys(updateData.Unset),
-		"removed_from_set": removedFromSet,
-		"unset_fields":     unsetFields,
 	}).Debug("Upsert: Dữ liệu update sau khi xử lý")
 
-	// Tạo options cho upsert với sort để đảm bảo chỉ update một document
+	var prevDoc interface{}
+	if isExisting {
+		prevDoc = existing
+	}
+	return s.executeUpsertUpdate(ctx, filter, updateData, prevDoc)
+}
+
+// UpsertWithPreparedData thực hiện upsert với updateData đã được prepare sẵn (không gọi prepareUpsertUpdateData).
+// Dùng bởi DoSyncUpsert sau khi xử lý phần đặc biệt (so sánh updated_at) để tránh lặp code.
+func (s *BaseServiceMongoImpl[T]) UpsertWithPreparedData(ctx context.Context, filter interface{}, updateData *UpdateData, prevDoc interface{}) (T, error) {
+	return s.executeUpsertUpdate(ctx, filter, updateData, prevDoc)
+}
+
+// executeUpsertUpdate thực hiện FindOneAndUpdate với updateData đã prepare, xử lý duplicate key và emit events.
+func (s *BaseServiceMongoImpl[T]) executeUpsertUpdate(ctx context.Context, filter interface{}, updateData *UpdateData, prevDoc interface{}) (T, error) {
+	var zero T
 	opts := options.FindOneAndUpdate().
 		SetUpsert(true).
 		SetReturnDocument(options.After).
-		SetSort(bson.D{{Key: "_id", Value: 1}}) // Sắp xếp theo _id để đảm bảo tính nhất quán
+		SetSort(bson.D{{Key: "_id", Value: 1}})
 
-	// Thực hiện upsert và lấy document sau khi update
 	var upserted T
-	err = s.collection.FindOneAndUpdate(ctx, filter, updateData, opts).Decode(&upserted)
+	err := s.collection.FindOneAndUpdate(ctx, filter, updateData, opts).Decode(&upserted)
 	if err != nil {
-		// Kiểm tra xem có phải lỗi duplicate key với phone/email = null không
-		// Nếu có, cần xóa field đó từ document cũ và thử lại
 		if mongoErr, ok := err.(mongo.WriteException); ok {
 			for _, writeErr := range mongoErr.WriteErrors {
-				if writeErr.Code == 11000 { // Duplicate key error
-					// Kiểm tra xem có phải lỗi với phone hoặc email = null không
+				if writeErr.Code == 11000 {
 					errMsg := writeErr.Message
 					if (strings.Contains(errMsg, "phone") || strings.Contains(errMsg, "email")) &&
 						strings.Contains(errMsg, "null") {
-						logrus.WithFields(logrus.Fields{
-							"error": errMsg,
-						}).Warn("Upsert: Phát hiện lỗi duplicate key với phone/email = null, thử xóa field từ document cũ")
-
-						// Tìm document cũ có phone/email = null và xóa field đó
-						// Sử dụng filter để tìm document có field = null
+						logrus.WithFields(logrus.Fields{"error": errMsg}).Warn("Upsert: Phát hiện lỗi duplicate key với phone/email = null, thử xóa field từ document cũ")
 						var fieldToClean string
 						if strings.Contains(errMsg, "phone") {
 							fieldToClean = "phone"
 						} else if strings.Contains(errMsg, "email") {
 							fieldToClean = "email"
 						}
-
 						if fieldToClean != "" {
-							// Tìm và xóa field từ document cũ
 							cleanFilter := bson.M{fieldToClean: nil}
 							cleanUpdate := bson.M{"$unset": bson.M{fieldToClean: ""}}
-							_, cleanErr := s.collection.UpdateMany(ctx, cleanFilter, cleanUpdate)
-							if cleanErr == nil {
-								logrus.WithFields(logrus.Fields{
-									"field": fieldToClean,
-								}).Info("Upsert: Đã xóa field từ document cũ, thử lại upsert")
-
-								// Thử lại upsert
+							if _, cleanErr := s.collection.UpdateMany(ctx, cleanFilter, cleanUpdate); cleanErr == nil {
 								err = s.collection.FindOneAndUpdate(ctx, filter, updateData, opts).Decode(&upserted)
 								if err == nil {
-									logrus.Debug("Upsert: Upsert thành công sau khi xóa field từ document cũ")
 									events.EmitDataChanged(ctx, events.DataChangeEvent{
 										CollectionName: s.collection.Name(),
 										Operation:      events.OpUpsert,
@@ -1170,24 +1124,10 @@ func (s *BaseServiceMongoImpl[T]) Upsert(ctx context.Context, filter interface{}
 				}
 			}
 		}
-
-		logrus.WithFields(logrus.Fields{
-			"filter":      filter,
-			"update_data": updateData.Set,
-			"error":       err.Error(),
-		}).Error("Upsert: Lỗi khi thực hiện FindOneAndUpdate")
+		logrus.WithFields(logrus.Fields{"filter": filter, "error": err.Error()}).Error("Upsert: Lỗi khi thực hiện FindOneAndUpdate")
 		return zero, common.ConvertMongoError(err)
 	}
-
-	// Log thành công (không log ID vì generic type khó lấy)
-	logrus.WithFields(logrus.Fields{
-		"collection": s.collection.Name(),
-	}).Debug("Upsert: Upsert thành công")
-
-	var prevDoc interface{}
-	if isExisting {
-		prevDoc = existing
-	}
+	logrus.WithFields(logrus.Fields{"collection": s.collection.Name()}).Debug("Upsert: Upsert thành công")
 	events.EmitDataChanged(ctx, events.DataChangeEvent{
 		CollectionName:   s.collection.Name(),
 		Operation:        events.OpUpsert,
@@ -1456,6 +1396,43 @@ func WithSystemDataInsertAllowed(ctx context.Context) context.Context {
 func isSystemDataInsertAllowed(ctx context.Context) bool {
 	allowed, ok := ctx.Value(allowSystemDataInsertKey).(bool)
 	return ok && allowed
+}
+
+// getInt64FromStructByBsonField lấy giá trị int64 từ struct theo bson field name (dùng cho sync skip check).
+func getInt64FromStructByBsonField(data interface{}, bsonField string) int64 {
+	if data == nil || bsonField == "" {
+		return 0
+	}
+	v := reflect.ValueOf(data)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return 0
+	}
+	t := v.Type()
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		tag := f.Tag.Get("bson")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		key := strings.TrimSpace(strings.Split(tag, ",")[0])
+		if key != bsonField {
+			continue
+		}
+		val := v.Field(i)
+		switch val.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			return val.Int()
+		case reflect.Float32, reflect.Float64:
+			return int64(val.Float())
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			return int64(val.Uint())
+		}
+		return 0
+	}
+	return 0
 }
 
 // getIsSystemValue lấy giá trị IsSystem từ model bằng reflection

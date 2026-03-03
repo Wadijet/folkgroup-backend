@@ -17,11 +17,13 @@ type PcPosVariation struct {
 	Weight         float64                `json:"weight" bson:"weight" extract:"PosData\\.weight,converter=number,optional"`                           // Trọng lượng (extract từ PosData["weight"])
 	Fields         []interface{}          `json:"fields" bson:"fields" extract:"PosData\\.fields,optional"`                                            // Các trường thuộc tính (extract từ PosData["fields"])
 	Images         []string               `json:"images" bson:"images" extract:"PosData\\.images,optional"`                                            // Danh sách hình ảnh (extract từ PosData["images"])
-	PosData        map[string]interface{} `json:"posData" bson:"posData"`                                                                              // Dữ liệu gốc từ Pancake POS API
+	PosData map[string]interface{} `json:"posData" bson:"posData"` // Dữ liệu gốc từ Pancake POS API
 
 	// ===== ORGANIZATION =====
 	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1"` // Tổ chức sở hữu dữ liệu (phân quyền)
 
-	CreatedAt int64 `json:"createdAt" bson:"createdAt"` // Thời gian tạo
-	UpdatedAt int64 `json:"updatedAt" bson:"updatedAt"` // Thời gian cập nhật
+	// ===== METADATA =====
+	PosUpdatedAt int64 `json:"posUpdatedAt" bson:"posUpdatedAt" extract:"PosData\\.updated_at,converter=time,format=2006-01-02T15:04:05Z,optional"` // Thời gian cập nhật từ POS (extract từ PosData["updated_at"])
+	CreatedAt    int64 `json:"createdAt" bson:"createdAt"`                                                                                        // Thời gian tạo
+	UpdatedAt    int64 `json:"updatedAt" bson:"updatedAt"`                                                                                        // Thời gian cập nhật
 }

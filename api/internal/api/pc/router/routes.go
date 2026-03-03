@@ -37,30 +37,35 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 	if err != nil {
 		return fmt.Errorf("create pancake pos shop handler: %w", err)
 	}
+	apirouter.RegisterRouteWithMiddleware(v1, "/pancake-pos/shop", "POST", "/sync-upsert-one", []fiber.Handler{middleware.AuthMiddleware("PcPosShop.Update"), orgContextMiddleware}, pcPosShopHandler.HandleSyncUpsertOne)
 	r.RegisterCRUDRoutes(v1, "/pancake-pos/shop", pcPosShopHandler, apirouter.ReadWriteConfig, "PcPosShop")
 
 	pcPosWarehouseHandler, err := pchdl.NewPcPosWarehouseHandler()
 	if err != nil {
 		return fmt.Errorf("create pancake pos warehouse handler: %w", err)
 	}
+	apirouter.RegisterRouteWithMiddleware(v1, "/pancake-pos/warehouse", "POST", "/sync-upsert-one", []fiber.Handler{middleware.AuthMiddleware("PcPosWarehouse.Update"), orgContextMiddleware}, pcPosWarehouseHandler.HandleSyncUpsertOne)
 	r.RegisterCRUDRoutes(v1, "/pancake-pos/warehouse", pcPosWarehouseHandler, apirouter.ReadWriteConfig, "PcPosWarehouse")
 
 	pcPosProductHandler, err := pchdl.NewPcPosProductHandler()
 	if err != nil {
 		return fmt.Errorf("create pancake pos product handler: %w", err)
 	}
+	apirouter.RegisterRouteWithMiddleware(v1, "/pancake-pos/product", "POST", "/sync-upsert-one", []fiber.Handler{middleware.AuthMiddleware("PcPosProduct.Update"), orgContextMiddleware}, pcPosProductHandler.HandleSyncUpsertOne)
 	r.RegisterCRUDRoutes(v1, "/pancake-pos/product", pcPosProductHandler, apirouter.ReadWriteConfig, "PcPosProduct")
 
 	pcPosVariationHandler, err := pchdl.NewPcPosVariationHandler()
 	if err != nil {
 		return fmt.Errorf("create pancake pos variation handler: %w", err)
 	}
+	apirouter.RegisterRouteWithMiddleware(v1, "/pancake-pos/variation", "POST", "/sync-upsert-one", []fiber.Handler{middleware.AuthMiddleware("PcPosVariation.Update"), orgContextMiddleware}, pcPosVariationHandler.HandleSyncUpsertOne)
 	r.RegisterCRUDRoutes(v1, "/pancake-pos/variation", pcPosVariationHandler, apirouter.ReadWriteConfig, "PcPosVariation")
 
 	pcPosCategoryHandler, err := pchdl.NewPcPosCategoryHandler()
 	if err != nil {
 		return fmt.Errorf("create pancake pos category handler: %w", err)
 	}
+	apirouter.RegisterRouteWithMiddleware(v1, "/pancake-pos/category", "POST", "/sync-upsert-one", []fiber.Handler{middleware.AuthMiddleware("PcPosCategory.Update"), orgContextMiddleware}, pcPosCategoryHandler.HandleSyncUpsertOne)
 	r.RegisterCRUDRoutes(v1, "/pancake-pos/category", pcPosCategoryHandler, apirouter.ReadWriteConfig, "PcPosCategory")
 
 	pcPosOrderHandler, err := pchdl.NewPcPosOrderHandler()

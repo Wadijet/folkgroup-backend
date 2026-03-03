@@ -3,7 +3,6 @@ package fbsvc
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -12,10 +11,8 @@ import (
 	basemodels "meta_commerce/internal/api/base/models"
 	basesvc "meta_commerce/internal/api/base/service"
 	fbmodels "meta_commerce/internal/api/fb/models"
-	"meta_commerce/internal/api/events"
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
-	"meta_commerce/internal/utility"
 )
 
 // FbConversationService là cấu trúc chứa các phương thức liên quan đến Facebook conversation
@@ -67,65 +64,7 @@ func (s *FbConversationService) FindAllSortByApiUpdate(ctx context.Context, page
 }
 
 // SyncUpsertOne thực hiện upsert có điều kiện: chỉ ghi khi dữ liệu mới hơn (panCakeUpdatedAt) hoặc document chưa tồn tại.
-// Giảm tải backend khi sync incremental: bỏ qua các document không thay đổi.
-// Trả về (model, skipped, error). skipped=true khi không ghi.
+// Dùng chung logic với Upsert; khác biệt duy nhất là so sánh updated_at.
 func (s *FbConversationService) SyncUpsertOne(ctx context.Context, filter interface{}, data interface{}) (fbmodels.FbConversation, bool, error) {
-	var zero fbmodels.FbConversation
-	updateData, err := basesvc.ToUpdateData(data)
-	if err != nil {
-		return zero, false, common.ErrInvalidFormat
-	}
-	// Lấy updated_at từ panCakeData
-	var newUpdatedAt int64
-	if set := updateData.Set; set != nil {
-		if panCake, ok := set["panCakeData"].(map[string]interface{}); ok {
-			newUpdatedAt = utility.ParseTimestampFromMap(panCake, "updated_at")
-		}
-	}
-	// Build filter có điều kiện: chỉ update khi panCakeUpdatedAt < newUpdatedAt hoặc chưa có
-	condFilter := basesvc.BuildSyncUpsertFilter(filter, "panCakeUpdatedAt", newUpdatedAt)
-	now := time.Now().UnixMilli()
-	if updateData.Set == nil {
-		updateData.Set = make(map[string]interface{})
-	}
-	updateData.Set["updatedAt"] = now
-	updateData.Set["createdAt"] = now
-	opts := options.Update().SetUpsert(true)
-	updateDoc := bson.M{}
-	if updateData.Set != nil {
-		updateDoc["$set"] = updateData.Set
-	}
-	if updateData.SetOnInsert != nil {
-		updateDoc["$setOnInsert"] = updateData.SetOnInsert
-	}
-	if updateData.Unset != nil {
-		updateDoc["$unset"] = updateData.Unset
-	}
-	result, err := s.Collection().UpdateOne(ctx, condFilter, updateDoc, opts)
-	if err != nil {
-		return zero, false, common.ConvertMongoError(err)
-	}
-	if result.MatchedCount == 0 && result.ModifiedCount == 0 && result.UpsertedCount == 0 {
-		return zero, true, nil
-	}
-	var updated fbmodels.FbConversation
-	if result.UpsertedID != nil {
-		_ = s.Collection().FindOne(ctx, bson.M{"_id": result.UpsertedID}).Decode(&updated)
-		events.EmitDataChanged(ctx, events.DataChangeEvent{
-			CollectionName: s.Collection().Name(),
-			Operation:       events.OpUpsert,
-			Document:        updated,
-		})
-	} else if result.ModifiedCount > 0 {
-		filterMap, _ := filter.(map[string]interface{})
-		if filterMap != nil {
-			_ = s.Collection().FindOne(ctx, filter).Decode(&updated)
-			events.EmitDataChanged(ctx, events.DataChangeEvent{
-				CollectionName: s.Collection().Name(),
-				Operation:       events.OpUpdate,
-				Document:        updated,
-			})
-		}
-	}
-	return updated, false, nil
+	return basesvc.DoSyncUpsert(ctx, s.BaseServiceMongoImpl, filter, data, "panCakeData", "panCakeUpdatedAt")
 }

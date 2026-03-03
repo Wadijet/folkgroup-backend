@@ -304,6 +304,9 @@ var InitialPermissions = []authmodels.Permission{
 	// Quản lý khởi tạo hệ thống: Thiết lập administrator và đồng bộ quyền
 	{Name: "Init.SetAdmin", Describe: "Quyền thiết lập administrator và đồng bộ quyền cho Administrator", Group: "Auth", Category: "Init"},
 
+	// Quản lý MongoDB: Xem danh sách collections, xóa toàn bộ, export (chỉ dành cho admin hệ thống)
+	{Name: "MongoDB.Manage", Describe: "Quyền quản lý MongoDB: xem collections, xóa toàn bộ documents, tải export", Group: "Auth", Category: "MongoDB"},
+
 	// ==================================== PANCAKE MODULE ===========================================
 	// Quản lý token truy cập: Thêm, xem, sửa, xóa token
 	{Name: "AccessToken.Insert", Describe: "Quyền tạo token", Group: "Pancake", Category: "AccessToken"},

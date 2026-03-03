@@ -5,7 +5,6 @@ package reportsvc
 import (
 	"context"
 
-	crmmodels "meta_commerce/internal/api/crm/models"
 	crmvc "meta_commerce/internal/api/crm/service"
 	"meta_commerce/internal/api/report/layer3"
 
@@ -94,42 +93,23 @@ func addMapFloat(m map[string]float64, k string, v float64) {
 
 // computeAllPhatSinh tính phát sinh in/out cho toàn bộ cấu trúc metrics (distributions, LTV, layer3).
 // Chỉ đếm chuyển đổi RÒNG cuối cùng mỗi khách (start → end kỳ), không đếm mỗi lần chuyển trạng thái trung gian.
-// Tránh trùng đếm khi khách có nhiều activity trong kỳ (vd: nhiều cuộc hội thoại → số nhảy vọt).
+// Dùng snapshot đầu kỳ và cuối kỳ — không cần duyệt qua từng activity trong kỳ.
 func computeAllPhatSinh(ctx context.Context, actSvc *crmvc.CrmActivityService, ownerOrgID primitive.ObjectID, startMs, endMs int64) (map[string]interface{}, error) {
 	startState, err := actSvc.GetLastSnapshotPerCustomerBeforeEndMs(ctx, ownerOrgID, startMs-1)
 	if err != nil {
 		return nil, err
 	}
 
-	activities, err := actSvc.GetActivitiesInPeriod(ctx, ownerOrgID, startMs, endMs)
+	endStateRaw, err := actSvc.GetLastSnapshotPerCustomerBeforeEndMs(ctx, ownerOrgID, endMs)
 	if err != nil {
 		return nil, err
 	}
 
-	// Bước 1: Thu thập trạng thái cuối kỳ mỗi khách (activity cuối trong kỳ — đã sort unifiedId, activityAt)
-	endState, _ := buildEndStateFromActivities(activities, endMs)
-	return computePhatSinhFromStateMaps(startState, endState, startMs, endMs), nil
-}
-
-// buildEndStateFromActivities xây map trạng thái cuối kỳ từ danh sách activities (activity cuối mỗi khách).
-// Activities phải sort theo unifiedId, activityAt tăng dần — activity cuối ghi đè.
-// lastSnapshot: metricsSnapshot của activity cuối mỗi khách (dùng làm startState cho kỳ tiếp theo).
-func buildEndStateFromActivities(activities []crmmodels.CrmActivityHistory, endMs int64) (endState map[string]customerState, lastSnapshot map[string]map[string]interface{}) {
-	endState = make(map[string]customerState)
-	lastSnapshot = make(map[string]map[string]interface{})
-	for _, a := range activities {
-		uid := a.UnifiedId
-		if uid == "" || a.Metadata == nil {
-			continue
-		}
-		ms, ok := a.Metadata["metricsSnapshot"].(map[string]interface{})
-		if !ok || ms == nil {
-			continue
-		}
-		endState[uid] = stateFromMetricsSnapshot(ms, endMs)
-		lastSnapshot[uid] = ms
+	endState := make(map[string]customerState)
+	for uid, m := range endStateRaw {
+		endState[uid] = stateFromMetricsSnapshot(m, endMs)
 	}
-	return endState, lastSnapshot
+	return computePhatSinhFromStateMaps(startState, endState, startMs, endMs), nil
 }
 
 // computePhatSinhFromStateMaps tính phát sinh từ startState → endState. Dùng cho batch và single period.
@@ -625,7 +605,7 @@ func buildPhatSinhMetrics(
 	}
 }
 
-// computeAllPhatSinhBatch tính phát sinh cho nhiều kỳ trong 1 lần — 2 DB calls thay vì 2*N.
+// computeAllPhatSinhBatch tính phát sinh cho nhiều kỳ trong 1 lần — mỗi kỳ dùng snapshot đầu/cuối, không duyệt activities.
 // Trả về []metrics tương ứng từng periodKey. Dùng cho trend-from-crm.
 func computeAllPhatSinhBatch(ctx context.Context, actSvc *crmvc.CrmActivityService, ownerOrgID primitive.ObjectID, reportKey string, periodKeys []string) ([]map[string]interface{}, error) {
 	if len(periodKeys) == 0 {
@@ -635,19 +615,8 @@ func computeAllPhatSinhBatch(ctx context.Context, actSvc *crmvc.CrmActivityServi
 	if err != nil {
 		return nil, err
 	}
-	lastEndMs, err := periodKeyToEndMs(reportKey, periodKeys[len(periodKeys)-1])
-	if err != nil {
-		return nil, err
-	}
 
-	// 1 DB call: trạng thái trước kỳ đầu
 	startState, err := actSvc.GetLastSnapshotPerCustomerBeforeEndMs(ctx, ownerOrgID, firstStartMs-1)
-	if err != nil {
-		return nil, err
-	}
-
-	// 1 DB call: toàn bộ activities trong range
-	activities, err := actSvc.GetActivitiesInPeriod(ctx, ownerOrgID, firstStartMs, lastEndMs)
 	if err != nil {
 		return nil, err
 	}
@@ -657,26 +626,18 @@ func computeAllPhatSinhBatch(ctx context.Context, actSvc *crmvc.CrmActivityServi
 		periodStartMs, _ := periodKeyToStartMs(reportKey, pk)
 		periodEndMs, _ := periodKeyToEndMs(reportKey, pk)
 
-		// Lọc activities trong kỳ này (đã sort unifiedId, activityAt — activity cuối ghi đè)
-		var inPeriod []crmmodels.CrmActivityHistory
-		for _, a := range activities {
-			if a.ActivityAt >= periodStartMs && a.ActivityAt <= periodEndMs {
-				inPeriod = append(inPeriod, a)
-			}
+		endStateRaw, err := actSvc.GetLastSnapshotPerCustomerBeforeEndMs(ctx, ownerOrgID, periodEndMs)
+		if err != nil {
+			return nil, err
 		}
-		endState, lastSnapshot := buildEndStateFromActivities(inPeriod, periodEndMs)
+		endState := make(map[string]customerState)
+		for uid, m := range endStateRaw {
+			endState[uid] = stateFromMetricsSnapshot(m, periodEndMs)
+		}
 		metrics := computePhatSinhFromStateMaps(startState, endState, periodStartMs, periodEndMs)
 		result = append(result, metrics)
 
-		// Chuẩn bị startState cho kỳ tiếp theo: dùng lastSnapshot nếu có, giữ startState cho khách không có activity
-		nextStart := make(map[string]map[string]interface{})
-		for uid, m := range startState {
-			nextStart[uid] = m
-		}
-		for uid, m := range lastSnapshot {
-			nextStart[uid] = m
-		}
-		startState = nextStart
+		startState = endStateRaw
 	}
 	return result, nil
 }

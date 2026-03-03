@@ -12,8 +12,8 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
-	"meta_commerce/internal/common"
 	reportmodels "meta_commerce/internal/api/report/models"
+	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
 )
 
@@ -175,9 +175,12 @@ func periodKeyFromTime(t time.Time, periodType string) string {
 
 // MarkDirty đánh dấu chu kỳ cần tính lại.
 // Nếu đã có bản ghi cùng reportKey, periodKey, ownerOrganizationId và processedAt = null (đang chờ) thì bỏ qua, không ghi thêm.
-// Không tạo dirty period cho chu kỳ customer bị tắt (điểm chặn cuối cùng — bất kể ai gọi).
+// Không tạo dirty period cho chu kỳ customer/order bị tắt (điểm chặn cuối cùng — bất kể ai gọi).
 func (s *ReportService) MarkDirty(ctx context.Context, reportKey, periodKey string, ownerOrganizationID primitive.ObjectID) error {
 	if IsCustomerReportKeyDisabled(reportKey) {
+		return nil
+	}
+	if IsOrderReportKeyDisabled(reportKey) {
 		return nil
 	}
 	filter := bson.M{

@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"time"
 
+	basehdl "meta_commerce/internal/api/base/handler"
+	crmvc "meta_commerce/internal/api/crm/service"
 	reportdto "meta_commerce/internal/api/report/dto"
 	reportsvc "meta_commerce/internal/api/report/service"
-	crmvc "meta_commerce/internal/api/crm/service"
-	basehdl "meta_commerce/internal/api/base/handler"
 	"meta_commerce/internal/common"
 
 	"github.com/gofiber/fiber/v3"
@@ -177,8 +177,14 @@ func (h *ReportHandler) HandleRecompute(c fiber.Ctx) error {
 			})
 			return nil
 		}
-		// Chặn chu kỳ customer bị tắt (customer_monthly, customer_yearly).
+		// Chặn chu kỳ customer/order bị tắt (vd: customer_monthly, order_weekly — tính on-demand khi xem).
 		if reportsvc.IsCustomerReportKeyDisabled(body.ReportKey) {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationInput.Code, "message": "Chu kỳ báo cáo này đã bị tắt tạm thời", "status": "error",
+			})
+			return nil
+		}
+		if reportsvc.IsOrderReportKeyDisabled(body.ReportKey) {
 			c.Status(common.StatusBadRequest).JSON(fiber.Map{
 				"code": common.ErrCodeValidationInput.Code, "message": "Chu kỳ báo cáo này đã bị tắt tạm thời", "status": "error",
 			})

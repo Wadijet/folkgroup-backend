@@ -122,8 +122,8 @@ func (s *UserService) LoginWithFirebase(ctx context.Context, input *authdto.Fire
 	updateData.Set["emailVerified"] = firebaseUser.EmailVerified
 	updateData.Set["phoneVerified"] = firebaseUser.PhoneNumber != ""
 	updateData.Set["isBlock"] = false
-	updateData.Set["tokens"] = []models.Token{}
-	updateData.Set["token"] = ""
+	// KHÔNG xóa tokens/token ở đây — giữ nguyên tokens của các thiết bị khác để hỗ trợ đăng nhập đa thiết bị.
+	// Token của thiết bị hiện tại sẽ được thêm/cập nhật ở block bên dưới.
 
 	if firebaseUser.DisplayName != "" {
 		updateData.Set["name"] = firebaseUser.DisplayName

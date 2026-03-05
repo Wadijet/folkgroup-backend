@@ -8,14 +8,14 @@ import (
 // Các field CampaignId, AdAccountId, Name, Objective, Status, EffectiveStatus có extract tag để lấy từ metaData khi ghi.
 type MetaCampaign struct {
 	ID                  primitive.ObjectID     `json:"id,omitempty" bson:"_id,omitempty"`
-	CampaignId          string                 `json:"campaignId" bson:"campaignId" index:"unique;text" extract:"metaData\\.id,converter=string,optional"`
-	AdAccountId         string                 `json:"adAccountId" bson:"adAccountId" index:"text" extract:"metaData\\.account_id,converter=string,optional"`
+	CampaignId          string                 `json:"campaignId" bson:"campaignId" index:"unique;text;single:1,compound:meta_campaign_lookup_unique;compound:meta_campaign_by_account" extract:"metaData\\.id,converter=string,required"`
+	AdAccountId         string                 `json:"adAccountId" bson:"adAccountId" index:"text;single:1,compound:meta_campaign_lookup_unique;compound:meta_campaign_by_account" extract:"metaData\\.account_id,converter=string,optional"`
 	Name                string                 `json:"name" bson:"name" index:"text" extract:"metaData\\.name,converter=string,optional"`
 	Objective           string                 `json:"objective" bson:"objective" extract:"metaData\\.objective,converter=string,optional"`
 	Status              string                 `json:"status" bson:"status" extract:"metaData\\.status,converter=string,optional"`
 	EffectiveStatus     string                 `json:"effectiveStatus" bson:"effectiveStatus" extract:"metaData\\.effective_status,converter=string,optional"`
 	MetaData            map[string]interface{} `json:"metaData" bson:"metaData"`
-	OwnerOrganizationID primitive.ObjectID     `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1"`
+	OwnerOrganizationID primitive.ObjectID     `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:meta_campaign_lookup_unique;compound:meta_campaign_by_account"`
 	CreatedAt           int64                  `json:"createdAt" bson:"createdAt"`
 	UpdatedAt           int64                  `json:"updatedAt" bson:"updatedAt"`
 	LastSyncedAt        int64                  `json:"lastSyncedAt" bson:"lastSyncedAt"`

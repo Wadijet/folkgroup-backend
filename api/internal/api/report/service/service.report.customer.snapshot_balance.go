@@ -22,10 +22,16 @@ var reportKeyOrderCustomer = []string{"customer_yearly", "customer_monthly", "cu
 // reportKeyOrderOrder thứ tự ưu tiên cho order: dài trước, ngắn sau.
 var reportKeyOrderOrder = []string{"order_yearly", "order_monthly", "order_weekly", "order_daily"}
 
-// GetReportKeyOrderForDomain trả về thứ tự reportKey theo domain (customer|order).
+// reportKeyOrderAds thứ tự ưu tiên cho ads (ads_daily — chu kỳ ngày).
+var reportKeyOrderAds = []string{"ads_daily"}
+
+// GetReportKeyOrderForDomain trả về thứ tự reportKey theo domain (customer|order|ads).
 func GetReportKeyOrderForDomain(domain string) []string {
 	if domain == "order" {
 		return reportKeyOrderOrder
+	}
+	if domain == "ads" {
+		return reportKeyOrderAds
 	}
 	return reportKeyOrderCustomer
 }
@@ -159,7 +165,7 @@ func periodRangeForReportKey(reportKey string, startT, endT time.Time, loc *time
 		}
 		return mondayStart.Format("2006-01-02"), mondayEnd.Format("2006-01-02"), count
 
-	case reportKey == "customer_daily" || reportKey == "order_daily":
+	case reportKey == "customer_daily" || reportKey == "order_daily" || reportKey == "ads_daily":
 		// Daily luôn dùng được; ranh giới tùy startT/endT; count = số ngày thực tế.
 		return startT.Format("2006-01-02"), endT.Format("2006-01-02"), actualDays
 

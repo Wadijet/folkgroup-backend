@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 
 	"meta_commerce/internal/api/meta/models"
@@ -17,12 +18,25 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	mongoopts "go.mongodb.org/mongo-driver/mongo/options"
 )
 
 const (
 	// DefaultWindowDays số ngày mặc định cho window (raw.window).
 	DefaultWindowDays = 7
 )
+
+// adAccountIdFilterForMeta trả về giá trị filter cho field adAccountId.
+// meta_ads/meta_adsets/meta_campaigns có thể lưu "act_XXX" hoặc "XXX" (chỉ số) — cần match cả hai.
+func adAccountIdFilterForMeta(adAccountId string) interface{} {
+	if adAccountId == "" {
+		return adAccountId
+	}
+	if strings.HasPrefix(adAccountId, "act_") {
+		return bson.M{"$in": bson.A{adAccountId, strings.TrimPrefix(adAccountId, "act_")}}
+	}
+	return bson.M{"$in": bson.A{adAccountId, "act_" + adAccountId}}
+}
 
 // RecalculateForEntity tính lại currentMetrics cho 1 entity. Bottom-up: nếu là parent thì gọi con trước.
 // objectType: ad_account | campaign | adset | ad
@@ -35,6 +49,133 @@ func RecalculateForEntity(ctx context.Context, objectType, objectId, adAccountId
 	default:
 		return nil
 	}
+}
+
+// RecalculateAllResult kết quả recalculate toàn bộ Meta ads.
+type RecalculateAllResult struct {
+	TotalAdsProcessed   int      `json:"totalAdsProcessed"`   // Số Ad đã tính toán lại thành công
+	TotalAdsFailed      int      `json:"totalAdsFailed"`      // Số Ad lỗi khi tính toán
+	FailedAdIds         []string `json:"failedAdIds,omitempty"` // Danh sách adId lỗi (tối đa 10 mẫu)
+	TotalAdSetsRolledUp int      `json:"totalAdSetsRolledUp"` // Số AdSet đã roll-up
+	TotalCampaignsRolledUp int   `json:"totalCampaignsRolledUp"` // Số Campaign đã roll-up
+	TotalAccountsRolledUp int    `json:"totalAccountsRolledUp"`  // Số AdAccount đã roll-up
+}
+
+const maxFailedAdIds = 10
+
+// RecalculateAllMetaAds tính toán lại toàn bộ currentMetrics cho Meta ads của org.
+//
+// Luồng (bottom-up):
+// 1. Lấy tất cả meta_ads theo ownerOrganizationId (có limit nếu > 0)
+// 2. Phase 1 - Ads: Với mỗi Ad, gọi RecalculateForEntity("ad", ...) — tính raw từ meta insights + pos orders + conversations → layer1→layer2→layer3
+// 3. Phase 2 - AdSets: Thu thập unique (adSetId, adAccountId), gọi rollupFromChildren cho từng AdSet
+// 4. Phase 3 - Campaigns: Thu thập unique (campaignId, adAccountId), gọi rollupFromChildren cho từng Campaign
+// 5. Phase 4 - AdAccounts: Thu thập unique adAccountId, gọi rollupFromChildren cho từng AdAccount
+//
+// Tham số:
+// - ctx: context
+// - ownerOrgID: ID tổ chức sở hữu
+// - limit: giới hạn số Ad xử lý (0 = tất cả)
+//
+// Trả về:
+// - *RecalculateAllResult: kết quả (số processed, failed, roll-up)
+// - error: lỗi nếu có (ví dụ không tìm thấy collection)
+func RecalculateAllMetaAds(ctx context.Context, ownerOrgID primitive.ObjectID, limit int) (*RecalculateAllResult, error) {
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.MetaAds)
+	if !ok {
+		return nil, fmt.Errorf("không tìm thấy collection meta_ads")
+	}
+	filter := bson.M{"ownerOrganizationId": ownerOrgID}
+	opts := mongoopts.Find().SetProjection(bson.M{"adId": 1, "adSetId": 1, "campaignId": 1, "adAccountId": 1})
+	if limit > 0 {
+		opts.SetLimit(int64(limit))
+	}
+	cursor, err := coll.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	type adRef struct {
+		AdId        string `bson:"adId"`
+		AdSetId     string `bson:"adSetId"`
+		CampaignId  string `bson:"campaignId"`
+		AdAccountId string `bson:"adAccountId"`
+	}
+	var ads []adRef
+	for cursor.Next(ctx) {
+		var doc adRef
+		if err := cursor.Decode(&doc); err != nil {
+			continue
+		}
+		if doc.AdId == "" || doc.AdAccountId == "" {
+			continue
+		}
+		ads = append(ads, doc)
+	}
+
+	result := &RecalculateAllResult{}
+	adSetMap := make(map[string]string)     // adSetId -> adAccountId
+	campaignMap := make(map[string]string)   // campaignId -> adAccountId
+	accountSet := make(map[string]struct{}) // adAccountId
+
+	for _, ad := range ads {
+		if err := RecalculateForEntity(ctx, "ad", ad.AdId, ad.AdAccountId, ownerOrgID); err != nil {
+			result.TotalAdsFailed++
+			if len(result.FailedAdIds) < maxFailedAdIds {
+				result.FailedAdIds = append(result.FailedAdIds, ad.AdId)
+			}
+			logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
+				"adId": ad.AdId, "ownerOrgId": ownerOrgID.Hex(),
+			}).Warn("[META] Recalculate Ad thất bại")
+			continue
+		}
+		result.TotalAdsProcessed++
+		if ad.AdSetId != "" {
+			adSetMap[ad.AdSetId] = ad.AdAccountId
+		}
+		if ad.CampaignId != "" {
+			campaignMap[ad.CampaignId] = ad.AdAccountId
+		}
+		if ad.AdAccountId != "" {
+			accountSet[ad.AdAccountId] = struct{}{}
+		}
+	}
+
+	// Phase 2: Roll-up AdSets
+	for adSetId, adAccountId := range adSetMap {
+		if err := RecalculateForEntity(ctx, "adset", adSetId, adAccountId, ownerOrgID); err != nil {
+			logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
+				"adSetId": adSetId, "ownerOrgId": ownerOrgID.Hex(),
+			}).Warn("[META] Roll-up AdSet thất bại")
+			continue
+		}
+		result.TotalAdSetsRolledUp++
+	}
+
+	// Phase 3: Roll-up Campaigns
+	for campaignId, adAccountId := range campaignMap {
+		if err := RecalculateForEntity(ctx, "campaign", campaignId, adAccountId, ownerOrgID); err != nil {
+			logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
+				"campaignId": campaignId, "ownerOrgId": ownerOrgID.Hex(),
+			}).Warn("[META] Roll-up Campaign thất bại")
+			continue
+		}
+		result.TotalCampaignsRolledUp++
+	}
+
+	// Phase 4: Roll-up AdAccounts
+	for adAccountId := range accountSet {
+		if err := RecalculateForEntity(ctx, "ad_account", adAccountId, adAccountId, ownerOrgID); err != nil {
+			logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
+				"adAccountId": adAccountId, "ownerOrgId": ownerOrgID.Hex(),
+			}).Warn("[META] Roll-up AdAccount thất bại")
+			continue
+		}
+		result.TotalAccountsRolledUp++
+	}
+
+	return result, nil
 }
 
 // UpdateRawFromSource chỉ cập nhật raw từ 1 nguồn (meta|pancake.pos|pancake.conversation), giữ nguyên raw khác, rồi tính lại layers.
@@ -102,13 +243,14 @@ func UpdateRawFromSource(ctx context.Context, objectType, objectId, adAccountId 
 	}
 	current["raw"] = raw
 
-	// Tính layer1, layer2, layer3
+	// Tính layer1, layer2, layer3, alertFlags
 	layer1 := computeLayer1(raw)
 	layer2 := computeLayer2(raw, layer1)
 	layer3 := computeLayer3(layer1, layer2)
 	current["layer1"] = layer1
 	current["layer2"] = layer2
 	current["layer3"] = layer3
+	current["alertFlags"] = computeAlertFlags(raw, layer1, layer2, layer3)
 
 	return updateAdCurrentMetrics(ctx, objectId, adAccountId, ownerOrgID, current, source)
 }
@@ -150,12 +292,14 @@ func updateRawAndLayersForAd(ctx context.Context, adId, adAccountId string, owne
 	layer1 := computeLayer1(raw)
 	layer2 := computeLayer2(raw, layer1)
 	layer3 := computeLayer3(layer1, layer2)
+	alertFlags := computeAlertFlags(raw, layer1, layer2, layer3)
 
 	current := map[string]interface{}{
-		"raw":    raw,
-		"layer1": layer1,
-		"layer2": layer2,
-		"layer3": layer3,
+		"raw":         raw,
+		"layer1":     layer1,
+		"layer2":     layer2,
+		"layer3":     layer3,
+		"alertFlags": alertFlags,
 	}
 	return updateAdCurrentMetrics(ctx, adId, adAccountId, ownerOrgID, current, "recompute")
 }
@@ -167,7 +311,7 @@ func getAdCurrentMetrics(ctx context.Context, adId, adAccountId string, ownerOrg
 	}
 	filter := bson.M{
 		"adId":                 adId,
-		"adAccountId":          adAccountId,
+		"adAccountId":          adAccountIdFilterForMeta(adAccountId),
 		"ownerOrganizationId": ownerOrgID,
 	}
 	var doc struct {
@@ -193,7 +337,7 @@ func updateAdCurrentMetrics(ctx context.Context, adId, adAccountId string, owner
 	}
 	filter := bson.M{
 		"adId":                 adId,
-		"adAccountId":          adAccountId,
+		"adAccountId":          adAccountIdFilterForMeta(adAccountId),
 		"ownerOrganizationId": ownerOrgID,
 	}
 	old, _ := getAdCurrentMetrics(ctx, adId, adAccountId, ownerOrgID)
@@ -742,8 +886,13 @@ func rollupFromChildren(ctx context.Context, objectType, objectId, adAccountId s
 	layer1 := computeLayer1(raw)
 	layer2 := computeLayer2(raw, layer1)
 	layer3 := computeLayer3(layer1, layer2)
+	alertFlags := computeAlertFlags(raw, layer1, layer2, layer3)
 	current := map[string]interface{}{
-		"raw": raw, "layer1": layer1, "layer2": layer2, "layer3": layer3,
+		"raw":         raw,
+		"layer1":     layer1,
+		"layer2":     layer2,
+		"layer3":     layer3,
+		"alertFlags": alertFlags,
 	}
 	return updateParentCurrentMetrics(ctx, objectType, objectId, adAccountId, ownerOrgID, current)
 }
@@ -769,13 +918,11 @@ func aggregateRawFromChildren(ctx context.Context, objectType, objectId, adAccou
 		return nil, fmt.Errorf("không tìm thấy collection cho %s", objectType)
 	}
 	filter := bson.M{
-		childIdField:            objectId,
-		"ownerOrganizationId":   ownerOrgID,
+		childIdField:          objectId,
+		"ownerOrganizationId": ownerOrgID,
 	}
-	if objectType == "adset" {
-		filter["adAccountId"] = adAccountId
-	} else if objectType == "campaign" {
-		filter["adAccountId"] = adAccountId
+	if objectType == "adset" || objectType == "campaign" {
+		filter["adAccountId"] = adAccountIdFilterForMeta(adAccountId)
 	}
 	cursor, err := coll.Find(ctx, filter, nil)
 	if err != nil {
@@ -890,9 +1037,12 @@ func updateParentCurrentMetrics(ctx context.Context, objectType, objectId, adAcc
 	if coll == nil {
 		return fmt.Errorf("không tìm thấy collection cho %s", objectType)
 	}
-	filter := bson.M{idField: objectId, "ownerOrganizationId": ownerOrgID}
-	if objectType != "ad_account" {
-		filter["adAccountId"] = adAccountId
+	filter := bson.M{"ownerOrganizationId": ownerOrgID}
+	if objectType == "ad_account" {
+		filter[idField] = adAccountIdFilterForMeta(adAccountId)
+	} else {
+		filter[idField] = objectId
+		filter["adAccountId"] = adAccountIdFilterForMeta(adAccountId)
 	}
 	old := getParentCurrentMetrics(ctx, coll, filter)
 	recordActivityForEntity(ctx, objectType, objectId, adAccountId, ownerOrgID, old, current, "rollup")

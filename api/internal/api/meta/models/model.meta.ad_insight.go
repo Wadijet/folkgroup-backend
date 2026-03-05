@@ -9,10 +9,10 @@ import (
 // ObjectId, ObjectType, AdAccountId do sync logic truyền (phụ thuộc level). Các metric có extract tag.
 type MetaAdInsight struct {
 	ID                  primitive.ObjectID     `json:"id,omitempty" bson:"_id,omitempty"`
-	ObjectId            string                 `json:"objectId" bson:"objectId" index:"text"`       // act_xxx, campaign_id, adset_id, ad_id (truyền từ sync)
-	ObjectType          string                 `json:"objectType" bson:"objectType"`                // ad_account, campaign, adset, ad (truyền từ sync)
-	AdAccountId         string                 `json:"adAccountId" bson:"adAccountId" index:"text"` // truyền từ sync
-	DateStart           string                 `json:"dateStart" bson:"dateStart" extract:"metaData\\.date_start,converter=string,optional"`
+	ObjectId            string                 `json:"objectId" bson:"objectId" index:"text;single:1,compound:meta_insight_agg"`       // act_xxx, campaign_id, adset_id, ad_id (truyền từ sync)
+	ObjectType          string                 `json:"objectType" bson:"objectType" index:"single:1,compound:meta_insight_agg"`      // ad_account, campaign, adset, ad (truyền từ sync)
+	AdAccountId         string                 `json:"adAccountId" bson:"adAccountId" index:"text;single:1,compound:meta_insight_agg"` // truyền từ sync
+	DateStart           string                 `json:"dateStart" bson:"dateStart" index:"single:1,compound:meta_insight_agg" extract:"metaData\\.date_start,converter=string,optional"`
 	DateStop            string                 `json:"dateStop" bson:"dateStop" extract:"metaData\\.date_stop,converter=string,optional"`
 	Impressions         string                 `json:"impressions" bson:"impressions" extract:"metaData\\.impressions,converter=string,optional"`
 	Clicks              string                 `json:"clicks" bson:"clicks" extract:"metaData\\.clicks,converter=string,optional"`
@@ -22,7 +22,7 @@ type MetaAdInsight struct {
 	Cpm                 string                 `json:"cpm" bson:"cpm" extract:"metaData\\.cpm,converter=string,optional"`
 	Ctr                 string                 `json:"ctr" bson:"ctr" extract:"metaData\\.ctr,converter=string,optional"`
 	MetaData            map[string]interface{} `json:"metaData" bson:"metaData"`
-	OwnerOrganizationID primitive.ObjectID     `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1"`
+	OwnerOrganizationID primitive.ObjectID     `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:meta_insight_agg"`
 	CreatedAt           int64                  `json:"createdAt" bson:"createdAt"`
 	UpdatedAt           int64                  `json:"updatedAt" bson:"updatedAt"`
 }

@@ -338,10 +338,20 @@ func (s *ReportService) GetOrderTrendFromDb(ctx context.Context, ownerOrganizati
 
 // FindSnapshotsForTrend truy vấn report_snapshots theo reportKey, ownerOrganizationId, periodKey trong [from, to].
 func (s *ReportService) FindSnapshotsForTrend(ctx context.Context, reportKey string, ownerOrganizationID primitive.ObjectID, from, to string) ([]reportmodels.ReportSnapshot, error) {
+	return s.FindSnapshotsForTrendWithDimensions(ctx, reportKey, ownerOrganizationID, from, to, nil)
+}
+
+// FindSnapshotsForTrendWithDimensions giống FindSnapshotsForTrend, thêm filter dimensions (vd: adAccountId cho ads_daily).
+func (s *ReportService) FindSnapshotsForTrendWithDimensions(ctx context.Context, reportKey string, ownerOrganizationID primitive.ObjectID, from, to string, dimensions map[string]interface{}) ([]reportmodels.ReportSnapshot, error) {
 	filter := bson.M{
 		"reportKey":            reportKey,
 		"ownerOrganizationId": ownerOrganizationID,
 		"periodKey":            bson.M{"$gte": from, "$lte": to},
+	}
+	if len(dimensions) > 0 {
+		for k, v := range dimensions {
+			filter["dimensions."+k] = v
+		}
 	}
 	opts := options.Find().SetSort(bson.D{{Key: "periodKey", Value: 1}})
 	cursor, err := s.snapColl.Find(ctx, filter, opts)
@@ -358,6 +368,30 @@ func (s *ReportService) FindSnapshotsForTrend(ctx context.Context, reportKey str
 		list = []reportmodels.ReportSnapshot{}
 	}
 	return list, nil
+}
+
+// FindSnapshotsForAdsTrendByDayRange truy vấn ads_daily từ report_snapshots theo khoảng ngày.
+// adAccountId: optional — nếu có thì filter theo dimensions.adAccountId; nếu rỗng trả về tất cả ad accounts.
+func (s *ReportService) FindSnapshotsForAdsTrendByDayRange(ctx context.Context, ownerOrganizationID primitive.ObjectID, startMs, endMs int64, adAccountId string) ([]reportmodels.ReportSnapshot, error) {
+	if IsAdsReportKeyDisabled("ads_daily") {
+		return []reportmodels.ReportSnapshot{}, nil
+	}
+	reportKeyOrder := GetReportKeyOrderForDomain("ads")
+	candidates := getCandidateReportKeysAndRanges(startMs, endMs, reportKeyOrder)
+	var dimensions map[string]interface{}
+	if adAccountId != "" {
+		dimensions = map[string]interface{}{"adAccountId": adAccountId}
+	}
+	for _, c := range candidates {
+		list, err := s.FindSnapshotsForTrendWithDimensions(ctx, c.reportKey, ownerOrganizationID, c.fromStr, c.toStr, dimensions)
+		if err != nil {
+			return nil, err
+		}
+		if len(list) > 0 {
+			return list, nil
+		}
+	}
+	return []reportmodels.ReportSnapshot{}, nil
 }
 
 // GetUnprocessedDirtyPeriods lấy tối đa limit bản ghi từ report_dirty_periods có processedAt = null.

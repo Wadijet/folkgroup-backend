@@ -9,12 +9,12 @@ import (
 // Các field AdAccountId, Name, AccountStatus, Currency có extract tag để lấy từ metaData khi đọc.
 type MetaAdAccount struct {
 	ID                   primitive.ObjectID     `json:"id,omitempty" bson:"_id,omitempty"`
-	AdAccountId          string                 `json:"adAccountId" bson:"adAccountId" index:"unique;text" extract:"metaData\\.id,converter=string,optional"`           // act_123456789 (extract từ metaData["id"])
+	AdAccountId          string                 `json:"adAccountId" bson:"adAccountId" index:"unique;text;single:1,compound:meta_adaccount_lookup_unique" extract:"metaData\\.id,converter=string|metaData\\.adAccountId,converter=string"` // act_123456789 (extract từ metaData["id"] hoặc metaData["adAccountId"])
 	Name                 string                 `json:"name" bson:"name" index:"text" extract:"metaData\\.name,converter=string,optional"`                              // Tên ad account (extract từ metaData["name"])
 	AccountStatus        int64                  `json:"accountStatus" bson:"accountStatus" extract:"metaData\\.account_status,converter=int64,optional"`              // Trạng thái 1=active, 2=disabled (extract từ metaData["account_status"])
 	Currency             string                 `json:"currency" bson:"currency" extract:"metaData\\.currency,converter=string,optional"`                             // Đơn vị tiền tệ VND, USD (extract từ metaData["currency"])
 	MetaData             map[string]interface{} `json:"metaData" bson:"metaData"`                                                                                     // Dữ liệu gốc từ Meta API
-	OwnerOrganizationID  primitive.ObjectID     `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1"`
+	OwnerOrganizationID  primitive.ObjectID     `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:meta_adaccount_lookup_unique"`
 	CreatedAt            int64                  `json:"createdAt" bson:"createdAt"`
 	UpdatedAt            int64                  `json:"updatedAt" bson:"updatedAt"`
 	LastSyncedAt         int64                  `json:"lastSyncedAt" bson:"lastSyncedAt"` // Lần sync cuối

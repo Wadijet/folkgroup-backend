@@ -96,6 +96,63 @@ func (h *ReportHandler) HandleOrderPeriodMovementsFromSnapshots(c fiber.Ctx) err
 	})
 }
 
+// HandleAdsDailyTrendFromSnapshots xử lý GET /reports/ads/period-movements-from-snapshots — ads_daily trend từ report_snapshots.
+// Query: from=dd-mm-yyyy&to=dd-mm-yyyy&adAccountId=xxx (adAccountId optional).
+func (h *ReportHandler) HandleAdsDailyTrendFromSnapshots(c fiber.Ctx) error {
+	return basehdl.SafeHandlerWrapper(c, func() error {
+		fromStr := c.Query("from")
+		toStr := c.Query("to")
+		if fromStr == "" || toStr == "" {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationInput.Code, "message": "Thiếu from hoặc to (dd-mm-yyyy). Ví dụ: ?from=01-01-2025&to=31-01-2025", "status": "error",
+			})
+			return nil
+		}
+		orgID := getActiveOrganizationID(c)
+		if orgID == nil || orgID.IsZero() {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationInput.Code, "message": "Vui lòng chọn tổ chức (active organization)", "status": "error",
+			})
+			return nil
+		}
+		fromT, err := time.Parse(reportdto.ReportDateFormat, fromStr)
+		if err != nil {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationFormat.Code, "message": "from không đúng định dạng dd-mm-yyyy", "status": "error",
+			})
+			return nil
+		}
+		toT, err := time.Parse(reportdto.ReportDateFormat, toStr)
+		if err != nil {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationFormat.Code, "message": "to không đúng định dạng dd-mm-yyyy", "status": "error",
+			})
+			return nil
+		}
+		if fromT.After(toT) {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationInput.Code, "message": "from phải nhỏ hơn hoặc bằng to", "status": "error",
+			})
+			return nil
+		}
+		startMs, endMs := dayRangeToMs(fromT, toT)
+		adAccountId := strings.TrimSpace(c.Query("adAccountId"))
+		list, err := h.ReportService.FindSnapshotsForAdsTrendByDayRange(c.Context(), *orgID, startMs, endMs, adAccountId)
+		if err != nil {
+			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
+				"code": common.ErrCodeDatabase.Code, "message": "Lỗi truy vấn báo cáo ads_daily", "status": "error",
+			})
+			return nil
+		}
+		c.Status(common.StatusOK).JSON(fiber.Map{
+			"code": common.StatusOK, "message": "Thành công", "data": list,
+			"meta": fiber.Map{"dataSource": "snapshots", "domain": "ads", "reportKey": "ads_daily", "description": "Snapshots ads_daily trong kỳ từ report_snapshots"},
+			"status": "success",
+		})
+		return nil
+	})
+}
+
 // HandleOrderPeriodMovementsFromDb xử lý GET /reports/order/period-movements-from-db — PHỤ: order phát sinh từ DB (aggregate pc_pos_orders, đối chiếu).
 // Query: from=dd-mm-yyyy&to=dd-mm-yyyy. Trả về format giống period-movements-from-snapshots (reportKey=order_*).
 func (h *ReportHandler) HandleOrderPeriodMovementsFromDb(c fiber.Ctx) error {

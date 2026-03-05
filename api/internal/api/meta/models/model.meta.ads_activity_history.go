@@ -9,11 +9,11 @@ import (
 type AdsActivityHistory struct {
 	ID                   primitive.ObjectID     `json:"id,omitempty" bson:"_id,omitempty"`
 	ActivityType         string                 `json:"activityType" bson:"activityType" index:"single:1"`
-	AdAccountId          string                 `json:"adAccountId" bson:"adAccountId" index:"single:1"`
-	ObjectType           string                 `json:"objectType" bson:"objectType" index:"single:1"`
-	ObjectId             string                 `json:"objectId" bson:"objectId" index:"single:1"`
-	OwnerOrganizationID  primitive.ObjectID     `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1"`
-	ActivityAt           int64                  `json:"activityAt" bson:"activityAt" index:"single:-1"`
+	AdAccountId          string                 `json:"adAccountId" bson:"adAccountId" index:"single:1,compound:ads_activity_by_entity"`
+	ObjectType           string                 `json:"objectType" bson:"objectType" index:"single:1,compound:ads_activity_by_entity"`
+	ObjectId             string                 `json:"objectId" bson:"objectId" index:"single:1,compound:ads_activity_by_entity"`
+	OwnerOrganizationID  primitive.ObjectID     `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:ads_activity_by_entity"`
+	ActivityAt           int64                  `json:"activityAt" bson:"activityAt" index:"single:-1,compound:ads_activity_by_entity,order:-1"`
 	Metadata             map[string]interface{} `json:"metadata" bson:"metadata"`
 	CreatedAt            int64                  `json:"createdAt" bson:"createdAt"`
 }

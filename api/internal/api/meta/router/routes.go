@@ -54,6 +54,7 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 	r.RegisterCRUDRoutes(v1, "/meta/ad", adHandler, apirouter.ReadWriteConfig, "MetaAd")
 	apirouter.RegisterRouteWithMiddleware(v1, "/meta/ad", "POST", "/sync-upsert", []fiber.Handler{middleware.AuthMiddleware("MetaAd.Update"), orgContextMiddleware}, adHandler.HandleSyncUpsertOne)
 	apirouter.RegisterRouteWithMiddleware(v1, "/meta/ad", "POST", "/recalculate", []fiber.Handler{middleware.AuthMiddleware("MetaAd.Update"), orgContextMiddleware}, adHandler.HandleRecalculate)
+	apirouter.RegisterRouteWithMiddleware(v1, "/meta/ad", "POST", "/recalculate-all", []fiber.Handler{middleware.AuthMiddleware("MetaAd.Update"), orgContextMiddleware}, adHandler.HandleRecalculateAllMetaAds)
 
 	// Meta Ad Insight
 	adInsightHandler, err := metahdl.NewMetaAdInsightHandler()

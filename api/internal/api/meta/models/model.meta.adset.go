@@ -8,16 +8,16 @@ import (
 // Các field có extract tag để lấy từ metaData khi ghi.
 type MetaAdSet struct {
 	ID                  primitive.ObjectID     `json:"id,omitempty" bson:"_id,omitempty"`
-	AdSetId             string                 `json:"adSetId" bson:"adSetId" index:"unique;text" extract:"metaData\\.id,converter=string,optional"`
-	CampaignId          string                 `json:"campaignId" bson:"campaignId" index:"text" extract:"metaData\\.campaign_id,converter=string,optional"`
-	AdAccountId         string                 `json:"adAccountId" bson:"adAccountId" index:"text" extract:"metaData\\.account_id,converter=string,optional"`
+	AdSetId             string                 `json:"adSetId" bson:"adSetId" index:"unique;text;single:1,compound:meta_adset_lookup_unique;compound:meta_adset_by_campaign" extract:"metaData\\.id,converter=string,required"`
+	CampaignId          string                 `json:"campaignId" bson:"campaignId" index:"text;single:1,compound:meta_adset_by_campaign" extract:"metaData\\.campaign_id,converter=string,optional"`
+	AdAccountId         string                 `json:"adAccountId" bson:"adAccountId" index:"text;single:1,compound:meta_adset_lookup_unique;compound:meta_adset_by_campaign" extract:"metaData\\.account_id,converter=string,optional"`
 	Name                string                 `json:"name" bson:"name" index:"text" extract:"metaData\\.name,converter=string,optional"`
 	Status              string                 `json:"status" bson:"status" extract:"metaData\\.status,converter=string,optional"`
 	EffectiveStatus     string                 `json:"effectiveStatus" bson:"effectiveStatus" extract:"metaData\\.effective_status,converter=string,optional"`
 	DailyBudget         string                 `json:"dailyBudget" bson:"dailyBudget" extract:"metaData\\.daily_budget,converter=string,optional"`
 	LifetimeBudget      string                 `json:"lifetimeBudget" bson:"lifetimeBudget" extract:"metaData\\.lifetime_budget,converter=string,optional"`
 	MetaData            map[string]interface{} `json:"metaData" bson:"metaData"`
-	OwnerOrganizationID primitive.ObjectID     `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1"`
+	OwnerOrganizationID primitive.ObjectID     `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:meta_adset_lookup_unique;compound:meta_adset_by_campaign"`
 	CreatedAt           int64                  `json:"createdAt" bson:"createdAt"`
 	UpdatedAt           int64                  `json:"updatedAt" bson:"updatedAt"`
 	LastSyncedAt        int64                  `json:"lastSyncedAt" bson:"lastSyncedAt"`

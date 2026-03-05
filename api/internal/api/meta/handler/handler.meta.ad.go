@@ -82,6 +82,11 @@ type RecalculateInput struct {
 	AdId string `json:"adId"`
 }
 
+// RecalculateAllInput body cho endpoint recalculate-all.
+type RecalculateAllInput struct {
+	Limit int `json:"limit"` // Giới hạn số Ad xử lý (0 = tất cả)
+}
+
 // HandleRecalculate tính lại currentMetrics cho Ad (raw + layer1 + layer2 + layer3).
 // POST /meta/ad/recalculate với body { "adId": "xxx" }. OwnerOrgID lấy từ context.
 func (h *MetaAdHandler) HandleRecalculate(c fiber.Ctx) error {
@@ -128,6 +133,44 @@ func (h *MetaAdHandler) HandleRecalculate(c fiber.Ctx) error {
 		}
 		c.Status(common.StatusOK).JSON(fiber.Map{
 			"code": common.StatusOK, "message": "Đã tính lại currentMetrics thành công", "data": data, "status": "success",
+		})
+		return nil
+	})
+}
+
+// HandleRecalculateAllMetaAds xử lý POST /meta/ad/recalculate-all — tính toán lại currentMetrics cho toàn bộ Meta ads của org.
+// Body: { "limit": 0 } — limit = 0 xử lý tất cả, limit > 0 giới hạn số Ad.
+// Luồng: Ad (raw + layers) → AdSet roll-up → Campaign roll-up → AdAccount roll-up.
+func (h *MetaAdHandler) HandleRecalculateAllMetaAds(c fiber.Ctx) error {
+	return basehdl.SafeHandlerWrapper(c, func() error {
+		var input RecalculateAllInput
+		_ = c.Bind().Body(&input)
+		orgID := h.GetActiveOrganizationID(c)
+		if orgID == nil {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationInput.Code, "message": "Chưa chọn tổ chức", "status": "error",
+			})
+			return nil
+		}
+		result, err := metasvc.RecalculateAllMetaAds(c.Context(), *orgID, input.Limit)
+		if err != nil {
+			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
+				"code": common.ErrCodeInternalServer.Code, "message": "Tính toán lại toàn bộ Meta ads thất bại: " + err.Error(), "status": "error",
+			})
+			return nil
+		}
+		c.Status(common.StatusOK).JSON(fiber.Map{
+			"code": common.StatusOK,
+			"message": "Đã tính toán lại toàn bộ Meta ads thành công",
+			"data": fiber.Map{
+				"totalAdsProcessed":     result.TotalAdsProcessed,
+				"totalAdsFailed":        result.TotalAdsFailed,
+				"failedAdIds":           result.FailedAdIds,
+				"totalAdSetsRolledUp":   result.TotalAdSetsRolledUp,
+				"totalCampaignsRolledUp": result.TotalCampaignsRolledUp,
+				"totalAccountsRolledUp": result.TotalAccountsRolledUp,
+			},
+			"status": "success",
 		})
 		return nil
 	})

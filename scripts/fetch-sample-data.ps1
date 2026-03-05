@@ -256,7 +256,10 @@ $collections = @(
     @{ Endpoint = "webhook-log"; OutputFile = "webhook-logs-sample.json"; UsePagination = $true },
     
     # Access Tokens
-    @{ Endpoint = "access-token"; OutputFile = "access-tokens-sample.json"; UsePagination = $false }
+    @{ Endpoint = "access-token"; OutputFile = "access-tokens-sample.json"; UsePagination = $false },
+
+    # Meta Ads
+    @{ Endpoint = "meta/ad-account"; OutputFile = "meta-ad-accounts-sample.json"; UsePagination = $false }
 )
 
 $successCount = 0

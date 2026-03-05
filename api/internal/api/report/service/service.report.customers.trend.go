@@ -1,5 +1,7 @@
-// Package reportsvc - API trend cho Tab 4 Customer: trend-from-snapshots (nhanh), trend-from-crm (chính xác), transition-matrix, group-changes.
-// Dùng metricsSnapshot từ crm_activity_history (hệ CRM).
+// Package reportsvc - API trend cho Tab 4 Customer.
+//
+// Nguồn CHÍNH: period-movements-from-snapshots (report_snapshots) — nhanh, dùng cho UI.
+// Nguồn PHỤ: period-movements-from-db (query DB trực tiếp) — nặng, dùng để kiểm tra đối chiếu.
 package reportsvc
 
 import (
@@ -10,7 +12,6 @@ import (
 
 	crmvc "meta_commerce/internal/api/crm/service"
 	reportdto "meta_commerce/internal/api/report/dto"
-	reportmodels "meta_commerce/internal/api/report/models"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -51,24 +52,16 @@ func (s *ReportService) GetCustomersTrendFromSnapshots(ctx context.Context, owne
 		}
 	}
 
-	// 2. Lấy trend data từ report_snapshots — ưu tiên chu kỳ dài, nếu không có thì fallback chu kỳ ngắn hơn.
+	// 2. Lấy trend data — đơn vị cơ sở là ngày; thử chu kỳ dài hơn (yearly→monthly→weekly→daily) để thay thế nếu có.
+	// Chu kỳ dài phải khớp từ ngày đầu đến ngày cuối mới được dùng.
 	startMs, endMs, err := getStartEndMsFromParams(params)
 	if err != nil {
 		return nil, err
 	}
-	candidates := getCandidateReportKeysAndRanges(startMs, endMs)
-	var snapshots []reportmodels.ReportSnapshot
-	for _, c := range candidates {
-		list, err := s.FindSnapshotsForTrend(ctx, c.reportKey, ownerOrgID, c.fromStr, c.toStr)
-		if err != nil {
-			return nil, fmt.Errorf("find snapshots: %w", err)
-		}
-		if len(list) > 0 {
-			snapshots = list
-			break
-		}
+	snapshots, err := s.FindSnapshotsForTrendByDayRange(ctx, ownerOrgID, startMs, endMs, reportKeyOrderCustomer)
+	if err != nil {
+		return nil, fmt.Errorf("find snapshots: %w", err)
 	}
-
 	trendData := make([]reportdto.CustomersTrendDataItem, 0, len(snapshots))
 	for _, snap := range snapshots {
 		trendData = append(trendData, reportdto.CustomersTrendDataItem{
@@ -78,13 +71,9 @@ func (s *ReportService) GetCustomersTrendFromSnapshots(ctx context.Context, owne
 			ComputedAt: snap.ComputedAt,
 		})
 	}
-
-	// 4. Comparison: kỳ hiện tại (cuối) vs kỳ trước
 	comparison := make(map[string]reportdto.ComparisonItem)
 	if len(snapshots) >= 2 {
-		curr := snapshots[len(snapshots)-1].Metrics
-		prev := snapshots[len(snapshots)-2].Metrics
-		comparison = buildComparison(curr, prev)
+		comparison = buildComparison(snapshots[len(snapshots)-1].Metrics, snapshots[len(snapshots)-2].Metrics)
 	}
 
 	return &reportdto.CustomersTrendResult{
@@ -161,13 +150,13 @@ func getPeriodKeysInRange(reportKey, fromStr, toStr string) []string {
 	loc, _ := time.LoadLocation("Asia/Ho_Chi_Minh")
 	var keys []string
 	switch reportKey {
-	case "customer_daily":
+	case "customer_daily", "order_daily":
 		from, _ := time.ParseInLocation("2006-01-02", fromStr, loc)
 		to, _ := time.ParseInLocation("2006-01-02", toStr, loc)
 		for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
 			keys = append(keys, d.Format("2006-01-02"))
 		}
-	case "customer_weekly":
+	case "customer_weekly", "order_weekly":
 		from, _ := time.ParseInLocation("2006-01-02", fromStr, loc)
 		to, _ := time.ParseInLocation("2006-01-02", toStr, loc)
 		mondayFrom := getMondayOfWeek(from)
@@ -175,13 +164,13 @@ func getPeriodKeysInRange(reportKey, fromStr, toStr string) []string {
 		for d := mondayFrom; !d.After(mondayTo); d = d.AddDate(0, 0, 7) {
 			keys = append(keys, d.Format("2006-01-02"))
 		}
-	case "customer_monthly":
+	case "customer_monthly", "order_monthly":
 		from, _ := time.ParseInLocation("2006-01", fromStr, loc)
 		to, _ := time.ParseInLocation("2006-01", toStr, loc)
 		for d := from; !d.After(to); d = d.AddDate(0, 1, 0) {
 			keys = append(keys, d.Format("2006-01"))
 		}
-	case "customer_yearly":
+	case "customer_yearly", "order_yearly":
 		fromY, _ := time.ParseInLocation("2006", fromStr, loc)
 		toY, _ := time.ParseInLocation("2006", toStr, loc)
 		for y := fromY.Year(); y <= toY.Year(); y++ {
@@ -199,13 +188,13 @@ func getPeriodKeysInRange(reportKey, fromStr, toStr string) []string {
 
 func reportKeyToPeriodType(reportKey string) string {
 	switch reportKey {
-	case "customer_daily":
+	case "customer_daily", "order_daily":
 		return "day"
-	case "customer_weekly":
+	case "customer_weekly", "order_weekly":
 		return "week"
-	case "customer_monthly":
+	case "customer_monthly", "order_monthly":
 		return "month"
-	case "customer_yearly":
+	case "customer_yearly", "order_yearly":
 		return "year"
 	default:
 		return "day"
@@ -243,9 +232,20 @@ func paramsToTrendRange(params *reportdto.CustomersQueryParams) (reportKey, from
 			to = today
 			reportKey = "customer_daily"
 		case "week":
-			from = today.AddDate(0, 0, -28)
-			to = today
+			// Chu kỳ tuần: chỉ dùng tuần đã hoàn thành (Chủ nhật đã qua).
+			// Tuần hiện tại chưa kết thúc → snapshot chưa có. Lùi về Chủ nhật tuần trước.
+			lastMonday := getMondayOfWeek(today)
+			lastSunday := lastMonday.AddDate(0, 0, -1) // Chủ nhật tuần trước
+			to = lastSunday
+			from = lastSunday.AddDate(0, 0, -27) // 4 tuần đã hoàn thành
 			reportKey = "customer_weekly"
+		case "month":
+			// Chu kỳ tháng: chỉ dùng tháng đã hoàn thành. Tháng hiện tại chưa kết thúc → dùng tháng trước.
+			firstOfThisMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, loc)
+			lastDayPrevMonth := firstOfThisMonth.AddDate(0, 0, -1)
+			to = lastDayPrevMonth
+			from = firstOfThisMonth.AddDate(0, -12, 0) // 12 tháng trước
+			reportKey = "customer_monthly"
 		case "60d":
 			from = today.AddDate(0, 0, -60)
 			to = today
@@ -255,8 +255,11 @@ func paramsToTrendRange(params *reportdto.CustomersQueryParams) (reportKey, from
 			to = today
 			reportKey = "customer_daily"
 		case "year":
-			from = today.AddDate(0, 0, -365)
-			to = today
+			// Chu kỳ năm: 12 tháng đã hoàn thành (cùng logic month, dùng customer_monthly).
+			firstOfThisMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, loc)
+			lastDayPrevMonth := firstOfThisMonth.AddDate(0, 0, -1)
+			to = lastDayPrevMonth
+			from = firstOfThisMonth.AddDate(0, -12, 0)
 			reportKey = "customer_monthly"
 		default:
 			from = today.AddDate(0, 0, -60)

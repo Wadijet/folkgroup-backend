@@ -97,22 +97,37 @@ func (w *ReportDirtyWorker) Start(ctx context.Context) {
 					for _, d := range list {
 						// Chu kỳ bị tắt bởi config — xóa dirty period và snapshot, không tạo chu kỳ báo cáo.
 						if reportsvc.IsCustomerReportKeyDisabled(d.ReportKey) {
-							if err := w.reportService.DeleteDirtyPeriod(batchCtx, d.ReportKey, d.PeriodKey, d.OwnerOrganizationID); err != nil {
+							if err := w.reportService.DeleteDirtyPeriod(batchCtx, d.ReportKey, d.PeriodKey, d.OwnerOrganizationID, d.AdAccountId); err != nil {
 								log.WithError(err).WithFields(map[string]interface{}{
 									"reportKey": d.ReportKey,
 									"periodKey": d.PeriodKey,
 								}).Warn("📊 [REPORT_DIRTY] DeleteDirtyPeriod thất bại")
 								continue
 							}
-							_ = w.reportService.DeleteReportSnapshot(batchCtx, d.ReportKey, d.PeriodKey, d.OwnerOrganizationID)
+							_ = w.reportService.DeleteReportSnapshot(batchCtx, d.ReportKey, d.PeriodKey, d.OwnerOrganizationID, d.AdAccountId)
 							log.WithFields(map[string]interface{}{
 								"reportKey": d.ReportKey,
 								"periodKey": d.PeriodKey,
 							}).Info("📊 [REPORT_DIRTY] Đã xóa dirty period và snapshot (chu kỳ tắt)")
 							continue
 						}
+						if reportsvc.IsAdsReportKeyDisabled(d.ReportKey) {
+							if err := w.reportService.DeleteDirtyPeriod(batchCtx, d.ReportKey, d.PeriodKey, d.OwnerOrganizationID, d.AdAccountId); err != nil {
+								log.WithError(err).WithFields(map[string]interface{}{
+									"reportKey": d.ReportKey,
+									"periodKey": d.PeriodKey,
+								}).Warn("📊 [REPORT_DIRTY] DeleteDirtyPeriod thất bại")
+								continue
+							}
+							_ = w.reportService.DeleteReportSnapshot(batchCtx, d.ReportKey, d.PeriodKey, d.OwnerOrganizationID, d.AdAccountId)
+							log.WithFields(map[string]interface{}{
+								"reportKey": d.ReportKey,
+								"periodKey": d.PeriodKey,
+							}).Info("📊 [REPORT_DIRTY] Đã xóa dirty period và snapshot (chu kỳ ads tắt)")
+							continue
+						}
 						start := time.Now()
-						if err := w.reportService.Compute(batchCtx, d.ReportKey, d.PeriodKey, d.OwnerOrganizationID); err != nil {
+						if err := w.reportService.Compute(batchCtx, d.ReportKey, d.PeriodKey, d.OwnerOrganizationID, d.AdAccountId); err != nil {
 							log.WithError(err).WithFields(map[string]interface{}{
 								"reportKey":  d.ReportKey,
 								"periodKey":  d.PeriodKey,
@@ -120,7 +135,7 @@ func (w *ReportDirtyWorker) Start(ctx context.Context) {
 							}).Warn("📊 [REPORT_DIRTY] Compute thất bại, bỏ qua và sẽ thử lại lần sau")
 							continue
 						}
-						if err := w.reportService.SetDirtyProcessed(batchCtx, d.ReportKey, d.PeriodKey, d.OwnerOrganizationID); err != nil {
+						if err := w.reportService.SetDirtyProcessed(batchCtx, d.ReportKey, d.PeriodKey, d.OwnerOrganizationID, d.AdAccountId); err != nil {
 							log.WithError(err).WithFields(map[string]interface{}{
 								"reportKey": d.ReportKey,
 								"periodKey": d.PeriodKey,

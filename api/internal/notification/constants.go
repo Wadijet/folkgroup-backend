@@ -9,6 +9,7 @@ const (
 	DomainSecurity    = "security"    // Security alerts, login failed
 	DomainPayment     = "payment"     // Payment processing
 	DomainAnalytics   = "analytics"   // Analytics, reports
+	DomainAds         = "ads"         // Ads Intelligence — đề xuất, duyệt, thực thi
 )
 
 // Severity constants - Mức độ nghiêm trọng

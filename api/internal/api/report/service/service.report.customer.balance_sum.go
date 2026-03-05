@@ -5,8 +5,11 @@ import (
 	reportmodels "meta_commerce/internal/api/report/models"
 )
 
-// sumPhatSinhToBalance cộng phát sinh (in - out) từ nhiều snapshot thành số dư cuối kỳ.
-// Số dư đầu kỳ = 0. Cấu trúc trả về: raw, layer1, layer2, layer3 (giống buildPeriodEndBalance).
+// sumPhatSinhToBalance cộng dồn phát sinh (in - out) từ nhiều snapshot thành số dư cuối kỳ.
+//
+// LƯU Ý: Mỗi snapshot lưu SỐ PHÁT SINH (in/out) của kỳ đó, KHÔNG phải số dư cuối kỳ.
+// Số cộng dồn = sum(phát sinh từng kỳ). Số dư đầu kỳ = 0.
+// Cấu trúc trả về: raw, layer1, layer2, layer3 (giống buildPeriodEndBalance).
 func sumPhatSinhToBalance(snapshots []reportmodels.ReportSnapshot) map[string]interface{} {
 	if len(snapshots) == 0 {
 		return emptyBalance()

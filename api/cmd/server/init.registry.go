@@ -37,7 +37,9 @@ func InitCollections(client *mongo.Client, cfg *config.Configuration) error {
 		"ai_workflows", "ai_steps", "ai_prompt_templates", "ai_provider_profiles", "ai_workflow_runs", "ai_step_runs",
 		"ai_generation_batches", "ai_candidates", "ai_runs", "ai_workflow_commands",
 		"report_definitions", "report_snapshots", "report_dirty_periods",
-		"crm_customers", "crm_activity_history", "crm_notes", "crm_pending_ingest", "crm_bulk_jobs"}
+		"crm_customers", "crm_activity_history", "crm_notes", "crm_pending_ingest", "crm_bulk_jobs",
+		"meta_ad_accounts", "meta_campaigns", "meta_adsets", "meta_ads", "meta_ad_insights",
+		"action_pending_approval", "ads_approval_config", "ads_activity_history"}
 
 	for _, name := range colNames {
 		registered, err := global.RegistryCollections.Register(name, db.Collection(name))

@@ -1,5 +1,7 @@
 // Package reportsvc - Số dư cuối kỳ tính từ report_snapshots (phát sinh).
-// Số đầu kỳ = 0, cộng phát sinh từng kỳ qua snapshots (không query từng khách → nhanh hơn CRM).
+//
+// LƯU Ý: Snapshots lưu SỐ PHÁT SINH (in/out) mỗi kỳ, không lưu số dư.
+// Số cộng dồn từ snapshots = tổng phát sinh. Số đầu kỳ = 0.
 // Ưu tiên chu kỳ dài: thay 3 chu kỳ ngày bằng 1 chu kỳ tháng để ít snapshot nhất.
 package reportsvc
 
@@ -14,8 +16,19 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// reportKeyOrder thứ tự ưu tiên: dài trước, ngắn sau (ít snapshot nhất).
-var reportKeyOrder = []string{"customer_yearly", "customer_monthly", "customer_weekly", "customer_daily"}
+// reportKeyOrderCustomer thứ tự ưu tiên cho customer: dài trước, ngắn sau (ít snapshot nhất).
+var reportKeyOrderCustomer = []string{"customer_yearly", "customer_monthly", "customer_weekly", "customer_daily"}
+
+// reportKeyOrderOrder thứ tự ưu tiên cho order: dài trước, ngắn sau.
+var reportKeyOrderOrder = []string{"order_yearly", "order_monthly", "order_weekly", "order_daily"}
+
+// GetReportKeyOrderForDomain trả về thứ tự reportKey theo domain (customer|order).
+func GetReportKeyOrderForDomain(domain string) []string {
+	if domain == "order" {
+		return reportKeyOrderOrder
+	}
+	return reportKeyOrderCustomer
+}
 
 // periodRangeCandidate một ứng viên (reportKey, fromStr, toStr) cho query snapshots.
 type periodRangeCandidate struct {
@@ -27,7 +40,8 @@ type periodRangeCandidate struct {
 // getCandidateReportKeysAndRanges trả về danh sách ứng viên theo thứ tự ưu tiên: chu kỳ dài trước (ít snapshot).
 // Chỉ thêm chu kỳ dài khi [startMs, endMs] KHỚP ranh giới chu kỳ — tránh thừa/thiếu phát sinh.
 // Dùng để thử lần lượt: nếu chu kỳ dài không có snapshot thì thử chu kỳ ngắn hơn.
-func getCandidateReportKeysAndRanges(startMs, endMs int64) []periodRangeCandidate {
+// reportKeyOrder: thứ tự ưu tiên (vd: reportKeyOrderCustomer hoặc reportKeyOrderOrder).
+func getCandidateReportKeysAndRanges(startMs, endMs int64, reportKeyOrder []string) []periodRangeCandidate {
 	loc, err := time.LoadLocation(ReportTimezone)
 	if err != nil {
 		return nil
@@ -48,6 +62,10 @@ func getCandidateReportKeysAndRanges(startMs, endMs int64) []periodRangeCandidat
 		count     int
 	}
 	var items []item
+	dailyKey := "customer_daily"
+	if len(reportKeyOrder) > 0 && len(reportKeyOrder[len(reportKeyOrder)-1]) > 0 {
+		dailyKey = reportKeyOrder[len(reportKeyOrder)-1]
+	}
 	for _, rk := range reportKeyOrder {
 		from, to, cnt := periodRangeForReportKey(rk, startT, endT, loc)
 		if cnt > 0 && cnt < 999999 {
@@ -55,8 +73,8 @@ func getCandidateReportKeysAndRanges(startMs, endMs int64) []periodRangeCandidat
 		}
 	}
 	// Đảm bảo có daily (fallback cuối nếu chưa có).
-	if len(items) == 0 || items[len(items)-1].reportKey != "customer_daily" {
-		items = append(items, item{"customer_daily", startT.Format("2006-01-02"), endT.Format("2006-01-02"), days})
+	if len(items) == 0 || items[len(items)-1].reportKey != dailyKey {
+		items = append(items, item{dailyKey, startT.Format("2006-01-02"), endT.Format("2006-01-02"), days})
 	}
 
 	// Sắp xếp theo count tăng dần (ưu tiên chu kỳ dài = ít snapshot).
@@ -85,14 +103,15 @@ func getCandidateReportKeysAndRanges(startMs, endMs int64) []periodRangeCandidat
 // Chỉ dùng chu kỳ dài khi range [startT, endT] KHỚP ranh giới chu kỳ — tránh thừa/thiếu phát sinh.
 // Mỗi chu kỳ phải khớp với số ngày thực tế (count * ngày/chu kỳ = span thực tế).
 // Report align: yearly = 1/1–31/12, monthly = đầu tháng–cuối tháng, weekly = T2 00:00–CN 23:59:59.
+// Hỗ trợ cả customer_* và order_*.
 func periodRangeForReportKey(reportKey string, startT, endT time.Time, loc *time.Location) (fromStr, toStr string, count int) {
 	actualDays := int(endT.Sub(startT).Hours()/24) + 1
 	if actualDays < 1 {
 		actualDays = 1
 	}
 
-	switch reportKey {
-	case "customer_yearly":
+	switch {
+	case reportKey == "customer_yearly" || reportKey == "order_yearly":
 		// Chỉ dùng yearly khi range trùng ranh giới năm: bắt đầu 1/1 00:00, kết thúc 31/12 23:59:59.
 		if !isStartOfYear(startT) || !isEndOfYear(endT, loc) {
 			return "", "", 999999
@@ -106,7 +125,7 @@ func periodRangeForReportKey(reportKey string, startT, endT time.Time, loc *time
 		}
 		return fmt.Sprintf("%d", yFrom), fmt.Sprintf("%d", yTo), count
 
-	case "customer_monthly":
+	case reportKey == "customer_monthly" || reportKey == "order_monthly":
 		// Chỉ dùng monthly khi range khớp ranh giới tháng: start = 1st 00:00, end = cuối tháng 23:59:59.
 		if !isStartOfMonth(startT) || !isEndOfMonth(endT, loc) {
 			return "", "", 999999
@@ -123,7 +142,7 @@ func periodRangeForReportKey(reportKey string, startT, endT time.Time, loc *time
 		}
 		return from.Format("2006-01"), to.Format("2006-01"), count
 
-	case "customer_weekly":
+	case reportKey == "customer_weekly" || reportKey == "order_weekly":
 		// Chỉ dùng weekly khi range khớp ranh giới tuần: start = T2 00:00, end = CN 23:59:59.
 		if !isStartOfWeek(startT) || !isEndOfWeek(endT, loc) {
 			return "", "", 999999
@@ -140,7 +159,7 @@ func periodRangeForReportKey(reportKey string, startT, endT time.Time, loc *time
 		}
 		return mondayStart.Format("2006-01-02"), mondayEnd.Format("2006-01-02"), count
 
-	case "customer_daily":
+	case reportKey == "customer_daily" || reportKey == "order_daily":
 		// Daily luôn dùng được; ranh giới tùy startT/endT; count = số ngày thực tế.
 		return startT.Format("2006-01-02"), endT.Format("2006-01-02"), actualDays
 
@@ -202,6 +221,7 @@ var earliestPeriodKey = map[string]string{
 }
 
 // GetPeriodEndBalanceFromSnapshots lấy số dư cuối kỳ = 0 + tổng phát sinh từ đầu đến endMs.
+// Lưu ý: Mỗi snapshot là số phát sinh (in/out) của kỳ đó; cộng dồn = số dư.
 // Phải tích lũy TỪ ĐẦU mới khớp GetPeriodEndBalance (CRM). Tối ưu: ưu tiên chu kỳ dài.
 func (s *ReportService) GetPeriodEndBalanceFromSnapshots(ctx context.Context, ownerOrgID primitive.ObjectID, params *reportdto.CustomersQueryParams) (map[string]interface{}, error) {
 	if params == nil {

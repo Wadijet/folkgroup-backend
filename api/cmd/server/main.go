@@ -11,6 +11,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
+	approval "meta_commerce/internal/approval"
 	crmvc "meta_commerce/internal/api/crm/service"
 	"meta_commerce/internal/delivery"
 	"meta_commerce/internal/global"
@@ -207,6 +208,9 @@ func main() {
 	// Khởi tạo registry
 	InitRegistry()
 
+	// Khởi tạo cơ chế duyệt (pkg/approval engine + bridge)
+	approval.Init()
+
 	// Subcommand: --backfill-conv [ownerOrganizationId] — chạy backfill conversation rồi thoát
 	for i, arg := range os.Args {
 		if arg == "--backfill-conv" {
@@ -396,20 +400,24 @@ func main() {
 
 	// Worker CRM Bulk: xử lý crm_bulk_jobs (sync, backfill, rebuild, recalculate)
 	// Interval 2 phút, batch 2 — giảm tải mặc định để tránh CPU spike.
-	crmBulkWorker := worker.NewCrmBulkWorker(2*time.Minute, 2)
-	ctxCrmBulk, cancelCrmBulk := context.WithCancel(context.Background())
-	defer cancelCrmBulk()
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.WithFields(map[string]interface{}{"panic": r}).Error("📋 [CRM_BULK] Worker goroutine panic")
-			}
+	crmBulkWorker, err := worker.NewCrmBulkWorker(2*time.Minute, 2)
+	if err != nil {
+		log.WithError(err).Warn("Failed to create CRM Bulk Worker")
+	} else {
+		ctxCrmBulk, cancelCrmBulk := context.WithCancel(context.Background())
+		defer cancelCrmBulk()
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.WithFields(map[string]interface{}{"panic": r}).Error("📋 [CRM_BULK] Worker goroutine panic")
+				}
+			}()
+			log.Info("📋 [CRM_BULK] Starting CRM Bulk Worker...")
+			crmBulkWorker.Start(ctxCrmBulk)
+			log.Warn("📋 [CRM_BULK] Worker đã dừng")
 		}()
-		log.Info("📋 [CRM_BULK] Starting CRM Bulk Worker...")
-		crmBulkWorker.Start(ctxCrmBulk)
-		log.Warn("📋 [CRM_BULK] Worker đã dừng")
-	}()
-	log.Info("📋 [CRM_BULK] CRM Bulk Worker started successfully")
+		log.Info("📋 [CRM_BULK] CRM Bulk Worker started successfully")
+	}
 
 	// Worker tính lại phân loại khách hàng (full: hàng ngày; smart: mỗi 6h, chỉ khách gần ngưỡng)
 	classificationRefreshFullWorker, err := worker.NewClassificationRefreshWorker(24*time.Hour, 200, worker.ClassificationRefreshModeFull)

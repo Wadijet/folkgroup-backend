@@ -27,6 +27,9 @@ func GetDomainFromEventType(eventType string) string {
 	if strings.HasPrefix(eventType, "analytics_") {
 		return DomainAnalytics
 	}
+	if strings.HasPrefix(eventType, "ads_") {
+		return DomainAds
+	}
 	return DomainSystem // Default
 }
 
@@ -42,7 +45,8 @@ func GetSeverityFromEventType(eventType string) string {
 	if strings.Contains(eventType, "_failed") ||
 		strings.Contains(eventType, "_alert") ||
 		strings.Contains(eventType, "_timeout") ||
-		strings.Contains(eventType, "_overload") {
+		strings.Contains(eventType, "_overload") ||
+		strings.Contains(eventType, "ads_action_pending_approval") {
 		return SeverityHigh
 	}
 	if strings.Contains(eventType, "_warning") ||
@@ -51,7 +55,9 @@ func GetSeverityFromEventType(eventType string) string {
 	}
 	if strings.Contains(eventType, "_completed") ||
 		strings.Contains(eventType, "_created") ||
-		strings.Contains(eventType, "_updated") {
+		strings.Contains(eventType, "_updated") ||
+		strings.Contains(eventType, "ads_action_executed") ||
+		strings.Contains(eventType, "ads_action_rejected") {
 		return SeverityInfo
 	}
 	return SeverityMedium // Default

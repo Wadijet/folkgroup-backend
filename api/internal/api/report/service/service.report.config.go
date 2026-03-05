@@ -68,6 +68,28 @@ func getDisabledOrderReportKeys() []string {
 	return orderReportKeysDisabled
 }
 
+// --- Ads report ---
+
+// allAdsReportKeys danh sách report keys ads (ads_daily dùng custom engine).
+var allAdsReportKeys = []string{"ads_daily"}
+
+// GetActiveAdsReportKeys trả về danh sách ads report keys đang bật.
+func GetActiveAdsReportKeys() []string {
+	return filterActiveReportKeys(allAdsReportKeys, getDisabledAdsReportKeys())
+}
+
+// IsAdsReportKeyDisabled trả về true nếu reportKey đang bị tắt (fix cứng).
+func IsAdsReportKeyDisabled(reportKey string) bool {
+	return isReportKeyDisabled(reportKey, getDisabledAdsReportKeys())
+}
+
+// adsReportKeysDisabled — fix cứng: tạm thời không tắt ads_daily.
+var adsReportKeysDisabled = []string{}
+
+func getDisabledAdsReportKeys() []string {
+	return adsReportKeysDisabled
+}
+
 // --- Helpers ---
 
 func filterActiveReportKeys(all []string, disabled []string) []string {

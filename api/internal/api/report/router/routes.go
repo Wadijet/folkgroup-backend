@@ -20,7 +20,10 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 	reportReadMiddleware := middleware.AuthMiddleware("Report.Read")
 	reportRecomputeMiddleware := middleware.AuthMiddleware("Report.Recompute")
 	orgContextMiddleware := middleware.OrganizationContextMiddleware()
-	apirouter.RegisterRouteWithMiddleware(v1, "/reports", "GET", "/trend", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleTrend)
+	// Order period-movements từ snapshots — CHÍNH, domain order (không cần reportKey).
+	apirouter.RegisterRouteWithMiddleware(v1, "/reports", "GET", "/order/period-movements-from-snapshots", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleOrderPeriodMovementsFromSnapshots)
+	// PHỤ: order period-movements từ DB (aggregate pc_pos_orders, đối chiếu — query nặng).
+	apirouter.RegisterRouteWithMiddleware(v1, "/reports", "GET", "/order/period-movements-from-db", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleOrderPeriodMovementsFromDb)
 	apirouter.RegisterRouteWithMiddleware(v1, "/reports", "POST", "/recompute", []fiber.Handler{reportRecomputeMiddleware, orgContextMiddleware}, reportHandler.HandleRecompute)
 
 	// Dashboard Order Processing (TAB 6) — dữ liệu lũy kế, query trực tiếp DB
@@ -35,14 +38,14 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/inventory/products", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetInventoryProducts)
 	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/inventory/products/:productId/variations", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetInventoryProductVariations)
 
-	// Dashboard Customer Intelligence (TAB 4) — KPI, tier distribution, lifecycle, bảng khách, VIP inactive panel
+	// Dashboard Customer Intelligence (TAB 4) — CHÍNH: snapshot; PHỤ: CRM (đối chiếu, nặng).
 	// Đăng ký route con trước /customers để tránh conflict
-	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/customers/trend-from-snapshots", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetCustomersTrendFromSnapshots)
-	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/customers/trend/transition-matrix", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetTransitionMatrix)
-	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/customers/trend/group-changes", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetGroupChanges)
+	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/customers/period-movements-from-snapshots", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetCustomersPeriodMovementsFromSnapshots)
+	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/customers/period-movements/transition-matrix", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetTransitionMatrix)
+	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/customers/period-movements/group-changes", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetGroupChanges)
 	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/customers/period-end-balance", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetPeriodEndBalance)
 	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/customers/period-end-balance-from-snapshots", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetPeriodEndBalanceFromSnapshots)
-	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/customers/trend-from-crm", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetCustomersTrendFromCrm)
+	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/customers/period-movements-from-db", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetCustomersPeriodMovementsFromDb)
 	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/customers/journey-funnel", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetJourneyFunnel)
 	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/customers/asset-matrix", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetAssetMatrix)
 	apirouter.RegisterRouteWithMiddleware(v1, "/dashboard", "GET", "/customers/matrix-journey-value", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleGetMatrixJourneyValue)

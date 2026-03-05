@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"meta_commerce/config"
+	pkgapproval "meta_commerce/pkg/approval"
 	agentmodels "meta_commerce/internal/api/agent/models"
 	aimodels "meta_commerce/internal/api/ai/models"
 	authmodels "meta_commerce/internal/api/auth/models"
 	contentmodels "meta_commerce/internal/api/content/models"
 	crmmodels "meta_commerce/internal/api/crm/models"
+	adsmodels "meta_commerce/internal/api/ads/models"
+	metamodels "meta_commerce/internal/api/meta/models"
 	ctamodels "meta_commerce/internal/api/cta/models"
 	deliverymodels "meta_commerce/internal/api/delivery/models"
 	fbmodels "meta_commerce/internal/api/fb/models"
@@ -113,6 +116,16 @@ func initColNames() {
 	global.MongoDB_ColNames.CrmNotes = "crm_notes"
 	global.MongoDB_ColNames.CrmPendingIngest = "crm_pending_ingest"
 	global.MongoDB_ColNames.CrmBulkJobs = "crm_bulk_jobs"
+
+	// Module Meta Ads
+	global.MongoDB_ColNames.MetaAdAccounts = "meta_ad_accounts"
+	global.MongoDB_ColNames.MetaCampaigns = "meta_campaigns"
+	global.MongoDB_ColNames.MetaAdSets = "meta_adsets"
+	global.MongoDB_ColNames.MetaAds = "meta_ads"
+	global.MongoDB_ColNames.MetaAdInsights = "meta_ad_insights"
+	global.MongoDB_ColNames.ActionPendingApproval = "action_pending_approval"
+	global.MongoDB_ColNames.AdsApprovalConfig = "ads_approval_config"
+	global.MongoDB_ColNames.AdsActivityHistory = "ads_activity_history"
 
 	logrus.Info("Initialized collection names") // Ghi log thông báo đã khởi tạo tên các collection
 }
@@ -221,6 +234,16 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmNotes), crmmodels.CrmNote{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmPendingIngest), crmmodels.CrmPendingIngest{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmBulkJobs), crmmodels.CrmBulkJob{})
+
+	// Module Meta Ads
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.MetaAdAccounts), metamodels.MetaAdAccount{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.MetaCampaigns), metamodels.MetaCampaign{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.MetaAdSets), metamodels.MetaAdSet{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.MetaAds), metamodels.MetaAd{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.MetaAdInsights), metamodels.MetaAdInsight{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.ActionPendingApproval), pkgapproval.ActionPending{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsApprovalConfig), adsmodels.AdsApprovalConfig{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsActivityHistory), metamodels.AdsActivityHistory{})
 }
 
 // initFirebase khởi tạo Firebase Admin SDK

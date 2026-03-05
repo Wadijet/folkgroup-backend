@@ -123,6 +123,17 @@ func handleReportDataChange(ctx context.Context, e events.DataChangeEvent) {
 			return
 		}
 		markDirtyForPeriods(ctx, reportSvc, periodKeys, ownerOrgID)
+	case global.MongoDB_ColNames.MetaAdInsights:
+		// Report ads_daily: hook meta_ad_insights — dateStart = periodKey, dimensions theo adAccountId.
+		dateStart := events.GetStringField(e.Document, "DateStart")
+		adAccountId := events.GetStringField(e.Document, "AdAccountId")
+		if dateStart == "" || adAccountId == "" {
+			return
+		}
+		if !IsAdsReportKeyDisabled("ads_daily") {
+			_ = reportSvc.MarkDirtyAdsDaily(ctx, dateStart, ownerOrgID, adAccountId)
+		}
+	// Ads profile (currentMetrics): hook 4 level — xử lý trong meta/hooks, không phải report.
 	default:
 		return
 	}

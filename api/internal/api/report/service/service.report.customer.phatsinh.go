@@ -606,7 +606,7 @@ func buildPhatSinhMetrics(
 }
 
 // computeAllPhatSinhBatch tính phát sinh cho nhiều kỳ trong 1 lần — mỗi kỳ dùng snapshot đầu/cuối, không duyệt activities.
-// Trả về []metrics tương ứng từng periodKey. Dùng cho trend-from-crm.
+// Trả về []metrics tương ứng từng periodKey. Dùng cho period-movements-from-db (PHỤ, đối chiếu — query DB nặng).
 func computeAllPhatSinhBatch(ctx context.Context, actSvc *crmvc.CrmActivityService, ownerOrgID primitive.ObjectID, reportKey string, periodKeys []string) ([]map[string]interface{}, error) {
 	if len(periodKeys) == 0 {
 		return nil, nil

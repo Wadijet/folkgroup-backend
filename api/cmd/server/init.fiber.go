@@ -12,6 +12,8 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/gofiber/fiber/v3/middleware/requestid"
 
+	adsrouter "meta_commerce/internal/api/ads/router"
+	approvalrouter "meta_commerce/internal/api/approval/router"
 	agentrouter "meta_commerce/internal/api/agent/router"
 	airouter "meta_commerce/internal/api/ai/router"
 	authrouter "meta_commerce/internal/api/auth/router"
@@ -20,6 +22,7 @@ import (
 	ctarouter "meta_commerce/internal/api/cta/router"
 	deliveryrouter "meta_commerce/internal/api/delivery/router"
 	fbrouter "meta_commerce/internal/api/fb/router"
+	metarouter "meta_commerce/internal/api/meta/router"
 	notificationrouter "meta_commerce/internal/api/notification/router"
 	pcrouter "meta_commerce/internal/api/pc/router"
 	reportrouter "meta_commerce/internal/api/report/router"
@@ -296,7 +299,10 @@ func InitFiberApp() *fiber.App {
 	// Khởi tạo routes trước khi đăng ký response middleware (theo từng domain để tránh import cycle)
 	if err := router.SetupRoutes(app,
 		authrouter.Register,
+		approvalrouter.Register,
+		adsrouter.Register,
 		fbrouter.Register,
+		metarouter.Register,
 		pcrouter.Register,
 		webhookrouter.Register,
 		reportrouter.Register,

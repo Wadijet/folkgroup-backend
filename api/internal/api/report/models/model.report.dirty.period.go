@@ -11,6 +11,7 @@ type ReportDirtyPeriod struct {
 	ReportKey           string              `json:"reportKey" bson:"reportKey" index:"single:1,compound:dirty_org_period,compound:dirty_org_unprocessed"`   // Key báo cáo
 	PeriodKey           string              `json:"periodKey" bson:"periodKey" index:"compound:dirty_org_period,compound:dirty_org_unprocessed"`             // Vd: 2025-02-01
 	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"compound:dirty_org_period,compound:dirty_org_unprocessed"` // Tổ chức
+	AdAccountId         string              `json:"adAccountId,omitempty" bson:"adAccountId,omitempty"` // (Optional) Cho ads_daily: dimensions theo account
 	MarkedAt            int64              `json:"markedAt" bson:"markedAt" index:"compound:dirty_worker_marked,order:1"`                                  // Unix seconds — sort cho worker
 	ProcessedAt         *int64              `json:"processedAt,omitempty" bson:"processedAt,omitempty" index:"single:1,compound:dirty_org_unprocessed,compound:dirty_worker_marked"` // null = chưa xử lý
 }

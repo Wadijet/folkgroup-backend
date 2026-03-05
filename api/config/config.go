@@ -42,6 +42,13 @@ type Configuration struct {
 	TelegramChatIDs     string `env:"TELEGRAM_CHAT_IDS"`     // Danh sách chat IDs phân cách bằng dấu phẩy, ví dụ: "-123456789,-987654321" (optional)
 	// MongoDB Import: Giới hạn body size cho upload file (MB). Mặc định 500MB cho file lớn.
 	MongoDBImportMaxBodyMB int `env:"MONGODB_IMPORT_MAX_BODY_MB" envDefault:"500"`
+	// Meta Marketing API: Access token cho đồng bộ Ads (ads_read, ads_management). Có thể dùng User token hoặc System User token.
+	MetaAccessToken string `env:"META_ACCESS_TOKEN"` // Token để gọi Meta Graph API (Marketing/Ads)
+	// Meta App credentials (cho exchange short-lived → long-lived token)
+	MetaAppID     string `env:"META_APP_ID"`     // App ID từ Meta Developer Console
+	MetaAppSecret string `env:"META_APP_SECRET"` // App Secret (bảo mật, không commit)
+	// Đường dẫn file lưu token dài hạn (~60 ngày). Nếu có, server ưu tiên dùng token từ file khi khởi động.
+	MetaTokenFile string `env:"META_TOKEN_FILE" envDefault:"config/meta_token.json"` // File JSON lưu access_token, expires_in
 }
 
 // getEnvPath trả về đường dẫn đến file env

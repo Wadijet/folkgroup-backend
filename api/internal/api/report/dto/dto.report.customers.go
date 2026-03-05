@@ -384,7 +384,7 @@ type CustomersSnapshotResult struct {
 	SnapshotComputedAt     int64                  `json:"snapshotComputedAt,omitempty"`
 }
 
-// CustomersTrendResult kết quả GET /dashboard/customers/trend — snapshot hiện tại + trend + comparison.
+// CustomersTrendResult kết quả GET /dashboard/customers/period-movements-from-snapshots (hoặc -from-db) — snapshot hiện tại + phát sinh theo kỳ + comparison.
 type CustomersTrendResult struct {
 	CurrentSnapshot *CustomersSnapshotResult       `json:"currentSnapshot"`
 	TrendData       []CustomersTrendDataItem      `json:"trendData"`
@@ -406,7 +406,7 @@ type ComparisonItem struct {
 	ChangePct float64     `json:"changePct"`
 }
 
-// TransitionMatrixResult kết quả GET /dashboard/customers/trend/transition-matrix.
+// TransitionMatrixResult kết quả GET /dashboard/customers/period-movements/transition-matrix.
 type TransitionMatrixResult struct {
 	FromPeriod      string                        `json:"fromPeriod"`
 	ToPeriod        string                        `json:"toPeriod"`
@@ -435,7 +435,7 @@ type SankeyLink struct {
 	Value  int64  `json:"value"`
 }
 
-// GroupChangesResult kết quả GET /dashboard/customers/trend/group-changes.
+// GroupChangesResult kết quả GET /dashboard/customers/period-movements/group-changes.
 type GroupChangesResult struct {
 	FromPeriod string              `json:"fromPeriod"`
 	ToPeriod   string              `json:"toPeriod"`

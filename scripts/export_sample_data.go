@@ -35,6 +35,7 @@ var collections = []string{
 	"ai_workflow_runs", "ai_step_runs", "ai_generation_batches", "ai_candidates", "ai_runs", "ai_workflow_commands",
 	"report_definitions", "report_snapshots", "report_dirty_periods",
 	"crm_customers", "crm_activity_history", "crm_notes",
+	"meta_ad_accounts", "meta_campaigns", "meta_adsets", "meta_ads", "meta_ad_insights",
 }
 
 const limitPerCollection = 20

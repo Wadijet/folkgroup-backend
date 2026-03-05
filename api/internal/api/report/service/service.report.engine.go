@@ -21,26 +21,30 @@ import (
 const ReportTimezone = "Asia/Ho_Chi_Minh"
 
 // Compute chạy engine tính báo cáo: load definition, aggregation nguồn, upsert snapshot.
-// Hỗ trợ báo cáo có tagDimension trong metadata: thống kê theo posData.tags, chia đều khi đơn có nhiều tag.
-// Báo cáo customer_* (customer_daily, ...) dùng engine riêng ComputeCustomerReport.
-// Báo cáo order_*: chỉ order_daily được tính; order_weekly/monthly/yearly bị tắt — tính on-demand khi xem.
-func (s *ReportService) Compute(ctx context.Context, reportKey, periodKey string, ownerOrganizationID primitive.ObjectID) error {
+// adAccountId: (optional) Cho ads_daily — dimensions theo account.
+func (s *ReportService) Compute(ctx context.Context, reportKey, periodKey string, ownerOrganizationID primitive.ObjectID, adAccountId string) error {
 	if len(reportKey) >= 9 && reportKey[:9] == "customer_" {
-		// Bỏ qua chu kỳ bị tắt bởi config — xóa dirty period và snapshot rồi return.
 		if IsCustomerReportKeyDisabled(reportKey) {
-			_ = s.DeleteDirtyPeriod(ctx, reportKey, periodKey, ownerOrganizationID)
-			_ = s.DeleteReportSnapshot(ctx, reportKey, periodKey, ownerOrganizationID)
+			_ = s.DeleteDirtyPeriod(ctx, reportKey, periodKey, ownerOrganizationID, "")
+			_ = s.DeleteReportSnapshot(ctx, reportKey, periodKey, ownerOrganizationID, "")
 			return nil
 		}
 		return s.ComputeCustomerReport(ctx, reportKey, periodKey, ownerOrganizationID)
 	}
 	if len(reportKey) >= 6 && reportKey[:6] == "order_" {
-		// Bỏ qua chu kỳ order bị tắt (weekly/monthly/yearly) — xóa dirty và snapshot rồi return.
 		if IsOrderReportKeyDisabled(reportKey) {
-			_ = s.DeleteDirtyPeriod(ctx, reportKey, periodKey, ownerOrganizationID)
-			_ = s.DeleteReportSnapshot(ctx, reportKey, periodKey, ownerOrganizationID)
+			_ = s.DeleteDirtyPeriod(ctx, reportKey, periodKey, ownerOrganizationID, "")
+			_ = s.DeleteReportSnapshot(ctx, reportKey, periodKey, ownerOrganizationID, "")
 			return nil
 		}
+	}
+	if reportKey == "ads_daily" {
+		if IsAdsReportKeyDisabled(reportKey) {
+			_ = s.DeleteDirtyPeriod(ctx, reportKey, periodKey, ownerOrganizationID, adAccountId)
+			_ = s.DeleteReportSnapshot(ctx, reportKey, periodKey, ownerOrganizationID, adAccountId)
+			return nil
+		}
+		return s.ComputeAdsDailyReport(ctx, periodKey, ownerOrganizationID, adAccountId)
 	}
 
 	def, err := s.LoadDefinition(ctx, reportKey)
@@ -478,9 +482,9 @@ func getStatusLabel(labels map[string]string, statusKey string) string {
 	return statusKey
 }
 
-// computeWithTagDimension chạy aggregation với $unwind tags, chia đều số lượng và số tiền khi đơn có nhiều tag.
-// Thêm byStatus khi có statusDimension trong metadata (theo docs Pancake POS API).
-func (s *ReportService) computeWithTagDimension(ctx context.Context, reportKey, periodKey string, ownerOrganizationID primitive.ObjectID, def *reportmodels.ReportDefinition, sourceColl *mongo.Collection, filter bson.M, tagDim *tagDimensionConfig) error {
+// aggregateOrderMetricsWithTagDimension chạy aggregation order với $unwind tags, trả metrics (không upsert).
+// Dùng cho period-movements-from-db (PHỤ, đối chiếu) — query DB trực tiếp.
+func (s *ReportService) aggregateOrderMetricsWithTagDimension(ctx context.Context, def *reportmodels.ReportDefinition, sourceColl *mongo.Collection, filter bson.M, tagDim *tagDimensionConfig) (map[string]interface{}, error) {
 	tagPath := tagDim.FieldPath
 	nameField := tagDim.NameField
 	amountPath := tagDim.TotalAmountPath
@@ -618,7 +622,7 @@ func (s *ReportService) computeWithTagDimension(ctx context.Context, reportKey, 
 
 	cursor, err := sourceColl.Aggregate(ctx, pipeline)
 	if err != nil {
-		return common.ConvertMongoError(err)
+		return nil, common.ConvertMongoError(err)
 	}
 	defer cursor.Close(ctx)
 
@@ -668,7 +672,7 @@ func (s *ReportService) computeWithTagDimension(ctx context.Context, reportKey, 
 			} `bson:"byOrderSource"`
 		}
 		if err := cursor.Decode(&raw); err != nil {
-			return common.ConvertMongoError(err)
+			return nil, common.ConvertMongoError(err)
 		}
 		totalOrderCount := int64(0)
 		totalAmount := int64(0)
@@ -775,23 +779,129 @@ func (s *ReportService) computeWithTagDimension(ctx context.Context, reportKey, 
 		applyDerivedMetricsFromDef(metrics, totalMap, totalMap, def.Metrics)
 	}
 
+	return metrics, nil
+}
+
+// computeWithTagDimension chạy aggregation với $unwind tags, chia đều số lượng và số tiền khi đơn có nhiều tag.
+// Thêm byStatus khi có statusDimension trong metadata (theo docs Pancake POS API).
+func (s *ReportService) computeWithTagDimension(ctx context.Context, reportKey, periodKey string, ownerOrganizationID primitive.ObjectID, def *reportmodels.ReportDefinition, sourceColl *mongo.Collection, filter bson.M, tagDim *tagDimensionConfig) error {
+	metrics, err := s.aggregateOrderMetricsWithTagDimension(ctx, def, sourceColl, filter, tagDim)
+	if err != nil {
+		return err
+	}
 	return s.upsertSnapshot(ctx, reportKey, periodKey, def.PeriodType, ownerOrganizationID, metrics)
 }
 
+// AggregateOrderReportForPeriod chạy aggregation order cho một kỳ, trả metrics (không upsert snapshot).
+// Dùng cho period-movements-from-db (PHỤ, đối chiếu) — query DB trực tiếp từ pc_pos_orders.
+func (s *ReportService) AggregateOrderReportForPeriod(ctx context.Context, reportKey, periodKey string, ownerOrganizationID primitive.ObjectID) (map[string]interface{}, error) {
+	def, err := s.LoadDefinition(ctx, reportKey)
+	if err != nil {
+		return nil, fmt.Errorf("load report definition: %w", err)
+	}
+	loc, err := time.LoadLocation(ReportTimezone)
+	if err != nil {
+		return nil, fmt.Errorf("load timezone %s: %w", ReportTimezone, err)
+	}
+	var startSec, endSec int64
+	switch def.PeriodType {
+	case "day":
+		t, err := time.ParseInLocation("2006-01-02", periodKey, loc)
+		if err != nil {
+			return nil, fmt.Errorf("parse periodKey %s: %w", periodKey, err)
+		}
+		startSec = t.Unix()
+		endSec = t.AddDate(0, 0, 1).Unix() - 1
+	case "week":
+		t, err := time.ParseInLocation("2006-01-02", periodKey, loc)
+		if err != nil {
+			return nil, fmt.Errorf("parse periodKey %s (cần YYYY-MM-DD): %w", periodKey, err)
+		}
+		weekday := int(t.Weekday())
+		if weekday == 0 {
+			weekday = 7
+		}
+		monday := t.AddDate(0, 0, -(weekday - 1))
+		startSec = monday.Unix()
+		endSec = monday.AddDate(0, 0, 7).Unix() - 1
+	case "month":
+		t, err := time.ParseInLocation("2006-01", periodKey, loc)
+		if err != nil {
+			return nil, fmt.Errorf("parse periodKey %s (cần YYYY-MM): %w", periodKey, err)
+		}
+		startSec = t.Unix()
+		endSec = t.AddDate(0, 1, 0).Add(-time.Second).Unix()
+	case "year":
+		t, err := time.ParseInLocation("2006", periodKey, loc)
+		if err != nil {
+			return nil, fmt.Errorf("parse periodKey %s (cần YYYY): %w", periodKey, err)
+		}
+		startSec = t.Unix()
+		endSec = t.AddDate(1, 0, 0).Add(-time.Second).Unix()
+	default:
+		return nil, fmt.Errorf("periodType %s chưa hỗ trợ", def.PeriodType)
+	}
+	sourceColl, ok := global.RegistryCollections.Get(def.SourceCollection)
+	if !ok {
+		return nil, fmt.Errorf("không tìm thấy collection nguồn %s: %w", def.SourceCollection, common.ErrNotFound)
+	}
+	timeUnit := def.TimeFieldUnit
+	if timeUnit == "" {
+		timeUnit = "second"
+	}
+	var timeFrom, timeTo int64
+	switch timeUnit {
+	case "millisecond":
+		timeFrom = startSec * 1000
+		timeTo = endSec*1000 + 999
+	default:
+		timeFrom = startSec
+		timeTo = endSec
+	}
+	filter := bson.M{
+		"ownerOrganizationId": ownerOrganizationID,
+		def.TimeField:         bson.M{"$gte": timeFrom, "$lte": timeTo},
+	}
+	if statusPath := extractStatusDimensionField(def.Metadata); statusPath != "" {
+		if exclude := extractExcludeStatuses(def.Metadata); len(exclude) > 0 {
+			filter[statusPath] = bson.M{"$nin": exclude}
+		}
+	}
+	tagDim := extractTagDimension(def.Metadata)
+	if tagDim == nil {
+		return nil, fmt.Errorf("report %s không có tagDimension (chỉ hỗ trợ order report)", reportKey)
+	}
+	return s.aggregateOrderMetricsWithTagDimension(ctx, def, sourceColl, filter, tagDim)
+}
+
 func (s *ReportService) upsertSnapshot(ctx context.Context, reportKey, periodKey, periodType string, ownerOrganizationID primitive.ObjectID, metrics map[string]interface{}) error {
+	return s.upsertSnapshotWithDimensions(ctx, reportKey, periodKey, periodType, ownerOrganizationID, nil, metrics)
+}
+
+// upsertSnapshotWithDimensions upsert snapshot, hỗ trợ dimensions (vd: adAccountId cho ads_daily).
+func (s *ReportService) upsertSnapshotWithDimensions(ctx context.Context, reportKey, periodKey, periodType string, ownerOrganizationID primitive.ObjectID, dimensions map[string]interface{}, metrics map[string]interface{}) error {
 	now := time.Now().Unix()
 	filterSnap := bson.M{
 		"reportKey":            reportKey,
 		"periodKey":            periodKey,
 		"ownerOrganizationId": ownerOrganizationID,
 	}
+	if len(dimensions) > 0 {
+		for k, v := range dimensions {
+			filterSnap["dimensions."+k] = v
+		}
+	}
+	setFields := bson.M{
+		"metrics":    metrics,
+		"periodType": periodType,
+		"computedAt": now,
+		"updatedAt":  now,
+	}
+	if len(dimensions) > 0 {
+		setFields["dimensions"] = dimensions
+	}
 	update := bson.M{
-		"$set": bson.M{
-			"metrics":     metrics,
-			"periodType":  periodType,
-			"computedAt":  now,
-			"updatedAt":   now,
-		},
+		"$set":         setFields,
 		"$setOnInsert": bson.M{"createdAt": now},
 	}
 	opts := options.Update().SetUpsert(true)

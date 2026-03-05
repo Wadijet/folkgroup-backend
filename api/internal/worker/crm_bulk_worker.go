@@ -15,19 +15,28 @@ import (
 
 // CrmBulkWorker worker xử lý crm_bulk_jobs: đọc job chưa xử lý, gọi Sync/Backfill/Rebuild/Recalculate.
 type CrmBulkWorker struct {
-	interval  time.Duration
-	batchSize int
+	interval      time.Duration
+	batchSize     int
+	bulkJobSvc    *crmvc.CrmBulkJobService
 }
 
 // NewCrmBulkWorker tạo mới CrmBulkWorker.
-func NewCrmBulkWorker(interval time.Duration, batchSize int) *CrmBulkWorker {
+func NewCrmBulkWorker(interval time.Duration, batchSize int) (*CrmBulkWorker, error) {
 	if interval < 30*time.Second {
 		interval = 1 * time.Minute
 	}
 	if batchSize <= 0 {
 		batchSize = 3
 	}
-	return &CrmBulkWorker{interval: interval, batchSize: batchSize}
+	bulkJobSvc, err := crmvc.NewCrmBulkJobService()
+	if err != nil {
+		return nil, err
+	}
+	return &CrmBulkWorker{
+		interval:   interval,
+		batchSize:  batchSize,
+		bulkJobSvc: bulkJobSvc,
+	}, nil
 }
 
 // Start chạy worker trong vòng lặp.
@@ -61,7 +70,7 @@ func (w *CrmBulkWorker) Start(ctx context.Context) {
 				}()
 
 				batchSize := GetEffectiveBatchSize(w.batchSize, PriorityNormal)
-				list, err := crmvc.GetUnprocessedCrmBulkJobs(ctx, batchSize)
+				list, err := w.bulkJobSvc.GetUnprocessed(ctx, batchSize)
 				if err != nil {
 					log.WithError(err).Error("📋 [CRM_BULK] Lỗi lấy danh sách bulk jobs")
 					return
@@ -88,7 +97,7 @@ func (w *CrmBulkWorker) Start(ctx context.Context) {
 							"jobId":   item.ID.Hex(),
 						}).Warn("📋 [CRM_BULK] Xử lý job lỗi")
 					}
-					if setErr := crmvc.SetCrmBulkJobProcessed(ctx, item.ID, errStr, result); setErr != nil {
+					if setErr := w.bulkJobSvc.SetProcessed(ctx, item.ID, errStr, result); setErr != nil {
 						log.WithError(setErr).Warn("📋 [CRM_BULK] SetCrmBulkJobProcessed thất bại")
 					}
 				}

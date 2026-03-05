@@ -20,7 +20,8 @@ import (
 // CrmCustomerHandler xử lý API profile khách hàng và CRUD (find, find-one, find-by-id, find-with-pagination, count).
 type CrmCustomerHandler struct {
 	*basehdl.BaseHandler[crmmodels.CrmCustomer, crmdto.CrmCustomerCreateInput, crmdto.CrmCustomerUpdateInput]
-	CustomerService *crmvc.CrmCustomerService
+	CustomerService   *crmvc.CrmCustomerService
+	BulkJobService   *crmvc.CrmBulkJobService
 }
 
 // NewCrmCustomerHandler tạo CrmCustomerHandler mới.
@@ -29,9 +30,14 @@ func NewCrmCustomerHandler() (*CrmCustomerHandler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("tạo CrmCustomerService: %w", err)
 	}
+	bulkJobSvc, err := crmvc.NewCrmBulkJobService()
+	if err != nil {
+		return nil, fmt.Errorf("tạo CrmBulkJobService: %w", err)
+	}
 	hdl := &CrmCustomerHandler{
 		BaseHandler:     basehdl.NewBaseHandler[crmmodels.CrmCustomer, crmdto.CrmCustomerCreateInput, crmdto.CrmCustomerUpdateInput](svc.BaseServiceMongoImpl),
 		CustomerService: svc,
+		BulkJobService:  bulkJobSvc,
 	}
 	// Filter cho CRUD: cho phép filter theo classification và unifiedId (dashboard, bảng khách).
 	hdl.SetFilterOptions(basehdl.FilterOptions{
@@ -88,7 +94,7 @@ func (h *CrmCustomerHandler) HandleRebuildCrm(c fiber.Ctx) error {
 			params["sources"] = syncSources
 			params["types"] = backfillTypes
 		}
-		jobID, err := crmvc.EnqueueCrmBulkJob(c.Context(), crmmodels.CrmBulkJobRebuild, *orgID, params)
+		jobID, err := h.BulkJobService.Enqueue(c.Context(), crmmodels.CrmBulkJobRebuild, *orgID, params)
 		if err != nil {
 			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
 				"code": common.ErrCodeDatabase.Code, "message": "Lỗi đưa job vào queue: " + err.Error(), "status": "error",
@@ -134,7 +140,7 @@ func (h *CrmCustomerHandler) HandleRecalculateAllCustomers(c fiber.Ctx) error {
 		if input.Limit > 0 {
 			params["limit"] = input.Limit
 		}
-		jobID, err := crmvc.EnqueueCrmBulkJob(c.Context(), crmmodels.CrmBulkJobRecalculateAll, *orgID, params)
+		jobID, err := h.BulkJobService.Enqueue(c.Context(), crmmodels.CrmBulkJobRecalculateAll, *orgID, params)
 		if err != nil {
 			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
 				"code": common.ErrCodeDatabase.Code, "message": "Lỗi đưa job vào queue: " + err.Error(), "status": "error",
@@ -168,7 +174,7 @@ func (h *CrmCustomerHandler) HandleRecalculateCustomer(c fiber.Ctx) error {
 			return nil
 		}
 		params := bson.M{"unifiedId": unifiedId}
-		jobID, err := crmvc.EnqueueCrmBulkJob(c.Context(), crmmodels.CrmBulkJobRecalculateOne, *orgID, params)
+		jobID, err := h.BulkJobService.Enqueue(c.Context(), crmmodels.CrmBulkJobRecalculateOne, *orgID, params)
 		if err != nil {
 			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
 				"code": common.ErrCodeDatabase.Code, "message": "Lỗi đưa job vào queue: " + err.Error(), "status": "error",

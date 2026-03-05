@@ -88,7 +88,23 @@ type MongoDB_Auth_CollectionName struct {
 	CrmActivityHistory  string // crm_activity_history: lịch sử hoạt động
 	CrmNotes            string // crm_notes: ghi chú khách
 	CrmPendingIngest    string // crm_pending_ingest: queue cho worker xử lý Merge/Ingest
-	CrmBulkJobs        string // crm_bulk_jobs: queue cho worker xử lý sync, backfill, recalculate
+	CrmBulkJobs         string // crm_bulk_jobs: queue cho worker xử lý sync, backfill, recalculate
+
+	// Module Meta Ads (tiền tố meta_)
+	MetaAdAccounts  string // meta_ad_accounts: ad accounts (act_xxx)
+	MetaCampaigns    string // meta_campaigns: campaigns
+	MetaAdSets       string // meta_adsets: ad sets
+	MetaAds          string // meta_ads: ads
+	MetaAdInsights   string // meta_ad_insights: insights theo ngày
+
+	// Module Approval — Cơ chế duyệt độc lập (ads, content, ... dùng chung)
+	ActionPendingApproval string // action_pending_approval: queue đề xuất chờ duyệt (generic)
+
+	// Module Ads — Cấu hình duyệt theo ad account (tách khỏi meta)
+	AdsApprovalConfig string // ads_approval_config: cấu hình duyệt theo adAccountId
+
+	// Module Ads — Activity History (khi currentMetrics thay đổi)
+	AdsActivityHistory string // ads_activity_history: lịch sử thay đổi metrics
 }
 
 // Các biến toàn cục

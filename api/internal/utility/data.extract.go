@@ -270,6 +270,35 @@ func ExtractDataIfExists(s interface{}) error {
 	return nil
 }
 
+// findStructFieldByNameOrJsonTag tìm field trong struct theo tên struct hoặc json tag.
+// Cho phép extract tag dùng camelCase (metaData) khi struct field là MetaData — chuẩn chung với PanCakeData, PosData.
+func findStructFieldByNameOrJsonTag(structVal reflect.Value, structType reflect.Type, name string) reflect.Value {
+	// 1. Thử theo tên struct (FieldByName cần exact match)
+	if f := structVal.FieldByName(name); f.IsValid() {
+		return f
+	}
+	// 2. Fallback: camelCase → PascalCase (metaData → MetaData)
+	if len(name) > 0 {
+		pascal := strings.ToUpper(name[:1]) + name[1:]
+		if f := structVal.FieldByName(pascal); f.IsValid() {
+			return f
+		}
+	}
+	// 3. Tìm theo json tag
+	for i := 0; i < structVal.NumField(); i++ {
+		fieldType := structType.Field(i)
+		jsonTag := fieldType.Tag.Get("json")
+		if jsonTag == "" {
+			continue
+		}
+		jsonKey := strings.Split(jsonTag, ",")[0]
+		if jsonKey == name {
+			return structVal.Field(i)
+		}
+	}
+	return reflect.Value{}
+}
+
 // extractFieldValue extract giá trị từ source field vào target field
 func extractFieldValue(structVal reflect.Value, targetField reflect.Value, config *extractTagConfig) error {
 	if len(config.SourcePath) == 0 {
@@ -293,8 +322,8 @@ func extractFieldValue(structVal reflect.Value, targetField reflect.Value, confi
 	// Phần còn lại là nested path
 	pathParts := config.SourcePath[1:]
 
-	// Tìm source field trong struct
-	sourceField := structVal.FieldByName(sourceFieldName)
+	// Tìm source field trong struct (theo tên struct hoặc json tag — chuẩn chung: PanCakeData, PosData, metaData)
+	sourceField := findStructFieldByNameOrJsonTag(structVal, structVal.Type(), sourceFieldName)
 	if !sourceField.IsValid() {
 		return fmt.Errorf("không tìm thấy source field: %s", sourceFieldName)
 	}
@@ -725,7 +754,7 @@ func extractFieldValueMultiSource(structVal reflect.Value, targetField reflect.V
 	for _, config := range configs {
 		// Kiểm tra xem nguồn này có data không
 		sourceFieldName := config.SourcePath[0]
-		sourceField := structVal.FieldByName(sourceFieldName)
+		sourceField := findStructFieldByNameOrJsonTag(structVal, structVal.Type(), sourceFieldName)
 		if !sourceField.IsValid() {
 			continue // Nguồn không tồn tại, bỏ qua
 		}
@@ -806,8 +835,8 @@ func extractValueFromSource(structVal reflect.Value, config *extractTagConfig) (
 	sourceFieldName := config.SourcePath[0]
 	pathParts := config.SourcePath[1:]
 
-	// Tìm source field
-	sourceField := structVal.FieldByName(sourceFieldName)
+	// Tìm source field (theo tên struct hoặc json tag)
+	sourceField := findStructFieldByNameOrJsonTag(structVal, structVal.Type(), sourceFieldName)
 	if !sourceField.IsValid() {
 		return nil, fmt.Errorf("không tìm thấy source field: %s", sourceFieldName)
 	}

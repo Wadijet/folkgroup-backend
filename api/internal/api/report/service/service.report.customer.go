@@ -1,5 +1,7 @@
 // Package reportsvc - Compute engine cho báo cáo khách hàng theo chu kỳ (customer_daily, customer_weekly, customer_monthly, customer_yearly).
-// Snapshot chỉ lưu số phát sinh (in/out) cho toàn bộ cấu trúc metrics. Không lưu số cuối kỳ. Số dư lấy từ API GetPeriodEndBalance.
+//
+// LƯU Ý: Snapshot chỉ lưu SỐ PHÁT SINH (in/out) mỗi kỳ, không lưu số dư cuối kỳ.
+// Số cộng dồn từ snapshots = tổng phát sinh. Số dư thực tế lấy từ API GetPeriodEndBalance.
 package reportsvc
 
 import (
@@ -85,7 +87,7 @@ func (s *ReportService) computeCustomerPhatSinh(ctx context.Context, ownerOrgID 
 	return computeAllPhatSinh(ctx, actSvc, ownerOrgID, startMs, endMs)
 }
 
-// computeCustomerPhatSinhBatch tính phát sinh cho nhiều kỳ trong 1 lần (2 DB calls thay vì 2*N). Dùng cho trend-from-crm.
+// computeCustomerPhatSinhBatch tính phát sinh cho nhiều kỳ trong 1 lần (2 DB calls thay vì 2*N). Dùng cho period-movements-from-db (PHỤ, đối chiếu).
 func (s *ReportService) computeCustomerPhatSinhBatch(ctx context.Context, ownerOrgID primitive.ObjectID, reportKey string, periodKeys []string) ([]map[string]interface{}, error) {
 	actSvc, err := crmvc.NewCrmActivityService()
 	if err != nil {
@@ -282,7 +284,7 @@ func (s *ReportService) GetSnapshotForCustomersDashboard(ctx context.Context, ow
 	}
 
 	// Thử chu kỳ dài → ngắn, dùng chu kỳ đầu có snapshot.
-	for _, rk := range reportKeyOrder {
+	for _, rk := range reportKeyOrderCustomer {
 		periodKey := getPeriodKeyForEndMs(endMs, rk)
 		snap, err := s.GetReportSnapshot(ctx, rk, periodKey, ownerOrgID)
 		if err != nil || snap == nil || snap.Metrics == nil {

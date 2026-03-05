@@ -321,6 +321,36 @@ var InitialPermissions = []authmodels.Permission{
 	{Name: "FbPage.Delete", Describe: "Quyền xóa trang Facebook", Group: "Pancake", Category: "FbPage"},
 	{Name: "FbPage.UpdateToken", Describe: "Quyền cập nhật token trang Facebook", Group: "Pancake", Category: "FbPage"},
 
+	// Meta Ads: Ad Account
+	{Name: "MetaAdAccount.Insert", Describe: "Quyền thêm ad account Meta", Group: "Meta", Category: "MetaAdAccount"},
+	{Name: "MetaAdAccount.Read", Describe: "Quyền xem ad account Meta", Group: "Meta", Category: "MetaAdAccount"},
+	{Name: "MetaAdAccount.Update", Describe: "Quyền cập nhật ad account Meta", Group: "Meta", Category: "MetaAdAccount"},
+	{Name: "MetaAdAccount.Delete", Describe: "Quyền xóa ad account Meta", Group: "Meta", Category: "MetaAdAccount"},
+
+	// Meta Ads: Campaign
+	{Name: "MetaCampaign.Insert", Describe: "Quyền thêm campaign Meta", Group: "Meta", Category: "MetaCampaign"},
+	{Name: "MetaCampaign.Read", Describe: "Quyền xem campaign Meta", Group: "Meta", Category: "MetaCampaign"},
+	{Name: "MetaCampaign.Update", Describe: "Quyền cập nhật campaign Meta", Group: "Meta", Category: "MetaCampaign"},
+	{Name: "MetaCampaign.Delete", Describe: "Quyền xóa campaign Meta", Group: "Meta", Category: "MetaCampaign"},
+
+	// Meta Ads: Ad Set
+	{Name: "MetaAdSet.Insert", Describe: "Quyền thêm ad set Meta", Group: "Meta", Category: "MetaAdSet"},
+	{Name: "MetaAdSet.Read", Describe: "Quyền xem ad set Meta", Group: "Meta", Category: "MetaAdSet"},
+	{Name: "MetaAdSet.Update", Describe: "Quyền cập nhật ad set Meta", Group: "Meta", Category: "MetaAdSet"},
+	{Name: "MetaAdSet.Delete", Describe: "Quyền xóa ad set Meta", Group: "Meta", Category: "MetaAdSet"},
+
+	// Meta Ads: Ad
+	{Name: "MetaAd.Insert", Describe: "Quyền thêm ad Meta", Group: "Meta", Category: "MetaAd"},
+	{Name: "MetaAd.Read", Describe: "Quyền xem ad Meta", Group: "Meta", Category: "MetaAd"},
+	{Name: "MetaAd.Update", Describe: "Quyền cập nhật ad Meta", Group: "Meta", Category: "MetaAd"},
+	{Name: "MetaAd.Delete", Describe: "Quyền xóa ad Meta", Group: "Meta", Category: "MetaAd"},
+
+	// Meta Ads: Ad Insight
+	{Name: "MetaAdInsight.Insert", Describe: "Quyền thêm ad insight Meta", Group: "Meta", Category: "MetaAdInsight"},
+	{Name: "MetaAdInsight.Read", Describe: "Quyền xem ad insight Meta", Group: "Meta", Category: "MetaAdInsight"},
+	{Name: "MetaAdInsight.Update", Describe: "Quyền cập nhật ad insight Meta", Group: "Meta", Category: "MetaAdInsight"},
+	{Name: "MetaAdInsight.Delete", Describe: "Quyền xóa ad insight Meta", Group: "Meta", Category: "MetaAdInsight"},
+
 	// Quản lý cuộc trò chuyện Facebook: Thêm, xem, sửa, xóa
 	{Name: "FbConversation.Insert", Describe: "Quyền tạo cuộc trò chuyện", Group: "Pancake", Category: "FbConversation"},
 	{Name: "FbConversation.Read", Describe: "Quyền xem danh sách cuộc trò chuyện", Group: "Pancake", Category: "FbConversation"},
@@ -3736,5 +3766,31 @@ func (h *InitService) InitReportDefinitions() error {
 		}
 		logrus.Infof("[INIT] Báo cáo %s (%s) đã được tạo/cập nhật trong report_definitions", s.name, s.key)
 	}
+
+	// Báo cáo ads theo ngày (ads_daily) — dùng custom engine ComputeAdsDailyReport.
+	// Aggregate từ meta_ad_insights (phát sinh spend, clicks, impressions...) + meta_campaigns (activeCampaigns).
+	adsDailyMetadata := map[string]interface{}{
+		"description": "Snapshot ads theo ngày: phát sinh từ Meta (spend, clicks, impressions...), activeCampaigns. Dùng cho CEO Dashboard.",
+		"triggerCollections": []string{"meta_ad_insights", "meta_campaigns"},
+	}
+	adsDailySeed := reportmodels.ReportDefinition{
+		Key:              "ads_daily",
+		Name:             "Báo cáo ads chu kỳ ngày",
+		PeriodType:       "day",
+		PeriodLabel:      "Theo ngày",
+		SourceCollection: global.MongoDB_ColNames.MetaAdInsights,
+		TimeField:        "dateStart",
+		TimeFieldUnit:    "string",
+		Dimensions:       []string{"ownerOrganizationId"},
+		Metrics:          []reportmodels.ReportMetricDefinition{},
+		Metadata:         adsDailyMetadata,
+		IsActive:         true,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	if _, err := coll.ReplaceOne(ctx, bson.M{"key": "ads_daily"}, adsDailySeed, opts); err != nil {
+		return fmt.Errorf("upsert ads_daily: %w", err)
+	}
+	logrus.Infof("[INIT] Báo cáo ads_daily đã được tạo/cập nhật trong report_definitions")
 	return nil
 }

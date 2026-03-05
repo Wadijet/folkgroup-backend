@@ -1,6 +1,9 @@
 package main
 
 import (
+	"context"
+
+	adsMigration "meta_commerce/internal/api/ads/migration"
 	"meta_commerce/internal/api/initsvc"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/logger"
@@ -99,6 +102,17 @@ func InitDefaultData() {
 		log.WithError(err).Warn("⚠️ [INIT] Step 9: Failed to seed report definitions (có thể bỏ qua nếu collection chưa có)")
 	} else {
 		log.Info("✅ [INIT] Step 9: Mẫu báo cáo đơn hàng (order_daily) đã sẵn sàng")
+	}
+
+	// 10. Migration approvalConfig từ meta_ad_accounts sang ads_approval_config (một lần)
+	log.Info("🔄 [INIT] Step 10: Migrating approvalConfig to ads_approval_config...")
+	ctx := context.Background()
+	if n, err := adsMigration.MigrateApprovalConfigFromMetaAdAccounts(ctx); err != nil {
+		log.WithError(err).Warn("⚠️ [INIT] Step 10: Migration approvalConfig thất bại (bỏ qua)")
+	} else if n > 0 {
+		log.Infof("✅ [INIT] Step 10: Đã migrate %d approvalConfig sang ads_approval_config", n)
+	} else {
+		log.Info("✅ [INIT] Step 10: Không có approvalConfig cần migrate")
 	}
 
 	log.Info("✅ [INIT] InitDefaultData completed successfully")

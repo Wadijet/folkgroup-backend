@@ -183,6 +183,9 @@ func (s *ReportService) MarkDirty(ctx context.Context, reportKey, periodKey stri
 	if IsOrderReportKeyDisabled(reportKey) {
 		return nil
 	}
+	if IsAdsReportKeyDisabled(reportKey) {
+		return nil
+	}
 	filter := bson.M{
 		"reportKey":           reportKey,
 		"periodKey":           periodKey,
@@ -217,6 +220,46 @@ func (s *ReportService) MarkDirty(ctx context.Context, reportKey, periodKey stri
 	return common.ConvertMongoError(err)
 }
 
+// MarkDirtyAdsDaily đánh dấu chu kỳ ads_daily cần tính lại, theo adAccountId (dimensions).
+func (s *ReportService) MarkDirtyAdsDaily(ctx context.Context, periodKey string, ownerOrganizationID primitive.ObjectID, adAccountId string) error {
+	if IsAdsReportKeyDisabled("ads_daily") || adAccountId == "" {
+		return nil
+	}
+	filter := bson.M{
+		"reportKey":           "ads_daily",
+		"periodKey":           periodKey,
+		"ownerOrganizationId": ownerOrganizationID,
+		"adAccountId":         adAccountId,
+		"processedAt":         nil,
+	}
+	var existing reportmodels.ReportDirtyPeriod
+	err := s.dirtyColl.FindOne(ctx, filter).Decode(&existing)
+	if err == nil {
+		return nil
+	}
+	if err != mongo.ErrNoDocuments {
+		return common.ConvertMongoError(err)
+	}
+	now := time.Now().Unix()
+	doc := reportmodels.ReportDirtyPeriod{
+		ReportKey:           "ads_daily",
+		PeriodKey:           periodKey,
+		OwnerOrganizationID: ownerOrganizationID,
+		AdAccountId:         adAccountId,
+		MarkedAt:            now,
+		ProcessedAt:         nil,
+	}
+	upsertFilter := bson.M{
+		"reportKey":           "ads_daily",
+		"periodKey":           periodKey,
+		"ownerOrganizationId": ownerOrganizationID,
+		"adAccountId":         adAccountId,
+	}
+	opts := options.Replace().SetUpsert(true)
+	_, err = s.dirtyColl.ReplaceOne(ctx, upsertFilter, doc, opts)
+	return common.ConvertMongoError(err)
+}
+
 // GetDefinitionsCollection trả về collection report_definitions.
 func (s *ReportService) GetDefinitionsCollection() *mongo.Collection { return s.defColl }
 
@@ -243,6 +286,54 @@ func (s *ReportService) GetReportSnapshot(ctx context.Context, reportKey, period
 		return nil, common.ConvertMongoError(err)
 	}
 	return &snap, nil
+}
+
+// FindSnapshotsForTrendByDayRange truy vấn report_snapshots theo khoảng ngày [startMs, endMs].
+// Đơn vị cơ sở là ngày; thử chu kỳ dài hơn (yearly→monthly→weekly→daily) để thay thế nếu có, tuy nhiên chu kỳ dài phải khớp từ ngày đầu đến ngày cuối.
+// reportKeyOrder: thứ tự ưu tiên (vd: GetReportKeyOrderForDomain("order")).
+func (s *ReportService) FindSnapshotsForTrendByDayRange(ctx context.Context, ownerOrganizationID primitive.ObjectID, startMs, endMs int64, reportKeyOrder []string) ([]reportmodels.ReportSnapshot, error) {
+	candidates := getCandidateReportKeysAndRanges(startMs, endMs, reportKeyOrder)
+	for _, c := range candidates {
+		list, err := s.FindSnapshotsForTrend(ctx, c.reportKey, ownerOrganizationID, c.fromStr, c.toStr)
+		if err != nil {
+			return nil, err
+		}
+		if len(list) > 0 {
+			return list, nil
+		}
+	}
+	return []reportmodels.ReportSnapshot{}, nil
+}
+
+// GetOrderTrendFromDb trả về order trend aggregate trực tiếp từ pc_pos_orders (PHỤ, đối chiếu — query DB nặng).
+// Cùng format với FindSnapshotsForTrendByDayRange: []ReportSnapshot (reportKey, periodKey, periodType, metrics).
+func (s *ReportService) GetOrderTrendFromDb(ctx context.Context, ownerOrganizationID primitive.ObjectID, startMs, endMs int64) ([]reportmodels.ReportSnapshot, error) {
+	candidates := getCandidateReportKeysAndRanges(startMs, endMs, reportKeyOrderOrder)
+	if len(candidates) == 0 {
+		return []reportmodels.ReportSnapshot{}, nil
+	}
+	c := candidates[0]
+	periodKeys := getPeriodKeysInRange(c.reportKey, c.fromStr, c.toStr)
+	periodType := reportKeyToPeriodType(c.reportKey)
+	list := make([]reportmodels.ReportSnapshot, 0, len(periodKeys))
+	now := time.Now().Unix()
+	for _, pk := range periodKeys {
+		metrics, err := s.AggregateOrderReportForPeriod(ctx, c.reportKey, pk, ownerOrganizationID)
+		if err != nil {
+			return nil, fmt.Errorf("aggregate order %s/%s: %w", c.reportKey, pk, err)
+		}
+		list = append(list, reportmodels.ReportSnapshot{
+			ReportKey:           c.reportKey,
+			PeriodKey:           pk,
+			PeriodType:          periodType,
+			OwnerOrganizationID: ownerOrganizationID,
+			Metrics:             metrics,
+			ComputedAt:          now,
+			CreatedAt:           now,
+			UpdatedAt:           now,
+		})
+	}
+	return list, nil
 }
 
 // FindSnapshotsForTrend truy vấn report_snapshots theo reportKey, ownerOrganizationId, periodKey trong [from, to].
@@ -293,12 +384,15 @@ func (s *ReportService) GetUnprocessedDirtyPeriods(ctx context.Context, limit in
 }
 
 // SetDirtyProcessed đánh dấu đã xử lý.
-func (s *ReportService) SetDirtyProcessed(ctx context.Context, reportKey, periodKey string, ownerOrganizationID primitive.ObjectID) error {
+func (s *ReportService) SetDirtyProcessed(ctx context.Context, reportKey, periodKey string, ownerOrganizationID primitive.ObjectID, adAccountId string) error {
 	now := time.Now().Unix()
 	filter := bson.M{
 		"reportKey":           reportKey,
 		"periodKey":           periodKey,
 		"ownerOrganizationId": ownerOrganizationID,
+	}
+	if reportKey == "ads_daily" && adAccountId != "" {
+		filter["adAccountId"] = adAccountId
 	}
 	update := bson.M{"$set": bson.M{"processedAt": now}}
 	_, err := s.dirtyColl.UpdateOne(ctx, filter, update)
@@ -306,23 +400,29 @@ func (s *ReportService) SetDirtyProcessed(ctx context.Context, reportKey, period
 }
 
 // DeleteDirtyPeriod xóa dirty period (dùng khi chu kỳ bị tắt bởi config — không tạo chu kỳ báo cáo).
-func (s *ReportService) DeleteDirtyPeriod(ctx context.Context, reportKey, periodKey string, ownerOrganizationID primitive.ObjectID) error {
+func (s *ReportService) DeleteDirtyPeriod(ctx context.Context, reportKey, periodKey string, ownerOrganizationID primitive.ObjectID, adAccountId string) error {
 	filter := bson.M{
 		"reportKey":           reportKey,
 		"periodKey":           periodKey,
 		"ownerOrganizationId": ownerOrganizationID,
 	}
-	_, err := s.dirtyColl.DeleteOne(ctx, filter)
+	if reportKey == "ads_daily" && adAccountId != "" {
+		filter["adAccountId"] = adAccountId
+	}
+	_, err := s.dirtyColl.DeleteMany(ctx, filter)
 	return common.ConvertMongoError(err)
 }
 
 // DeleteReportSnapshot xóa snapshot theo reportKey, periodKey, ownerOrganizationId.
-func (s *ReportService) DeleteReportSnapshot(ctx context.Context, reportKey, periodKey string, ownerOrganizationID primitive.ObjectID) error {
+func (s *ReportService) DeleteReportSnapshot(ctx context.Context, reportKey, periodKey string, ownerOrganizationID primitive.ObjectID, adAccountId string) error {
 	filter := bson.M{
 		"reportKey":           reportKey,
 		"periodKey":           periodKey,
 		"ownerOrganizationId": ownerOrganizationID,
 	}
-	_, err := s.snapColl.DeleteOne(ctx, filter)
+	if reportKey == "ads_daily" && adAccountId != "" {
+		filter["dimensions.adAccountId"] = adAccountId
+	}
+	_, err := s.snapColl.DeleteMany(ctx, filter)
 	return common.ConvertMongoError(err)
 }

@@ -102,6 +102,17 @@ Worker/Cron đọc report_dirty_periods → Recompute từng (reportKey, periodK
 
 ## 6. API
 
+### 6.0 Nguyên tắc nguồn dữ liệu (CHÍNH vs PHỤ)
+
+| Nguồn | Vai trò | Mô tả |
+|-------|---------|-------|
+| **report_snapshots** | CHÍNH | Nhanh, dùng cho UI. Order và customer cùng pattern. |
+| **Query DB trực tiếp** (CRM, orders) | PHỤ | Nặng, dùng để kiểm tra đối chiếu với snapshot. |
+
+API trend/balance từ snapshot = chính; từ DB = phụ (đối chiếu).
+
+### 6.1 Endpoints
+
 - **GET** `/api/reports/:reportKey/trend`  
   Query: from, to (date), ownerOrganizationId (hoặc từ context). Query report_snapshots: reportKey, ownerOrganizationId, periodKey ∈ [from, to], sort periodKey. Trả về danh sách snapshot. Format chuẩn: code, message, data (array), status.
 

@@ -16,18 +16,22 @@ import (
 type FilterHook struct {
 	// Các filter sets (map[string]bool để lookup nhanh)
 	// Nếu map rỗng hoặc "*" trong config, cho phép tất cả
-	allowedModules    map[string]bool
+	allowedModules     map[string]bool
 	allowedCollections map[string]bool
 	allowedEndpoints   map[string]bool
 	allowedMethods     map[string]bool
 	allowedLogTypes    map[string]bool
 
+	// Filter theo nội dung message — chỉ log entries có message chứa chuỗi này
+	filterMessageContains string
+
 	// Flags để kiểm tra xem có filter nào được bật không
-	hasModuleFilter    bool
-	hasCollectionFilter bool
-	hasEndpointFilter   bool
-	hasMethodFilter     bool
-	hasLogTypeFilter    bool
+	hasModuleFilter      bool
+	hasCollectionFilter  bool
+	hasEndpointFilter    bool
+	hasMethodFilter      bool
+	hasLogTypeFilter     bool
+	hasMessageFilter     bool
 
 	mu sync.RWMutex
 }
@@ -72,6 +76,10 @@ func (h *FilterHook) updateFilters(cfg *LogConfig) {
 	// Parse log types filter
 	h.allowedLogTypes = parseFilter(cfg.FilterLogTypes)
 	h.hasLogTypeFilter = len(h.allowedLogTypes) > 0 && !h.allowedLogTypes["*"]
+
+	// Filter theo message
+	h.filterMessageContains = strings.TrimSpace(cfg.FilterMessageContains)
+	h.hasMessageFilter = h.filterMessageContains != ""
 }
 
 // parseFilter parse filter string thành map
@@ -110,6 +118,15 @@ func (h *FilterHook) Levels() []logrus.Level {
 func (h *FilterHook) Fire(entry *logrus.Entry) error {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+
+	// Kiểm tra message filter — chỉ cho phép entries có message chứa chuỗi
+	if h.hasMessageFilter {
+		msg := entry.Message
+		if !strings.Contains(msg, h.filterMessageContains) {
+			entry.Data["_filtered"] = true
+			return nil
+		}
+	}
 
 	// Kiểm tra log type filter
 	if h.hasLogTypeFilter {

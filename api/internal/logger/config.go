@@ -43,6 +43,7 @@ type LogConfig struct {
 	FilterEndpoints   string `env:"LOG_FILTER_ENDPOINTS" envDefault:"*"`   // Ví dụ: "/api/v1/users,/api/v1/orders" hoặc "*"
 	FilterMethods     string `env:"LOG_FILTER_METHODS" envDefault:"*"`     // Ví dụ: "GET,POST" hoặc "*"
 	FilterLogTypes    string `env:"LOG_FILTER_LOG_TYPES" envDefault:"*"`   // Ví dụ: "info,error" hoặc "*" (trace,debug,info,warn,error,fatal)
+	FilterMessageContains string `env:"LOG_FILTER_MESSAGE_CONTAINS" envDefault:""` // Chỉ log entries có message chứa chuỗi này (vd: "META_SYNC" để chỉ xem log Meta Ads)
 }
 
 // getEnvPath trả về đường dẫn đến file env (tương tự như config.getEnvPath)
@@ -210,6 +211,9 @@ func DefaultConfig() *LogConfig {
 	}
 	if filterLogTypes := os.Getenv("LOG_FILTER_LOG_TYPES"); filterLogTypes != "" {
 		config.FilterLogTypes = filterLogTypes
+	}
+	if filterMsg := os.Getenv("LOG_FILTER_MESSAGE_CONTAINS"); filterMsg != "" {
+		config.FilterMessageContains = filterMsg
 	}
 
 	return config

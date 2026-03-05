@@ -713,9 +713,9 @@ func buildVipInactiveFromCrm(items []crmvc.CrmDashboardCustomerItem, limit int) 
 	return result
 }
 
-// HandleGetCustomersTrendFromSnapshots xử lý GET /dashboard/customers/trend-from-snapshots — trend từ report_snapshots (nhanh).
+// HandleGetCustomersPeriodMovementsFromSnapshots xử lý GET /dashboard/customers/period-movements-from-snapshots — CHÍNH: phát sinh trong kỳ từ report_snapshots (nhanh).
 // Bổ sung Customers và VipInactiveCustomers từ CrmCustomerService.
-func (h *ReportHandler) HandleGetCustomersTrendFromSnapshots(c fiber.Ctx) error {
+func (h *ReportHandler) HandleGetCustomersPeriodMovementsFromSnapshots(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {
 		orgID := getActiveOrganizationID(c)
 		if orgID == nil || orgID.IsZero() {
@@ -780,13 +780,15 @@ func (h *ReportHandler) HandleGetCustomersTrendFromSnapshots(c fiber.Ctx) error 
 			}
 		}
 		c.Status(common.StatusOK).JSON(fiber.Map{
-			"code": common.StatusOK, "message": "Thành công", "data": result, "status": "success",
+			"code": common.StatusOK, "message": "Thành công", "data": result,
+			"meta": fiber.Map{"dataSource": "snapshots", "description": "Số phát sinh trong kỳ từ report_snapshots"},
+			"status": "success",
 		})
 		return nil
 	})
 }
 
-// HandleGetTransitionMatrix xử lý GET /dashboard/customers/trend/transition-matrix — ma trận chuyển đổi giữa 2 chu kỳ.
+// HandleGetTransitionMatrix xử lý GET /dashboard/customers/period-movements/transition-matrix — ma trận chuyển đổi giữa 2 chu kỳ.
 // Query: fromPeriod, toPeriod, dimension (journey|channel|value|lifecycle|loyalty|momentum|ceoGroup), periodType (day|week|month|year), sankey (true|false).
 func (h *ReportHandler) HandleGetTransitionMatrix(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {
@@ -826,7 +828,7 @@ func (h *ReportHandler) HandleGetTransitionMatrix(c fiber.Ctx) error {
 	})
 }
 
-// HandleGetGroupChanges xử lý GET /dashboard/customers/trend/group-changes — chi tiết khách chuyển nhóm (up/down/unchanged).
+// HandleGetGroupChanges xử lý GET /dashboard/customers/period-movements/group-changes — chi tiết khách chuyển nhóm (up/down/unchanged).
 // Query: fromPeriod, toPeriod, dimension (journey|channel|value|lifecycle|loyalty|momentum|ceoGroup), periodType (day|week|month|year).
 func (h *ReportHandler) HandleGetGroupChanges(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {
@@ -865,7 +867,8 @@ func (h *ReportHandler) HandleGetGroupChanges(c fiber.Ctx) error {
 	})
 }
 
-// HandleGetPeriodEndBalance xử lý GET /dashboard/customers/period-end-balance — số dư cuối kỳ theo cấu trúc raw/layer1/layer2/layer3.
+// HandleGetPeriodEndBalance xử lý GET /dashboard/customers/period-end-balance — PHỤ: số dư từ CRM (query DB trực tiếp, nặng).
+// Dùng để kiểm tra đối chiếu với snapshot.
 // Query: at=timestamp (Unix ms) hoặc period/from/to (giống GET /customers).
 func (h *ReportHandler) HandleGetPeriodEndBalance(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {
@@ -913,9 +916,9 @@ func (h *ReportHandler) HandleGetPeriodEndBalance(c fiber.Ctx) error {
 	})
 }
 
-// HandleGetCustomersTrendFromCrm xử lý GET /dashboard/customers/trend-from-crm — trend từ CRM (chính xác, chậm hơn).
-// Cùng format với trend-from-snapshots, khác nguồn dữ liệu.
-func (h *ReportHandler) HandleGetCustomersTrendFromCrm(c fiber.Ctx) error {
+// HandleGetCustomersPeriodMovementsFromDb xử lý GET /dashboard/customers/period-movements-from-db — PHỤ: phát sinh từ CRM/DB (query trực tiếp, nặng).
+// Dùng để kiểm tra đối chiếu với snapshot. Cùng format với period-movements-from-snapshots.
+func (h *ReportHandler) HandleGetCustomersPeriodMovementsFromDb(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {
 		orgID := getActiveOrganizationID(c)
 		if orgID == nil || orgID.IsZero() {
@@ -929,7 +932,7 @@ func (h *ReportHandler) HandleGetCustomersTrendFromCrm(c fiber.Ctx) error {
 		result, err := h.ReportService.GetCustomersTrendFromCrm(c.Context(), *orgID, &params)
 		if err != nil {
 			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
-				"code": common.ErrCodeDatabase.Code, "message": "Lỗi truy vấn trend từ CRM: " + err.Error(), "status": "error",
+				"code": common.ErrCodeDatabase.Code, "message": "Lỗi truy vấn phát sinh từ CRM: " + err.Error(), "status": "error",
 			})
 			return nil
 		}
@@ -978,14 +981,16 @@ func (h *ReportHandler) HandleGetCustomersTrendFromCrm(c fiber.Ctx) error {
 			}
 		}
 		c.Status(common.StatusOK).JSON(fiber.Map{
-			"code": common.StatusOK, "message": "Thành công", "data": result, "status": "success",
+			"code": common.StatusOK, "message": "Thành công", "data": result,
+			"meta": fiber.Map{"dataSource": "db", "description": "Số phát sinh trong kỳ từ CRM (query pc_pos_customers trực tiếp)"},
+			"status": "success",
 		})
 		return nil
 	})
 }
 
-// HandleGetPeriodEndBalanceFromSnapshots xử lý GET /dashboard/customers/period-end-balance-from-snapshots.
-// Số cuối kỳ = 0 + phát sinh từ snapshots (tối ưu hiệu suất, ưu tiên chu kỳ dài).
+// HandleGetPeriodEndBalanceFromSnapshots xử lý GET /dashboard/customers/period-end-balance-from-snapshots — CHÍNH.
+// Số cuối kỳ = 0 + phát sinh từ snapshots (nhanh, ưu tiên chu kỳ dài).
 // Query: period/from/to (giống GET /customers).
 func (h *ReportHandler) HandleGetPeriodEndBalanceFromSnapshots(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {

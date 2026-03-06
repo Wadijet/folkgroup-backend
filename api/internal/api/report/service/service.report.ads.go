@@ -151,7 +151,8 @@ func (s *ReportService) computeAdsDailyForAccount(ctx context.Context, periodKey
 	}
 	metrics["activeCampaigns"] = activeCount
 
-	// 4. campaignsCreatedInPeriod: count meta_campaigns có createdAt trong kỳ
+	// 4. campaignsCreatedInPeriod: count meta_campaigns có metaCreatedAt trong kỳ (thời gian tạo gốc từ Meta API)
+	// Fallback createdAt khi metaCreatedAt = 0 (dữ liệu cũ trước khi có field metaCreatedAt)
 	loc, err := time.LoadLocation(ReportTimezone)
 	if err != nil {
 		return fmt.Errorf("load timezone: %w", err)
@@ -162,10 +163,17 @@ func (s *ReportService) computeAdsDailyForAccount(ctx context.Context, periodKey
 	}
 	startMs := t.Unix() * 1000
 	endMs := t.AddDate(0, 0, 1).Unix()*1000 - 1
+	timeInPeriod := bson.M{"$gte": startMs, "$lte": endMs}
 	filterCreated := bson.M{
 		"ownerOrganizationId": ownerOrganizationID,
 		"adAccountId":         adAccountId,
-		"createdAt":           bson.M{"$gte": startMs, "$lte": endMs},
+		"$or": bson.A{
+			bson.M{"metaCreatedAt": timeInPeriod},
+			bson.M{"$and": bson.A{
+				bson.M{"$or": bson.A{bson.M{"metaCreatedAt": 0}, bson.M{"metaCreatedAt": bson.M{"$exists": false}}}},
+				bson.M{"createdAt": timeInPeriod},
+			}},
+		},
 	}
 	createdCount, err := campaignsColl.CountDocuments(ctx, filterCreated)
 	if err != nil {

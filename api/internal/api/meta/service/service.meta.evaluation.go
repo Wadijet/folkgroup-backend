@@ -24,6 +24,8 @@ import (
 const (
 	// DefaultWindowDays số ngày mặc định cho window (raw.window).
 	DefaultWindowDays = 7
+	// MetaLearningPhaseDays số ngày learning phase của Meta (ad mới tạo < N ngày = NEW).
+	MetaLearningPhaseDays = 7
 )
 
 // adAccountIdFilterForMeta trả về giá trị filter cho field adAccountId.
@@ -241,6 +243,7 @@ func UpdateRawFromSource(ctx context.Context, objectType, objectId, adAccountId 
 		"dateStart": dateStart,
 		"dateStop":  dateStop,
 	}
+	raw["metaCreatedAt"] = fetchAdMetaCreatedAt(ctx, objectId, adAccountId, ownerOrgID)
 	current["raw"] = raw
 
 	// Tính layer1, layer2, layer3, alertFlags
@@ -288,6 +291,7 @@ func updateRawAndLayersForAd(ctx context.Context, adId, adAccountId string, owne
 		raw["pancake"] = pancake
 	}
 	raw["window"] = map[string]interface{}{"dateStart": dateStart, "dateStop": dateStop}
+	raw["metaCreatedAt"] = fetchAdMetaCreatedAt(ctx, adId, adAccountId, ownerOrgID)
 
 	layer1 := computeLayer1(raw)
 	layer2 := computeLayer2(raw, layer1)
@@ -462,15 +466,34 @@ func computeLayer1(raw map[string]interface{}) map[string]interface{} {
 		roas = revenue / spend
 	}
 
+	// Lifecycle: ưu tiên metaCreatedAt (thời gian tạo gốc từ Meta) — ad trong learning phase (< 7 ngày) = NEW
 	lifecycle := "NEW"
-	if inlineLinkClicks >= 100 {
-		lifecycle = "WARMING"
-	}
-	if inlineLinkClicks >= 500 {
-		lifecycle = "CALIBRATED"
-	}
-	if inlineLinkClicks >= 2000 {
-		lifecycle = "MATURE"
+	metaCreatedAt := toInt64(raw, "metaCreatedAt")
+	if metaCreatedAt > 0 {
+		daysSinceCreated := (time.Now().UnixMilli() - metaCreatedAt) / (24 * 60 * 60 * 1000)
+		if daysSinceCreated < MetaLearningPhaseDays {
+			lifecycle = "NEW" // Learning phase, bỏ qua clicks
+		} else {
+			// Ra khỏi learning phase: dùng click-based
+			if inlineLinkClicks >= 2000 {
+				lifecycle = "MATURE"
+			} else if inlineLinkClicks >= 500 {
+				lifecycle = "CALIBRATED"
+			} else if inlineLinkClicks >= 100 {
+				lifecycle = "WARMING"
+			}
+		}
+	} else {
+		// Fallback khi không có metaCreatedAt (dữ liệu cũ): dùng click-based
+		if inlineLinkClicks >= 100 {
+			lifecycle = "WARMING"
+		}
+		if inlineLinkClicks >= 500 {
+			lifecycle = "CALIBRATED"
+		}
+		if inlineLinkClicks >= 2000 {
+			lifecycle = "MATURE"
+		}
 	}
 
 	return map[string]interface{}{
@@ -670,6 +693,27 @@ func toInt64(m map[string]interface{}, k string) int64 {
 	return 0
 }
 
+// fetchAdMetaCreatedAt lấy metaCreatedAt (thời gian tạo gốc từ Meta API) từ meta_ads.
+// Trả về 0 nếu không tìm thấy hoặc chưa có field.
+func fetchAdMetaCreatedAt(ctx context.Context, adId, adAccountId string, ownerOrgID primitive.ObjectID) int64 {
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.MetaAds)
+	if !ok {
+		return 0
+	}
+	filter := bson.M{
+		"adId":                 adId,
+		"adAccountId":          adAccountIdFilterForMeta(adAccountId),
+		"ownerOrganizationId": ownerOrgID,
+	}
+	var doc struct {
+		MetaCreatedAt int64 `bson:"metaCreatedAt"`
+	}
+	if err := coll.FindOne(ctx, filter, mongoopts.FindOne().SetProjection(bson.M{"metaCreatedAt": 1})).Decode(&doc); err != nil {
+		return 0
+	}
+	return doc.MetaCreatedAt
+}
+
 // fetchRawMetaFromInsights aggregate meta_ad_insights cho entity trong window → raw.meta.
 // Extract Frequency, Mess, InlineLinkClicks từ metaData (đã có trong DB từ sync).
 func fetchRawMetaFromInsights(ctx context.Context, objectType, objectId, adAccountId string, ownerOrgID primitive.ObjectID, dateStart, dateStop string) (map[string]interface{}, error) {
@@ -677,10 +721,11 @@ func fetchRawMetaFromInsights(ctx context.Context, objectType, objectId, adAccou
 	if !ok {
 		return nil, fmt.Errorf("không tìm thấy collection meta_ad_insights")
 	}
+	// adAccountId có thể lưu "act_XXX" hoặc "XXX" — meta_ad_insights có thể dùng format khác meta_ads.
 	filter := bson.M{
 		"objectType":          objectType,
 		"objectId":            objectId,
-		"adAccountId":         adAccountId,
+		"adAccountId":         adAccountIdFilterForMeta(adAccountId),
 		"ownerOrganizationId": ownerOrgID,
 		"dateStart":           bson.M{"$gte": dateStart, "$lte": dateStop},
 	}

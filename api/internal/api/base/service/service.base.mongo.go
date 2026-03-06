@@ -1002,7 +1002,12 @@ func prepareUpsertUpdateData[T any](ctx context.Context, zero T, updateData *Upd
 		updateData.Set = make(map[string]interface{})
 	}
 	updateData.Set["updatedAt"] = now
-	updateData.Set["createdAt"] = now
+	// createdAt: thời gian hệ thống; khi update không ghi đè; khi insert = now
+	if isExisting {
+		delete(updateData.Set, "createdAt")
+	} else {
+		updateData.Set["createdAt"] = now
+	}
 	if !isExisting {
 		defaults := getInsertDefaultsFromModelType(reflect.TypeOf(zero))
 		if len(defaults) > 0 {

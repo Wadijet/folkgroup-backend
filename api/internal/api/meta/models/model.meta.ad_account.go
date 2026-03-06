@@ -15,7 +15,8 @@ type MetaAdAccount struct {
 	Currency             string                 `json:"currency" bson:"currency" extract:"metaData\\.currency,converter=string,optional"`                             // Đơn vị tiền tệ VND, USD (extract từ metaData["currency"])
 	MetaData             map[string]interface{} `json:"metaData" bson:"metaData"`                                                                                     // Dữ liệu gốc từ Meta API
 	OwnerOrganizationID  primitive.ObjectID     `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:meta_adaccount_lookup_unique"`
-	CreatedAt            int64                  `json:"createdAt" bson:"createdAt"`
+	CreatedAt            int64                  `json:"createdAt" bson:"createdAt"`                                                                                    // Thời gian tạo bản ghi trong hệ thống (lúc sync lần đầu)
+	MetaCreatedAt         int64                  `json:"metaCreatedAt" bson:"metaCreatedAt" extract:"metaData\\.created_time,converter=time,format=2006-01-02T15:04:05-0700,optional"` // Thời gian tạo gốc từ Meta API (khi ad account được tạo trên Meta)
 	UpdatedAt            int64                  `json:"updatedAt" bson:"updatedAt"`
 	LastSyncedAt         int64                  `json:"lastSyncedAt" bson:"lastSyncedAt"` // Lần sync cuối
 

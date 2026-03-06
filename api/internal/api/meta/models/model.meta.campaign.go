@@ -16,7 +16,8 @@ type MetaCampaign struct {
 	EffectiveStatus     string                 `json:"effectiveStatus" bson:"effectiveStatus" extract:"metaData\\.effective_status,converter=string,optional"`
 	MetaData            map[string]interface{} `json:"metaData" bson:"metaData"`
 	OwnerOrganizationID primitive.ObjectID     `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:meta_campaign_lookup_unique;compound:meta_campaign_by_account"`
-	CreatedAt           int64                  `json:"createdAt" bson:"createdAt"`
+	CreatedAt           int64                  `json:"createdAt" bson:"createdAt"`                                                                                                                       // Thời gian tạo bản ghi trong hệ thống (lúc sync lần đầu)
+	MetaCreatedAt       int64                  `json:"metaCreatedAt" bson:"metaCreatedAt" extract:"metaData\\.created_time,converter=time,format=2006-01-02T15:04:05-0700,optional"`                       // Thời gian tạo gốc từ Meta API (khi campaign được tạo trên Meta)
 	UpdatedAt           int64                  `json:"updatedAt" bson:"updatedAt"`
 	LastSyncedAt        int64                  `json:"lastSyncedAt" bson:"lastSyncedAt"`
 

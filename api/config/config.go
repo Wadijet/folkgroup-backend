@@ -39,7 +39,7 @@ type Configuration struct {
 	// Telegram Notification Configuration (optional - dùng cho notification init)
 	TelegramBotToken    string `env:"TELEGRAM_BOT_TOKEN"`    // Bot token cho Telegram sender mặc định (optional)
 	TelegramBotUsername string `env:"TELEGRAM_BOT_USERNAME"` // Bot username cho Telegram sender mặc định (optional)
-	TelegramChatIDs     string `env:"TELEGRAM_CHAT_IDS"`     // Danh sách chat IDs phân cách bằng dấu phẩy, ví dụ: "-123456789,-987654321" (optional)
+	TelegramChatIDs     string `env:"TELEGRAM_CHAT_IDS"`     // Chat IDs phân cách bằng dấu phẩy. Format: "chatID" hoặc "chatID:topicID" (topic trong forum). VD: "-123456789" hoặc "-123456789:12345"
 	// MongoDB Import: Giới hạn body size cho upload file (MB). Mặc định 500MB cho file lớn.
 	MongoDBImportMaxBodyMB int `env:"MONGODB_IMPORT_MAX_BODY_MB" envDefault:"500"`
 	// Meta Marketing API: Access token cho đồng bộ Ads (ads_read, ads_management). Có thể dùng User token hoặc System User token.

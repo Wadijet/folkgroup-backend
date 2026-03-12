@@ -19,7 +19,9 @@ type NotificationChannel struct {
 	SenderIDs []primitive.ObjectID `json:"senderIds,omitempty" bson:"senderIds,omitempty"`
 
 	Recipients []string `json:"recipients,omitempty" bson:"recipients,omitempty"`
-	ChatIDs    []string `json:"chatIds,omitempty" bson:"chatIds,omitempty"`
+	// ChatIDs: danh sách đích nhận Telegram. Mỗi phần tử: "chatID" (chat chính) hoặc "chatID:topicID" (topic cụ thể trong forum supergroup).
+	// Ví dụ: ["-123456789"] hoặc ["-123456789:12345"] để gửi vào topic 12345.
+	ChatIDs []string `json:"chatIds,omitempty" bson:"chatIds,omitempty"`
 
 	WebhookURL     string            `json:"webhookUrl,omitempty" bson:"webhookUrl,omitempty"`
 	WebhookHeaders map[string]string `json:"webhookHeaders,omitempty" bson:"webhookHeaders,omitempty"`

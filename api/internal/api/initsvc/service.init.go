@@ -1412,11 +1412,11 @@ func (h *InitService) InitNotificationData() error {
 	}
 	_, err = h.notificationChannelService.FindOne(ctx, systemTelegramChannelFilter, nil)
 	if err == common.ErrNotFound {
-		// Lấy chat IDs từ config (nếu có)
+		// Lấy chat IDs từ config (nếu có). Format: "chatID" hoặc "chatID:topicID" (topic trong forum supergroup)
 		chatIDs := []string{}
 		isActive := false
 		if global.MongoDB_ServerConfig != nil && global.MongoDB_ServerConfig.TelegramChatIDs != "" {
-			// Parse chat IDs từ string (phân cách bằng dấu phẩy)
+			// Parse chat IDs từ string (phân cách bằng dấu phẩy). Hỗ trợ "chatID:topicID" cho topic cụ thể
 			chatIDStrings := strings.Split(global.MongoDB_ServerConfig.TelegramChatIDs, ",")
 			for _, chatID := range chatIDStrings {
 				chatID = strings.TrimSpace(chatID)

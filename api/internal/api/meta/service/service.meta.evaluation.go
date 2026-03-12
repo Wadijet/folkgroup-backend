@@ -580,22 +580,20 @@ func computeLayer1(raw map[string]interface{}) map[string]interface{} {
 		roas = revenue / spend
 	}
 
-	// Lifecycle: ưu tiên metaCreatedAt (thời gian tạo gốc từ Meta) — ad trong learning phase (< 7 ngày) = NEW
+	// Lifecycle: theo FolkForm v4.1 Section 2.2 Per-Camp Adaptive Threshold — time-based.
+	// Giai đoạn 0: < 7 ngày = NEW | 1: 7–14 ngày = WARMING | 2: 14–30 ngày = CALIBRATED | 3: 30+ ngày = MATURE
 	lifecycle := "NEW"
 	metaCreatedAt := toInt64(r7d, "metaCreatedAt")
 	if metaCreatedAt > 0 {
 		daysSinceCreated := (time.Now().UnixMilli() - metaCreatedAt) / (24 * 60 * 60 * 1000)
 		if daysSinceCreated < MetaLearningPhaseDays {
-			lifecycle = "NEW" // Learning phase, bỏ qua clicks
+			lifecycle = "NEW" // Giai đoạn 0: camp mới, chưa đủ data
+		} else if daysSinceCreated < 14 {
+			lifecycle = "WARMING" // Giai đoạn 1: 7–14 ngày
+		} else if daysSinceCreated < 30 {
+			lifecycle = "CALIBRATED" // Giai đoạn 2: 14–30 ngày
 		} else {
-			// Ra khỏi learning phase: dùng click-based
-			if inlineLinkClicks >= 2000 {
-				lifecycle = "MATURE"
-			} else if inlineLinkClicks >= 500 {
-				lifecycle = "CALIBRATED"
-			} else if inlineLinkClicks >= 100 {
-				lifecycle = "WARMING"
-			}
+			lifecycle = "MATURE" // Giai đoạn 3: 30+ ngày
 		}
 	} else {
 		// Fallback khi không có metaCreatedAt (dữ liệu cũ): dùng click-based

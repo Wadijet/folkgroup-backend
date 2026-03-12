@@ -7,6 +7,7 @@ type NotificationChannelCreateInput struct {
 	IsActive    bool     `json:"isActive"`
 	SenderIDs   []string `json:"senderIds,omitempty"`
 	Recipients  []string `json:"recipients,omitempty"`
+	// ChatIDs: Telegram - mỗi phần tử "chatID" hoặc "chatID:topicID" (topic trong forum supergroup). VD: ["-123456789:12345"]
 	ChatIDs     []string `json:"chatIds,omitempty"`
 	WebhookURL  string   `json:"webhookUrl,omitempty"`
 	WebhookHeaders map[string]string `json:"webhookHeaders,omitempty"`
@@ -19,6 +20,7 @@ type NotificationChannelUpdateInput struct {
 	IsActive       *bool             `json:"isActive"`
 	SenderIDs      []string          `json:"senderIds,omitempty"`
 	Recipients     []string          `json:"recipients,omitempty"`
+	// ChatIDs: Telegram - "chatID" hoặc "chatID:topicID". VD: ["-123456789:12345"]
 	ChatIDs        []string          `json:"chatIds,omitempty"`
 	WebhookURL     string            `json:"webhookUrl,omitempty"`
 	WebhookHeaders map[string]string `json:"webhookHeaders,omitempty"`

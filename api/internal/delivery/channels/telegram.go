@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,16 +15,36 @@ import (
 	"meta_commerce/internal/logger"
 )
 
-// SendTelegram gửi telegram message
-func SendTelegram(ctx context.Context, sender *notifmodels.NotificationChannelSender, chatID string, template *RenderedTemplate, historyID string, baseURL string) error {
+// parseTelegramRecipient tách recipient thành chatID và message_thread_id (topic).
+// Format: "chatID" (gửi vào chat chính) hoặc "chatID:topicID" (gửi vào topic cụ thể trong forum supergroup).
+// Ví dụ: "-123456789" hoặc "-123456789:12345"
+func parseTelegramRecipient(recipient string) (chatID string, messageThreadID *int64) {
+	parts := strings.SplitN(recipient, ":", 2)
+	chatID = strings.TrimSpace(parts[0])
+	if len(parts) == 2 && parts[1] != "" {
+		if id, err := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64); err == nil {
+			messageThreadID = &id
+		}
+	}
+	return chatID, messageThreadID
+}
+
+// SendTelegram gửi telegram message.
+// recipient: chatID (ví dụ "-123456789") hoặc "chatID:topicID" (ví dụ "-123456789:12345") để gửi vào topic cụ thể.
+func SendTelegram(ctx context.Context, sender *notifmodels.NotificationChannelSender, recipient string, template *RenderedTemplate, historyID string, baseURL string) error {
+	chatID, messageThreadID := parseTelegramRecipient(recipient)
 	log := logger.GetAppLogger()
-	log.WithFields(map[string]interface{}{
+	logFields := map[string]interface{}{
 		"historyId":  historyID,
 		"chatID":     chatID,
 		"senderId":   sender.ID.Hex(),
 		"senderName": sender.Name,
 		"botUsername": sender.BotUsername,
-	}).Info("📱 [TELEGRAM] Bắt đầu gửi Telegram message")
+	}
+	if messageThreadID != nil {
+		logFields["messageThreadId"] = *messageThreadID
+	}
+	log.WithFields(logFields).Info("📱 [TELEGRAM] Bắt đầu gửi Telegram message")
 	
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", sender.BotToken)
 
@@ -69,6 +90,9 @@ func SendTelegram(ctx context.Context, sender *notifmodels.NotificationChannelSe
 	payload := map[string]interface{}{
 		"chat_id": chatID,
 		"text":    template.Content,
+	}
+	if messageThreadID != nil {
+		payload["message_thread_id"] = *messageThreadID
 	}
 
 	if len(inlineKeyboard) > 0 {

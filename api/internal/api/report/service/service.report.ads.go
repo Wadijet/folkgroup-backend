@@ -61,10 +61,12 @@ func (s *ReportService) computeAdsDailyForAccount(ctx context.Context, periodKey
 	metrics := make(map[string]interface{})
 
 	// 1. Aggregate meta_ad_insights: dateStart = periodKey, ownerOrganizationId, adAccountId.
+	// Chỉ lấy objectType = ad_account để tránh cộng dồn 4 level (ad_account, campaign, adset, ad đều có cùng tổng).
 	filterInsights := bson.M{
 		"dateStart":            periodKey,
 		"ownerOrganizationId": ownerOrganizationID,
 		"adAccountId":         adAccountId,
+		"objectType":          "ad_account",
 	}
 	extractInlineClicks := bson.M{"$convert": bson.M{"input": bson.M{"$ifNull": bson.A{"$metaData.inline_link_clicks", "0"}}, "to": "long", "onError": 0, "onNull": 0}}
 	pipeline := mongo.Pipeline{
@@ -198,5 +200,143 @@ func (s *ReportService) computeAdsDailyForAccount(ctx context.Context, periodKey
 
 	dimensions := map[string]interface{}{"adAccountId": adAccountId}
 	return s.upsertSnapshotWithDimensions(ctx, "ads_daily", periodKey, "day", ownerOrganizationID, dimensions, metrics)
+}
+
+// AggregateAdsDailyForPeriod aggregate meta_ad_insights + meta_campaigns cho một ngày, trả metrics (không upsert).
+// Dùng cho period-movements-from-db (PHỤ, đối chiếu) — query DB trực tiếp.
+func (s *ReportService) AggregateAdsDailyForPeriod(ctx context.Context, periodKey string, ownerOrganizationID primitive.ObjectID, adAccountId string) (map[string]interface{}, error) {
+	insightsColl, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.MetaAdInsights)
+	if !ok {
+		return nil, fmt.Errorf("không tìm thấy collection %s", global.MongoDB_ColNames.MetaAdInsights)
+	}
+	campaignsColl, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.MetaCampaigns)
+	if !ok {
+		return nil, fmt.Errorf("không tìm thấy collection %s", global.MongoDB_ColNames.MetaCampaigns)
+	}
+	metrics := make(map[string]interface{})
+	filterInsights := bson.M{
+		"dateStart":            periodKey,
+		"ownerOrganizationId": ownerOrganizationID,
+		"adAccountId":         adAccountId,
+		"objectType":          "ad_account",
+	}
+	extractInlineClicks := bson.M{"$convert": bson.M{"input": bson.M{"$ifNull": bson.A{"$metaData.inline_link_clicks", "0"}}, "to": "long", "onError": 0, "onNull": 0}}
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: filterInsights}},
+		{{Key: "$addFields", Value: bson.M{"_extractedInlineClicks": extractInlineClicks}}},
+		{{Key: "$group", Value: bson.M{
+			"_id":              nil,
+			"spend":            bson.M{"$sum": bson.M{"$convert": bson.M{"input": "$spend", "to": "double", "onError": 0, "onNull": 0}}},
+			"impressions":      bson.M{"$sum": bson.M{"$convert": bson.M{"input": "$impressions", "to": "long", "onError": 0, "onNull": 0}}},
+			"clicks":           bson.M{"$sum": bson.M{"$convert": bson.M{"input": "$clicks", "to": "long", "onError": 0, "onNull": 0}}},
+			"reach":            bson.M{"$sum": bson.M{"$convert": bson.M{"input": "$reach", "to": "long", "onError": 0, "onNull": 0}}},
+			"inlineLinkClicks": bson.M{"$sum": "$_extractedInlineClicks"},
+		}}},
+	}
+	cursor, err := insightsColl.Aggregate(ctx, pipeline, options.Aggregate())
+	if err != nil {
+		return nil, fmt.Errorf("aggregate meta_ad_insights: %w", err)
+	}
+	defer cursor.Close(ctx)
+	if cursor.Next(ctx) {
+		var raw bson.M
+		if err := cursor.Decode(&raw); err != nil {
+			return nil, fmt.Errorf("decode insights: %w", err)
+		}
+		if v, ok := raw["spend"].(float64); ok {
+			metrics["spend"] = v
+		} else {
+			metrics["spend"] = 0.0
+		}
+		if v, ok := raw["impressions"].(int64); ok {
+			metrics["impressions"] = v
+		} else if v, ok := raw["impressions"].(int32); ok {
+			metrics["impressions"] = int64(v)
+		} else {
+			metrics["impressions"] = int64(0)
+		}
+		if v, ok := raw["clicks"].(int64); ok {
+			metrics["clicks"] = v
+		} else if v, ok := raw["clicks"].(int32); ok {
+			metrics["clicks"] = int64(v)
+		} else {
+			metrics["clicks"] = int64(0)
+		}
+		if v, ok := raw["reach"].(int64); ok {
+			metrics["reach"] = v
+		} else if v, ok := raw["reach"].(int32); ok {
+			metrics["reach"] = int64(v)
+		} else {
+			metrics["reach"] = int64(0)
+		}
+		if v, ok := raw["inlineLinkClicks"].(int64); ok {
+			metrics["inlineLinkClicks"] = v
+		} else if v, ok := raw["inlineLinkClicks"].(int32); ok {
+			metrics["inlineLinkClicks"] = int64(v)
+		} else {
+			metrics["inlineLinkClicks"] = int64(0)
+		}
+	}
+	if len(metrics) == 0 {
+		metrics["spend"] = 0.0
+		metrics["impressions"] = int64(0)
+		metrics["clicks"] = int64(0)
+		metrics["reach"] = int64(0)
+		metrics["inlineLinkClicks"] = int64(0)
+	}
+	if _, ok := metrics["inlineLinkClicks"]; !ok {
+		metrics["inlineLinkClicks"] = int64(0)
+	}
+	filterCampaigns := bson.M{
+		"ownerOrganizationId": ownerOrganizationID,
+		"adAccountId":         adAccountId,
+		"effectiveStatus":     "ACTIVE",
+	}
+	activeCount, err := campaignsColl.CountDocuments(ctx, filterCampaigns)
+	if err != nil {
+		return nil, fmt.Errorf("count active campaigns: %w", err)
+	}
+	metrics["activeCampaigns"] = activeCount
+	loc, err := time.LoadLocation(ReportTimezone)
+	if err != nil {
+		return nil, fmt.Errorf("load timezone: %w", err)
+	}
+	t, err := time.ParseInLocation("2006-01-02", periodKey, loc)
+	if err != nil {
+		return nil, fmt.Errorf("parse periodKey: %w", err)
+	}
+	startMs := t.Unix() * 1000
+	endMs := t.AddDate(0, 0, 1).Unix()*1000 - 1
+	timeInPeriod := bson.M{"$gte": startMs, "$lte": endMs}
+	filterCreated := bson.M{
+		"ownerOrganizationId": ownerOrganizationID,
+		"adAccountId":         adAccountId,
+		"$or": bson.A{
+			bson.M{"metaCreatedAt": timeInPeriod},
+			bson.M{"$and": bson.A{
+				bson.M{"$or": bson.A{bson.M{"metaCreatedAt": 0}, bson.M{"metaCreatedAt": bson.M{"$exists": false}}}},
+				bson.M{"createdAt": timeInPeriod},
+			}},
+		},
+	}
+	createdCount, err := campaignsColl.CountDocuments(ctx, filterCreated)
+	if err != nil {
+		return nil, fmt.Errorf("count campaigns created: %w", err)
+	}
+	metrics["campaignsCreatedInPeriod"] = createdCount
+	if spend, ok := metrics["spend"].(float64); ok && spend > 0 {
+		if imp, ok := metrics["impressions"].(int64); ok && imp > 0 {
+			metrics["cpm"] = spend / float64(imp) * 1000
+		}
+		if clk, ok := metrics["clicks"].(int64); ok && clk > 0 {
+			metrics["cpc"] = spend / float64(clk)
+		}
+		if imp, ok := metrics["impressions"].(int64); ok && imp > 0 {
+			if clk, ok := metrics["clicks"].(int64); ok {
+				metrics["ctr"] = float64(clk) / float64(imp) * 100
+			}
+		}
+	}
+	return metrics, nil
 }
 

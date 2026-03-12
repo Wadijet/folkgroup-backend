@@ -21,6 +21,7 @@ import (
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/logger"
+	"meta_commerce/internal/notification"
 	"meta_commerce/internal/utility"
 
 	"github.com/sirupsen/logrus"
@@ -171,71 +172,99 @@ func NewInitService() (*InitService, error) {
 	}, nil
 }
 
-// InitDefaultNotificationTeam khởi tạo team mặc định cho hệ thống notification
-// Tạo team "Tech Team" thuộc System Organization và channel mặc định
-// Returns:
-//   - *authmodels.Organization: Team mặc định đã tạo
-//   - error: Lỗi nếu có trong quá trình khởi tạo
+// DefaultNotificationTeam định nghĩa cấu hình team mặc định cho định tuyến thông báo
+type DefaultNotificationTeam struct {
+	Code string // Mã team (unique)
+	Name string // Tên hiển thị
+}
+
+// defaultNotificationTeams danh sách các team mặc định: Marketing, Sales, Vận hành, Tech
+var defaultNotificationTeams = []DefaultNotificationTeam{
+	{Code: authmodels.TeamCodeTech, Name: "Tech Team"},
+	{Code: authmodels.TeamCodeMarketing, Name: "Marketing Team"},
+	{Code: authmodels.TeamCodeSales, Name: "Sales Team"},
+	{Code: authmodels.TeamCodeOperations, Name: "Vận hành (Operations)"},
+}
+
+// InitDefaultNotificationTeam khởi tạo team mặc định cho hệ thống notification (giữ tương thích ngược)
+// Tạo team "Tech Team" thuộc System Organization
+// Deprecated: Sử dụng InitDefaultNotificationTeams để lấy tất cả teams
 func (h *InitService) InitDefaultNotificationTeam() (*authmodels.Organization, error) {
-	// Sử dụng context cho phép insert system data trong quá trình init
-	// Context cho phép insert system data trong init (từ package services)
+	teams, err := h.InitDefaultNotificationTeams()
+	if err != nil {
+		return nil, err
+	}
+	techTeam, ok := teams[authmodels.TeamCodeTech]
+	if !ok {
+		return nil, fmt.Errorf("tech team không tồn tại sau khi init")
+	}
+	return techTeam, nil
+}
+
+// InitDefaultNotificationTeams khởi tạo tất cả teams mặc định cho định tuyến thông báo theo domain
+// Tạo: Tech Team, Marketing Team, Sales Team, Vận hành (Operations)
+// Returns:
+//   - map[string]*authmodels.Organization: Map teamCode -> team (đã tạo hoặc đã tồn tại)
+//   - error: Lỗi nếu có trong quá trình khởi tạo
+func (h *InitService) InitDefaultNotificationTeams() (map[string]*authmodels.Organization, error) {
 	ctx := basesvc.WithSystemDataInsertAllowed(context.TODO())
 	currentTime := time.Now().Unix()
 
-	// Lấy System Organization
 	systemOrg, err := h.GetRootOrganization()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get system organization: %v", err)
 	}
 
-	// Kiểm tra team mặc định đã tồn tại chưa
-	teamFilter := bson.M{
-		"code":     "TECH_TEAM",
-		"parentId": systemOrg.ID,
+	result := make(map[string]*authmodels.Organization)
+
+	for _, def := range defaultNotificationTeams {
+		teamFilter := bson.M{
+			"code":     def.Code,
+			"parentId": systemOrg.ID,
+		}
+		existingTeam, err := h.organizationService.BaseServiceMongoImpl.FindOne(ctx, teamFilter, nil)
+		if err != nil && err != common.ErrNotFound {
+			return nil, fmt.Errorf("failed to check existing team %s: %v", def.Code, err)
+		}
+
+		var team *authmodels.Organization
+		if err == common.ErrNotFound {
+			teamModel := authmodels.Organization{
+				Name:      def.Name,
+				Code:      def.Code,
+				Type:      authmodels.OrganizationTypeTeam,
+				ParentID:  &systemOrg.ID,
+				Path:      systemOrg.Path + "/" + def.Code,
+				Level:     systemOrg.Level + 1,
+				IsActive:  true,
+				IsSystem:  true,
+				CreatedAt: currentTime,
+				UpdatedAt: currentTime,
+			}
+
+			createdTeam, err := h.organizationService.BaseServiceMongoImpl.InsertOne(ctx, teamModel)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create team %s: %v", def.Code, err)
+			}
+
+			var modelTeam authmodels.Organization
+			bsonBytes, _ := bson.Marshal(createdTeam)
+			if err := bson.Unmarshal(bsonBytes, &modelTeam); err != nil {
+				return nil, fmt.Errorf("failed to decode team %s: %v", def.Code, err)
+			}
+			team = &modelTeam
+		} else {
+			var modelTeam authmodels.Organization
+			bsonBytes, _ := bson.Marshal(existingTeam)
+			if err := bson.Unmarshal(bsonBytes, &modelTeam); err != nil {
+				return nil, fmt.Errorf("failed to decode existing team %s: %v", def.Code, err)
+			}
+			team = &modelTeam
+		}
+		result[def.Code] = team
 	}
-	existingTeam, err := h.organizationService.BaseServiceMongoImpl.FindOne(ctx, teamFilter, nil)
-	if err != nil && err != common.ErrNotFound {
-		return nil, fmt.Errorf("failed to check existing tech team: %v", err)
-	}
 
-	var techTeam *authmodels.Organization
-	if err == common.ErrNotFound {
-		// Tạo mới Tech Team
-		techTeamModel := authmodels.Organization{
-			Name:      "Tech Team",
-			Code:      "TECH_TEAM",
-			Type:      authmodels.OrganizationTypeTeam,
-			ParentID:  &systemOrg.ID,
-			Path:      systemOrg.Path + "/TECH_TEAM",
-			Level:     systemOrg.Level + 1, // Level = 0 (vì System là -1)
-			IsActive:  true,
-			IsSystem:  true, // Đánh dấu là dữ liệu hệ thống
-			CreatedAt: currentTime,
-			UpdatedAt: currentTime,
-		}
-
-		createdTeam, err := h.organizationService.BaseServiceMongoImpl.InsertOne(ctx, techTeamModel)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create tech team: %v", err)
-		}
-
-		var modelTeam authmodels.Organization
-		bsonBytes, _ := bson.Marshal(createdTeam)
-		if err := bson.Unmarshal(bsonBytes, &modelTeam); err != nil {
-			return nil, fmt.Errorf("failed to decode tech team: %v", err)
-		}
-		techTeam = &modelTeam
-	} else {
-		// Team đã tồn tại
-		var modelTeam authmodels.Organization
-		bsonBytes, _ := bson.Marshal(existingTeam)
-		if err := bson.Unmarshal(bsonBytes, &modelTeam); err != nil {
-			return nil, fmt.Errorf("failed to decode existing tech team: %v", err)
-		}
-		techTeam = &modelTeam
-	}
-
-	return techTeam, nil
+	return result, nil
 }
 
 // InitialPermissions định nghĩa danh sách các quyền mặc định của hệ thống
@@ -350,6 +379,9 @@ var InitialPermissions = []authmodels.Permission{
 	{Name: "MetaAdInsight.Read", Describe: "Quyền xem ad insight Meta", Group: "Meta", Category: "MetaAdInsight"},
 	{Name: "MetaAdInsight.Update", Describe: "Quyền cập nhật ad insight Meta", Group: "Meta", Category: "MetaAdInsight"},
 	{Name: "MetaAdInsight.Delete", Describe: "Quyền xóa ad insight Meta", Group: "Meta", Category: "MetaAdInsight"},
+
+	// Meta Ads: Activity History — lịch sử thay đổi metrics (chỉ đọc)
+	{Name: "MetaActivityHistory.Read", Describe: "Quyền xem lịch sử hoạt động Meta Ads", Group: "Meta", Category: "MetaActivityHistory"},
 
 	// Quản lý cuộc trò chuyện Facebook: Thêm, xem, sửa, xóa
 	{Name: "FbConversation.Insert", Describe: "Quyền tạo cuộc trò chuyện", Group: "Pancake", Category: "FbConversation"},
@@ -1230,9 +1262,12 @@ func (h *InitService) InitNotificationData() error {
 		return fmt.Errorf("failed to get system organization: %v", err)
 	}
 
-	// ==================================== 0.1. KHỞI TẠO TEAM MẶC ĐỊNH CHO NOTIFICATION =============================================
-	// Lưu ý: Không cần tạo Tech Team nữa vì channels hệ thống thuộc về System Organization trực tiếp
-	// Tech Team vẫn có thể được tạo nếu cần cho mục đích khác, nhưng không bắt buộc cho notification channels
+	// ==================================== 0.1. KHỞI TẠO CÁC TEAM MẶC ĐỊNH CHO ĐỊNH TUYẾN THEO DOMAIN =============================================
+	// Tạo Tech, Marketing, Sales, Vận hành (Operations) — dùng cho routing rules theo domain
+	teams, err := h.InitDefaultNotificationTeams()
+	if err != nil {
+		return fmt.Errorf("failed to init default notification teams: %v", err)
+	}
 
 	// ==================================== 1. KHỞI TẠO NOTIFICATION SENDERS CHO SYSTEM ORGANIZATION =============================================
 	// Senders là dữ liệu hệ thống, thuộc về System Organization để có thể được share với tất cả organizations
@@ -1435,6 +1470,46 @@ func (h *InitService) InitNotificationData() error {
 		_, err = h.notificationChannelService.InsertOne(ctx, systemWebhookChannel)
 		if err != nil {
 			return fmt.Errorf("failed to create system webhook channel: %v", err)
+		}
+	}
+
+	// ==================================== 3.1. KHỞI TẠO CHANNELS CHO CÁC TEAM (Marketing, Sales, Vận hành, Tech) =============================================
+	// Mỗi team cần có channel để nhận thông báo theo domain. Admin cấu hình recipients/chatIDs sau.
+	teamChannelNames := map[string]string{
+		authmodels.TeamCodeTech:       "Tech Team Telegram",
+		authmodels.TeamCodeMarketing:  "Marketing Team Telegram",
+		authmodels.TeamCodeSales:      "Sales Team Telegram",
+		authmodels.TeamCodeOperations: "Vận hành Team Telegram",
+	}
+	for teamCode, team := range teams {
+		channelName, ok := teamChannelNames[teamCode]
+		if !ok {
+			continue
+		}
+		channelFilter := bson.M{
+			"ownerOrganizationId": team.ID,
+			"channelType":         "telegram",
+			"name":                channelName,
+		}
+		_, err = h.notificationChannelService.FindOne(ctx, channelFilter, nil)
+		if err == common.ErrNotFound {
+			teamChannel := notifmodels.NotificationChannel{
+				OwnerOrganizationID: team.ID,
+				ChannelType:         "telegram",
+				Name:                channelName,
+				Description:         fmt.Sprintf("Kênh Telegram cho %s. Admin cấu hình ChatIDs để nhận thông báo theo domain.", team.Name),
+				IsActive:            false,      // Tắt mặc định, admin cấu hình trước khi bật
+				IsSystem:            true,
+				ChatIDs:             []string{}, // Admin bổ sung
+				CreatedAt:           currentTime,
+				UpdatedAt:           currentTime,
+			}
+			_, err = h.notificationChannelService.InsertOne(ctx, teamChannel)
+			if err != nil {
+				return fmt.Errorf("failed to create channel for team %s: %v", teamCode, err)
+			}
+		} else if err != nil {
+			return fmt.Errorf("failed to check channel for team %s: %v", teamCode, err)
 		}
 	}
 
@@ -1745,84 +1820,82 @@ Hệ thống thông báo`,
 		}
 	}
 
-	// ==================================== 5. KHỞI TẠO ROUTING RULES MẶC ĐỊNH =============================================
-	// Tạo routing rules để kết nối system events với System Organization channels
-	// Lưu ý: Routing rules thuộc về System Organization (ownerOrganizationId = systemOrg.ID)
-	// và gửi notification cho System Organization (organizationIds = [systemOrg.ID]) để sử dụng channels hệ thống
-	// Lưu ý: Nếu có lỗi duplicate, chỉ log warning và tiếp tục (không return error)
-	for _, event := range systemEvents {
-		// Query với eventType cụ thể và ownerOrganizationId để kiểm tra duplicate
-		routingFilter := bson.M{
-			"eventType":           event.eventType, // Query trực tiếp với string (EventType giờ là string, không phải *string)
-			"ownerOrganizationId": systemOrg.ID,    // Filter theo ownerOrganizationId để tránh duplicate
+	// ==================================== 4.1. XÓA ROUTING RULES CŨ (theo eventType) — thay bằng domain rules =============================================
+	// Xóa rules cũ: system_*, ads_* (đã được thay bằng domain rules)
+	deleteOldFilter := bson.M{
+		"ownerOrganizationId": systemOrg.ID,
+		"isSystem":            true,
+		"$or": []bson.M{
+			{"eventType": bson.M{"$in": []string{"system_startup", "system_shutdown", "system_error", "system_resource_overload"}}},
+			{"eventType": bson.M{"$regex": "^ads_"}}, // ads_* (không match domain:ads)
+		},
+	}
+	res, delErr := h.notificationRoutingService.DeleteMany(ctx, deleteOldFilter)
+	if delErr == nil && res > 0 {
+		logrus.WithField("deletedCount", res).Info("🗑️ [INIT] Đã xóa routing rules cũ (eventType), thay bằng domain rules")
+	}
+
+	// ==================================== 5. KHỞI TẠO ROUTING RULES THEO DOMAIN → TEAM =============================================
+	// Chỉ dùng domain rules. Nếu domain rule đã có thì giữ nguyên.
+	// Định tuyến thông báo theo domain: ads/analytics→Marketing, conversation→Sales, order/payment→Vận hành, system/security/user→Tech (+ System Org để backward compat)
+	domainToTeamRules := []struct {
+		domain        string
+		teamCode      string
+		desc          string
+		includeSystem bool // Thêm System Org vào OrganizationIDs (system/security/user — channels đã cấu hình từ env)
+	}{
+		{notification.DomainAds, authmodels.TeamCodeMarketing, "Quảng cáo, đề xuất Ads", false},
+		{notification.DomainAnalytics, authmodels.TeamCodeMarketing, "Báo cáo, phân tích", false},
+		{notification.DomainConversation, authmodels.TeamCodeSales, "Chat, tin nhắn khách hàng", false},
+		{notification.DomainOrder, authmodels.TeamCodeOperations, "Đơn hàng", false},
+		{notification.DomainPayment, authmodels.TeamCodeOperations, "Thanh toán", false},
+		{notification.DomainSystem, authmodels.TeamCodeTech, "Hệ thống, lỗi API", true},
+		{notification.DomainSecurity, authmodels.TeamCodeTech, "Bảo mật, đăng nhập", true},
+		{notification.DomainUser, authmodels.TeamCodeTech, "Quản lý người dùng", true},
+	}
+	for _, r := range domainToTeamRules {
+		team, ok := teams[r.teamCode]
+		if !ok {
+			logrus.Warnf("⚠️ [INIT] Team %s không tồn tại, bỏ qua routing rule domain=%s", r.teamCode, r.domain)
+			continue
 		}
-		existingRule, err := h.notificationRoutingService.FindOne(ctx, routingFilter, nil)
+		domainFilter := bson.M{
+			"domain":              r.domain,
+			"ownerOrganizationId": systemOrg.ID,
+		}
+		existingRule, err := h.notificationRoutingService.FindOne(ctx, domainFilter, nil)
 		if err == common.ErrNotFound {
-			// Chưa có rule cho eventType này, tạo mới
+			domainStr := r.domain
+			orgIDs := []primitive.ObjectID{team.ID}
+			if r.includeSystem {
+				orgIDs = append([]primitive.ObjectID{systemOrg.ID}, orgIDs...) // System Org trước (backward compat)
+			}
 			routingRule := notifmodels.NotificationRoutingRule{
-				OwnerOrganizationID: systemOrg.ID,    // Thuộc về System Organization (phân quyền dữ liệu)
-				EventType:           event.eventType, // EventType giờ là string, không phải *string
-				Description:         fmt.Sprintf("Routing rule mặc định cho event '%s'. Gửi thông báo đến System Organization qua tất cả các kênh hệ thống (email, telegram, webhook). Được tạo tự động khi khởi tạo hệ thống.", event.eventType),
-				OrganizationIDs:     []primitive.ObjectID{systemOrg.ID},       // System Organization nhận notification (logic nghiệp vụ) - sử dụng channels hệ thống
-				ChannelTypes:        []string{"email", "telegram", "webhook"}, // Tất cả channel types
-				IsActive:            false,                                    // Tắt mặc định, admin cần bật sau khi cấu hình channels
-				IsSystem:            true,                                     // Đánh dấu là dữ liệu hệ thống, không thể xóa
+				OwnerOrganizationID: systemOrg.ID,
+				EventType:           "domain:" + r.domain, // Convention cho domain rules (đảm bảo uniqueness)
+				Domain:              &domainStr,
+				Description:         fmt.Sprintf("Định tuyến domain '%s' → %s. %s.", r.domain, team.Name, r.desc),
+				OrganizationIDs:     orgIDs,
+				ChannelTypes:        []string{"email", "telegram", "webhook"},
+				IsActive:            true,
+				IsSystem:            true,
 				CreatedAt:           currentTime,
 				UpdatedAt:           currentTime,
 			}
-			createdRule, err := h.notificationRoutingService.InsertOne(ctx, routingRule)
+			_, err = h.notificationRoutingService.InsertOne(ctx, routingRule)
 			if err != nil {
-				// Kiểm tra xem có phải lỗi duplicate key không
 				if errors.Is(err, common.ErrMongoDuplicate) {
-					// Lỗi duplicate key - rule đã tồn tại (có thể do race condition hoặc query không tìm thấy)
-					// Thử query lại với nhiều cách khác nhau để tìm rule đã tồn tại
-					var existingRule notifmodels.NotificationRoutingRule
-					var queryErr error
-
-					// Cách 1: Query với filter ban đầu
-					existingRule, queryErr = h.notificationRoutingService.FindOne(ctx, routingFilter, nil)
-					if queryErr != nil {
-						// Cách 2: Query chỉ với ownerOrganizationId và eventType (không dùng filter phức tạp)
-						simpleFilter := bson.M{
-							"ownerOrganizationId": systemOrg.ID,
-							"eventType":           event.eventType,
-						}
-						existingRule, queryErr = h.notificationRoutingService.FindOne(ctx, simpleFilter, nil)
-					}
-
-					if queryErr == nil {
-						logrus.WithFields(logrus.Fields{
-							"eventType": event.eventType,
-							"ruleId":    existingRule.ID.Hex(),
-						}).Infof("ℹ️  [INIT] Routing rule for eventType '%s' already exists (detected via duplicate key error), skipping...", event.eventType)
-					} else {
-						// Không thể query lại rule đã tồn tại, nhưng duplicate key error cho thấy rule đã tồn tại
-						// Log info thay vì warning vì đây là trường hợp bình thường (rule đã tồn tại)
-						logrus.WithFields(logrus.Fields{
-							"eventType": event.eventType,
-							"error":     err.Error(),
-						}).Infof("ℹ️  [INIT] Routing rule for eventType '%s' already exists (duplicate key detected, không thể query lại nhưng rule đã tồn tại), skipping...", event.eventType)
-					}
+					logrus.WithFields(logrus.Fields{"domain": r.domain}).Infof("ℹ️  [INIT] Domain routing rule for '%s' already exists, skipping...", r.domain)
 				} else {
-					// Lỗi khác, log warning và tiếp tục
-					logrus.WithError(err).Warnf("⚠️ [INIT] Failed to create routing rule for %s, tiếp tục...", event.eventType)
+					logrus.WithError(err).Warnf("⚠️ [INIT] Failed to create domain routing rule for %s, tiếp tục...", r.domain)
 				}
-				// Không return error, tiếp tục với event tiếp theo
 			} else {
-				logrus.WithFields(logrus.Fields{
-					"eventType": event.eventType,
-					"ruleId":    createdRule.ID.Hex(),
-				}).Infof("✅ [INIT] Created routing rule for eventType '%s'", event.eventType)
+				logrus.WithFields(logrus.Fields{"domain": r.domain, "team": team.Name}).Infof("✅ [INIT] Created domain routing rule: %s → %s", r.domain, team.Name)
 			}
 		} else if err != nil {
-			// Lỗi khác khi query, log warning và tiếp tục
-			logrus.WithError(err).Warnf("⚠️ [INIT] Failed to check existing routing rule for %s, tiếp tục...", event.eventType)
+			logrus.WithError(err).Warnf("⚠️ [INIT] Failed to check domain routing rule for %s, tiếp tục...", r.domain)
 		} else {
-			// Rule đã tồn tại, log info
-			logrus.WithFields(logrus.Fields{
-				"eventType": event.eventType,
-				"ruleId":    existingRule.ID.Hex(),
-			}).Infof("ℹ️  [INIT] Routing rule for eventType '%s' already exists, skipping...", event.eventType)
+			logrus.WithFields(logrus.Fields{"domain": r.domain, "ruleId": existingRule.ID.Hex()}).Infof("ℹ️  [INIT] Domain routing rule for '%s' already exists, skipping...", r.domain)
 		}
 	}
 

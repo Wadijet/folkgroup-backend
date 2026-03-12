@@ -194,7 +194,7 @@ func buildMetricsSnapshot(c *crmmodels.CrmCustomer) map[string]interface{} {
 			layer3Obj["repeat"] = v
 		}
 		if v := layer3Map["vipLayer3"]; v != nil {
-			layer3Obj["vip"] = v
+			layer3Obj["top"] = v
 		}
 		if v := layer3Map["inactiveLayer3"]; v != nil {
 			layer3Obj["inactive"] = v
@@ -236,7 +236,7 @@ func ensureLayer3InMetrics(m map[string]interface{}) map[string]interface{} {
 		layer3Obj["repeat"] = v
 	}
 	if v := layer3Map["vipLayer3"]; v != nil {
-		layer3Obj["vip"] = v
+		layer3Obj["top"] = v
 	}
 	if v := layer3Map["inactiveLayer3"]; v != nil {
 		layer3Obj["inactive"] = v
@@ -594,7 +594,7 @@ func getFromNestedMetrics(m map[string]interface{}, key string) interface{} {
 		} else if key == "repeatLayer3" {
 			nestedKey = "repeat"
 		} else if key == "vipLayer3" {
-			nestedKey = "vip"
+			nestedKey = "top"
 		} else if key == "inactiveLayer3" {
 			nestedKey = "inactive"
 		}

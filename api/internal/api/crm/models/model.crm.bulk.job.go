@@ -21,7 +21,8 @@ type CrmBulkJob struct {
 	JobType             string             `json:"jobType" bson:"jobType" index:"single:1,compound:bulk_worker"`
 	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"compound:bulk_worker"`
 	Params              bson.M             `json:"params" bson:"params"` // sources, types, limit, unifiedId...
-	CreatedAt           int64             `json:"createdAt" bson:"createdAt" index:"compound:bulk_worker,order:1"`
+	IsPriority          bool               `json:"isPriority" bson:"isPriority"` // Job ưu tiên: bắt buộc chạy, không bị throttle
+	CreatedAt           int64              `json:"createdAt" bson:"createdAt" index:"compound:bulk_worker,order:1"`
 	ProcessedAt         *int64             `json:"processedAt,omitempty" bson:"processedAt,omitempty" index:"single:1,compound:bulk_worker"`
 	ProcessError        string             `json:"processError,omitempty" bson:"processError,omitempty"`
 	Result              bson.M             `json:"result,omitempty" bson:"result,omitempty"` // Kết quả khi thành công

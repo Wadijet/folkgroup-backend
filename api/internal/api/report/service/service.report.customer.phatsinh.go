@@ -6,6 +6,7 @@ import (
 	"context"
 
 	crmvc "meta_commerce/internal/api/crm/service"
+	reportconstants "meta_commerce/internal/api/report/constants"
 	"meta_commerce/internal/api/report/layer3"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -278,10 +279,10 @@ func computePhatSinhFromStateMaps(startState map[string]map[string]interface{}, 
 		if to.OrderCount >= 1 && to.LastOrderAt >= startMs && to.LastOrderAt <= endMs {
 			activeInPeriod++
 		}
-		if to.ValueTier == "vip" && (to.LifecycleStage == "inactive" || to.LifecycleStage == "dead") {
+		if to.ValueTier == "top" && (to.LifecycleStage == "inactive" || to.LifecycleStage == "dead") {
 			reactivationValueIn += spent
 		}
-		if hadFrom && from.ValueTier == "vip" && (from.LifecycleStage == "inactive" || from.LifecycleStage == "dead") {
+		if hadFrom && from.ValueTier == "top" && (from.LifecycleStage == "inactive" || from.LifecycleStage == "dead") {
 			reactivationValueOut += from.TotalSpent
 		}
 
@@ -579,7 +580,7 @@ func buildPhatSinhMetrics(
 			"emotionalEngagement": inOutMapInt64(repeatEEIn, repeatEEOut),
 			"upgradePotential":    inOutMapInt64(repeatUPIn, repeatUPOut),
 		},
-		"vip": map[string]interface{}{
+		"top": map[string]interface{}{
 			"vipDepth":         inOutMapInt64(vipVDIn, vipVDOut),
 			"spendTrend":       inOutMapInt64(vipSTIn, vipSTOut),
 			"productDiversity": inOutMapInt64(vipPDIn, vipPDOut),
@@ -681,7 +682,7 @@ func buildPeriodEndBalance(snapshotMap map[string]map[string]interface{}, endMs,
 		if startMs > 0 && s.LastOrderAt >= startMs && s.LastOrderAt <= endMs {
 			activeInPeriod++
 		}
-		if s.ValueTier == "vip" && (s.LifecycleStage == "inactive" || s.LifecycleStage == "dead") {
+		if s.ValueTier == "top" && (s.LifecycleStage == "inactive" || s.LifecycleStage == "dead") {
 			reactivationValue += s.TotalSpent
 		}
 
@@ -734,19 +735,12 @@ func buildPeriodEndBalance(snapshotMap map[string]map[string]interface{}, endMs,
 		}
 	}
 
-	toInt64Map := func(m map[string]int64) map[string]interface{} {
-		out := make(map[string]interface{})
-		for k, v := range m {
-			out[k] = v
-		}
-		return out
+	// Dùng SortedInt64Map/SortedFloat64Map để output JSON luôn theo thứ tự chuẩn
+	wrapInt64 := func(m map[string]int64, order []string) reportconstants.SortedInt64Map {
+		return reportconstants.SortedInt64Map{Order: order, Data: m}
 	}
-	toFloat64Map := func(m map[string]float64) map[string]interface{} {
-		out := make(map[string]interface{})
-		for k, v := range m {
-			out[k] = v
-		}
-		return out
+	wrapFloat64 := func(m map[string]float64, order []string) reportconstants.SortedFloat64Map {
+		return reportconstants.SortedFloat64Map{Order: order, Data: m}
 	}
 
 	raw := map[string]interface{}{
@@ -757,22 +751,22 @@ func buildPeriodEndBalance(snapshotMap map[string]map[string]interface{}, endMs,
 	}
 
 	layer1 := map[string]interface{}{
-		"journeyStage": toInt64Map(journeyDist),
+		"journeyStage": wrapInt64(journeyDist, reportconstants.JourneyOrder),
 	}
 
 	layer2 := map[string]interface{}{
-		"valueTier":         toInt64Map(valueDist),
-		"lifecycleStage":    toInt64Map(lifecycleDist),
-		"channel":           toInt64Map(channelDist),
-		"loyaltyStage":      toInt64Map(loyaltyDist),
-		"momentumStage":     toInt64Map(momentumDist),
-		"ceoGroup":          toInt64Map(ceoDist),
-		"valueTierLTV":      toFloat64Map(valueLTV),
-		"lifecycleStageLTV": toFloat64Map(lifecycleLTV),
-		"channelLTV":        toFloat64Map(channelLTV),
-		"loyaltyStageLTV":   toFloat64Map(loyaltyLTV),
-		"momentumStageLTV":  toFloat64Map(momentumLTV),
-		"ceoGroupLTV":       toFloat64Map(ceoLTV),
+		"valueTier":         wrapInt64(valueDist, reportconstants.ValueOrder),
+		"lifecycleStage":    wrapInt64(lifecycleDist, reportconstants.LifecycleOrder),
+		"channel":           wrapInt64(channelDist, reportconstants.ChannelOrder),
+		"loyaltyStage":      wrapInt64(loyaltyDist, reportconstants.LoyaltyOrder),
+		"momentumStage":     wrapInt64(momentumDist, reportconstants.MomentumOrder),
+		"ceoGroup":          wrapInt64(ceoDist, reportconstants.CeoGroupOrder),
+		"valueTierLTV":      wrapFloat64(valueLTV, reportconstants.ValueOrder),
+		"lifecycleStageLTV": wrapFloat64(lifecycleLTV, reportconstants.LifecycleOrder),
+		"channelLTV":        wrapFloat64(channelLTV, reportconstants.ChannelOrder),
+		"loyaltyStageLTV":   wrapFloat64(loyaltyLTV, reportconstants.LoyaltyOrder),
+		"momentumStageLTV":  wrapFloat64(momentumLTV, reportconstants.MomentumOrder),
+		"ceoGroupLTV":       wrapFloat64(ceoLTV, reportconstants.CeoGroupOrder),
 	}
 
 	layer3 := map[string]interface{}{
@@ -784,7 +778,7 @@ func buildPeriodEndBalance(snapshotMap map[string]map[string]interface{}, endMs,
 			"repeatDepth": repeatRD, "repeatFrequency": repeatRF, "spendMomentum": repeatSM,
 			"productExpansion": repeatPE, "emotionalEngagement": repeatEE, "upgradePotential": repeatUP,
 		},
-		"vip": map[string]interface{}{
+		"top": map[string]interface{}{
 			"vipDepth": vipVD, "spendTrend": vipST, "productDiversity": vipPD,
 			"engagementLevel": vipEL, "riskScore": vipRS,
 		},

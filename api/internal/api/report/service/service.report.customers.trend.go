@@ -150,7 +150,7 @@ func getPeriodKeysInRange(reportKey, fromStr, toStr string) []string {
 	loc, _ := time.LoadLocation("Asia/Ho_Chi_Minh")
 	var keys []string
 	switch reportKey {
-	case "customer_daily", "order_daily":
+	case "customer_daily", "order_daily", "ads_daily":
 		from, _ := time.ParseInLocation("2006-01-02", fromStr, loc)
 		to, _ := time.ParseInLocation("2006-01-02", toStr, loc)
 		for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
@@ -188,7 +188,7 @@ func getPeriodKeysInRange(reportKey, fromStr, toStr string) []string {
 
 func reportKeyToPeriodType(reportKey string) string {
 	switch reportKey {
-	case "customer_daily", "order_daily":
+	case "customer_daily", "order_daily", "ads_daily":
 		return "day"
 	case "customer_weekly", "order_weekly":
 		return "week"
@@ -299,7 +299,7 @@ func getMondayOfWeek(t time.Time) time.Time {
 func buildComparison(curr, prev map[string]interface{}) map[string]reportdto.ComparisonItem {
 	out := make(map[string]reportdto.ComparisonItem)
 	// Snapshot phát sinh: cấu trúc raw/layer1/layer2/layer3 (giống metricsSnapshot trong customer activity).
-	// Cấu trúc mới: mỗi metric có in/out trong cùng nhóm — path = raw.totalCustomers.in, layer2.valueTier.vip.in
+	// Cấu trúc mới: mỗi metric có in/out trong cùng nhóm — path = raw.totalCustomers.in, layer2.valueTier.top.in
 	pairs := []struct{ nested, flat string }{
 		{"raw.totalCustomers.in", "totalCustomersIn"},
 		{"raw.totalCustomers.out", "totalCustomersOut"},
@@ -307,19 +307,19 @@ func buildComparison(curr, prev map[string]interface{}) map[string]reportdto.Com
 		{"raw.activeInPeriod.in", "activeInPeriod"},
 		{"raw.reactivationValue.in", "reactivationValueIn"},
 		{"raw.reactivationValue.out", "reactivationValueOut"},
-		{"layer2.valueTier.vip.in", "value_in_vip"},
+		{"layer2.valueTier.top.in", "value_in_vip"},
 		{"layer2.valueTier.high.in", "value_in_high"},
 		{"layer2.valueTier.medium.in", "value_in_medium"},
 		{"layer2.valueTier.low.in", "value_in_low"},
 		{"layer2.valueTier.new.in", "value_in_new"},
-		{"layer2.valueTier.vip.out", "value_out_vip"},
+		{"layer2.valueTier.top.out", "value_out_vip"},
 		{"layer2.valueTier.high.out", "value_out_high"},
 		{"layer1.journeyStage.visitor.in", "journey_in_visitor"},
 		{"layer1.journeyStage.engaged.in", "journey_in_engaged"},
 		{"layer1.journeyStage.first.in", "journey_in_first"},
 		{"layer1.journeyStage.repeat.in", "journey_in_repeat"},
-		{"layer1.journeyStage.vip.in", "journey_in_vip"},
-		{"layer1.journeyStage.inactive.in", "journey_in_inactive"},
+		{"layer1.journeyStage.blocked_spam.in", "journey_in_blocked_spam"},
+		{"layer1.journeyStage.promoter.in", "journey_in_promoter"},
 		{"layer2.lifecycleStage.active.in", "lifecycle_in_active"},
 		{"layer2.lifecycleStage.cooling.in", "lifecycle_in_cooling"},
 		{"layer2.lifecycleStage.inactive.in", "lifecycle_in_inactive"},
@@ -336,9 +336,9 @@ func buildComparison(curr, prev map[string]interface{}) map[string]reportdto.Com
 		{"layer2.ceoGroup.new.out", "ceo_out_new"},
 		{"layer2.ceoGroup.one_time.out", "ceo_out_one_time"},
 		{"layer2.ceoGroup.dead.out", "ceo_out_dead"},
-		{"layer2.valueTierLTV.vip.in", "valueLTV_in_vip"},
+		{"layer2.valueTierLTV.top.in", "valueLTV_in_vip"},
 		{"layer2.valueTierLTV.high.in", "valueLTV_in_high"},
-		{"layer2.valueTierLTV.vip.out", "valueLTV_out_vip"},
+		{"layer2.valueTierLTV.top.out", "valueLTV_out_vip"},
 		{"layer2.ceoGroupLTV.vip_active.in", "ceoGroupLTV_in_vip_active"},
 		{"layer2.ceoGroupLTV.vip_inactive.in", "ceoGroupLTV_in_vip_inactive"},
 		{"layer2.ceoGroupLTV.vip_active.out", "ceoGroupLTV_out_vip_active"},
@@ -556,8 +556,8 @@ func (s *ReportService) getCustomerStateMapForPeriod(ctx context.Context, ownerO
 }
 
 func computeCeoGroup(valueTier, lifecycleStage, journeyStage, loyaltyStage, momentumStage string) string {
-	if valueTier == "vip" && lifecycleStage == "active" { return "vip_active" }
-	if valueTier == "vip" && (lifecycleStage == "inactive" || lifecycleStage == "dead") { return "vip_inactive" }
+	if valueTier == "top" && lifecycleStage == "active" { return "vip_active" }
+	if valueTier == "top" && (lifecycleStage == "inactive" || lifecycleStage == "dead") { return "vip_inactive" }
 	if momentumStage == "rising" { return "rising" }
 	if journeyStage == "first" || valueTier == "new" { return "new" }
 	if loyaltyStage == "one_time" { return "one_time" }
@@ -616,9 +616,9 @@ func (s *ReportService) GetGroupChanges(ctx context.Context, ownerOrgID primitiv
 		}
 	}
 	// Thứ tự nhóm cho xác định upgrade/downgrade (số càng cao càng tốt)
-	valueOrder := map[string]int{"new": 0, "low": 1, "medium": 2, "high": 3, "vip": 4, "_unspecified": -1}
-	lifecycleOrder := map[string]int{"never_purchased": 0, "dead": 1, "inactive": 2, "cooling": 3, "active": 4, "_unspecified": -1}
-	journeyOrder := map[string]int{"visitor": 0, "engaged": 1, "first": 2, "repeat": 3, "vip": 4, "inactive": 0, "_unspecified": -1}
+	valueOrder := map[string]int{"new": 0, "low": 1, "medium": 2, "high": 3, "top": 4, "_unspecified": -1}
+	lifecycleOrder := map[string]int{"dead": 0, "inactive": 1, "cooling": 2, "active": 3, "_unspecified": -1}
+	journeyOrder := map[string]int{"visitor": 0, "engaged": 1, "blocked_spam": 2, "first": 3, "repeat": 4, "promoter": 5, "_unspecified": -1}
 	ceoOrder := map[string]int{"_other": 0, "dead": 0, "one_time": 1, "new": 2, "rising": 3, "vip_inactive": 2, "vip_active": 4}
 	defaultOrder := map[string]int{"_unspecified": -1, "_other": 0}
 

@@ -3,6 +3,7 @@ package notification
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	notifmodels "meta_commerce/internal/api/notification/models"
 	notifsvc "meta_commerce/internal/api/notification/service"
@@ -102,8 +103,18 @@ func (r *Router) FindRoutes(ctx context.Context, eventType string, domain string
 	routes := []Route{}
 
 	for _, rule := range filteredRules {
-		// Với mỗi team trong rule
-		for _, orgID := range rule.OrganizationIDs {
+		orgIDsToUse := rule.OrganizationIDs
+		// Ads events: thêm org trigger (proposal owner) vào danh sách nhận — org sở hữu đề xuất cần nhận thông báo
+		if organizationID != nil && !organizationID.IsZero() && strings.HasPrefix(eventType, "ads_action_") {
+			seen := make(map[string]bool)
+			for _, oid := range rule.OrganizationIDs {
+				seen[oid.Hex()] = true
+			}
+			if !seen[organizationID.Hex()] {
+				orgIDsToUse = append([]primitive.ObjectID{*organizationID}, rule.OrganizationIDs...)
+			}
+		}
+		for _, orgID := range orgIDsToUse {
 			// Lấy TẤT CẢ channels của team (filter theo ChannelTypes nếu có)
 			channels, err := r.channelService.FindByOrganizationID(ctx, orgID, rule.ChannelTypes)
 			if err != nil {

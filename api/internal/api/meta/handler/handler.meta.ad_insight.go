@@ -87,6 +87,9 @@ func (h *MetaAdInsightHandler) HandleSyncUpsertOne(c fiber.Ctx) error {
 			"objectType":  input.ObjectType,
 		}
 		result, err := h.MetaAdInsightService.Upsert(c.Context(), filter, &doc)
+		if err == nil {
+			_ = metasvc.SaveDailySnapshot(c.Context(), &doc)
+		}
 		h.HandleResponse(c, result, err)
 		return nil
 	})

@@ -66,8 +66,8 @@ func InitFiberApp() *fiber.App {
 		// =========================================
 		// 3. CẤU HÌNH TIMEOUT
 		// =========================================
-		ReadTimeout:  15 * time.Second,  // Timeout đọc request
-		WriteTimeout: 30 * time.Second,  // Timeout ghi response
+		ReadTimeout:  15 * time.Second,   // Timeout đọc request
+		WriteTimeout: 120 * time.Second,  // Timeout ghi response (cho API report nặng: period-end-balance, period-movements-from-db)
 		IdleTimeout:  120 * time.Second, // Timeout cho idle connections
 
 		// =========================================

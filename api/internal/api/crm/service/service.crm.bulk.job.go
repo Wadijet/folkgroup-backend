@@ -34,7 +34,8 @@ func NewCrmBulkJobService() (*CrmBulkJobService, error) {
 
 // Enqueue thêm job vào queue crm_bulk_jobs.
 // Trả về jobID và error.
-func (s *CrmBulkJobService) Enqueue(ctx context.Context, jobType string, ownerOrgID primitive.ObjectID, params bson.M) (primitive.ObjectID, error) {
+// isPriority: true = job ưu tiên, bắt buộc chạy ngay không bị throttle.
+func (s *CrmBulkJobService) Enqueue(ctx context.Context, jobType string, ownerOrgID primitive.ObjectID, params bson.M, isPriority bool) (primitive.ObjectID, error) {
 	if params == nil {
 		params = bson.M{}
 	}
@@ -43,6 +44,7 @@ func (s *CrmBulkJobService) Enqueue(ctx context.Context, jobType string, ownerOr
 		JobType:             jobType,
 		OwnerOrganizationID: ownerOrgID,
 		Params:              params,
+		IsPriority:          isPriority,
 		CreatedAt:           now,
 	}
 	inserted, err := s.InsertOne(ctx, *doc)
@@ -52,13 +54,15 @@ func (s *CrmBulkJobService) Enqueue(ctx context.Context, jobType string, ownerOr
 	return inserted.ID, nil
 }
 
-// GetUnprocessed lấy tối đa limit job chưa xử lý, sort theo createdAt asc.
+// GetUnprocessed lấy tối đa limit job chưa xử lý, sort theo isPriority desc (ưu tiên trước), createdAt asc.
 func (s *CrmBulkJobService) GetUnprocessed(ctx context.Context, limit int) ([]crmmodels.CrmBulkJob, error) {
 	if limit <= 0 {
 		limit = 5
 	}
 	filter := bson.M{"processedAt": nil}
-	opts := mongoopts.Find().SetSort(bson.D{{Key: "createdAt", Value: 1}}).SetLimit(int64(limit))
+	opts := mongoopts.Find().
+		SetSort(bson.D{{Key: "isPriority", Value: -1}, {Key: "createdAt", Value: 1}}).
+		SetLimit(int64(limit))
 	list, err := s.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, err

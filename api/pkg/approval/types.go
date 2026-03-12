@@ -21,6 +21,9 @@ type ActionPending struct {
 	ExecutedAt           int64                  `json:"executedAt,omitempty" bson:"executedAt,omitempty"`
 	ExecuteResponse      map[string]interface{} `json:"executeResponse,omitempty" bson:"executeResponse,omitempty"`
 	ExecuteError         string                 `json:"executeError,omitempty" bson:"executeError,omitempty"`
+	RetryCount           int                    `json:"retryCount" bson:"retryCount"`                     // Số lần đã retry (cho domain dùng queue)
+	NextRetryAt          *int64                 `json:"nextRetryAt,omitempty" bson:"nextRetryAt,omitempty" index:"single:1"` // Thời điểm retry tiếp (Unix sec)
+	MaxRetries           int                    `json:"maxRetries" bson:"maxRetries"`                        // Số lần retry tối đa (mặc định 5)
 	OwnerOrganizationID  primitive.ObjectID     `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1"`
 	CreatedAt            int64                  `json:"createdAt" bson:"createdAt"`
 	UpdatedAt            int64                  `json:"updatedAt" bson:"updatedAt"`
@@ -29,7 +32,12 @@ type ActionPending struct {
 const (
 	StatusPending  = "pending"
 	StatusApproved = "approved"
+	StatusQueued   = "queued" // Đã duyệt, chờ worker xử lý (domain ads dùng queue)
 	StatusRejected = "rejected"
 	StatusExecuted = "executed"
 	StatusFailed   = "failed"
+	StatusCancelled = "cancelled" // User hủy đề xuất trước khi duyệt
 )
+
+// MaxRetriesDefault số lần retry mặc định cho domain dùng queue.
+const MaxRetriesDefault = 5

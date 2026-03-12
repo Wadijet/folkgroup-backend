@@ -83,10 +83,22 @@ func (w *ClassificationRefreshWorker) Start(ctx context.Context) {
 			log.Info("📊 [CLASSIFICATION_REFRESH] Classification Refresh Worker stopped")
 			return
 		case <-ticker.C:
-			if ShouldThrottle(PriorityLowest) {
+			workerName := WorkerClassificationFull
+			if w.mode == ClassificationRefreshModeSmart {
+				workerName = WorkerClassificationSmart
+			}
+			if !IsWorkerActive(workerName) {
+				time.Sleep(1 * time.Minute)
 				continue
 			}
-			if effInterval := GetEffectiveInterval(w.interval, PriorityLowest); effInterval > w.interval {
+			p := GetPriority(WorkerClassificationFull, PriorityLowest)
+			if w.mode == ClassificationRefreshModeSmart {
+				p = GetPriority(WorkerClassificationSmart, PriorityLowest)
+			}
+			if ShouldThrottle(p) {
+				continue
+			}
+			if effInterval := GetEffectiveInterval(w.interval, p); effInterval > w.interval {
 				time.Sleep(effInterval - w.interval)
 			}
 			w.runBatch(ctx, log)
@@ -100,7 +112,11 @@ func (w *ClassificationRefreshWorker) runBatch(ctx context.Context, log *logrus.
 	defer func() {
 		metrics.RecordDuration("classification_refresh:"+w.mode, time.Since(start))
 	}()
-	batchSize := GetEffectiveBatchSize(w.batchSize, PriorityLowest)
+	p := GetPriority(WorkerClassificationFull, PriorityLowest)
+	if w.mode == ClassificationRefreshModeSmart {
+		p = GetPriority(WorkerClassificationSmart, PriorityLowest)
+	}
+	batchSize := GetEffectiveBatchSize(w.batchSize, p)
 	defer func() {
 		if r := recover(); r != nil {
 			log.WithFields(map[string]interface{}{

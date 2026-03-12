@@ -12,9 +12,13 @@ import (
 func init() {
 	approval.RegisterExecutor(DomainAds, pkgapproval.ExecutorFunc(executeAdsAction))
 	approval.RegisterEventTypes(DomainAds, map[string]string{
-		"executed": "ads_action_executed",
-		"rejected": "ads_action_rejected",
+		"executed":  "ads_action_executed",
+		"rejected":  "ads_action_rejected",
+		"failed":    "ads_action_executed_failed",
+		"cancelled": "ads_action_cancelled",
 	})
+	// Domain ads dùng queue: sau approve → status=queued, worker xử lý với retry
+	pkgapproval.RegisterDeferredExecutionDomain(DomainAds)
 }
 
 const DomainAds = "ads"

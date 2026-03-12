@@ -14,7 +14,9 @@ import (
 	pkgapproval "meta_commerce/pkg/approval"
 )
 
-// ExecuteAdsAction thực thi action (KILL, PAUSE, RESUME, INCREASE, DECREASE, SET_BUDGET) qua Meta API.
+// ExecuteAdsAction thực thi action qua Meta API.
+// Hỗ trợ: KILL, PAUSE, RESUME, ARCHIVE, DELETE, SET_BUDGET, SET_LIFETIME_BUDGET, INCREASE, DECREASE, SET_NAME.
+// Hỗ trợ đầy đủ campaign, adset, ad — ưu tiên ad > adset > campaign theo objectId.
 func ExecuteAdsAction(ctx context.Context, doc *pkgapproval.ActionPending) (map[string]interface{}, error) {
 	payload := doc.Payload
 	if payload == nil {
@@ -73,6 +75,54 @@ func ExecuteAdsAction(ctx context.Context, doc *pkgapproval.ActionPending) (map[
 			"raw":        string(body),
 		}, nil
 
+	case "ARCHIVE":
+		body, err := client.Post(ctx, objectId, map[string]string{"status": "ARCHIVED"})
+		if err != nil {
+			return nil, fmt.Errorf("Meta API archive %s %s: %w", objectType, objectId, err)
+		}
+		return map[string]interface{}{
+			"success":    true,
+			"objectType": objectType,
+			"objectId":   objectId,
+			"status":     "ARCHIVED",
+			"raw":        string(body),
+		}, nil
+
+	case "DELETE":
+		body, err := client.Post(ctx, objectId, map[string]string{"status": "DELETED"})
+		if err != nil {
+			return nil, fmt.Errorf("Meta API delete %s %s: %w", objectType, objectId, err)
+		}
+		return map[string]interface{}{
+			"success":    true,
+			"objectType": objectType,
+			"objectId":   objectId,
+			"status":     "DELETED",
+			"raw":        string(body),
+		}, nil
+
+	case "SET_NAME":
+		newName, _ := payload["value"].(string)
+		if newName == "" {
+			if n, ok := payload["name"].(string); ok && n != "" {
+				newName = n
+			}
+		}
+		if newName == "" {
+			return nil, fmt.Errorf("SET_NAME cần value hoặc payload.name")
+		}
+		body, err := client.Post(ctx, objectId, map[string]string{"name": newName})
+		if err != nil {
+			return nil, fmt.Errorf("Meta API set name %s %s: %w", objectType, objectId, err)
+		}
+		return map[string]interface{}{
+			"success":    true,
+			"objectType": objectType,
+			"objectId":   objectId,
+			"name":       newName,
+			"raw":        string(body),
+		}, nil
+
 	case "RESUME":
 		body, err := client.Post(ctx, objectId, map[string]string{"status": "ACTIVE"})
 		if err != nil {
@@ -87,7 +137,7 @@ func ExecuteAdsAction(ctx context.Context, doc *pkgapproval.ActionPending) (map[
 		}, nil
 
 	case "SET_BUDGET":
-		// Budget phải đổi ở adset hoặc campaign. Ưu tiên adset.
+		// Budget phải đổi ở adset hoặc campaign. Ưu tiên adset. daily_budget (cent).
 		budgetObjId := adSetId
 		if budgetObjId == "" {
 			budgetObjId = campaignId
@@ -111,6 +161,33 @@ func ExecuteAdsAction(ctx context.Context, doc *pkgapproval.ActionPending) (map[
 			"dailyBudget":  budgetCents,
 			"adAccountId":  adAccountId,
 			"raw":          string(body),
+		}, nil
+
+	case "SET_LIFETIME_BUDGET":
+		// lifetime_budget (cent) — campaign hoặc adset.
+		budgetObjId := adSetId
+		if budgetObjId == "" {
+			budgetObjId = campaignId
+		}
+		if budgetObjId == "" {
+			return nil, fmt.Errorf("SET_LIFETIME_BUDGET cần adSetId hoặc campaignId")
+		}
+		budgetCents := toBudgetCents(value)
+		if budgetCents <= 0 {
+			return nil, fmt.Errorf("SET_LIFETIME_BUDGET value không hợp lệ: %v", value)
+		}
+		body, err := client.Post(ctx, budgetObjId, map[string]string{
+			"lifetime_budget": strconv.FormatInt(budgetCents, 10),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("Meta API set lifetime budget %s: %w", budgetObjId, err)
+		}
+		return map[string]interface{}{
+			"success":         true,
+			"objectId":        budgetObjId,
+			"lifetimeBudget":  budgetCents,
+			"adAccountId":     adAccountId,
+			"raw":             string(body),
 		}, nil
 
 	case "INCREASE", "DECREASE":

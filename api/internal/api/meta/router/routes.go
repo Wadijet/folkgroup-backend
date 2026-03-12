@@ -64,5 +64,12 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 	r.RegisterCRUDRoutes(v1, "/meta/ad-insight", adInsightHandler, apirouter.ReadWriteConfig, "MetaAdInsight")
 	apirouter.RegisterRouteWithMiddleware(v1, "/meta/ad-insight", "POST", "/sync-upsert", []fiber.Handler{middleware.AuthMiddleware("MetaAdInsight.Update"), orgContextMiddleware}, adInsightHandler.HandleSyncUpsertOne)
 
+	// Meta Activity History — lịch sử thay đổi metrics (Campaign/AdSet/Ad). Chỉ đọc.
+	activityHistoryHandler, err := metahdl.NewMetaAdsActivityHistoryHandler()
+	if err != nil {
+		return fmt.Errorf("tạo meta activity history handler: %w", err)
+	}
+	r.RegisterCRUDRoutes(v1, "/meta/activity-history", activityHistoryHandler, apirouter.ReadOnlyConfig, "MetaActivityHistory")
+
 	return nil
 }

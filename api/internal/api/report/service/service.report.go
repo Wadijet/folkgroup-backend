@@ -370,6 +370,84 @@ func (s *ReportService) FindSnapshotsForTrendWithDimensions(ctx context.Context,
 	return list, nil
 }
 
+// GetAdsTrendFromDb trả về ads trend aggregate trực tiếp từ meta_ad_insights + meta_campaigns (PHỤ, đối chiếu — query DB nặng).
+// Cùng format với FindSnapshotsForAdsTrendByDayRange: []ReportSnapshot. adAccountId optional — rỗng thì aggregate tất cả accounts.
+func (s *ReportService) GetAdsTrendFromDb(ctx context.Context, ownerOrganizationID primitive.ObjectID, startMs, endMs int64, adAccountId string) ([]reportmodels.ReportSnapshot, error) {
+	if IsAdsReportKeyDisabled("ads_daily") {
+		return []reportmodels.ReportSnapshot{}, nil
+	}
+	reportKeyOrder := GetReportKeyOrderForDomain("ads")
+	candidates := getCandidateReportKeysAndRanges(startMs, endMs, reportKeyOrder)
+	if len(candidates) == 0 {
+		return []reportmodels.ReportSnapshot{}, nil
+	}
+	c := candidates[0]
+	periodKeys := getPeriodKeysInRange(c.reportKey, c.fromStr, c.toStr)
+	now := time.Now().Unix()
+	list := make([]reportmodels.ReportSnapshot, 0)
+
+	if adAccountId != "" {
+		for _, pk := range periodKeys {
+			metrics, err := s.AggregateAdsDailyForPeriod(ctx, pk, ownerOrganizationID, adAccountId)
+			if err != nil {
+				return nil, fmt.Errorf("aggregate ads %s/%s: %w", c.reportKey, pk, err)
+			}
+			list = append(list, reportmodels.ReportSnapshot{
+				ReportKey:           c.reportKey,
+				PeriodKey:           pk,
+				PeriodType:          "day",
+				OwnerOrganizationID: ownerOrganizationID,
+				Dimensions:          map[string]interface{}{"adAccountId": adAccountId},
+				Metrics:             metrics,
+				ComputedAt:          now,
+				CreatedAt:           now,
+				UpdatedAt:           now,
+			})
+		}
+		return list, nil
+	}
+
+	accColl, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.MetaAdAccounts)
+	if !ok {
+		return nil, fmt.Errorf("không tìm thấy collection meta_ad_accounts")
+	}
+	cursor, err := accColl.Find(ctx, bson.M{"ownerOrganizationId": ownerOrganizationID}, nil)
+	if err != nil {
+		return nil, fmt.Errorf("lấy ad accounts: %w", err)
+	}
+	defer cursor.Close(ctx)
+	var accountIds []string
+	for cursor.Next(ctx) {
+		var doc struct {
+			AdAccountId string `bson:"adAccountId"`
+		}
+		if err := cursor.Decode(&doc); err != nil || doc.AdAccountId == "" {
+			continue
+		}
+		accountIds = append(accountIds, doc.AdAccountId)
+	}
+	for _, pk := range periodKeys {
+		for _, accId := range accountIds {
+			metrics, err := s.AggregateAdsDailyForPeriod(ctx, pk, ownerOrganizationID, accId)
+			if err != nil {
+				return nil, fmt.Errorf("aggregate ads %s/%s account %s: %w", c.reportKey, pk, accId, err)
+			}
+			list = append(list, reportmodels.ReportSnapshot{
+				ReportKey:           c.reportKey,
+				PeriodKey:           pk,
+				PeriodType:          "day",
+				OwnerOrganizationID: ownerOrganizationID,
+				Dimensions:          map[string]interface{}{"adAccountId": accId},
+				Metrics:             metrics,
+				ComputedAt:          now,
+				CreatedAt:           now,
+				UpdatedAt:           now,
+			})
+		}
+	}
+	return list, nil
+}
+
 // FindSnapshotsForAdsTrendByDayRange truy vấn ads_daily từ report_snapshots theo khoảng ngày.
 // adAccountId: optional — nếu có thì filter theo dimensions.adAccountId; nếu rỗng trả về tất cả ad accounts.
 func (s *ReportService) FindSnapshotsForAdsTrendByDayRange(ctx context.Context, ownerOrganizationID primitive.ObjectID, startMs, endMs int64, adAccountId string) ([]reportmodels.ReportSnapshot, error) {

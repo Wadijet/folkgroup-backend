@@ -66,6 +66,10 @@ func registerSystemRoutes(router fiber.Router) error {
 	}
 	router.Get("/system/health", systemHandler.HandleHealth)
 	router.Get("/internal/metrics/job-metrics", systemHandler.HandleJobMetrics)
+	// Worker config: cần auth, quyền MongoDB.Manage (admin)
+	workerConfigMiddleware := middleware.AuthMiddleware("MongoDB.Manage")
+	apirouter.RegisterRouteWithMiddleware(router, "/system", "GET", "/worker-config", []fiber.Handler{workerConfigMiddleware}, systemHandler.HandleGetWorkerConfig)
+	apirouter.RegisterRouteWithMiddleware(router, "/system", "PUT", "/worker-config", []fiber.Handler{workerConfigMiddleware}, systemHandler.HandleUpdateWorkerConfig)
 	return nil
 }
 

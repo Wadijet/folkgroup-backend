@@ -55,15 +55,16 @@ func InitDefaultData() {
 		log.Info("User đầu tiên login sẽ tự động trở thành admin (First user becomes admin)")
 	}
 
-	// 5. Khởi tạo Tech Team mặc định (nếu chưa có)
-	// Tạo team "Tech Team" thuộc System Organization để sử dụng cho các mục đích khác nhau
-	log.Info("🔄 [INIT] Step 5: Initializing default Tech Team...")
-	techTeam, err := initService.InitDefaultNotificationTeam()
+	// 5. Khởi tạo các team mặc định (Tech, Marketing, Sales, Vận hành) cho định tuyến thông báo theo domain
+	log.Info("🔄 [INIT] Step 5: Initializing default notification teams (Tech, Marketing, Sales, Vận hành)...")
+	teams, err := initService.InitDefaultNotificationTeams()
 	if err != nil {
-		log.WithError(err).Error("❌ [INIT] Step 5: Failed to initialize Tech Team")
-		log.Warnf("Failed to initialize Tech Team: %v", err)
+		log.WithError(err).Error("❌ [INIT] Step 5: Failed to initialize notification teams")
+		log.Warnf("Failed to initialize notification teams: %v", err)
 	} else {
-		log.Infof("✅ [INIT] Step 5: Tech Team initialized successfully (ID: %s)", techTeam.ID.Hex())
+		for code, team := range teams {
+			log.Infof("✅ [INIT] Step 5: Team %s initialized (ID: %s)", code, team.ID.Hex())
+		}
 	}
 
 	// 6. Khởi tạo dữ liệu mặc định cho hệ thống notification
@@ -113,6 +114,69 @@ func InitDefaultData() {
 		log.Infof("✅ [INIT] Step 10: Đã migrate %d approvalConfig sang ads_approval_config", n)
 	} else {
 		log.Info("✅ [INIT] Step 10: Không có approvalConfig cần migrate")
+	}
+
+	// 11. Backfill level cho ads_meta_config cũ (chưa có level → campaign), migrate sang cấu trúc mới (1 doc), rồi init mặc định
+	log.Info("🔄 [INIT] Step 11: Backfill ads_meta_config level...")
+	if n, err := adsMigration.BackfillAdsMetaConfigLevel(ctx); err != nil {
+		log.WithError(err).Warn("⚠️ [INIT] Step 11a: Backfill ads_meta_config level thất bại (bỏ qua)")
+	} else if n > 0 {
+		log.Infof("✅ [INIT] Step 11a: Đã backfill level cho %d ads_meta_config", n)
+	}
+	log.Info("🔄 [INIT] Step 11b: Migrate ads_meta_config sang cấu trúc 1 document (account, campaign, adSet, ad)...")
+	if n, err := adsMigration.MigrateAdsMetaConfigToUnified(ctx); err != nil {
+		log.WithError(err).Warn("⚠️ [INIT] Step 11b: Migrate ads_meta_config thất bại (bỏ qua)")
+	} else if n > 0 {
+		log.Infof("✅ [INIT] Step 11b: Đã migrate %d ads_meta_config sang cấu trúc mới", n)
+	}
+	log.Info("🔄 [INIT] Step 11c: Initializing ads_meta_config defaults...")
+	if n, err := adsMigration.InitAdsMetaConfigDefaults(ctx); err != nil {
+		log.WithError(err).Warn("⚠️ [INIT] Step 11: Init ads_meta_config thất bại (bỏ qua)")
+	} else if n > 0 {
+		log.Infof("✅ [INIT] Step 11: Đã tạo %d ads_meta_config mặc định", n)
+	} else {
+		log.Info("✅ [INIT] Step 11: Không có ads_meta_config cần tạo")
+	}
+
+	// 12. Copy autoProposeEnabled, killRulesEnabled từ ads_approval_config sang ads_meta_config (một lần)
+	// Lưu ý: Chạy sau MigrateAdsMetaConfigToUnified — cấu trúc mới: account.automationConfig
+	log.Info("🔄 [INIT] Step 12: Migrating approvalConfig to ads_meta_config...")
+	if n, err := adsMigration.MigrateApprovalConfigToAdsMetaConfig(ctx); err != nil {
+		log.WithError(err).Warn("⚠️ [INIT] Step 12: Migration approval→meta_config thất bại (bỏ qua)")
+	} else if n > 0 {
+		log.Infof("✅ [INIT] Step 12: Đã copy approval config sang %d ads_meta_config", n)
+	} else {
+		log.Info("✅ [INIT] Step 12: Không có approval config cần migrate")
+	}
+
+	// 13. Backfill actionRuleConfig (killRules, decreaseRules) cho docs chưa có
+	log.Info("🔄 [INIT] Step 13: Backfill actionRuleConfig...")
+	if n, err := adsMigration.BackfillAutomationActionRules(ctx); err != nil {
+		log.WithError(err).Warn("⚠️ [INIT] Step 13: Backfill actionRuleConfig thất bại (bỏ qua)")
+	} else if n > 0 {
+		log.Infof("✅ [INIT] Step 13: Đã backfill actionRuleConfig cho %d ads_meta_config", n)
+	} else {
+		log.Info("✅ [INIT] Step 13: Không có ads_meta_config cần backfill actionRuleConfig")
+	}
+
+	// 14. Seed ads_metric_definitions theo FolkForm v4.1 (7d, 2h, 1h, 30p)
+	log.Info("🔄 [INIT] Step 14: Seeding ads_metric_definitions...")
+	if n, err := adsMigration.SeedAdsMetricDefinitions(ctx); err != nil {
+		log.WithError(err).Warn("⚠️ [INIT] Step 14: Seed ads_metric_definitions thất bại (bỏ qua)")
+	} else if n > 0 {
+		log.Infof("✅ [INIT] Step 14: Đã seed %d ads_metric_definitions", n)
+	} else {
+		log.Info("✅ [INIT] Step 14: ads_metric_definitions đã có sẵn")
+	}
+
+	// 15. Init ads notification events (templates + routing cho Circuit Breaker, Pancake Down, v.v.)
+	log.Info("🔄 [INIT] Step 15: Initializing ads notification events...")
+	if n, err := adsMigration.InitAdsNotificationEvents(ctx); err != nil {
+		log.WithError(err).Warn("⚠️ [INIT] Step 15: Init ads notification events thất bại (bỏ qua)")
+	} else if n > 0 {
+		log.Infof("✅ [INIT] Step 15: Đã tạo %d ads notification templates/rules", n)
+	} else {
+		log.Info("✅ [INIT] Step 15: Ads notification events đã có sẵn")
 	}
 
 	log.Info("✅ [INIT] InitDefaultData completed successfully")

@@ -2,6 +2,7 @@
 package reportsvc
 
 import (
+	reportconstants "meta_commerce/internal/api/report/constants"
 	reportmodels "meta_commerce/internal/api/report/models"
 )
 
@@ -36,7 +37,7 @@ func sumPhatSinhToBalance(snapshots []reportmodels.ReportSnapshot) map[string]in
 		layer2LTVOut[d] = make(map[string]float64)
 	}
 
-	layer3Groups := []string{"first", "repeat", "vip", "inactive", "engaged"}
+	layer3Groups := []string{"first", "repeat", "top", "inactive", "engaged"}
 	layer3In := make(map[string]map[string]map[string]int64)
 	layer3Out := make(map[string]map[string]map[string]int64)
 	for _, g := range layer3Groups {
@@ -68,7 +69,7 @@ func emptyBalance() map[string]interface{} {
 			"loyaltyStageLTV": map[string]interface{}{}, "momentumStageLTV": map[string]interface{}{}, "ceoGroupLTV": map[string]interface{}{},
 		},
 		"layer3": map[string]interface{}{
-			"first": map[string]interface{}{}, "repeat": map[string]interface{}{}, "vip": map[string]interface{}{},
+			"first": map[string]interface{}{}, "repeat": map[string]interface{}{}, "top": map[string]interface{}{},
 			"inactive": map[string]interface{}{}, "engaged": map[string]interface{}{},
 		},
 	}
@@ -154,7 +155,7 @@ func accumulatePhatSinh(m map[string]interface{},
 
 	// layer3 — group.dim.key = { in, out }
 	if l3, ok := m["layer3"].(map[string]interface{}); ok {
-		for _, group := range []string{"first", "repeat", "vip", "inactive", "engaged"} {
+		for _, group := range []string{"first", "repeat", "top", "inactive", "engaged"} {
 			if gMap, ok := l3[group].(map[string]interface{}); ok {
 				for dim, val := range gMap {
 					if sub, ok := val.(map[string]interface{}); ok {
@@ -217,8 +218,8 @@ func buildBalanceFromAccum(rawIn, rawOut map[string]float64,
 	layer2LTVIn, layer2LTVOut map[string]map[string]float64,
 	layer3In, layer3Out map[string]map[string]map[string]int64) map[string]interface{} {
 
-	netInt64Map := func(in, out map[string]int64) map[string]interface{} {
-		m := make(map[string]interface{})
+	netInt64Map := func(in, out map[string]int64, order []string) reportconstants.SortedInt64Map {
+		m := make(map[string]int64)
 		allKeys := make(map[string]bool)
 		for k := range in {
 			allKeys[k] = true
@@ -232,10 +233,10 @@ func buildBalanceFromAccum(rawIn, rawOut map[string]float64,
 				m[k] = net
 			}
 		}
-		return m
+		return reportconstants.SortedInt64Map{Order: order, Data: m}
 	}
-	netFloat64Map := func(in, out map[string]float64) map[string]interface{} {
-		m := make(map[string]interface{})
+	netFloat64Map := func(in, out map[string]float64, order []string) reportconstants.SortedFloat64Map {
+		m := make(map[string]float64)
 		allKeys := make(map[string]bool)
 		for k := range in {
 			allKeys[k] = true
@@ -249,7 +250,7 @@ func buildBalanceFromAccum(rawIn, rawOut map[string]float64,
 				m[k] = net
 			}
 		}
-		return m
+		return reportconstants.SortedFloat64Map{Order: order, Data: m}
 	}
 
 	raw := map[string]interface{}{
@@ -261,39 +262,39 @@ func buildBalanceFromAccum(rawIn, rawOut map[string]float64,
 	}
 
 	layer1 := map[string]interface{}{
-		"journeyStage": netInt64Map(layer1In, layer1Out),
+		"journeyStage": netInt64Map(layer1In, layer1Out, reportconstants.JourneyOrder),
 	}
 
 	layer2 := map[string]interface{}{
-		"valueTier":         netInt64Map(layer2In["valueTier"], layer2Out["valueTier"]),
-		"lifecycleStage":    netInt64Map(layer2In["lifecycleStage"], layer2Out["lifecycleStage"]),
-		"channel":           netInt64Map(layer2In["channel"], layer2Out["channel"]),
-		"loyaltyStage":      netInt64Map(layer2In["loyaltyStage"], layer2Out["loyaltyStage"]),
-		"momentumStage":     netInt64Map(layer2In["momentumStage"], layer2Out["momentumStage"]),
-		"ceoGroup":          netInt64Map(layer2In["ceoGroup"], layer2Out["ceoGroup"]),
-		"valueTierLTV":      netFloat64Map(layer2LTVIn["valueTierLTV"], layer2LTVOut["valueTierLTV"]),
-		"lifecycleStageLTV": netFloat64Map(layer2LTVIn["lifecycleStageLTV"], layer2LTVOut["lifecycleStageLTV"]),
-		"channelLTV":        netFloat64Map(layer2LTVIn["channelLTV"], layer2LTVOut["channelLTV"]),
-		"loyaltyStageLTV":   netFloat64Map(layer2LTVIn["loyaltyStageLTV"], layer2LTVOut["loyaltyStageLTV"]),
-		"momentumStageLTV":  netFloat64Map(layer2LTVIn["momentumStageLTV"], layer2LTVOut["momentumStageLTV"]),
-		"ceoGroupLTV":       netFloat64Map(layer2LTVIn["ceoGroupLTV"], layer2LTVOut["ceoGroupLTV"]),
+		"valueTier":         netInt64Map(layer2In["valueTier"], layer2Out["valueTier"], reportconstants.ValueOrder),
+		"lifecycleStage":    netInt64Map(layer2In["lifecycleStage"], layer2Out["lifecycleStage"], reportconstants.LifecycleOrder),
+		"channel":           netInt64Map(layer2In["channel"], layer2Out["channel"], reportconstants.ChannelOrder),
+		"loyaltyStage":      netInt64Map(layer2In["loyaltyStage"], layer2Out["loyaltyStage"], reportconstants.LoyaltyOrder),
+		"momentumStage":     netInt64Map(layer2In["momentumStage"], layer2Out["momentumStage"], reportconstants.MomentumOrder),
+		"ceoGroup":          netInt64Map(layer2In["ceoGroup"], layer2Out["ceoGroup"], reportconstants.CeoGroupOrder),
+		"valueTierLTV":      netFloat64Map(layer2LTVIn["valueTierLTV"], layer2LTVOut["valueTierLTV"], reportconstants.ValueOrder),
+		"lifecycleStageLTV": netFloat64Map(layer2LTVIn["lifecycleStageLTV"], layer2LTVOut["lifecycleStageLTV"], reportconstants.LifecycleOrder),
+		"channelLTV":        netFloat64Map(layer2LTVIn["channelLTV"], layer2LTVOut["channelLTV"], reportconstants.ChannelOrder),
+		"loyaltyStageLTV":   netFloat64Map(layer2LTVIn["loyaltyStageLTV"], layer2LTVOut["loyaltyStageLTV"], reportconstants.LoyaltyOrder),
+		"momentumStageLTV":  netFloat64Map(layer2LTVIn["momentumStageLTV"], layer2LTVOut["momentumStageLTV"], reportconstants.MomentumOrder),
+		"ceoGroupLTV":       netFloat64Map(layer2LTVIn["ceoGroupLTV"], layer2LTVOut["ceoGroupLTV"], reportconstants.CeoGroupOrder),
 	}
 
 	layer3 := make(map[string]interface{})
-	for _, group := range []string{"first", "repeat", "vip", "inactive", "engaged"} {
+	for _, group := range reportconstants.Layer3GroupOrder {
 		groupOut := make(map[string]interface{})
 		for dim := range layer3In[group] {
 			if layer3Out[group][dim] == nil {
 				layer3Out[group][dim] = make(map[string]int64)
 			}
-			groupOut[dim] = netInt64Map(layer3In[group][dim], layer3Out[group][dim])
+			groupOut[dim] = netInt64Map(layer3In[group][dim], layer3Out[group][dim], nil)
 		}
 		for dim := range layer3Out[group] {
 			if _, has := layer3In[group][dim]; !has {
 				if layer3In[group][dim] == nil {
 					layer3In[group][dim] = make(map[string]int64)
 				}
-				groupOut[dim] = netInt64Map(layer3In[group][dim], layer3Out[group][dim])
+				groupOut[dim] = netInt64Map(layer3In[group][dim], layer3Out[group][dim], nil)
 			}
 		}
 		layer3[group] = groupOut

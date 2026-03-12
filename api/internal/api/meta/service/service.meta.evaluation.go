@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	adsadaptive "meta_commerce/internal/api/ads/adaptive"
+	adsconfig "meta_commerce/internal/api/ads/config"
 	"meta_commerce/internal/api/meta/models"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/logger"
@@ -187,7 +189,8 @@ func UpdateRawFromSource(ctx context.Context, objectType, objectId, adAccountId 
 		return nil
 	}
 	dateStart, dateStop := getWindowDates(DefaultWindowDays)
-	windowMs := getWindowMs(DefaultWindowDays)
+	windowMs := getWindowMsForCurrentMetrics(ctx)
+	start7dMs, end7dMs := getWindowMsRangeFromDates(DefaultWindowDays)
 
 	// Lấy currentMetrics hiện tại
 	current, err := getAdCurrentMetrics(ctx, objectId, adAccountId, ownerOrgID)
@@ -198,112 +201,147 @@ func UpdateRawFromSource(ctx context.Context, objectType, objectId, adAccountId 
 	if raw == nil {
 		raw = make(map[string]interface{})
 	}
+	r7 := getRaw7d(raw)
 
-	// Chỉ cập nhật raw từ nguồn được chỉ định
+	// Chỉ cập nhật raw.7d từ nguồn được chỉ định (meta, pancake.pos, pancake.conversation)
 	switch source {
 	case "meta":
 		metaRaw, err := fetchRawMetaFromInsights(ctx, objectType, objectId, adAccountId, ownerOrgID, dateStart, dateStop)
 		if err != nil {
 			return fmt.Errorf("fetch raw meta: %w", err)
 		}
-		raw["meta"] = metaRaw
+		r7["meta"] = metaRaw
 	case "pancake.pos":
-		posRaw, err := fetchRawPosFromOrders(ctx, objectId, ownerOrgID, windowMs)
+		posRaw, err := fetchRawPosFromOrders(ctx, objectId, ownerOrgID, windowMs, start7dMs, end7dMs)
 		if err != nil {
 			return fmt.Errorf("fetch raw pos: %w", err)
 		}
-		if raw["pancake"] == nil {
-			raw["pancake"] = make(map[string]interface{})
+		if r7["pancake"] == nil {
+			r7["pancake"] = make(map[string]interface{})
 		}
-		pancake, _ := raw["pancake"].(map[string]interface{})
+		pancake, _ := r7["pancake"].(map[string]interface{})
 		if pancake == nil {
 			pancake = make(map[string]interface{})
 		}
 		pancake["pos"] = posRaw
-		raw["pancake"] = pancake
+		r7["pancake"] = pancake
 	case "pancake.conversation":
-		convRaw, err := fetchRawConversationFromConversations(ctx, objectId, ownerOrgID, windowMs)
+		convRaw, err := fetchRawConversationFromConversations(ctx, objectId, ownerOrgID, windowMs, start7dMs, end7dMs)
 		if err != nil {
 			return fmt.Errorf("fetch raw conversation: %w", err)
 		}
-		if raw["pancake"] == nil {
-			raw["pancake"] = make(map[string]interface{})
+		if r7["pancake"] == nil {
+			r7["pancake"] = make(map[string]interface{})
 		}
-		pancake, _ := raw["pancake"].(map[string]interface{})
+		pancake, _ := r7["pancake"].(map[string]interface{})
 		if pancake == nil {
 			pancake = make(map[string]interface{})
 		}
 		pancake["conversation"] = convRaw
-		raw["pancake"] = pancake
+		r7["pancake"] = pancake
 	default:
 		return fmt.Errorf("nguồn không hợp lệ: %s", source)
 	}
 
-	raw["window"] = map[string]interface{}{
+	r7["window"] = map[string]interface{}{
 		"dateStart": dateStart,
 		"dateStop":  dateStop,
 	}
-	raw["metaCreatedAt"] = fetchAdMetaCreatedAt(ctx, objectId, adAccountId, ownerOrgID)
+	r7["metaCreatedAt"] = fetchAdMetaCreatedAt(ctx, objectId, adAccountId, ownerOrgID)
+	// Đảm bảo raw có cấu trúc nested khi đã có 2h/1h
+	if raw["7d"] != nil {
+		raw["7d"] = r7
+	} else {
+		raw = r7
+	}
 	current["raw"] = raw
 
-	// Tính layer1, layer2, layer3, alertFlags
+	// Tính layer1, layer2, layer3. Theo FolkForm v4.1: 13 rules CHỈ apply cho campaign — Ad không có alertFlags.
 	layer1 := computeLayer1(raw)
 	layer2 := computeLayer2(raw, layer1)
 	layer3 := computeLayer3(layer1, layer2)
 	current["layer1"] = layer1
 	current["layer2"] = layer2
 	current["layer3"] = layer3
-	current["alertFlags"] = computeAlertFlags(raw, layer1, layer2, layer3)
+	current["alertFlags"] = []string{}
+	current["actions"] = []map[string]interface{}{}
 
 	return updateAdCurrentMetrics(ctx, objectId, adAccountId, ownerOrgID, current, source)
 }
 
-// updateRawAndLayersForAd tính đầy đủ raw từ 3 nguồn rồi tính layers cho Ad.
+// updateRawAndLayersForAd tính đầy đủ raw từ 3 nguồn (7d, 2h, 1h) rồi tính layers cho Ad.
+// Cấu trúc raw: { "7d": { meta, pancake, window, metaCreatedAt }, "2h": { orders, revenue, mess }, "1h": { orders, revenue, mess } }
 func updateRawAndLayersForAd(ctx context.Context, adId, adAccountId string, ownerOrgID primitive.ObjectID) error {
 	dateStart, dateStop := getWindowDates(DefaultWindowDays)
-	windowMs := getWindowMs(DefaultWindowDays)
+	window7dMs := getWindowMsForCurrentMetrics(ctx)
+	window2hMs := int64(2 * 60 * 60 * 1000)
+	window1hMs := int64(60 * 60 * 1000)
 
-	raw := make(map[string]interface{})
+	// raw.7d — Theo FolkForm 01: Pancake (orders) + FB (mess). Source: meta_ad_insights (FB) + pc_pos_orders (Pancake)
+	// Dùng calendar range (startMs, endMs) để align với meta — cùng khoảng thời gian theo múi giờ.
+	start7dMs, end7dMs := getWindowMsRangeFromDates(DefaultWindowDays)
+	raw7d := make(map[string]interface{})
 	metaRaw, err := fetchRawMetaFromInsights(ctx, "ad", adId, adAccountId, ownerOrgID, dateStart, dateStop)
 	if err != nil {
 		logger.GetAppLogger().WithError(err).Warn("[ADS_PROFILE] Không lấy được raw meta")
 	} else {
-		raw["meta"] = metaRaw
+		raw7d["meta"] = metaRaw
 	}
-	posRaw, err := fetchRawPosFromOrders(ctx, adId, ownerOrgID, windowMs)
+	posRaw7d, err := fetchRawPosFromOrders(ctx, adId, ownerOrgID, window7dMs, start7dMs, end7dMs)
 	if err != nil {
-		logger.GetAppLogger().WithError(err).Warn("[ADS_PROFILE] Không lấy được raw pos")
+		logger.GetAppLogger().WithError(err).Warn("[ADS_PROFILE] Không lấy được raw pos 7d")
 	} else {
-		raw["pancake"] = map[string]interface{}{"pos": posRaw}
+		raw7d["pancake"] = map[string]interface{}{"pos": posRaw7d}
 	}
-	convRaw, err := fetchRawConversationFromConversations(ctx, adId, ownerOrgID, windowMs)
+	convRaw7d, err := fetchRawConversationFromConversations(ctx, adId, ownerOrgID, window7dMs, start7dMs, end7dMs)
 	if err != nil {
-		logger.GetAppLogger().WithError(err).Warn("[ADS_PROFILE] Không lấy được raw conversation")
+		logger.GetAppLogger().WithError(err).Warn("[ADS_PROFILE] Không lấy được raw conversation 7d")
 	} else {
-		if raw["pancake"] == nil {
-			raw["pancake"] = make(map[string]interface{})
+		if raw7d["pancake"] == nil {
+			raw7d["pancake"] = make(map[string]interface{})
 		}
-		pancake, _ := raw["pancake"].(map[string]interface{})
+		pancake, _ := raw7d["pancake"].(map[string]interface{})
 		if pancake == nil {
 			pancake = make(map[string]interface{})
 		}
-		pancake["conversation"] = convRaw
-		raw["pancake"] = pancake
+		pancake["conversation"] = convRaw7d
+		raw7d["pancake"] = pancake
 	}
-	raw["window"] = map[string]interface{}{"dateStart": dateStart, "dateStop": dateStop}
-	raw["metaCreatedAt"] = fetchAdMetaCreatedAt(ctx, adId, adAccountId, ownerOrgID)
+	raw7d["window"] = map[string]interface{}{"dateStart": dateStart, "dateStop": dateStop}
+	raw7d["metaCreatedAt"] = fetchAdMetaCreatedAt(ctx, adId, adAccountId, ownerOrgID)
+
+	// raw.2h — Theo FolkForm 04: Conv_Rate_now = Pancake_orders_2h / FB_Mess_2h. Source: pc_pos_orders (Pancake) + fb_conversations (FB mess)
+	// Dùng khoảng align theo boundary 2h (slot đã hoàn thành gần nhất).
+	start2hMs, end2hMs := getWindowMsRangeForShortCycle(120)
+	raw2h := fetchRawForShortWindow(ctx, adId, ownerOrgID, window2hMs, start2hMs, end2hMs)
+
+	// raw.1h — Theo FolkForm PATCH 03 HB-3: FB_Mess_1h, Pancake_orders_1h. Source: pc_pos_orders (Pancake) + fb_conversations (FB mess)
+	start1hMs, end1hMs := getWindowMsRangeForShortCycle(60)
+	raw1h := fetchRawForShortWindow(ctx, adId, ownerOrgID, window1hMs, start1hMs, end1hMs)
+
+	// raw.30p — Theo FolkForm 01: Mess_30p cho MQS, Msg_Rate. meta_ad_insights chỉ daily → mess từ fb_conversations.
+	window30pMs := int64(30 * 60 * 1000)
+	start30pMs, end30pMs := getWindowMsRangeForShortCycle(30)
+	raw30p := fetchRawForShortWindow(ctx, adId, ownerOrgID, window30pMs, start30pMs, end30pMs)
+
+	raw := map[string]interface{}{
+		"7d":  raw7d,
+		"2h":  raw2h,
+		"1h":  raw1h,
+		"30p": raw30p,
+	}
 
 	layer1 := computeLayer1(raw)
 	layer2 := computeLayer2(raw, layer1)
 	layer3 := computeLayer3(layer1, layer2)
-	alertFlags := computeAlertFlags(raw, layer1, layer2, layer3)
-
+	// Theo FolkForm v4.1: 13 rules CHỈ apply cho campaign — Ad không có alertFlags.
 	current := map[string]interface{}{
 		"raw":         raw,
 		"layer1":     layer1,
 		"layer2":     layer2,
 		"layer3":     layer3,
-		"alertFlags": alertFlags,
+		"alertFlags": []string{},
+		"actions":    []map[string]interface{}{},
 	}
 	return updateAdCurrentMetrics(ctx, adId, adAccountId, ownerOrgID, current, "recompute")
 }
@@ -434,11 +472,70 @@ func flattenMap(m map[string]interface{}, prefix string) map[string]interface{} 
 	return out
 }
 
+// getRaw7d trả về raw cho window 7d. Hỗ trợ cả cấu trúc mới (raw.7d) và cũ (raw phẳng).
+func getRaw7d(raw map[string]interface{}) map[string]interface{} {
+	if r, ok := raw["7d"].(map[string]interface{}); ok && r != nil {
+		return r
+	}
+	return raw
+}
+
+// getRaw2h trả về raw cho window 2h. Nil nếu không có.
+func getRaw2h(raw map[string]interface{}) map[string]interface{} {
+	r, _ := raw["2h"].(map[string]interface{})
+	return r
+}
+
+// getRaw1h trả về raw cho window 1h. Nil nếu không có.
+func getRaw1h(raw map[string]interface{}) map[string]interface{} {
+	r, _ := raw["1h"].(map[string]interface{})
+	return r
+}
+
+// getRaw30p trả về raw cho window 30 phút. Nil nếu không có.
+// Mess từ fb_conversations (meta_ad_insights chỉ có daily).
+func getRaw30p(raw map[string]interface{}) map[string]interface{} {
+	r, _ := raw["30p"].(map[string]interface{})
+	return r
+}
+
+// getTimeFactorForMQS trả về Time_Factor theo FolkForm 01. Dùng timezone Asia/Ho_Chi_Minh.
+func getTimeFactorForMQS() float64 {
+	loc, err := time.LoadLocation("Asia/Ho_Chi_Minh")
+	if err != nil {
+		loc = time.FixedZone("UTC+7", 7*3600)
+	}
+	hour := time.Now().In(loc).Hour()
+	min := time.Now().In(loc).Minute()
+	// 07:00–11:59 ×1.2 | 12:00–16:59 ×1.0 | 17:00–19:59 ×0.8 | 20:00–22:29 ×0.5 | khác ×1.0
+	if hour >= 7 && hour < 12 {
+		return 1.2
+	}
+	if hour >= 12 && hour < 17 {
+		return 1.0
+	}
+	if hour >= 17 && hour < 20 {
+		return 0.8
+	}
+	if hour == 20 || hour == 21 || (hour == 22 && min < 30) {
+		return 0.5
+	}
+	return 1.0
+}
+
+// computeLayer1 tính layer1 theo FolkForm 01. Nguồn: Pancake (orders) + FB (mess).
+// raw.7d: meta (meta_ad_insights) + pancake.pos (pc_pos_orders). raw.2h/1h/30p: orders (pc_pos_orders) + mess (fb_conversations).
 func computeLayer1(raw map[string]interface{}) map[string]interface{} {
-	meta, _ := raw["meta"].(map[string]interface{})
-	pancake, _ := raw["pancake"].(map[string]interface{})
+	r7d := getRaw7d(raw)
+	r2h := getRaw2h(raw)
+	r1h := getRaw1h(raw)
+	r30p := getRaw30p(raw)
+
+	meta, _ := r7d["meta"].(map[string]interface{})
+	pancake, _ := r7d["pancake"].(map[string]interface{})
 	pos, _ := mapOrNil(pancake, "pos").(map[string]interface{})
 
+	// FB_Mess_7d, Pancake_orders_7d từ meta_ad_insights + pc_pos_orders
 	spend := toFloat(meta, "spend")
 	mess := toInt64(meta, "mess")
 	inlineLinkClicks := toInt64(meta, "inlineLinkClicks")
@@ -461,6 +558,23 @@ func computeLayer1(raw map[string]interface{}) map[string]interface{} {
 	if mess > 0 {
 		convRate = float64(orders) / float64(mess)
 	}
+	// convRate_2h, convRate_1h — từ raw.2h, raw.1h (orders/mess từ fb_conversations). Tỷ lệ 0-1.
+	convRate2h := 0.0
+	if r2h != nil {
+		o2 := toInt64(r2h, "orders")
+		m2 := toInt64(r2h, "mess")
+		if m2 > 0 {
+			convRate2h = float64(o2) / float64(m2)
+		}
+	}
+	convRate1h := 0.0
+	if r1h != nil {
+		o1 := toInt64(r1h, "orders")
+		m1 := toInt64(r1h, "mess")
+		if m1 > 0 {
+			convRate1h = float64(o1) / float64(m1)
+		}
+	}
 	roas := 0.0
 	if spend > 0 {
 		roas = revenue / spend
@@ -468,7 +582,7 @@ func computeLayer1(raw map[string]interface{}) map[string]interface{} {
 
 	// Lifecycle: ưu tiên metaCreatedAt (thời gian tạo gốc từ Meta) — ad trong learning phase (< 7 ngày) = NEW
 	lifecycle := "NEW"
-	metaCreatedAt := toInt64(raw, "metaCreatedAt")
+	metaCreatedAt := toInt64(r7d, "metaCreatedAt")
 	if metaCreatedAt > 0 {
 		daysSinceCreated := (time.Now().UnixMilli() - metaCreatedAt) / (24 * 60 * 60 * 1000)
 		if daysSinceCreated < MetaLearningPhaseDays {
@@ -496,25 +610,67 @@ func computeLayer1(raw map[string]interface{}) map[string]interface{} {
 		}
 	}
 
+	// MQS = Mess(lag-30p) × CR_7day_Pancake × Time_Factor. Theo FolkForm 01.
+	// Ưu tiên mess_30p từ fb_conversations; fallback mess_7d khi không có raw.30p.
+	timeFactor := getTimeFactorForMQS()
+	messForMQS := mess
+	if r30p != nil {
+		if m30 := toInt64(r30p, "mess"); m30 > 0 {
+			messForMQS = m30
+		}
+	}
+	mqs := float64(messForMQS) * convRate * timeFactor
+
+	// spend_pct = spend / daily_budget (từ meta.dailyBudget khi có — campaign level)
+	spendPct := 0.0
+	if dailyBudget := toFloat(meta, "dailyBudget"); dailyBudget > 0 && spend > 0 {
+		spendPct = spend / dailyBudget
+	}
+
+	// runtime_minutes = (now - metaCreatedAt) / 60000 — cho KO-A, BASE CONDITION
+	runtimeMinutes := 0.0
+	if metaCreatedAt := toInt64(r7d, "metaCreatedAt"); metaCreatedAt > 0 {
+		runtimeMinutes = float64(time.Now().UnixMilli()-metaCreatedAt) / 60000
+	}
+
+	// msgRate_30p = mess_30p / clicks_30p. Meta không có clicks 30p → ước lượng: clicks_30p ≈ clicks_7d/336 (7d=10080p, 30p/10080p=1/336).
+	msgRate30p := 0.0
+	if r30p != nil && inlineLinkClicks > 0 {
+		m30 := toInt64(r30p, "mess")
+		clicks30pEst := float64(inlineLinkClicks) / 336.0 // 7 ngày = 10080 phút; 30p/10080p ≈ 1/336
+		if clicks30pEst >= 1 && m30 > 0 {
+			msgRate30p = float64(m30) / clicks30pEst
+		}
+	}
+
+	// Tên metric thể hiện rõ chu kỳ theo FolkForm v4.1
 	return map[string]interface{}{
-		"lifecycle":    lifecycle,
-		"msgRate":      msgRate,
-		"cpaMess":      cpaMess,
-		"cpaPurchase":  cpaPurchase,
-		"convRate":     convRate,
-		"roas":         roas,
+		"lifecycle":        lifecycle,
+		"msgRate_7d":       msgRate,
+		"msgRate_30p":      msgRate30p,
+		"mess_30p":         toInt64(r30p, "mess"),
+		"cpaMess_7d":       cpaMess,
+		"cpaPurchase_7d":   cpaPurchase,
+		"convRate_7d":      convRate,
+		"convRate_2h":      convRate2h,
+		"convRate_1h":      convRate1h,
+		"roas_7d":          roas,
+		"mqs_7d":           mqs,
+		"spendPct_7d":      spendPct,
+		"runtimeMinutes":  runtimeMinutes,
 	}
 }
 
 func computeLayer2(raw map[string]interface{}, layer1 map[string]interface{}) map[string]interface{} {
-	meta, _ := raw["meta"].(map[string]interface{})
+	r7d := getRaw7d(raw)
+	meta, _ := r7d["meta"].(map[string]interface{})
 	cpm := toFloat(meta, "cpm")
 	ctr := toFloat(meta, "ctr")
 	frequency := toFloat(meta, "frequency")
 
-	// Đơn giản hóa: 5 trục 0-100 dựa trên ngưỡng
-	efficiency := scoreFromRoas(toFloat(layer1, "roas"))
-	demandQuality := scoreFromRate(toFloat(layer1, "msgRate"), toFloat(layer1, "convRate"))
+	// Đơn giản hóa: 5 trục 0-100 dựa trên ngưỡng. Dùng metrics 7d.
+	efficiency := scoreFromRoas(toFloat(layer1, "roas_7d"))
+	demandQuality := scoreFromRate(toFloat(layer1, "msgRate_7d"), toFloat(layer1, "convRate_7d"))
 	auctionPressure := scoreFromCpmCtr(cpm, ctr)
 	saturation := scoreFromFrequency(frequency)
 	momentum := 50 // TODO: cần trend data
@@ -545,7 +701,7 @@ func computeLayer3(layer1, layer2 map[string]interface{}) map[string]interface{}
 		healthState = "warning"
 	}
 
-	roas := toFloat(layer1, "roas")
+	roas := toFloat(layer1, "roas_7d")
 	performanceTier := "low"
 	if roas >= 3 {
 		performanceTier = "high"
@@ -855,17 +1011,35 @@ func toInt64FromBson(d bson.M, k string) int64 {
 	return 0
 }
 
-// fetchRawPosFromOrders aggregate pc_pos_orders có posData.ad_id = adId → raw.pancake.pos.
-func fetchRawPosFromOrders(ctx context.Context, adId string, ownerOrgID primitive.ObjectID, windowMs int64) (map[string]interface{}, error) {
+// fetchRawPosFromOrders aggregate pc_pos_orders có posData.ad_id = adId trong window → raw.pancake.pos.
+// Theo FolkForm v4.1: Conv_Rate_7day = Pancake_orders_7d / FB_Mess_7d — orders phải filter cùng chu kỳ với Meta insights.
+// Khi startEndMs có 2 phần tử: dùng calendar range (align với meta). Ngược lại: dùng rolling window (now - windowMs đến now).
+func fetchRawPosFromOrders(ctx context.Context, adId string, ownerOrgID primitive.ObjectID, windowMs int64, startEndMs ...int64) (map[string]interface{}, error) {
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
 	if !ok {
 		return nil, fmt.Errorf("không tìm thấy collection pc_pos_orders")
 	}
+	var startMs, endMs int64
+	if len(startEndMs) >= 2 && startEndMs[0] > 0 && startEndMs[1] > 0 {
+		startMs, endMs = startEndMs[0], startEndMs[1]
+	} else {
+		nowMs := time.Now().UnixMilli()
+		startMs = nowMs - windowMs
+		endMs = nowMs
+	}
+	startSec := startMs / 1000
+	endSec := endMs / 1000
+
 	filter := bson.M{
 		"ownerOrganizationId": ownerOrgID,
 		"posData.ad_id":       adId,
+		"$or": []bson.M{
+			{"posCreatedAt": bson.M{"$gte": startSec, "$lte": endSec}},
+			{"insertedAt": bson.M{"$gte": startSec, "$lte": endSec}},
+			{"posCreatedAt": bson.M{"$gte": startMs, "$lte": endMs}},
+			{"insertedAt": bson.M{"$gte": startMs, "$lte": endMs}},
+		},
 	}
-	_ = windowMs // Phase 1: không filter theo thời gian
 
 	pipeline := mongo.Pipeline{
 		{{Key: "$match", Value: filter}},
@@ -893,23 +1067,103 @@ func fetchRawPosFromOrders(ctx context.Context, adId string, ownerOrgID primitiv
 	return raw, nil
 }
 
-// fetchRawConversationFromConversations đếm fb_conversations có panCakeData.ad_ids chứa adId hoặc ads[].ad_id = adId.
-func fetchRawConversationFromConversations(ctx context.Context, adId string, ownerOrgID primitive.ObjectID, windowMs int64) (map[string]interface{}, error) {
+// fetchRawForShortWindow lấy raw cho window ngắn (2h, 1h, 30p) theo FolkForm 04, PATCH 03.
+// Orders: pc_pos_orders (Pancake). Mess: fb_conversations (FB — hội thoại từ ad, meta_ad_insights chỉ có daily).
+// Khi startEndMs có 2 phần tử: dùng khoảng align theo boundary (đúng chu kỳ). Ngược lại: rolling window.
+func fetchRawForShortWindow(ctx context.Context, adId string, ownerOrgID primitive.ObjectID, windowMs int64, startEndMs ...int64) map[string]interface{} {
+	out := map[string]interface{}{"orders": int64(0), "revenue": 0.0, "mess": int64(0)}
+	posRaw, err := fetchRawPosFromOrders(ctx, adId, ownerOrgID, windowMs, startEndMs...)
+	if err == nil {
+		out["orders"] = toInt64(posRaw, "orders")
+		out["revenue"] = toFloat(posRaw, "revenue")
+	}
+	convRaw, err := fetchRawConversationFromConversations(ctx, adId, ownerOrgID, windowMs, startEndMs...)
+	if err == nil {
+		out["mess"] = toInt64(convRaw, "conversationCount")
+	}
+	return out
+}
+
+// fetchRawConversationFromConversations đếm fb_conversations (FB mess) có panCakeData.ad_ids chứa adId trong window.
+// FolkForm: FB_Mess = hội thoại từ ad. Dùng panCakeData.inserted_at (thời điểm hội thoại bắt đầu) — không dùng panCakeUpdatedAt.
+// inserted_at có thể là string ISO ("2026-02-14T13:03:30") hoặc number (Unix sec/ms) — dùng aggregation để xử lý.
+// Khi startEndMs có 2 phần tử: dùng calendar range (align với meta). Ngược lại: dùng rolling window.
+func fetchRawConversationFromConversations(ctx context.Context, adId string, ownerOrgID primitive.ObjectID, windowMs int64, startEndMs ...int64) (map[string]interface{}, error) {
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.FbConvesations)
 	if !ok {
 		return nil, fmt.Errorf("không tìm thấy collection fb_conversations")
 	}
-	filter := bson.M{
-		"ownerOrganizationId": ownerOrgID,
-		"$or": []bson.M{
-			{"panCakeData.ad_ids": adId},
-			{"panCakeData.ads.ad_id": adId},
+	var startMs, endMs int64
+	if len(startEndMs) >= 2 && startEndMs[0] > 0 && startEndMs[1] > 0 {
+		startMs, endMs = startEndMs[0], startEndMs[1]
+	} else {
+		nowMs := time.Now().UnixMilli()
+		startMs = nowMs - windowMs
+		endMs = nowMs
+	}
+
+	// convTsMs: chuyển panCakeData.inserted_at sang Unix ms. Hỗ trợ string ISO và number (sec/ms).
+	convTsMs := bson.M{
+		"$cond": bson.A{
+			bson.M{"$and": bson.A{
+				bson.M{"$ne": bson.A{"$panCakeData.inserted_at", nil}},
+				bson.M{"$ne": bson.A{"$panCakeData.inserted_at", ""}},
+			}},
+			bson.M{"$cond": bson.A{
+				bson.M{"$eq": bson.A{bson.M{"$type": "$panCakeData.inserted_at"}, "string"}},
+				bson.M{"$let": bson.M{
+					"vars": bson.M{
+						"parsed": bson.M{"$dateFromString": bson.M{
+							"dateString": bson.M{"$substr": bson.A{"$panCakeData.inserted_at", 0, 19}},
+							"format":    "%Y-%m-%dT%H:%M:%S",
+							"onError":   nil,
+							"onNull":    nil,
+						}},
+					},
+					"in": bson.M{"$cond": bson.A{
+						bson.M{"$eq": bson.A{"$$parsed", nil}},
+						nil,
+						bson.M{"$toLong": "$$parsed"},
+					}},
+				}},
+				bson.M{"$cond": bson.A{
+					bson.M{"$gte": bson.A{bson.M{"$toLong": "$panCakeData.inserted_at"}, 1e12}},
+					bson.M{"$toLong": "$panCakeData.inserted_at"},
+					bson.M{"$multiply": bson.A{bson.M{"$toLong": "$panCakeData.inserted_at"}, 1000}},
+				}},
+			}},
+			nil,
 		},
 	}
-	_ = windowMs // Phase 1: không filter theo thời gian
-	count, err := coll.CountDocuments(ctx, filter)
+
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{
+			"ownerOrganizationId": ownerOrgID,
+			"$or": []bson.M{
+				{"panCakeData.ad_ids": adId},
+				{"panCakeData.ads.ad_id": adId},
+			},
+		}}},
+		{{Key: "$addFields", Value: bson.M{"_convTsMs": convTsMs}}},
+		{{Key: "$match", Value: bson.M{
+			"_convTsMs": bson.M{"$ne": nil, "$gte": startMs, "$lte": endMs},
+		}}},
+		{{Key: "$count", Value: "n"}},
+	}
+	cursor, err := coll.Aggregate(ctx, pipeline)
 	if err != nil {
 		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	count := int64(0)
+	if cursor.Next(ctx) {
+		var doc struct {
+			N int64 `bson:"n"`
+		}
+		if err := cursor.Decode(&doc); err == nil {
+			count = doc.N
+		}
 	}
 	return map[string]interface{}{"conversationCount": count}, nil
 }
@@ -925,24 +1179,148 @@ func rollupFromChildren(ctx context.Context, objectType, objectId, adAccountId s
 		childrenRaw = make(map[string]interface{})
 	}
 	dateStart, dateStop := getWindowDates(DefaultWindowDays)
-	childrenRaw["window"] = map[string]interface{}{"dateStart": dateStart, "dateStop": dateStop}
+	// Đặt window vào raw.7d
+	r7d := getRaw7d(childrenRaw)
+	r7d["window"] = map[string]interface{}{"dateStart": dateStart, "dateStop": dateStop}
 	raw := childrenRaw
+
+	// Enrich raw với entity-level data (daily_budget, metaCreatedAt, ...) khi có
+	switch objectType {
+	case "campaign":
+		enrichRawWithCampaignData(ctx, objectId, adAccountId, ownerOrgID, raw)
+	case "adset":
+		enrichRawWithAdSetData(ctx, objectId, adAccountId, ownerOrgID, raw)
+	case "ad_account":
+		enrichRawWithAdAccountData(ctx, adAccountId, ownerOrgID, raw)
+	}
 
 	layer1 := computeLayer1(raw)
 	layer2 := computeLayer2(raw, layer1)
+	// Bổ sung currentMode từ ad_account.accountMode — SL-B BLITZ/PROTECT dùng ngưỡng 0.20
+	if adAccountId != "" {
+		enrichLayer2WithAdAccountMode(ctx, adAccountId, ownerOrgID, layer2)
+	}
 	layer3 := computeLayer3(layer1, layer2)
-	alertFlags := computeAlertFlags(raw, layer1, layer2, layer3)
+	// Theo FolkForm v4.1: toàn bộ 13 rules CHỈ apply cho campaign. AdSet/AdAccount không có FLAG_RULE.
+	// Rules engine cần raw.7d (có meta, pancake) — getRaw7d hỗ trợ cả cấu trúc mới và cũ.
+	var alertFlags []string
+	var actions []map[string]interface{}
+	if objectType == "campaign" {
+		cfg, _ := adsconfig.GetConfigForCampaign(ctx, adAccountId, ownerOrgID)
+		alertFlags = computeAlertFlags(ctx, getRaw7d(raw), layer1, layer2, layer3, cfg, objectId, adAccountId, ownerOrgID)
+		actions = computeSuggestedActions(ctx, alertFlags, adAccountId, ownerOrgID, cfg, getRaw7d(raw), layer1)
+		// Cập nhật ads_camp_thresholds (P25/P50/P75) cho Per-Camp Adaptive — FolkForm v4.1 Section 2.2
+		if metaCreatedAt := toInt64(getRaw7d(raw), "metaCreatedAt"); metaCreatedAt > 0 {
+			if err := adsadaptive.ComputeCampThresholds(ctx, objectId, adAccountId, ownerOrgID, metaCreatedAt); err != nil {
+				logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
+					"campaignId": objectId, "adAccountId": adAccountId,
+				}).Debug("[META] ComputeCampThresholds bỏ qua (camp chưa đủ data)")
+			}
+		}
+	}
 	current := map[string]interface{}{
 		"raw":         raw,
 		"layer1":     layer1,
 		"layer2":     layer2,
 		"layer3":     layer3,
 		"alertFlags": alertFlags,
+		"actions":    actions,
 	}
 	return updateParentCurrentMetrics(ctx, objectType, objectId, adAccountId, ownerOrgID, current)
 }
 
+// enrichLayer2WithAdAccountMode bổ sung currentMode vào layer2.
+// Đọc từ ads_meta_config.account.accountMode (nguồn duy nhất).
+// Dùng cho SL-B BLITZ/PROTECT: khi accountMode=BLITZ hoặc PROTECT thì ngưỡng spend_pct = 0.20.
+func enrichLayer2WithAdAccountMode(ctx context.Context, adAccountId string, ownerOrgID primitive.ObjectID, layer2 map[string]interface{}) {
+	if layer2 == nil || adAccountId == "" {
+		return
+	}
+	cfg, _ := adsconfig.GetConfig(ctx, adAccountId, ownerOrgID)
+	if cfg != nil && cfg.Account.AccountMode != "" {
+		layer2["currentMode"] = strings.TrimSpace(cfg.Account.AccountMode)
+	}
+}
+
+// enrichRawWithCampaignData bổ sung daily_budget, metaCreatedAt từ campaign document vào raw.
+// Dùng cho spend_pct và runtime_minutes trong rules.
+func enrichRawWithCampaignData(ctx context.Context, campaignId, adAccountId string, ownerOrgID primitive.ObjectID, raw map[string]interface{}) {
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.MetaCampaigns)
+	if !ok {
+		return
+	}
+	var doc struct {
+		MetaData      map[string]interface{} `bson:"metaData"`
+		MetaCreatedAt int64                 `bson:"metaCreatedAt"`
+	}
+	err := coll.FindOne(ctx, bson.M{
+		"campaignId":         campaignId,
+		"adAccountId":        adAccountIdFilterForMeta(adAccountId),
+		"ownerOrganizationId": ownerOrgID,
+	}).Decode(&doc)
+	if err != nil {
+		return
+	}
+	r7d := getRaw7d(raw)
+	if meta, _ := r7d["meta"].(map[string]interface{}); meta != nil {
+		if db := toFloat(doc.MetaData, "daily_budget"); db > 0 {
+			meta["dailyBudget"] = db
+		}
+		// delivery_status từ metaData (insights) — cho KO-A
+		if ds, ok := doc.MetaData["delivery_status"].(string); ok && ds != "" {
+			meta["deliveryStatus"] = ds
+		}
+	}
+	if doc.MetaCreatedAt > 0 {
+		r7d["metaCreatedAt"] = doc.MetaCreatedAt
+	}
+}
+
+// enrichRawWithAdSetData bổ sung metaCreatedAt từ adset document vào raw.
+// Dùng cho lifecycle và runtimeMinutes khi rollup AdSet.
+func enrichRawWithAdSetData(ctx context.Context, adSetId, adAccountId string, ownerOrgID primitive.ObjectID, raw map[string]interface{}) {
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.MetaAdSets)
+	if !ok {
+		return
+	}
+	var doc struct {
+		MetaCreatedAt int64 `bson:"metaCreatedAt"`
+	}
+	err := coll.FindOne(ctx, bson.M{
+		"adSetId":             adSetId,
+		"adAccountId":         adAccountIdFilterForMeta(adAccountId),
+		"ownerOrganizationId": ownerOrgID,
+	}).Decode(&doc)
+	if err != nil || doc.MetaCreatedAt <= 0 {
+		return
+	}
+	r7d := getRaw7d(raw)
+	r7d["metaCreatedAt"] = doc.MetaCreatedAt
+}
+
+// enrichRawWithAdAccountData bổ sung metaCreatedAt từ ad account document vào raw.
+// Dùng cho lifecycle và runtimeMinutes khi rollup AdAccount.
+func enrichRawWithAdAccountData(ctx context.Context, adAccountId string, ownerOrgID primitive.ObjectID, raw map[string]interface{}) {
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.MetaAdAccounts)
+	if !ok {
+		return
+	}
+	var doc struct {
+		MetaCreatedAt int64 `bson:"metaCreatedAt"`
+	}
+	err := coll.FindOne(ctx, bson.M{
+		"adAccountId":         adAccountIdFilterForMeta(adAccountId),
+		"ownerOrganizationId": ownerOrgID,
+	}).Decode(&doc)
+	if err != nil || doc.MetaCreatedAt <= 0 {
+		return
+	}
+	r7d := getRaw7d(raw)
+	r7d["metaCreatedAt"] = doc.MetaCreatedAt
+}
+
 // aggregateRawFromChildren aggregate raw từ currentMetrics của children.
+// Hỗ trợ cả cấu trúc mới (raw.7d, raw.2h, raw.1h) và cũ (raw phẳng).
 func aggregateRawFromChildren(ctx context.Context, objectType, objectId, adAccountId string, ownerOrgID primitive.ObjectID) (map[string]interface{}, error) {
 	var coll *mongo.Collection
 	var childIdField string
@@ -975,7 +1353,8 @@ func aggregateRawFromChildren(ctx context.Context, objectType, objectId, adAccou
 	}
 	defer cursor.Close(ctx)
 
-	agg := map[string]interface{}{
+	// Aggregator cho raw.7d (meta + pancake)
+	agg7d := map[string]interface{}{
 		"meta": map[string]interface{}{
 			"spend": 0.0, "impressions": int64(0), "clicks": int64(0), "reach": int64(0),
 			"mess": int64(0), "inlineLinkClicks": int64(0), "frequency": 0.0, "cpm": 0.0, "ctr": 0.0, "cpc": 0.0,
@@ -985,14 +1364,19 @@ func aggregateRawFromChildren(ctx context.Context, objectType, objectId, adAccou
 			"conversation": map[string]interface{}{"conversationCount": int64(0)},
 		},
 	}
-	meta := agg["meta"].(map[string]interface{})
-	pancake := agg["pancake"].(map[string]interface{})
+	meta := agg7d["meta"].(map[string]interface{})
+	pancake := agg7d["pancake"].(map[string]interface{})
 	pos := pancake["pos"].(map[string]interface{})
 	conv := pancake["conversation"].(map[string]interface{})
 	freqSum, freqCount := 0.0, 0
 	cpmSum, cpmCount := 0.0, 0
 	ctrSum, ctrCount := 0.0, 0
 	cpcSum, cpcCount := 0.0, 0
+
+	// Aggregator cho raw.2h, raw.1h, raw.30p
+	agg2h := map[string]interface{}{"orders": int64(0), "revenue": 0.0, "mess": int64(0)}
+	agg1h := map[string]interface{}{"orders": int64(0), "revenue": 0.0, "mess": int64(0)}
+	agg30p := map[string]interface{}{"orders": int64(0), "revenue": 0.0, "mess": int64(0)}
 
 	for cursor.Next(ctx) {
 		var doc struct {
@@ -1008,7 +1392,13 @@ func aggregateRawFromChildren(ctx context.Context, objectType, objectId, adAccou
 		if raw == nil {
 			continue
 		}
-		m, _ := raw["meta"].(map[string]interface{})
+		r7 := getRaw7d(raw)
+		r2h := getRaw2h(raw)
+		r1h := getRaw1h(raw)
+		r30p := getRaw30p(raw)
+
+		// Aggregate raw.7d
+		m, _ := r7["meta"].(map[string]interface{})
 		if m != nil {
 			meta["spend"] = toFloat(meta, "spend") + toFloat(m, "spend")
 			meta["impressions"] = toInt64(meta, "impressions") + toInt64(m, "impressions")
@@ -1033,7 +1423,7 @@ func aggregateRawFromChildren(ctx context.Context, objectType, objectId, adAccou
 				cpcCount++
 			}
 		}
-		p, _ := raw["pancake"].(map[string]interface{})
+		p, _ := r7["pancake"].(map[string]interface{})
 		if p != nil {
 			po, _ := p["pos"].(map[string]interface{})
 			if po != nil {
@@ -1044,6 +1434,23 @@ func aggregateRawFromChildren(ctx context.Context, objectType, objectId, adAccou
 			if co != nil {
 				conv["conversationCount"] = toInt64(conv, "conversationCount") + toInt64(co, "conversationCount")
 			}
+		}
+
+		// Aggregate raw.2h, raw.1h, raw.30p
+		if r2h != nil {
+			agg2h["orders"] = toInt64(agg2h, "orders") + toInt64(r2h, "orders")
+			agg2h["revenue"] = toFloat(agg2h, "revenue") + toFloat(r2h, "revenue")
+			agg2h["mess"] = toInt64(agg2h, "mess") + toInt64(r2h, "mess")
+		}
+		if r1h != nil {
+			agg1h["orders"] = toInt64(agg1h, "orders") + toInt64(r1h, "orders")
+			agg1h["revenue"] = toFloat(agg1h, "revenue") + toFloat(r1h, "revenue")
+			agg1h["mess"] = toInt64(agg1h, "mess") + toInt64(r1h, "mess")
+		}
+		if r30p != nil {
+			agg30p["orders"] = toInt64(agg30p, "orders") + toInt64(r30p, "orders")
+			agg30p["revenue"] = toFloat(agg30p, "revenue") + toFloat(r30p, "revenue")
+			agg30p["mess"] = toInt64(agg30p, "mess") + toInt64(r30p, "mess")
 		}
 	}
 	if freqCount > 0 {
@@ -1058,7 +1465,14 @@ func aggregateRawFromChildren(ctx context.Context, objectType, objectId, adAccou
 	if cpcCount > 0 {
 		meta["cpc"] = cpcSum / float64(cpcCount)
 	}
-	return agg, nil
+
+	// Trả về cấu trúc mới: raw.7d, raw.2h, raw.1h, raw.30p
+	return map[string]interface{}{
+		"7d":  agg7d,
+		"2h":  agg2h,
+		"1h":  agg1h,
+		"30p": agg30p,
+	}, nil
 }
 
 // updateParentCurrentMetrics cập nhật currentMetrics cho AdSet, Campaign, hoặc AdAccount.
@@ -1118,9 +1532,56 @@ func getWindowDates(days int) (string, string) {
 	return start.Format("2006-01-02"), end.Format("2006-01-02")
 }
 
+// getWindowMsRangeForShortCycle trả về (startMs, endMs) cho chu kỳ ngắn (30p, 1h, 2h) align theo boundary.
+// Ví dụ: now=14:47 → 30p: 14:00-14:30, 1h: 13:00-14:00, 2h: 12:00-14:00 (slot đã hoàn thành gần nhất).
+func getWindowMsRangeForShortCycle(windowMinutes int) (startMs, endMs int64) {
+	loc, _ := time.LoadLocation("Asia/Ho_Chi_Minh")
+	now := time.Now().In(loc)
+	var end time.Time
+	switch windowMinutes {
+	case 30:
+		m := now.Minute() / 30 * 30
+		end = time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), m, 0, 0, loc)
+	case 60:
+		end = time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, loc)
+	case 120:
+		h := now.Hour() / 2 * 2
+		end = time.Date(now.Year(), now.Month(), now.Day(), h, 0, 0, 0, loc)
+	default:
+		nowMs := now.UnixMilli()
+		wMs := int64(windowMinutes) * 60 * 1000
+		return nowMs - wMs, nowMs
+	}
+	endMs = end.UnixMilli()
+	wMs := int64(windowMinutes) * 60 * 1000
+	startMs = endMs - wMs
+	return startMs, endMs
+}
+
+// getWindowMsRangeFromDates trả về (startMs, endMs) theo calendar dates từ getWindowDates.
+// Dùng để align raw.7d pos/conversation với meta (cùng khoảng thời gian theo múi giờ Asia/Ho_Chi_Minh).
+func getWindowMsRangeFromDates(days int) (startMs, endMs int64) {
+	if days <= 0 {
+		days = DefaultWindowDays
+	}
+	loc, _ := time.LoadLocation("Asia/Ho_Chi_Minh")
+	now := time.Now().In(loc)
+	endDate := now
+	startDate := now.AddDate(0, 0, -days+1)
+	start := time.Date(startDate.Year(), startDate.Month(), startDate.Day(), 0, 0, 0, 0, loc)
+	end := time.Date(endDate.Year(), endDate.Month(), endDate.Day(), 23, 59, 59, 999999999, loc)
+	return start.UnixMilli(), end.UnixMilli()
+}
+
 func getWindowMs(days int) int64 {
 	if days <= 0 {
 		days = DefaultWindowDays
 	}
 	return int64(days) * 24 * 60 * 60 * 1000
+}
+
+// getWindowMsForCurrentMetrics trả về windowMs cho currentMetrics (7d).
+// Ưu tiên từ ads_metric_definitions; fallback DefaultWindowDays.
+func getWindowMsForCurrentMetrics(ctx context.Context) int64 {
+	return adsconfig.GetWindowMsForCurrentMetrics(ctx)
 }

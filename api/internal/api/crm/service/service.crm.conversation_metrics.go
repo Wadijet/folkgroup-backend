@@ -26,9 +26,9 @@ type conversationMetrics struct {
 }
 
 // buildConversationFilterForCustomerIds tạo filter để match conversation với customer.
-// Match theo: customerId (root), panCakeData.customer_id, panCakeData.customer.id, panCakeData.customers.id.
-// Dùng chung cho aggregateConversationMetricsForCustomer và fetchConversations.
-func buildConversationFilterForCustomerIds(customerIds []string, ownerOrgID primitive.ObjectID) bson.M {
+// Match theo: customerId (root), panCakeData.customer_id, panCakeData.customers.id, panCakeData.page_customer.id, conversationId.
+// conversationIds: từ pc_pos_customers.posData.fb_id — link POS customer với conv khi customerId trong conv khác (Pancake format).
+func buildConversationFilterForCustomerIds(customerIds []string, ownerOrgID primitive.ObjectID, conversationIds []string) bson.M {
 	var ids []string
 	var numIds []interface{}
 	for _, id := range customerIds {
@@ -39,21 +39,30 @@ func buildConversationFilterForCustomerIds(customerIds []string, ownerOrgID prim
 			}
 		}
 	}
-	if len(ids) == 0 {
-		return bson.M{"ownerOrganizationId": ownerOrgID, "customerId": "__NO_MATCH__"} // Không match gì
-	}
 	convCustomerOr := []bson.M{
 		{"customerId": bson.M{"$in": ids}},
 		{"panCakeData.customer_id": bson.M{"$in": ids}},
 		{"panCakeData.customer.id": bson.M{"$in": ids}},
 		{"panCakeData.customers.id": bson.M{"$in": ids}},
+		{"panCakeData.page_customer.id": bson.M{"$in": ids}},
+		{"panCakeData.page_customer.customer_id": bson.M{"$in": ids}},
 	}
 	if len(numIds) > 0 {
 		convCustomerOr = append(convCustomerOr,
 			bson.M{"panCakeData.customer_id": bson.M{"$in": numIds}},
 			bson.M{"panCakeData.customer.id": bson.M{"$in": numIds}},
 			bson.M{"panCakeData.customers.id": bson.M{"$in": numIds}},
+			bson.M{"panCakeData.page_customer.id": bson.M{"$in": numIds}},
+			bson.M{"panCakeData.page_customer.customer_id": bson.M{"$in": numIds}},
 		)
+	}
+	for _, cid := range conversationIds {
+		if cid != "" {
+			convCustomerOr = append(convCustomerOr, bson.M{"conversationId": cid})
+		}
+	}
+	if len(ids) == 0 && len(conversationIds) == 0 {
+		return bson.M{"ownerOrganizationId": ownerOrgID, "customerId": "__NO_MATCH__"}
 	}
 	return bson.M{
 		"ownerOrganizationId": ownerOrgID,
@@ -61,46 +70,100 @@ func buildConversationFilterForCustomerIds(customerIds []string, ownerOrgID prim
 	}
 }
 
-// aggregateConversationMetricsForCustomer aggregate từ fb_conversations. asOf > 0: chỉ conv có convUpdatedAt <= asOf.
-func (s *CrmCustomerService) aggregateConversationMetricsForCustomer(ctx context.Context, customerIds []string, ownerOrgID primitive.ObjectID, asOf int64) conversationMetrics {
+// aggregateConversationMetricsForCustomer aggregate từ fb_conversations. asOf > 0: chỉ conv đã tồn tại tại thời điểm asOf.
+// conversationIds: từ pc_pos_customers.posData.fb_id — link POS customer với conv khi customerId trong conv khác (Pancake format).
+func (s *CrmCustomerService) aggregateConversationMetricsForCustomer(ctx context.Context, customerIds []string, conversationIds []string, ownerOrgID primitive.ObjectID, asOf int64) conversationMetrics {
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.FbConvesations)
 	if !ok {
 		return conversationMetrics{}
 	}
 	var ids []string
-	var numIds []interface{}
 	for _, id := range customerIds {
 		if id != "" {
 			ids = append(ids, id)
-			if n, err := strconv.ParseInt(id, 10, 64); err == nil {
-				numIds = append(numIds, n)
-			}
 		}
 	}
-	if len(ids) == 0 {
+	if len(ids) == 0 && len(conversationIds) == 0 {
 		return conversationMetrics{}
 	}
 
-	matchFilter := buildConversationFilterForCustomerIds(customerIds, ownerOrgID)
-	if asOf > 0 {
-		matchFilter["$expr"] = bson.M{"$lte": bson.A{
-			bson.M{"$ifNull": bson.A{"$panCakeUpdatedAt", "$updatedAt"}},
-			asOf,
-		}}
-	}
+	matchFilter := buildConversationFilterForCustomerIds(customerIds, ownerOrgID, conversationIds)
 
+	// Nguyên tắc: panCakeData/posData = ngày tháng nguồn (khi sự kiện xảy ra); root (createdAt, updatedAt, panCakeUpdatedAt) = thời gian đồng bộ.
+	// convUpdatedAt: ưu tiên panCakeData.updated_at (nguồn), fallback panCakeUpdatedAt/updatedAt (sync). Dùng cho lastConversationAt, firstConversationAt.
+	convUpdatedAtParsed := bson.M{
+		"$cond": bson.A{
+			bson.M{"$eq": bson.A{bson.M{"$type": "$panCakeData.updated_at"}, "string"}},
+			bson.M{"$ifNull": bson.A{
+				bson.M{"$toLong": bson.M{"$toDate": bson.M{"$arrayElemAt": bson.A{
+					bson.M{"$split": bson.A{"$panCakeData.updated_at", "."}},
+					0,
+				}}}},
+				nil,
+			}},
+			bson.M{"$cond": bson.A{
+				bson.M{"$eq": bson.A{bson.M{"$type": "$panCakeData.updated_at"}, "long"}},
+				"$panCakeData.updated_at",
+				bson.M{"$cond": bson.A{
+					bson.M{"$eq": bson.A{bson.M{"$type": "$panCakeData.updated_at"}, "double"}},
+					bson.M{"$toLong": "$panCakeData.updated_at"},
+					bson.M{"$ifNull": bson.A{
+						bson.M{"$toLong": bson.M{"$toDate": "$panCakeData.updatedAt"}},
+						nil,
+					}},
+				}},
+			}},
+		},
+	}
+	convUpdatedAt := bson.M{"$ifNull": bson.A{convUpdatedAtParsed, "$panCakeUpdatedAt", "$updatedAt"}}
+	// convInsertedAt: thời điểm hội thoại bắt đầu — panCakeData.inserted_at (nguồn). Format: "2026-03-03T04:03:22.263935".
+	convInsertedAtMs := bson.M{
+		"$cond": bson.A{
+			bson.M{"$eq": bson.A{bson.M{"$type": "$panCakeData.inserted_at"}, "string"}},
+			bson.M{"$ifNull": bson.A{
+				bson.M{"$toLong": bson.M{"$toDate": bson.M{"$arrayElemAt": bson.A{
+					bson.M{"$split": bson.A{"$panCakeData.inserted_at", "."}},
+					0,
+				}}}},
+				nil,
+			}},
+			bson.M{"$cond": bson.A{
+				bson.M{"$eq": bson.A{bson.M{"$type": "$panCakeData.inserted_at"}, "long"}},
+				"$panCakeData.inserted_at",
+				bson.M{"$cond": bson.A{
+					bson.M{"$eq": bson.A{bson.M{"$type": "$panCakeData.inserted_at"}, "double"}},
+					bson.M{"$toLong": "$panCakeData.inserted_at"},
+					bson.M{"$ifNull": bson.A{
+						bson.M{"$toLong": bson.M{"$toDate": "$panCakeData.insertedAt"}},
+						bson.M{"$toLong": bson.M{"$toDate": "$panCakeData.created_at"}},
+					}},
+				}},
+			}},
+		},
+	}
+	// convExistedAt: chỉ dùng panCakeData.inserted_at (theo sample-data: "2026-03-03T04:03:22.263935").
+	// Không fallback — khi thiếu inserted_at thì convExistedAt = null; $or để bao gồm conv không xác định được (tránh loại nhầm).
 	addFieldsStage := bson.M{
-		"convUpdatedAt": bson.M{"$ifNull": bson.A{"$panCakeUpdatedAt", "$updatedAt"}},
-		"msgCount":      bson.M{"$ifNull": bson.A{"$panCakeData.message_count", 0}},
-		"convType":      bson.M{"$ifNull": bson.A{"$panCakeData.type", "INBOX"}},
-		"hasAdIds":      bson.M{"$gt": bson.A{bson.M{"$size": bson.M{"$ifNull": bson.A{"$panCakeData.ad_ids", bson.A{}}}}, 0}},
+		"convUpdatedAt":    convUpdatedAt,
+		"convInsertedAtMs":  convInsertedAtMs,
+		"convExistedAt":    "$convInsertedAtMs", // null khi không parse được inserted_at
+		"msgCount":         bson.M{"$ifNull": bson.A{"$panCakeData.message_count", 0}},
+		"convType":         bson.M{"$ifNull": bson.A{"$panCakeData.type", "INBOX"}},
+		"hasAdIds":         bson.M{"$gt": bson.A{bson.M{"$size": bson.M{"$ifNull": bson.A{"$panCakeData.ad_ids", bson.A{}}}}, 0}},
 	}
 	pipeStages := []bson.D{
 		{{Key: "$match", Value: matchFilter}},
 		{{Key: "$addFields", Value: addFieldsStage}},
 	}
 	if asOf > 0 {
-		pipeStages = append(pipeStages, bson.D{{Key: "$match", Value: bson.M{"convUpdatedAt": bson.M{"$lte": asOf}}}})
+		// Filter: conv đã tồn tại tại asOf (convExistedAt <= asOf) HOẶC không xác định được (convExistedAt null).
+		// Không dùng fallback sai — theo sample-data chỉ inserted_at là đúng cho timeline.
+		pipeStages = append(pipeStages, bson.D{{Key: "$match", Value: bson.M{
+			"$or": []bson.M{
+				{"convExistedAt": bson.M{"$lte": asOf}},
+				{"convExistedAt": nil},
+			},
+		}}})
 	}
 	pipeStages = append(pipeStages, bson.D{{Key: "$group", Value: bson.M{
 		"_id":                     nil,

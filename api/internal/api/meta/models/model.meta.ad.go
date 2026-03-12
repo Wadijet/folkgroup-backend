@@ -17,7 +17,7 @@ type MetaAd struct {
 	EffectiveStatus     string                 `json:"effectiveStatus" bson:"effectiveStatus" extract:"metaData\\.effective_status,converter=string,optional"`
 	CreativeId          string                 `json:"creativeId" bson:"creativeId" extract:"metaData\\.creative\\.id,converter=string,optional"`
 	MetaData            map[string]interface{} `json:"metaData" bson:"metaData"`
-	OwnerOrganizationID primitive.ObjectID     `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:meta_ad_lookup_unique;compound:meta_ad_by_adset"`
+	OwnerOrganizationID primitive.ObjectID     `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:meta_ad_lookup_unique,compound:meta_ad_by_adset"`
 	CreatedAt           int64                  `json:"createdAt" bson:"createdAt"`                                                                                                                       // Thời gian tạo bản ghi trong hệ thống (lúc sync lần đầu)
 	MetaCreatedAt       int64                  `json:"metaCreatedAt" bson:"metaCreatedAt" extract:"metaData\\.created_time,converter=time,format=2006-01-02T15:04:05-0700,optional"`                       // Thời gian tạo gốc từ Meta API (khi ad được tạo trên Meta)
 	UpdatedAt           int64                  `json:"updatedAt" bson:"updatedAt"`

@@ -15,6 +15,14 @@ const (
 	OrganizationTypeTeam       = "team"
 )
 
+// TeamCodeDefault các mã team mặc định cho định tuyến thông báo theo domain
+const (
+	TeamCodeTech       = "TECH_TEAM"       // Tech Team — system, security, user
+	TeamCodeMarketing  = "MARKETING_TEAM"  // Marketing — ads, analytics
+	TeamCodeSales      = "SALES_TEAM"      // Sales — conversation (chat, tin nhắn)
+	TeamCodeOperations = "OPERATIONS_TEAM" // Vận hành — order, payment
+)
+
 // Organization đại diện cấu trúc tổ chức hình cây.
 type Organization struct {
 	_Relationships struct{}           `relationship:"collection:roles,field:organizationId,message:Không thể xóa tổ chức vì có %d role trực thuộc. Vui lòng xóa hoặc di chuyển các role trước."`

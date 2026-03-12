@@ -7,7 +7,8 @@ const (
 	EventTypeActionPendingApproval = "ads_action_pending_approval" // Khi có đề xuất cần duyệt
 	EventTypeActionExecuted       = "ads_action_executed"         // Sau khi thực thi thành công
 	EventTypeActionExecutedFailed = "ads_action_executed_failed"  // Sau khi thực thi thất bại
-	EventTypeActionRejected       = "ads_action_rejected"         // Khi human reject
+	EventTypeActionRejected       = "ads_action_rejected"        // Khi human reject
+	EventTypeActionCancelled      = "ads_action_cancelled"        // Khi user hủy đề xuất pending
 )
 
 // ActionType loại hành động đề xuất.

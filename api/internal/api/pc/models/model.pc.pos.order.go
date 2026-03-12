@@ -22,8 +22,8 @@ type PcPosOrder struct {
 	Note            string                 `json:"note" bson:"note" extract:"PosData\\.note,converter=string,optional"`                                                 // Ghi chú đơn hàng (extract từ PosData["note"])
 	PageId          string                 `json:"pageId" bson:"pageId" index:"text" extract:"PosData\\.page_id,converter=string,optional"`                             // Facebook Page ID (extract từ PosData["page_id"])
 	PostId          string                 `json:"postId" bson:"postId" index:"text" extract:"PosData\\.post_id,converter=string,optional"`                             // Facebook Post ID (extract từ PosData["post_id"])
-	InsertedAt      int64                  `json:"insertedAt" bson:"insertedAt" extract:"PosData\\.inserted_at,converter=time,format=2006-01-02T15:04:05Z,optional"`    // Thời gian tạo đơn hàng (extract từ PosData["inserted_at"])
-	PosCreatedAt    int64                  `json:"posCreatedAt" bson:"posCreatedAt" extract:"PosData\\.inserted_at,converter=time,format=2006-01-02T15:04:05Z,optional"` // Thời gian tạo đơn từ POS (extract từ PosData["inserted_at"])
+	InsertedAt      int64                  `json:"insertedAt" bson:"insertedAt" index:"single:1,compound:idx_orders_by_ad_ins" extract:"PosData\\.inserted_at,converter=time,format=2006-01-02T15:04:05Z,optional"`    // Thời gian tạo đơn hàng (extract từ PosData["inserted_at"])
+	PosCreatedAt    int64                  `json:"posCreatedAt" bson:"posCreatedAt" index:"single:1,compound:idx_orders_by_ad_pos" extract:"PosData\\.inserted_at,converter=time,format=2006-01-02T15:04:05Z,optional"` // Thời gian tạo đơn từ POS (extract từ PosData["inserted_at"])
 	PosUpdatedAt    int64                  `json:"posUpdatedAt" bson:"posUpdatedAt" extract:"PosData\\.updated_at,converter=time,format=2006-01-02T15:04:05Z,optional"` // Thời gian cập nhật từ POS (extract từ PosData["updated_at"])
 	PaidAt          int64                  `json:"paidAt" bson:"paidAt" extract:"PosData\\.paid_at,converter=time,format=2006-01-02T15:04:05Z,optional"`                // Thời gian thanh toán (extract từ PosData["paid_at"])
 	OrderItems      []interface{}          `json:"orderItems" bson:"orderItems" extract:"PosData\\.items,converter=array|PosData\\.order_items,converter=array,optional"` // Danh sách sản phẩm (converter=array giữ nguyên slice, không convert sang string)
@@ -33,14 +33,14 @@ type PcPosOrder struct {
 	PosData         map[string]interface{} `json:"posData" bson:"posData"`                                                                                              // Dữ liệu gốc từ Pancake POS API
 
 	// ===== ORGANIZATION =====
-	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:idx_backfill_orders,compound:idx_pos_order_unique,compound:idx_orders_by_ad"` // Tổ chức sở hữu dữ liệu
+	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:idx_backfill_orders,compound:idx_pos_order_unique,compound:idx_orders_by_ad,compound:idx_orders_by_ad_pos,compound:idx_orders_by_ad_ins"` // Tổ chức sở hữu dữ liệu
 
 	// Index backfill: sort theo thời gian gốc trong posData (dùng cho Find phân trang CRUD)
 	posDataInsertedAt int64 `bson:"posData.inserted_at,omitempty" index:"compound:idx_backfill_orders"`
 	posDataUpdatedAt  int64 `bson:"posData.updated_at,omitempty" index:"compound:idx_backfill_orders"`
 
-	// Index cho Ads evaluation: query đơn theo ad_id (posData.ad_id)
-	posDataAdId string `json:"-" bson:"posData.ad_id,omitempty" index:"single:1,compound:idx_orders_by_ad"`
+	// Index cho Ads evaluation: query đơn theo ad_id (posData.ad_id) + time range (posCreatedAt/insertedAt)
+	posDataAdId string `json:"-" bson:"posData.ad_id,omitempty" index:"single:1,compound:idx_orders_by_ad,compound:idx_orders_by_ad_pos,compound:idx_orders_by_ad_ins"`
 
 	CreatedAt int64 `json:"createdAt" bson:"createdAt"` // Thời gian tạo
 	UpdatedAt int64 `json:"updatedAt" bson:"updatedAt"` // Thời gian cập nhật

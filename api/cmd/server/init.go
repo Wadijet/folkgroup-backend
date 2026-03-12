@@ -123,9 +123,18 @@ func initColNames() {
 	global.MongoDB_ColNames.MetaAdSets = "meta_adsets"
 	global.MongoDB_ColNames.MetaAds = "meta_ads"
 	global.MongoDB_ColNames.MetaAdInsights = "meta_ad_insights"
+	global.MongoDB_ColNames.MetaAdInsightsDailySnapshots = "meta_ad_insights_daily_snapshots"
 	global.MongoDB_ColNames.ActionPendingApproval = "action_pending_approval"
 	global.MongoDB_ColNames.AdsApprovalConfig = "ads_approval_config"
 	global.MongoDB_ColNames.AdsActivityHistory = "ads_activity_history"
+	global.MongoDB_ColNames.AdsMetaConfig = "ads_meta_config"
+	global.MongoDB_ColNames.AdsMetricDefinitions = "ads_metric_definitions"
+	global.MongoDB_ColNames.AdsCampThresholds = "ads_camp_thresholds"
+	global.MongoDB_ColNames.AdsKillSnapshots = "ads_kill_snapshots"
+	global.MongoDB_ColNames.AdsCounterfactualOutcomes = "ads_counterfactual_outcomes"
+	global.MongoDB_ColNames.AdsCampaignHourly = "ads_campaign_hourly"
+	global.MongoDB_ColNames.AdsCampPeakProfiles = "ads_camp_peak_profiles"
+	global.MongoDB_ColNames.AdsThrottleState = "ads_throttle_state"
 
 	logrus.Info("Initialized collection names") // Ghi log thông báo đã khởi tạo tên các collection
 }
@@ -241,9 +250,17 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.MetaAdSets), metamodels.MetaAdSet{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.MetaAds), metamodels.MetaAd{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.MetaAdInsights), metamodels.MetaAdInsight{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.MetaAdInsightsDailySnapshots), metamodels.MetaAdInsightDailySnapshot{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.ActionPendingApproval), pkgapproval.ActionPending{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsApprovalConfig), adsmodels.AdsApprovalConfig{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsActivityHistory), metamodels.AdsActivityHistory{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsMetricDefinitions), adsmodels.AdsMetricDefinition{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsCampThresholds), adsmodels.AdsCampThresholds{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsKillSnapshots), adsmodels.AdsKillSnapshot{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsCounterfactualOutcomes), adsmodels.AdsCounterfactualOutcome{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsCampaignHourly), adsmodels.AdsCampaignHourly{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsCampPeakProfiles), adsmodels.AdsCampPeakProfile{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsThrottleState), adsmodels.AdsThrottleState{})
 }
 
 // initFirebase khởi tạo Firebase Admin SDK

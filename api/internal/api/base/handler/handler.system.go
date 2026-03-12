@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"meta_commerce/internal/worker"
 	"meta_commerce/internal/worker/metrics"
 )
 
@@ -82,6 +83,74 @@ func (h *SystemHandler) HandleJobMetrics(c fiber.Ctx) error {
 		"code":    common.StatusOK,
 		"message": "Thành công",
 		"data":    data,
+		"status":  "success",
+	})
+}
+
+// HandleGetWorkerConfig trả về cấu hình worker hiện tại (ngưỡng throttle + priorities + active + state).
+// GET /api/v1/system/worker-config
+func (h *SystemHandler) HandleGetWorkerConfig(c fiber.Ctx) error {
+	ctrl := worker.DefaultController()
+	state, cpuPct := ctrl.GetState()
+	thresholds := ctrl.GetThresholds()
+	priorities := worker.GetPriorityOverrides()            // Override qua API (chỉ các worker đã chỉnh)
+	workerPriorities := worker.GetAllEffectivePriorities()  // Mức ưu tiên hiệu dụng từng worker (1–5)
+	workerActive := worker.GetAllWorkerActive()             // Trạng thái active/inactive từng worker
+	workerActiveOverrides := worker.GetWorkerActiveOverrides() // Override active (chỉ các worker đã chỉnh)
+	workerMetadata := worker.GetAllWorkerMetadata()         // Mô tả từng worker (module, description)
+	metrics := ctrl.GetResourceMetrics()
+	return c.Status(common.StatusOK).JSON(fiber.Map{
+		"code":    common.StatusOK,
+		"message": "Thành công",
+		"data": fiber.Map{
+			"thresholds":           thresholds,
+			"priorities":           priorities,            // Override (rỗng nếu chưa chỉnh)
+			"workerPriorities":     workerPriorities,      // Mức ưu tiên hiệu dụng tất cả workers
+			"workerActive":         workerActive,          // Trạng thái active hiệu dụng tất cả workers
+			"workerActiveOverrides": workerActiveOverrides, // Override active (rỗng nếu chưa chỉnh)
+			"workerMetadata":       workerMetadata,        // Mô tả từng worker (module, description)
+			"state":                string(state),
+			"cpuPercent":           cpuPct,
+			"ramPercent":           metrics.RAMPercent,
+			"diskPercent":          metrics.DiskPercent,
+		},
+		"status": "success",
+	})
+}
+
+// HandleUpdateWorkerConfig cập nhật cấu hình worker (ngưỡng + priority + active overrides).
+// PUT /api/v1/system/worker-config
+// Body: { "thresholds": {...}, "priorities": {"crm_bulk": 3}, "workerActive": {"crm_bulk": false} }
+func (h *SystemHandler) HandleUpdateWorkerConfig(c fiber.Ctx) error {
+	var body struct {
+		Thresholds   *worker.WorkerThresholds `json:"thresholds"`
+		Priorities   map[string]int           `json:"priorities"`
+		WorkerActive map[string]bool          `json:"workerActive"`
+	}
+	if err := c.Bind().JSON(&body); err != nil {
+		return c.Status(common.StatusBadRequest).JSON(fiber.Map{
+			"code":    common.ErrCodeValidationFormat.Code,
+			"message": "Dữ liệu gửi lên không đúng định dạng JSON",
+			"status":  "error",
+		})
+	}
+	if body.Thresholds != nil {
+		worker.DefaultController().SetThresholds(body.Thresholds)
+	}
+	if len(body.Priorities) > 0 {
+		for name, p := range body.Priorities {
+			worker.SetPriorityOverride(name, worker.Priority(p))
+		}
+	}
+	if len(body.WorkerActive) > 0 {
+		for name, active := range body.WorkerActive {
+			worker.SetWorkerActiveOverride(name, active)
+		}
+	}
+	return c.Status(common.StatusOK).JSON(fiber.Map{
+		"code":    common.StatusOK,
+		"message": "Đã cập nhật cấu hình worker",
+		"data":    nil,
 		"status":  "success",
 	})
 }

@@ -9,7 +9,8 @@ type ReportTrendQuery struct {
 	To        string `query:"to"`       // Ngày kết thúc (dd-mm-yyyy)
 }
 
-// ReportRecomputeBody body cho POST recompute: reportKey, from, to (date dd-mm-yyyy), giới hạn Phase 1 tối đa 31 ngày.
+// ReportRecomputeBody body cho POST recompute: reportKey, from, to (date dd-mm-yyyy).
+// Luôn tạo dirty marks, worker report_dirty xử lý bất đồng bộ. Không giới hạn khoảng thời gian.
 type ReportRecomputeBody struct {
 	ReportKey string `json:"reportKey"` // Key loại báo cáo (vd: order_daily)
 	From      string `json:"from"`      // Ngày bắt đầu (dd-mm-yyyy)

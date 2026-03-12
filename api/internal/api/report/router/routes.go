@@ -24,6 +24,8 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 	apirouter.RegisterRouteWithMiddleware(v1, "/reports", "GET", "/order/period-movements-from-snapshots", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleOrderPeriodMovementsFromSnapshots)
 	// Ads daily trend từ snapshots — ads_daily, query: from, to, adAccountId (optional).
 	apirouter.RegisterRouteWithMiddleware(v1, "/reports", "GET", "/ads/period-movements-from-snapshots", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleAdsDailyTrendFromSnapshots)
+	// PHỤ: ads period-movements từ DB (aggregate meta_ad_insights, đối chiếu — query nặng).
+	apirouter.RegisterRouteWithMiddleware(v1, "/reports", "GET", "/ads/period-movements-from-db", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleAdsPeriodMovementsFromDb)
 	// PHỤ: order period-movements từ DB (aggregate pc_pos_orders, đối chiếu — query nặng).
 	apirouter.RegisterRouteWithMiddleware(v1, "/reports", "GET", "/order/period-movements-from-db", []fiber.Handler{reportReadMiddleware, orgContextMiddleware}, reportHandler.HandleOrderPeriodMovementsFromDb)
 	apirouter.RegisterRouteWithMiddleware(v1, "/reports", "POST", "/recompute", []fiber.Handler{reportRecomputeMiddleware, orgContextMiddleware}, reportHandler.HandleRecompute)

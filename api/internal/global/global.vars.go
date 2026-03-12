@@ -96,6 +96,7 @@ type MongoDB_Auth_CollectionName struct {
 	MetaAdSets       string // meta_adsets: ad sets
 	MetaAds          string // meta_ads: ads
 	MetaAdInsights   string // meta_ad_insights: insights theo ngày
+	MetaAdInsightsDailySnapshots string // meta_ad_insights_daily_snapshots: snapshot mỗi 30p để suy ra hourly
 
 	// Module Approval — Cơ chế duyệt độc lập (ads, content, ... dùng chung)
 	ActionPendingApproval string // action_pending_approval: queue đề xuất chờ duyệt (generic)
@@ -105,6 +106,26 @@ type MongoDB_Auth_CollectionName struct {
 
 	// Module Ads — Activity History (khi currentMetrics thay đổi)
 	AdsActivityHistory string // ads_activity_history: lịch sử thay đổi metrics
+
+	// Module Ads — Meta Config (cấu hình FLAG_RULE, ACTION_RULE, automation)
+	AdsMetaConfig string // ads_meta_config: cấu hình quản lý Meta Ads theo ad account
+
+	// Module Ads — Metric Definitions (định nghĩa metrics theo window, FolkForm v4.1)
+	AdsMetricDefinitions string // ads_metric_definitions: định nghĩa metrics (7d, 2h, 1h, 30p)
+
+	// Module Ads — Per-Camp Adaptive Threshold (FolkForm v4.1 Section 2.2)
+	AdsCampThresholds string // ads_camp_thresholds: P25/P50/P75 theo campaign
+
+	// Module Ads — Counterfactual Kill Tracker (FolkForm v4.1 Section 2.3)
+	AdsKillSnapshots         string // ads_kill_snapshots: snapshot khi kill
+	AdsCounterfactualOutcomes string // ads_counterfactual_outcomes: kết quả siblings 4h sau kill
+
+	// Module Ads — Hourly Peak Matrix (FolkForm v4.1 Section 05)
+	AdsCampaignHourly   string // ads_campaign_hourly: dữ liệu theo giờ
+	AdsCampPeakProfiles string // ads_camp_peak_profiles: peak hours mỗi camp
+
+	// Module Ads — Rule 13 Throttle Gỡ cap (FolkForm v4.1)
+	AdsThrottleState string // ads_throttle_state: ad set đang bị cap, dùng cho logic remove
 }
 
 // Các biến toàn cục

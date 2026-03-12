@@ -195,6 +195,48 @@ func (e *Error) Error() string {
 	return e.Message
 }
 
+// GetSafeErrorMessage trả về message an toàn cho client. Nếu err là *common.Error thì dùng Message; ngược lại trả message mặc định (không expose lỗi nội bộ).
+func GetSafeErrorMessage(err error, fallback string) string {
+	if err == nil {
+		return ""
+	}
+	var customErr *Error
+	if errors.As(err, &customErr) {
+		return customErr.Message
+	}
+	if fallback != "" {
+		return fallback
+	}
+	return MsgInternalError
+}
+
+// GetErrorStatusCode trả về HTTP status code từ err. Nếu err là *common.Error thì dùng StatusCode; ngược lại 500.
+func GetErrorStatusCode(err error) int {
+	if err == nil {
+		return StatusOK
+	}
+	var customErr *Error
+	if errors.As(err, &customErr) {
+		return customErr.StatusCode
+	}
+	return StatusInternalServerError
+}
+
+// GetErrorResponseInfo trả về (errorCode, message, statusCode) cho response. Dùng khi err là *common.Error thì lấy từ đó; ngược lại dùng fallback.
+func GetErrorResponseInfo(err error, fallbackMsg string) (errorCode string, message string, statusCode int) {
+	if err == nil {
+		return "", "", StatusOK
+	}
+	var customErr *Error
+	if errors.As(err, &customErr) {
+		return customErr.Code.Code, customErr.Message, customErr.StatusCode
+	}
+	if fallbackMsg == "" {
+		fallbackMsg = MsgInternalError
+	}
+	return ErrCodeInternalServer.Code, fallbackMsg, StatusInternalServerError
+}
+
 // Is kiểm tra xem error có phải là target error không (hỗ trợ errors.Is)
 func (e *Error) Is(target error) bool {
 	if target == nil {

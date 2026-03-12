@@ -141,6 +141,19 @@ var (
 		Upsert: true, UpsMany: true, Exists: true,
 	}
 
+	// CrmBulkJobConfig cho crm_bulk_jobs: đọc + update-by-id (retry, isPriority). Không insert/delete.
+	CrmBulkJobConfig = CRUDConfig{
+		InsOne: false, InsMany: false,
+		Find: true, FindOne: true, FindById: true,
+		FindIds: true, Paginate: true,
+		UpdOne: false, UpdMany: false, UpdById: true,
+		FindUpd: false,
+		DelOne: false, DelMany: false, DelById: false,
+		FindDel: false,
+		Count: true, Distinct: true,
+		Upsert: false, UpsMany: false, Exists: true,
+	}
+
 	// OrgConfigItemConfig cho Organization Config Items (1 document per key): find-one, find, upsert-one, delete-one (+ resolved).
 	OrgConfigItemConfig = CRUDConfig{
 		InsOne: false, InsMany: false,

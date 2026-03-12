@@ -20,7 +20,11 @@ type FbConversation struct {
 	NeedsPrioritySync bool `json:"needsPrioritySync" bson:"needsPrioritySync" index:"single:1"` // Đánh dấu hội thoại này cần ưu tiên đồng bộ lại ngay
 
 	// ===== ORGANIZATION =====
-	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:idx_backfill_conversations"` // Tổ chức sở hữu dữ liệu
+	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:idx_backfill_conversations,compound:idx_conv_by_ad,compound:idx_conv_by_ad_ads"` // Tổ chức sở hữu dữ liệu
+
+	// Index cho Ads evaluation: query conversation theo ad_id (panCakeData.ad_ids, panCakeData.ads.ad_id)
+	panCakeDataAdIds   []string `json:"-" bson:"panCakeData.ad_ids,omitempty" index:"single:1,compound:idx_conv_by_ad"`
+	panCakeDataAdsAdId string   `json:"-" bson:"panCakeData.ads.ad_id,omitempty" index:"single:1,compound:idx_conv_by_ad_ads"`
 
 	// Index backfill: sort theo thời gian gốc trong panCakeData (dùng cho Find phân trang CRUD)
 	panCakeDataInsertedAt int64 `bson:"panCakeData.inserted_at,omitempty" index:"compound:idx_backfill_conversations"`

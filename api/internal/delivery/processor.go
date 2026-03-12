@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"strings"
+	"sync"
 	"time"
 
 	deliverysvc "meta_commerce/internal/api/delivery/service"
@@ -56,6 +56,74 @@ func NewProcessor(baseURL string) (*Processor, error) {
 		senderService:  senderService,
 		baseURL:        baseURL,
 	}, nil
+}
+
+// processDeliveryItem xử lý một queue item: reset stale, update status, gọi ProcessQueueItem.
+// Dùng bởi worker pool và chạy tuần tự.
+func (p *Processor) processDeliveryItem(ctx context.Context, item *deliverymodels.DeliveryQueueItem) {
+	appLog := logger.GetAppLogger()
+	// Nếu item đang processing (stale), reset về pending trước
+	if item.Status == "processing" {
+		ids := []interface{}{item.ID}
+		if err := p.queueService.UpdateStatus(ctx, ids, "pending"); err != nil {
+			appLog.WithError(err).WithField("queueItemId", item.ID.Hex()).Error("📦 [DELIVERY] Failed to reset stale item to pending")
+			return
+		}
+		item.Status = "pending"
+	}
+
+	ids := []interface{}{item.ID}
+	if err := p.queueService.UpdateStatus(ctx, ids, "processing"); err != nil {
+		appLog.WithError(err).WithField("queueItemId", item.ID.Hex()).Error("📦 [DELIVERY] Failed to update queue item status")
+		return
+	}
+
+	start := time.Now()
+	defer func() {
+		channelType := item.ChannelType
+		if channelType == "" {
+			channelType = "unknown"
+		}
+		metrics.RecordDuration("delivery:"+channelType, time.Since(start))
+	}()
+	defer func() {
+		if r := recover(); r != nil {
+			appLog.WithFields(map[string]interface{}{
+				"panic":       r,
+				"queueItemId": item.ID.Hex(),
+			}).Error("📦 [DELIVERY] Panic khi xử lý queue item")
+			ids := []interface{}{item.ID}
+			p.queueService.UpdateStatus(ctx, ids, "pending")
+			updateData := basesvc.UpdateData{
+				Set: map[string]interface{}{
+					"status":    "pending",
+					"updatedAt": time.Now().Unix(),
+				},
+			}
+			p.queueService.UpdateOne(ctx, bson.M{"_id": item.ID}, updateData, nil)
+		}
+	}()
+
+	err := p.ProcessQueueItem(ctx, item)
+	if err != nil {
+		appLog.WithError(err).WithFields(map[string]interface{}{
+			"queueItemId": item.ID.Hex(),
+			"retryCount":  item.RetryCount,
+		}).Error("📦 [DELIVERY] Failed to process queue item")
+		existingItem, findErr := p.queueService.FindOneById(ctx, item.ID)
+		if findErr == nil && existingItem.Status == "processing" {
+			updateData := basesvc.UpdateData{
+				Set: map[string]interface{}{
+					"status":    "pending",
+					"updatedAt": time.Now().Unix(),
+				},
+			}
+			_, updateErr := p.queueService.UpdateOne(ctx, bson.M{"_id": item.ID}, updateData, nil)
+			if updateErr != nil {
+				appLog.WithError(updateErr).WithField("queueItemId", item.ID.Hex()).Error("📦 [DELIVERY] Failed to reset item to pending after error")
+			}
+		}
+	}
 }
 
 // handleRetryOrFail xử lý retry logic cho mọi error case
@@ -296,11 +364,6 @@ func (p *Processor) sendNotification(ctx context.Context, sender *notifmodels.No
 	}
 }
 
-// contains kiểm tra string có chứa substring không
-func contains(s, substr string) bool {
-	return strings.Contains(s, substr)
-}
-
 // StartCleanupJob bắt đầu background job để dọn dẹp items bị kẹt
 func (p *Processor) StartCleanupJob(ctx context.Context) {
 	cleanupInterval := 1 * time.Minute // Chạy mỗi 1 phút
@@ -326,13 +389,18 @@ func (p *Processor) StartCleanupJob(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if worker.ShouldThrottle(worker.PriorityLow) {
+				if !worker.IsWorkerActive(worker.WorkerDeliveryCleanup) {
+					time.Sleep(1 * time.Minute)
+					continue
+				}
+				prio := worker.GetPriority(worker.WorkerDeliveryCleanup, worker.PriorityLow)
+				if worker.ShouldThrottle(prio) {
 					continue
 				}
 				log := logger.GetAppLogger()
-				
+
 				// Tìm items bị kẹt
-				effBatch := worker.GetEffectiveBatchSize(batchSize, worker.PriorityLow)
+				effBatch := worker.GetEffectiveBatchSize(batchSize, prio)
 				stuckItems, err := p.queueService.FindStuckItems(ctx, staleMinutes, effBatch)
 				if err != nil {
 					log.WithError(err).Error("📦 [CLEANUP] Failed to find stuck queue items")
@@ -444,17 +512,15 @@ func (p *Processor) Start(ctx context.Context) {
 				case <-ctx.Done():
 					return
 				case <-ticker.C:
-					if worker.ShouldThrottle(worker.PriorityCritical) {
+					if !worker.IsWorkerActive(worker.WorkerDelivery) {
+						time.Sleep(1 * time.Minute)
 						continue
 					}
-					effInterval := worker.GetEffectiveInterval(interval, worker.PriorityCritical)
-					if effInterval > interval {
-						time.Sleep(effInterval - interval)
-					}
-					log := logger.GetAppLogger()
-					effBatch := worker.GetEffectiveBatchSize(batchSize, worker.PriorityCritical)
+					prio := worker.GetPriority(worker.WorkerDelivery, worker.PriorityHigh)
+					effBatch := worker.GetEffectiveBatchSize(batchSize, prio)
 					items, err := p.queueService.FindPending(ctx, effBatch)
 					if err != nil {
+						log := logger.GetAppLogger()
 						log.WithError(err).Error("📦 [DELIVERY] Failed to find pending queue items")
 						continue
 					}
@@ -465,85 +531,50 @@ func (p *Processor) Start(ctx context.Context) {
 						continue
 					}
 
-					// Đã tắt log Info để giảm log (background job chạy thường xuyên)
-
-					for _, item := range items {
-						// Nếu item đang processing (stale), reset về pending trước
-						if item.Status == "processing" {
-							ids := []interface{}{item.ID}
-							err = p.queueService.UpdateStatus(ctx, ids, "pending")
-							if err != nil {
-								log.WithError(err).WithField("queueItemId", item.ID.Hex()).Error("📦 [DELIVERY] Failed to reset stale item to pending")
-								continue
-							}
-							// Đã tắt log Info để giảm log
-							item.Status = "pending"
+					// Item ưu tiên (Priority 1=critical, 2=high): bắt buộc chạy, không bị throttle
+					hasPriority := false
+					for i := range items {
+						if items[i].Priority >= 1 && items[i].Priority <= 2 {
+							hasPriority = true
+							break
 						}
-						
-						ids := []interface{}{item.ID}
-						err = p.queueService.UpdateStatus(ctx, ids, "processing")
-						if err != nil {
-							log.WithError(err).WithField("queueItemId", item.ID.Hex()).Error("📦 [DELIVERY] Failed to update queue item status")
+					}
+					if !hasPriority {
+						if worker.ShouldThrottle(prio) {
 							continue
 						}
+						effInterval := worker.GetEffectiveInterval(interval, prio)
+						if effInterval > interval {
+							time.Sleep(effInterval - interval)
+						}
+					}
 
-						func() {
-							start := time.Now()
-							defer func() {
-								channelType := item.ChannelType
-								if channelType == "" {
-									channelType = "unknown"
-								}
-								metrics.RecordDuration("delivery:"+channelType, time.Since(start))
-							}()
-							defer func() {
-								if r := recover(); r != nil {
-									log := logger.GetAppLogger()
-									log.WithFields(map[string]interface{}{
-										"panic":       r,
-										"queueItemId": item.ID.Hex(),
-									}).Error("📦 [DELIVERY] Panic khi xử lý queue item")
-									// Reset về pending để retry sau
-									ids := []interface{}{item.ID}
-									p.queueService.UpdateStatus(ctx, ids, "pending")
-									updateData := basesvc.UpdateData{
-										Set: map[string]interface{}{
-											"status":    "pending",
-											"updatedAt": time.Now().Unix(),
-										},
-									}
-									p.queueService.UpdateOne(ctx, bson.M{"_id": item.ID}, updateData, nil)
+					// Worker pool: pool size từ env, điều chỉnh theo CPU/RAM qua Controller
+					basePool := worker.GetPoolSize(worker.WorkerDelivery, 6)
+					poolSize := worker.GetEffectivePoolSize(basePool, prio)
+					if poolSize <= 1 {
+						// Chạy tuần tự
+						for i := range items {
+							p.processDeliveryItem(ctx, &items[i])
+						}
+					} else {
+						// Chạy song song với worker pool
+						jobs := make(chan *deliverymodels.DeliveryQueueItem, len(items))
+						var wg sync.WaitGroup
+						for i := 0; i < poolSize; i++ {
+							wg.Add(1)
+							go func() {
+								defer wg.Done()
+								for item := range jobs {
+									p.processDeliveryItem(ctx, item)
 								}
 							}()
-
-							err = p.ProcessQueueItem(ctx, &item)
-							if err != nil {
-								log := logger.GetAppLogger()
-								log.WithError(err).WithFields(map[string]interface{}{
-									"queueItemId": item.ID.Hex(),
-									"retryCount":  item.RetryCount,
-								}).Error("📦 [DELIVERY] Failed to process queue item")
-								
-								// Kiểm tra xem item còn tồn tại không (có thể đã bị xóa trong ProcessQueueItem)
-								// Nếu còn tồn tại và vẫn ở status "processing", reset về pending
-								existingItem, findErr := p.queueService.FindOneById(ctx, item.ID)
-								if findErr == nil && existingItem.Status == "processing" {
-									// Item vẫn còn và đang ở processing, reset về pending để retry
-									updateData := basesvc.UpdateData{
-										Set: map[string]interface{}{
-											"status":    "pending",
-											"updatedAt": time.Now().Unix(),
-										},
-									}
-									_, updateErr := p.queueService.UpdateOne(ctx, bson.M{"_id": item.ID}, updateData, nil)
-									if updateErr != nil {
-										log.WithError(updateErr).WithField("queueItemId", item.ID.Hex()).Error("📦 [DELIVERY] Failed to reset item to pending after error")
-									} else {
-										// Đã tắt log Info để giảm log
-									}
-								}
-							}
-						}()
+						}
+						for i := range items {
+							jobs <- &items[i]
+						}
+						close(jobs)
+						wg.Wait()
 					}
 				}
 			}

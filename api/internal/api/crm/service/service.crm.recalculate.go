@@ -5,7 +5,10 @@ package crmvc
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
 	crmdto "meta_commerce/internal/api/crm/dto"
@@ -14,6 +17,7 @@ import (
 	pcmodels "meta_commerce/internal/api/pc/models"
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
+	"meta_commerce/internal/logger"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -28,6 +32,7 @@ type RecalculateCustomerResult struct {
 	MetricsUpdated        bool   `json:"metricsUpdated"`
 	ClassificationUpdated bool   `json:"classificationUpdated"`
 	ActivitiesBackfilled  int    `json:"activitiesBackfilled"` // Số conversation_started đã ghi bổ sung
+	OrdersBackfilled      int    `json:"ordersBackfilled"`     // Số order_created/order_completed đã ghi bổ sung
 }
 
 // RecalculateCustomerFromAllSources tính toán lại toàn bộ thông tin khách hàng từ tất cả nguồn.
@@ -43,7 +48,6 @@ type RecalculateCustomerResult struct {
 // - ctx: context
 // - unifiedId: ID thống nhất của khách (crm_customers.unifiedId)
 // - ownerOrgID: ID tổ chức sở hữu
-//
 // Trả về:
 // - *RecalculateCustomerResult: kết quả cập nhật
 // - error: lỗi nếu có (ErrNotFound khi không tìm thấy khách)
@@ -73,10 +77,20 @@ func (s *CrmCustomerService) RecalculateCustomerFromAllSources(ctx context.Conte
 	}
 	ids = s.expandCustomerIdsForAggregation(ctx, &customer, ids, phones, ownerOrgID)
 
+	// 3b. Lấy conversationId: từ pc_pos_customers.posData.fb_id (POS) + query fb_conversations match ids (FB).
+	// Đảm bảo có conversationIds cho cả POS và FB — tránh aggregate bỏ sót do path BSON khác.
+	conversationIds := s.getConversationIdsFromPosCustomers(ctx, []string{customer.SourceIds.Pos}, ownerOrgID)
+	convIdsFromFb := s.getConversationIdsFromFbMatch(ctx, ids, ownerOrgID)
+	for _, cid := range convIdsFromFb {
+		if cid != "" {
+			conversationIds = appendUnique(conversationIds, cid)
+		}
+	}
+
 	// 4. Aggregate metrics (orders + conversations)
 	metrics := s.aggregateOrderMetricsForCustomer(ctx, ids, ownerOrgID, phones, 0)
-	convMetrics := s.aggregateConversationMetricsForCustomer(ctx, ids, ownerOrgID, 0)
-	hasConv := convMetrics.ConversationCount > 0 || s.checkHasConversation(ctx, ids, ownerOrgID)
+	convMetrics := s.aggregateConversationMetricsForCustomer(ctx, ids, conversationIds, ownerOrgID, 0)
+	hasConv := convMetrics.ConversationCount > 0 || s.checkHasConversation(ctx, ids, ownerOrgID, conversationIds)
 
 	// 5. Cập nhật sourceIds nếu tìm thấy link mới qua phone (để lần sau match conversation)
 	sourceIds := customer.SourceIds
@@ -93,21 +107,21 @@ func (s *CrmCustomerService) RecalculateCustomerFromAllSources(ctx context.Conte
 
 	// 6. Compute classification
 	cm := BuildCurrentMetricsFromOrderAndConv(metrics, convMetrics, hasConv)
-	class := ComputeClassificationFromMetrics(metrics.TotalSpent, metrics.OrderCount, metrics.LastOrderAt, metrics.RevenueLast30d, metrics.RevenueLast90d, metrics.OrderCountOnline, metrics.OrderCountOffline, hasConv)
+	class := ComputeClassificationFromMetrics(metrics.TotalSpent, metrics.OrderCount, metrics.LastOrderAt, metrics.RevenueLast30d, metrics.RevenueLast90d, metrics.OrderCountOnline, metrics.OrderCountOffline, hasConv, convMetrics.ConversationTags)
 
 	// 7. Update crm_customers
 	now := time.Now().UnixMilli()
 	setFields := bson.M{
-		"profile":             profile,
-		"sourceIds":           sourceIds,
-		"totalSpent":          metrics.TotalSpent,
-		"orderCount":          metrics.OrderCount,
-		"lastOrderAt":         metrics.LastOrderAt,
-		"ownedSkuQuantities":  metrics.OwnedSkuQuantities,
-		"conversationTags":    convMetrics.ConversationTags,
-		"mergedAt":            now,
-		"updatedAt":           now,
-		"currentMetrics":      cm,
+		"profile":            profile,
+		"sourceIds":          sourceIds,
+		"totalSpent":         metrics.TotalSpent,
+		"orderCount":         metrics.OrderCount,
+		"lastOrderAt":        metrics.LastOrderAt,
+		"ownedSkuQuantities": metrics.OwnedSkuQuantities,
+		"conversationTags":   convMetrics.ConversationTags,
+		"mergedAt":           now,
+		"updatedAt":          now,
+		"currentMetrics":     cm,
 	}
 	for k, v := range class {
 		setFields[k] = v
@@ -130,12 +144,12 @@ func (s *CrmCustomerService) RecalculateCustomerFromAllSources(ctx context.Conte
 
 	// 7b. Ghi activity customer_updated với metricsSnapshot mới — để report (ComputeCustomerReport) có layer3
 	// Report lấy snapshot từ crm_activity_history; nếu không ghi activity thì report dùng snapshot cũ.
-	s.logRecalculateActivity(ctx, unifiedId, ownerOrgID, now)
+	// Truyền cm (metrics vừa lưu) — đảm bảo snapshot = currentMetrics, tránh lệch do GetMetricsForSnapshotAt thiếu expandIds/checkHasConversation.
+	s.logRecalculateActivity(ctx, unifiedId, ownerOrgID, now, cm)
 
-	// 8. Backfill conversation_started activities thiếu — để lịch sử hiển thị đầy đủ
-	// Truyền unifiedId để đảm bảo resolve thành công (conversation có thể link qua customer_id=unifiedId
-	// nhưng extractConversationCustomerId trả customers[0].id có thể chưa có trong sourceIds.Fb)
-	activitiesBackfilled := s.backfillConversationActivitiesForCustomer(ctx, unifiedId, ids, ownerOrgID)
+	// 8. Backfill conversation_started và order activities thiếu — để lịch sử hiển thị đầy đủ
+	activitiesBackfilled := s.backfillConversationActivitiesForCustomer(ctx, unifiedId, ids, conversationIds, ownerOrgID)
+	ordersBackfilled := s.backfillOrderActivitiesForCustomer(ctx, ids, phones, ownerOrgID)
 
 	return &RecalculateCustomerResult{
 		UnifiedId:             unifiedId,
@@ -144,13 +158,257 @@ func (s *CrmCustomerService) RecalculateCustomerFromAllSources(ctx context.Conte
 		MetricsUpdated:        true,
 		ClassificationUpdated: true,
 		ActivitiesBackfilled:  activitiesBackfilled,
+		OrdersBackfilled:      ordersBackfilled,
 	}, nil
 }
 
-// RecalculateAllCustomers tính toán lại tất cả khách hàng hiện có của org (ngược với backfill).
-// Lặp qua crm_customers theo ownerOrganizationId, gọi RecalculateCustomerFromAllSources cho từng khách.
+// RecalculateMismatchCustomers recalculate chỉ các khách bị lỗi: engaged trong crm nhưng visitor trong activity snapshot.
+// Dùng để sửa chênh lệch currentMetrics vs metricsSnapshot trong hành trình khách hàng.
+// limit <= 0: xử lý tất cả mismatch; limit > 0: giới hạn số khách.
+// poolSize <= 0: dùng default 10; truyền worker.GetEffectivePoolSize(10, worker.PriorityLow) để giảm khi CPU/RAM cao.
+func (s *CrmCustomerService) RecalculateMismatchCustomers(ctx context.Context, ownerOrgID primitive.ObjectID, limit int, poolSize int) (*crmdto.CrmRecalculateAllResult, error) {
+	actColl, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CrmActivityHistory)
+	if !ok {
+		return nil, fmt.Errorf("không tìm thấy collection %s", global.MongoDB_ColNames.CrmActivityHistory)
+	}
+
+	nowMs := time.Now().UnixMilli()
+	// 1. Lấy last metricsSnapshot per customer từ activity
+	pipe := []bson.M{
+		{"$match": bson.M{
+			"ownerOrganizationId":      ownerOrgID,
+			"activityAt":               bson.M{"$lte": nowMs},
+			"metadata.metricsSnapshot": bson.M{"$exists": true, "$ne": nil},
+		}},
+		{"$sort": bson.M{"activityAt": -1}},
+		{"$group": bson.M{
+			"_id":             "$unifiedId",
+			"metricsSnapshot": bson.M{"$first": "$metadata.metricsSnapshot"},
+		}},
+	}
+	cursor, err := actColl.Aggregate(ctx, pipe)
+	if err != nil {
+		return nil, common.ConvertMongoError(err)
+	}
+	activitySnapshot := make(map[string]string)
+	for cursor.Next(ctx) {
+		var doc struct {
+			ID              string                 `bson:"_id"`
+			MetricsSnapshot map[string]interface{} `bson:"metricsSnapshot"`
+		}
+		if cursor.Decode(&doc) != nil || doc.MetricsSnapshot == nil {
+			continue
+		}
+		stage := extractJourneyStageFromMetrics(doc.MetricsSnapshot)
+		activitySnapshot[doc.ID] = stage
+	}
+	cursor.Close(ctx)
+
+	// 2. Lấy engaged trong crm_customers
+	engaged, err := s.Find(ctx, bson.M{
+		"ownerOrganizationId": ownerOrgID,
+		"journeyStage":        "engaged",
+	}, mongoopts.Find().SetProjection(bson.M{"unifiedId": 1}))
+	if err != nil {
+		return nil, common.ConvertMongoError(err)
+	}
+
+	// 3. Lọc mismatch: engaged crm nhưng visitor trong activity
+	var mismatchIds []string
+	for _, c := range engaged {
+		snapStage := activitySnapshot[c.UnifiedId]
+		if snapStage == "visitor" {
+			mismatchIds = append(mismatchIds, c.UnifiedId)
+		}
+	}
+
+	useLimit := limit > 0
+	if useLimit && len(mismatchIds) > limit {
+		mismatchIds = mismatchIds[:limit]
+	}
+
+	result := &crmdto.CrmRecalculateAllResult{}
+	total := len(mismatchIds)
+	if total == 0 {
+		return result, nil
+	}
+
+	// Worker pool: xử lý song song để tăng tốc, mỗi customer độc lập (unifiedId khác nhau).
+	const basePool = 10
+	workers := basePool
+	if poolSize > 0 {
+		workers = poolSize
+	}
+	if total < workers {
+		workers = total
+	}
+
+	jobs := make(chan string, total)
+	for _, id := range mismatchIds {
+		jobs <- id
+	}
+	close(jobs)
+
+	var mu sync.Mutex
+	const maxFailedIds = 10
+
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					// Bắt panic để không làm dừng toàn bộ tiến trình (vd: panic từ logger)
+					// Dùng fmt thay vì logger để tránh panic lặp
+					fmt.Fprintf(os.Stderr, "[CRM] RecalcMismatch: Worker panic recovered: %v\n", r)
+				}
+			}()
+			for unifiedId := range jobs {
+				_, err := s.RecalculateCustomerFromAllSources(ctx, unifiedId, ownerOrgID)
+				mu.Lock()
+				if err != nil {
+					result.TotalFailed++
+					if len(result.FailedIds) < maxFailedIds {
+						result.FailedIds = append(result.FailedIds, unifiedId)
+					}
+				} else {
+					result.TotalProcessed++
+					pct := float64(result.TotalProcessed) * 100 / float64(total)
+					logger.GetAppLogger().Infof("[CRM] RecalcMismatch: Fix thành công unifiedId=%s processed=%d total=%d progressPct=%.1f%%",
+						unifiedId, result.TotalProcessed, total, pct)
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+
+	return result, nil
+}
+
+// RecalculateOrderCountMismatchCustomers recalculate tất cả khách first/repeat/promoter (đã mua).
+// orderCount>0 chưa chắc đúng — recalc lại toàn bộ để đảm bảo metrics khớp DB.
+// inactive bỏ khỏi journey — dùng lifecycleStage.
 // limit <= 0: xử lý tất cả; limit > 0: giới hạn số khách.
-func (s *CrmCustomerService) RecalculateAllCustomers(ctx context.Context, ownerOrgID primitive.ObjectID, limit int) (*crmdto.CrmRecalculateAllResult, error) {
+// poolSize <= 0: dùng default 12; truyền worker.GetEffectivePoolSize(12, worker.PriorityLow) để giảm khi CPU/RAM cao.
+func (s *CrmCustomerService) RecalculateOrderCountMismatchCustomers(ctx context.Context, ownerOrgID primitive.ObjectID, limit int, poolSize int) (*crmdto.CrmRecalculateAllResult, error) {
+	stages := []string{"first", "repeat", "promoter"}
+	filter := bson.M{
+		"ownerOrganizationId": ownerOrgID,
+		"journeyStage":        bson.M{"$in": stages},
+	}
+	opts := mongoopts.Find().SetProjection(bson.M{"unifiedId": 1})
+	if limit > 0 {
+		opts.SetLimit(int64(limit))
+	}
+	customers, err := s.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, common.ConvertMongoError(err)
+	}
+	ids := make([]string, 0, len(customers))
+	for _, c := range customers {
+		ids = append(ids, c.UnifiedId)
+	}
+
+	result := &crmdto.CrmRecalculateAllResult{}
+	total := len(ids)
+	if total == 0 {
+		return result, nil
+	}
+
+	const basePool = 12
+	workers := basePool
+	if poolSize > 0 {
+		workers = poolSize
+	}
+	if total < workers {
+		workers = total
+	}
+	jobs := make(chan string, total)
+	for _, id := range ids {
+		jobs <- id
+	}
+	close(jobs)
+
+	var mu sync.Mutex
+	const maxFailedIds = 10
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Fprintf(os.Stderr, "[CRM] RecalcOrderMismatch: Worker panic recovered: %v\n", r)
+				}
+			}()
+			for unifiedId := range jobs {
+				_, err := s.RecalculateCustomerFromAllSources(ctx, unifiedId, ownerOrgID)
+				mu.Lock()
+				if err != nil {
+					result.TotalFailed++
+					if len(result.FailedIds) < maxFailedIds {
+						result.FailedIds = append(result.FailedIds, unifiedId)
+					}
+				} else {
+					result.TotalProcessed++
+					pct := float64(result.TotalProcessed) * 100 / float64(total)
+					logger.GetAppLogger().Infof("[CRM] RecalcOrderMismatch: Fix unifiedId=%s processed=%d total=%d progressPct=%.1f%%",
+						unifiedId, result.TotalProcessed, total, pct)
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	return result, nil
+}
+
+// getOrderCountFromCurrentMetrics đọc orderCount từ currentMetrics (raw/layer1/layer2).
+func getOrderCountFromCurrentMetrics(cm map[string]interface{}) int {
+	if cm == nil {
+		return 0
+	}
+	for _, layer := range []string{"layer2", "layer1", "raw"} {
+		if sub, ok := cm[layer].(map[string]interface{}); ok {
+			if v, ok := sub["orderCount"]; ok && v != nil {
+				switch x := v.(type) {
+				case int:
+					return x
+				case int64:
+					return int(x)
+				case float64:
+					return int(x)
+				}
+			}
+		}
+	}
+	return 0
+}
+
+// extractJourneyStageFromMetrics lấy journeyStage từ metricsSnapshot (layer1, layer2, raw).
+func extractJourneyStageFromMetrics(m map[string]interface{}) string {
+	if m == nil {
+		return ""
+	}
+	for _, layer := range []string{"layer1", "layer2", "raw"} {
+		if sub, ok := m[layer].(map[string]interface{}); ok {
+			if v, ok := sub["journeyStage"]; ok && v != nil {
+				if s, ok := v.(string); ok && s != "" {
+					return s
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// RecalculateAllCustomers tính toán lại tất cả khách hàng hiện có của org (ngược với backfill).
+// Dùng worker pool xử lý song song để tăng tốc, mỗi customer độc lập (unifiedId khác nhau).
+// limit <= 0: xử lý tất cả; limit > 0: giới hạn số khách.
+// poolSize <= 0: dùng default 12; truyền worker.GetEffectivePoolSize(12, worker.PriorityLow) để giảm khi CPU/RAM cao.
+func (s *CrmCustomerService) RecalculateAllCustomers(ctx context.Context, ownerOrgID primitive.ObjectID, limit int, poolSize int) (*crmdto.CrmRecalculateAllResult, error) {
 	useLimit := limit > 0
 	filter := bson.M{"ownerOrganizationId": ownerOrgID}
 	opts := mongoopts.Find().SetProjection(bson.M{"unifiedId": 1})
@@ -161,19 +419,63 @@ func (s *CrmCustomerService) RecalculateAllCustomers(ctx context.Context, ownerO
 	if err != nil {
 		return nil, common.ConvertMongoError(err)
 	}
-	result := &crmdto.CrmRecalculateAllResult{}
-	const maxFailedIds = 10
+	ids := make([]string, 0, len(customers))
 	for _, c := range customers {
-		_, err := s.RecalculateCustomerFromAllSources(ctx, c.UnifiedId, ownerOrgID)
-		if err != nil {
-			result.TotalFailed++
-			if len(result.FailedIds) < maxFailedIds {
-				result.FailedIds = append(result.FailedIds, c.UnifiedId)
-			}
-			continue
-		}
-		result.TotalProcessed++
+		ids = append(ids, c.UnifiedId)
 	}
+
+	result := &crmdto.CrmRecalculateAllResult{}
+	total := len(ids)
+	if total == 0 {
+		return result, nil
+	}
+
+	// Worker pool: xử lý song song để tăng tốc, mỗi customer độc lập (unifiedId khác nhau).
+	const basePool = 12
+	workers := basePool
+	if poolSize > 0 {
+		workers = poolSize
+	}
+	if total < workers {
+		workers = total
+	}
+	jobs := make(chan string, total)
+	for _, id := range ids {
+		jobs <- id
+	}
+	close(jobs)
+
+	var mu sync.Mutex
+	const maxFailedIds = 10
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Fprintf(os.Stderr, "[CRM] RecalcAll: Worker panic recovered: %v\n", r)
+				}
+			}()
+			for unifiedId := range jobs {
+				_, err := s.RecalculateCustomerFromAllSources(ctx, unifiedId, ownerOrgID)
+				mu.Lock()
+				if err != nil {
+					result.TotalFailed++
+					if len(result.FailedIds) < maxFailedIds {
+						result.FailedIds = append(result.FailedIds, unifiedId)
+					}
+				} else {
+					result.TotalProcessed++
+					pct := float64(result.TotalProcessed) * 100 / float64(total)
+					logger.GetAppLogger().Infof("[CRM] RecalcAll: unifiedId=%s processed=%d total=%d progressPct=%.1f%%",
+						unifiedId, result.TotalProcessed, total, pct)
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
 	return result, nil
 }
 
@@ -211,7 +513,8 @@ func (s *CrmCustomerService) rebuildProfileFromAllSources(ctx context.Context, c
 	}
 
 	// Fill gaps từ conversation gần nhất
-	if convDoc := s.fetchLatestConversationForCustomer(ctx, buildCustomerIdsForRecalculate(c), c.OwnerOrganizationID); convDoc != nil {
+	convIds := s.getConversationIdsFromPosCustomers(ctx, []string{c.SourceIds.Pos}, c.OwnerOrganizationID)
+	if convDoc := s.fetchLatestConversationForCustomer(ctx, buildCustomerIdsForRecalculate(c), convIds, c.OwnerOrganizationID); convDoc != nil {
 		custData := extractCustomerDataFromConv(convDoc)
 		merged = fillProfileGapsFromConvData(merged, custData)
 	}
@@ -352,6 +655,93 @@ func buildCustomerIdsForRecalculate(c *crmmodels.CrmCustomer) []string {
 	return ids
 }
 
+// getConversationIdsFromFbMatch query fb_conversations theo customerIds, trả về conversationId của các conv match.
+// Dùng cho FB customers — đảm bảo có conversationIds trong filter (fallback khi path BSON khác).
+func (s *CrmCustomerService) getConversationIdsFromFbMatch(ctx context.Context, customerIds []string, ownerOrgID primitive.ObjectID) []string {
+	if len(customerIds) == 0 {
+		return nil
+	}
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.FbConvesations)
+	if !ok {
+		return nil
+	}
+	filter := buildConversationFilterForCustomerIds(customerIds, ownerOrgID, nil)
+	if filter["customerId"] == "__NO_MATCH__" {
+		return nil
+	}
+	cursor, err := coll.Find(ctx, filter, mongoopts.Find().SetProjection(bson.M{"conversationId": 1}).SetLimit(50))
+	if err != nil {
+		return nil
+	}
+	defer cursor.Close(ctx)
+	var result []string
+	seen := make(map[string]bool)
+	for cursor.Next(ctx) {
+		var doc struct {
+			ConversationId string `bson:"conversationId"`
+		}
+		if cursor.Decode(&doc) != nil || doc.ConversationId == "" {
+			continue
+		}
+		if !seen[doc.ConversationId] {
+			seen[doc.ConversationId] = true
+			result = append(result, doc.ConversationId)
+		}
+	}
+	return result
+}
+
+func appendUnique(slice []string, item string) []string {
+	for _, v := range slice {
+		if v == item {
+			return slice
+		}
+	}
+	return append(slice, item)
+}
+
+// getConversationIdsFromPosCustomers lấy conversationId (pageId_psid) từ pc_pos_customers.posData.fb_id.
+// Dùng khi aggregate conversation — conv có customerId khác (Pancake format) nhưng posData.fb_id = conversationId.
+func (s *CrmCustomerService) getConversationIdsFromPosCustomers(ctx context.Context, posCustomerIds []string, ownerOrgID primitive.ObjectID) []string {
+	if len(posCustomerIds) == 0 {
+		return nil
+	}
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosCustomers)
+	if !ok {
+		return nil
+	}
+	cursor, err := coll.Find(ctx, bson.M{
+		"ownerOrganizationId": ownerOrgID,
+		"customerId":          bson.M{"$in": posCustomerIds},
+		"posData.fb_id":       bson.M{"$exists": true, "$ne": ""},
+	}, nil)
+	if err != nil {
+		return nil
+	}
+	defer cursor.Close(ctx)
+	var result []string
+	seen := make(map[string]bool)
+	for cursor.Next(ctx) {
+		var doc struct {
+			PosData map[string]interface{} `bson:"posData"`
+		}
+		if cursor.Decode(&doc) != nil || doc.PosData == nil {
+			continue
+		}
+		fbId := ""
+		if v, ok := doc.PosData["fb_id"].(string); ok && v != "" {
+			fbId = v
+		} else if n, ok := doc.PosData["fb_id"].(float64); ok {
+			fbId = fmt.Sprintf("%.0f", n)
+		}
+		if fbId != "" && !seen[fbId] {
+			seen[fbId] = true
+			result = append(result, fbId)
+		}
+	}
+	return result
+}
+
 // expandCustomerIdsForAggregation mở rộng ids để match conversation/order khi khách chưa merge.
 // Thêm FB customer ID tìm qua phone (nếu sourceIds.Fb trống), POS customer ID tìm qua phone (nếu sourceIds.Pos trống).
 // Giúp aggregateConversationMetricsForCustomer tìm được hội thoại của khách FB có cùng SĐT.
@@ -437,15 +827,15 @@ func (s *CrmCustomerService) fetchLatestOrderForCustomer(ctx context.Context, cu
 }
 
 // fetchLatestConversationForCustomer lấy hội thoại gần nhất của khách.
-func (s *CrmCustomerService) fetchLatestConversationForCustomer(ctx context.Context, customerIds []string, ownerOrgID primitive.ObjectID) *fbmodels.FbConversation {
-	if len(customerIds) == 0 {
+func (s *CrmCustomerService) fetchLatestConversationForCustomer(ctx context.Context, customerIds []string, conversationIds []string, ownerOrgID primitive.ObjectID) *fbmodels.FbConversation {
+	if len(customerIds) == 0 && len(conversationIds) == 0 {
 		return nil
 	}
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.FbConvesations)
 	if !ok {
 		return nil
 	}
-	filter := buildConversationFilterForCustomerIds(customerIds, ownerOrgID)
+	filter := buildConversationFilterForCustomerIds(customerIds, ownerOrgID, conversationIds)
 	opts := mongoopts.FindOne().SetSort(bson.D{{Key: "panCakeUpdatedAt", Value: -1}})
 	var doc fbmodels.FbConversation
 	if err := coll.FindOne(ctx, filter, opts).Decode(&doc); err != nil {
@@ -454,21 +844,22 @@ func (s *CrmCustomerService) fetchLatestConversationForCustomer(ctx context.Cont
 	return &doc
 }
 
-const recalculateConversationActivityLimit = 100 // Giới hạn số conversation backfill mỗi lần recalculate
+const (
+	recalculateConversationActivityLimit = 100 // Giới hạn số conversation backfill mỗi lần recalculate
+	recalculateOrderActivityLimit        = 100 // Giới hạn số order backfill mỗi lần recalculate
+)
 
 // backfillConversationActivitiesForCustomer ghi conversation_started cho các hội thoại chưa có activity.
-// unifiedId: ID thống nhất của khách (dùng để resolve — đảm bảo ghi đúng customer khi conversation link qua customer_id khác sourceIds).
-// customerIds: danh sách id để filter conversation (unifiedId + sourceIds + expanded).
-// Trả về số activity đã ghi bổ sung.
-func (s *CrmCustomerService) backfillConversationActivitiesForCustomer(ctx context.Context, unifiedId string, customerIds []string, ownerOrgID primitive.ObjectID) int {
-	if unifiedId == "" || len(customerIds) == 0 {
+// conversationIds: từ pc_pos_customers.posData.fb_id — link POS customer với conv.
+func (s *CrmCustomerService) backfillConversationActivitiesForCustomer(ctx context.Context, unifiedId string, customerIds []string, conversationIds []string, ownerOrgID primitive.ObjectID) int {
+	if unifiedId == "" || (len(customerIds) == 0 && len(conversationIds) == 0) {
 		return 0
 	}
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.FbConvesations)
 	if !ok {
 		return 0
 	}
-	filter := buildConversationFilterForCustomerIds(customerIds, ownerOrgID)
+	filter := buildConversationFilterForCustomerIds(customerIds, ownerOrgID, conversationIds)
 	opts := mongoopts.Find().SetSort(bson.D{{Key: "panCakeUpdatedAt", Value: 1}}).SetLimit(recalculateConversationActivityLimit)
 	cursor, err := coll.Find(ctx, filter, opts)
 	if err != nil {
@@ -492,13 +883,111 @@ func (s *CrmCustomerService) backfillConversationActivitiesForCustomer(ctx conte
 	return backfilled
 }
 
+// backfillOrderActivitiesForCustomer ghi order_created/order_completed cho các đơn hàng chưa có activity.
+// Filter đồng nhất với aggregateOrderMetricsForCustomer: customerId, posData.customer.id, posData.customer_id, billPhoneNumber.
+func (s *CrmCustomerService) backfillOrderActivitiesForCustomer(ctx context.Context, customerIds []string, phoneNumbers []string, ownerOrgID primitive.ObjectID) int {
+	var ids []string
+	for _, id := range customerIds {
+		if id != "" {
+			ids = append(ids, id)
+		}
+	}
+	var phoneVariants []string
+	for _, p := range phoneNumbers {
+		if p != "" {
+			phoneVariants = append(phoneVariants, p)
+			if len(p) >= 3 && p[:2] == "84" {
+				phoneVariants = append(phoneVariants, "0"+p[2:])
+			} else if len(p) >= 10 && p[0] == '0' {
+				phoneVariants = append(phoneVariants, "84"+p[1:])
+			}
+		}
+	}
+	if len(ids) == 0 && len(phoneVariants) == 0 {
+		return 0
+	}
+
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
+	if !ok {
+		return 0
+	}
+
+	var orConditions []bson.M
+	if len(ids) > 0 {
+		orConditions = append(orConditions,
+			bson.M{"customerId": bson.M{"$in": ids}},
+			bson.M{"posData.customer.id": bson.M{"$in": ids}},
+			bson.M{"posData.customer_id": bson.M{"$in": ids}},
+		)
+	}
+	if len(phoneVariants) > 0 {
+		orConditions = append(orConditions,
+			bson.M{"billPhoneNumber": bson.M{"$in": phoneVariants}},
+			bson.M{"posData.bill_phone_number": bson.M{"$in": phoneVariants}},
+		)
+	}
+	filter := bson.M{
+		"ownerOrganizationId": ownerOrgID,
+		"$and": []bson.M{
+			{"$or": orConditions},
+			{"status": bson.M{"$nin": []int{6}}},
+			{"posData.status": bson.M{"$nin": []int{6}}},
+		},
+	}
+	opts := mongoopts.Find().
+		SetSort(bson.D{{Key: "posData.inserted_at", Value: 1}, {Key: "posData.updated_at", Value: 1}, {Key: "_id", Value: 1}}).
+		SetLimit(recalculateOrderActivityLimit)
+	cursor, err := coll.Find(ctx, filter, opts)
+	if err != nil {
+		return 0
+	}
+	defer cursor.Close(ctx)
+
+	backfilled := 0
+	for cursor.Next(ctx) {
+		var doc pcmodels.PcPosOrder
+		if err := cursor.Decode(&doc); err != nil {
+			continue
+		}
+		customerId := doc.CustomerId
+		if customerId == "" && doc.PosData != nil {
+			if m, ok := doc.PosData["customer"].(map[string]interface{}); ok {
+				if id, ok := m["id"].(string); ok {
+					customerId = id
+				}
+			}
+		}
+		if customerId == "" && doc.PosData != nil {
+			if id, ok := doc.PosData["customer_id"].(string); ok {
+				customerId = id
+			}
+		}
+		if customerId == "" {
+			continue
+		}
+		channel := "offline"
+		if doc.PageId != "" {
+			channel = "online"
+		} else if doc.PosData != nil {
+			if pid, ok := doc.PosData["page_id"].(string); ok && pid != "" {
+				channel = "online"
+			}
+		}
+		_ = s.IngestOrderTouchpoint(ctx, customerId, ownerOrgID, doc.OrderId, true, channel, true, &doc)
+		backfilled++
+	}
+	return backfilled
+}
+
 func trimSpace(s string) string {
 	return strings.TrimSpace(s)
 }
 
 // logRecalculateActivity ghi activity customer_updated với metricsSnapshot mới sau recalculate.
 // Giúp report (ComputeCustomerReport) lấy được snapshot có layer3 qua GetLastSnapshotPerCustomerBeforeEndMs.
-func (s *CrmCustomerService) logRecalculateActivity(ctx context.Context, unifiedId string, ownerOrgID primitive.ObjectID, activityAt int64) {
+// metricsOverride: metrics vừa cập nhật vào crm_customers — dùng trực tiếp để đảm bảo snapshot = currentMetrics.
+// Tránh lệch visitor/engaged do GetMetricsForSnapshotAt thiếu expandCustomerIdsForAggregation và checkHasConversation.
+func (s *CrmCustomerService) logRecalculateActivity(ctx context.Context, unifiedId string, ownerOrgID primitive.ObjectID, activityAt int64, metricsOverride map[string]interface{}) {
 	actSvc, err := NewCrmActivityService()
 	if err != nil {
 		return
@@ -508,7 +997,8 @@ func (s *CrmCustomerService) logRecalculateActivity(ctx context.Context, unified
 		return
 	}
 	metadata := map[string]interface{}{"trigger": "recalculate"}
-	snap := BuildSnapshotForNewCustomer(&cust, activityAt, false, nil)
+	// Dùng metricsOverride (chính xác metrics vừa lưu) thay vì GetMetricsForSnapshotAt — tránh chênh lệch.
+	snap := BuildSnapshotForNewCustomer(&cust, activityAt, false, metricsOverride)
 	if snap != nil {
 		MergeSnapshotIntoMetadata(metadata, snap)
 	}

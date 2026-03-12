@@ -59,6 +59,7 @@ func (h *CrmCustomerHandler) HandleRebuildCrm(c fiber.Ctx) error {
 			OwnerOrganizationId string `json:"ownerOrganizationId"`
 			Limit               int    `json:"limit"`
 			Sources             string `json:"sources"`
+			IsPriority          bool   `json:"isPriority"` // Job ưu tiên: bắt buộc chạy ngay, không bị throttle
 		}
 		_ = c.Bind().Body(&input)
 		orgID := getActiveOrganizationID(c)
@@ -94,7 +95,7 @@ func (h *CrmCustomerHandler) HandleRebuildCrm(c fiber.Ctx) error {
 			params["sources"] = syncSources
 			params["types"] = backfillTypes
 		}
-		jobID, err := h.BulkJobService.Enqueue(c.Context(), crmmodels.CrmBulkJobRebuild, *orgID, params)
+		jobID, err := h.BulkJobService.Enqueue(c.Context(), crmmodels.CrmBulkJobRebuild, *orgID, params, input.IsPriority)
 		if err != nil {
 			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
 				"code": common.ErrCodeDatabase.Code, "message": "Lỗi đưa job vào queue: " + err.Error(), "status": "error",
@@ -117,6 +118,7 @@ func (h *CrmCustomerHandler) HandleRecalculateAllCustomers(c fiber.Ctx) error {
 		var input struct {
 			OwnerOrganizationId string `json:"ownerOrganizationId"`
 			Limit               int    `json:"limit"`
+			IsPriority          bool   `json:"isPriority"` // Job ưu tiên: bắt buộc chạy ngay, không bị throttle
 		}
 		_ = c.Bind().Body(&input)
 		orgID := getActiveOrganizationID(c)
@@ -140,7 +142,7 @@ func (h *CrmCustomerHandler) HandleRecalculateAllCustomers(c fiber.Ctx) error {
 		if input.Limit > 0 {
 			params["limit"] = input.Limit
 		}
-		jobID, err := h.BulkJobService.Enqueue(c.Context(), crmmodels.CrmBulkJobRecalculateAll, *orgID, params)
+		jobID, err := h.BulkJobService.Enqueue(c.Context(), crmmodels.CrmBulkJobRecalculateAll, *orgID, params, input.IsPriority)
 		if err != nil {
 			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
 				"code": common.ErrCodeDatabase.Code, "message": "Lỗi đưa job vào queue: " + err.Error(), "status": "error",
@@ -173,8 +175,12 @@ func (h *CrmCustomerHandler) HandleRecalculateCustomer(c fiber.Ctx) error {
 			})
 			return nil
 		}
+		var input struct {
+			IsPriority bool `json:"isPriority"` // Job ưu tiên: bắt buộc chạy ngay, không bị throttle
+		}
+		_ = c.Bind().Body(&input)
 		params := bson.M{"unifiedId": unifiedId}
-		jobID, err := h.BulkJobService.Enqueue(c.Context(), crmmodels.CrmBulkJobRecalculateOne, *orgID, params)
+		jobID, err := h.BulkJobService.Enqueue(c.Context(), crmmodels.CrmBulkJobRecalculateOne, *orgID, params, input.IsPriority)
 		if err != nil {
 			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
 				"code": common.ErrCodeDatabase.Code, "message": "Lỗi đưa job vào queue: " + err.Error(), "status": "error",

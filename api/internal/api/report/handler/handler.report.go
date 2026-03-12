@@ -153,6 +153,63 @@ func (h *ReportHandler) HandleAdsDailyTrendFromSnapshots(c fiber.Ctx) error {
 	})
 }
 
+// HandleAdsPeriodMovementsFromDb xử lý GET /reports/ads/period-movements-from-db — PHỤ: ads trend từ DB (aggregate meta_ad_insights, đối chiếu).
+// Query: from=dd-mm-yyyy&to=dd-mm-yyyy&adAccountId=xxx (adAccountId optional).
+func (h *ReportHandler) HandleAdsPeriodMovementsFromDb(c fiber.Ctx) error {
+	return basehdl.SafeHandlerWrapper(c, func() error {
+		fromStr := c.Query("from")
+		toStr := c.Query("to")
+		if fromStr == "" || toStr == "" {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationInput.Code, "message": "Thiếu from hoặc to (dd-mm-yyyy). Ví dụ: ?from=01-01-2025&to=31-01-2025", "status": "error",
+			})
+			return nil
+		}
+		orgID := getActiveOrganizationID(c)
+		if orgID == nil || orgID.IsZero() {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationInput.Code, "message": "Vui lòng chọn tổ chức (active organization)", "status": "error",
+			})
+			return nil
+		}
+		fromT, err := time.Parse(reportdto.ReportDateFormat, fromStr)
+		if err != nil {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationFormat.Code, "message": "from không đúng định dạng dd-mm-yyyy", "status": "error",
+			})
+			return nil
+		}
+		toT, err := time.Parse(reportdto.ReportDateFormat, toStr)
+		if err != nil {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationFormat.Code, "message": "to không đúng định dạng dd-mm-yyyy", "status": "error",
+			})
+			return nil
+		}
+		if fromT.After(toT) {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationInput.Code, "message": "from phải nhỏ hơn hoặc bằng to", "status": "error",
+			})
+			return nil
+		}
+		startMs, endMs := dayRangeToMs(fromT, toT)
+		adAccountId := strings.TrimSpace(c.Query("adAccountId"))
+		list, err := h.ReportService.GetAdsTrendFromDb(c.Context(), *orgID, startMs, endMs, adAccountId)
+		if err != nil {
+			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
+				"code": common.ErrCodeDatabase.Code, "message": "Lỗi truy vấn báo cáo ads từ DB: " + err.Error(), "status": "error",
+			})
+			return nil
+		}
+		c.Status(common.StatusOK).JSON(fiber.Map{
+			"code": common.StatusOK, "message": "Thành công", "data": list,
+			"meta": fiber.Map{"dataSource": "db", "domain": "ads", "reportKey": "ads_daily", "description": "Số phát sinh ads trong kỳ aggregate trực tiếp từ meta_ad_insights"},
+			"status": "success",
+		})
+		return nil
+	})
+}
+
 // HandleOrderPeriodMovementsFromDb xử lý GET /reports/order/period-movements-from-db — PHỤ: order phát sinh từ DB (aggregate pc_pos_orders, đối chiếu).
 // Query: from=dd-mm-yyyy&to=dd-mm-yyyy. Trả về format giống period-movements-from-snapshots (reportKey=order_*).
 func (h *ReportHandler) HandleOrderPeriodMovementsFromDb(c fiber.Ctx) error {
@@ -292,49 +349,39 @@ func (h *ReportHandler) HandleRecompute(c fiber.Ctx) error {
 		count := 0
 		switch def.PeriodType {
 		case "day":
-			days := int(toT.Sub(fromT).Hours()/24) + 1
-			if days > 31 {
-				c.Status(common.StatusBadRequest).JSON(fiber.Map{
-					"code": common.ErrCodeValidationInput.Code, "message": "Khoảng từ from đến to tối đa 31 ngày", "status": "error",
-				})
-				return nil
-			}
 			for d := fromT; !d.After(toT); d = d.AddDate(0, 0, 1) {
 				periodKey := d.Format("2006-01-02")
-				if err := h.ReportService.Compute(ctx, body.ReportKey, periodKey, *orgID, ""); err != nil {
+				if err := h.ReportService.MarkDirty(ctx, body.ReportKey, periodKey, *orgID); err != nil {
 					c.Status(common.StatusInternalServerError).JSON(fiber.Map{
-						"code": common.ErrCodeDatabase.Code, "message": "Lỗi tính báo cáo, vui lòng thử lại sau", "status": "error",
+						"code": common.ErrCodeDatabase.Code, "message": "Lỗi đánh dấu chu kỳ cần tính, vui lòng thử lại sau", "status": "error",
 					})
 					return nil
 				}
 				count++
 			}
 		case "week":
-			// Lùi về thứ Hai của tuần chứa from
 			weekday := int(fromT.Weekday())
 			if weekday == 0 {
 				weekday = 7
 			}
 			monday := fromT.AddDate(0, 0, -(weekday - 1))
-			weeks := 0
-			for d := monday; !d.After(toT) && weeks < 12; d = d.AddDate(0, 0, 7) {
+			for d := monday; !d.After(toT); d = d.AddDate(0, 0, 7) {
 				periodKey := d.Format("2006-01-02")
-				if err := h.ReportService.Compute(ctx, body.ReportKey, periodKey, *orgID, ""); err != nil {
+				if err := h.ReportService.MarkDirty(ctx, body.ReportKey, periodKey, *orgID); err != nil {
 					c.Status(common.StatusInternalServerError).JSON(fiber.Map{
-						"code": common.ErrCodeDatabase.Code, "message": "Lỗi tính báo cáo, vui lòng thử lại sau", "status": "error",
+						"code": common.ErrCodeDatabase.Code, "message": "Lỗi đánh dấu chu kỳ cần tính, vui lòng thử lại sau", "status": "error",
 					})
 					return nil
 				}
 				count++
-				weeks++
 			}
 		case "month":
 			d := time.Date(fromT.Year(), fromT.Month(), 1, 0, 0, 0, 0, fromT.Location())
-			for (d.Before(toT) || d.Equal(toT)) && count < 12 {
+			for d.Before(toT) || d.Equal(toT) {
 				periodKey := d.Format("2006-01")
-				if err := h.ReportService.Compute(ctx, body.ReportKey, periodKey, *orgID, ""); err != nil {
+				if err := h.ReportService.MarkDirty(ctx, body.ReportKey, periodKey, *orgID); err != nil {
 					c.Status(common.StatusInternalServerError).JSON(fiber.Map{
-						"code": common.ErrCodeDatabase.Code, "message": "Lỗi tính báo cáo, vui lòng thử lại sau", "status": "error",
+						"code": common.ErrCodeDatabase.Code, "message": "Lỗi đánh dấu chu kỳ cần tính, vui lòng thử lại sau", "status": "error",
 					})
 					return nil
 				}
@@ -343,11 +390,11 @@ func (h *ReportHandler) HandleRecompute(c fiber.Ctx) error {
 			}
 		case "year":
 			d := time.Date(fromT.Year(), 1, 1, 0, 0, 0, 0, fromT.Location())
-			for (d.Before(toT) || d.Equal(toT)) && count < 5 {
+			for d.Before(toT) || d.Equal(toT) {
 				periodKey := d.Format("2006")
-				if err := h.ReportService.Compute(ctx, body.ReportKey, periodKey, *orgID, ""); err != nil {
+				if err := h.ReportService.MarkDirty(ctx, body.ReportKey, periodKey, *orgID); err != nil {
 					c.Status(common.StatusInternalServerError).JSON(fiber.Map{
-						"code": common.ErrCodeDatabase.Code, "message": "Lỗi tính báo cáo, vui lòng thử lại sau", "status": "error",
+						"code": common.ErrCodeDatabase.Code, "message": "Lỗi đánh dấu chu kỳ cần tính, vui lòng thử lại sau", "status": "error",
 					})
 					return nil
 				}
@@ -362,8 +409,10 @@ func (h *ReportHandler) HandleRecompute(c fiber.Ctx) error {
 		}
 
 		c.Status(common.StatusOK).JSON(fiber.Map{
-			"code": common.StatusOK, "message": "Đã tính lại báo cáo",
-			"data": fiber.Map{"processedPeriods": count}, "status": "success",
+			"code": common.StatusOK,
+			"message": fmt.Sprintf("Đã đánh dấu %d chu kỳ cần tính lại. Worker sẽ xử lý tự động.", count),
+			"data":   fiber.Map{"markedPeriods": count},
+			"status": "success",
 		})
 		return nil
 	})

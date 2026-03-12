@@ -54,6 +54,19 @@ Mỗi Role thuộc về một Organization:
 3. **Roles**: Thuộc về một Organization
 4. **Permissions**: Có thể được gán cho nhiều Roles trong nhiều Organizations
 
+## 🏢 Teams mặc định cho định tuyến thông báo
+
+Hệ thống khởi tạo các team mặc định thuộc System Organization để định tuyến thông báo theo domain:
+
+| Team Code | Tên | Domain nhận |
+|-----------|-----|-------------|
+| `TECH_TEAM` | Tech Team | system, security, user |
+| `MARKETING_TEAM` | Marketing Team | ads, analytics |
+| `SALES_TEAM` | Sales Team | conversation |
+| `OPERATIONS_TEAM` | Vận hành (Operations) | order, payment |
+
+Chi tiết: [Notification Domain và Severity](../systems/notification-domain-severity.md).
+
 ## 🔍 Use Cases
 
 ### 1. Phân Quyền Theo Tổ Chức

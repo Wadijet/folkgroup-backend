@@ -51,8 +51,13 @@ func (s *CrmCustomerService) GetFullProfile(ctx context.Context, unifiedId strin
 	// 3. Lấy đơn hàng gần đây
 	recentOrders := s.fetchRecentOrders(ctx, customerIds, ownerOrgID)
 
-	// 4. Lấy hội thoại
-	conversations := s.fetchConversations(ctx, customerIds, ownerOrgID)
+	// 4. Lấy hội thoại (kèm conversationIds từ posData.fb_id cho POS customer)
+	var posIds []string
+	if customer.SourceIds.Pos != "" {
+		posIds = []string{customer.SourceIds.Pos}
+	}
+	convIds := s.getConversationIdsFromPosCustomers(ctx, posIds, ownerOrgID)
+	conversations := s.fetchConversations(ctx, customerIds, convIds, ownerOrgID)
 
 	// 5. Lấy ghi chú
 	notes := s.fetchNotes(ctx, unifiedId, ownerOrgID)
@@ -179,9 +184,8 @@ func (s *CrmCustomerService) fetchRecentOrders(ctx context.Context, customerIds 
 }
 
 // fetchConversations lấy hội thoại từ fb_conversations.
-// Match theo customerId (root), panCakeData.customer_id, panCakeData.customer.id, panCakeData.customers.id — đồng nhất với aggregateConversationMetricsForCustomer.
-func (s *CrmCustomerService) fetchConversations(ctx context.Context, customerIds []string, ownerOrgID primitive.ObjectID) []crmdto.CrmConversationSummary {
-	if len(customerIds) == 0 {
+func (s *CrmCustomerService) fetchConversations(ctx context.Context, customerIds []string, conversationIds []string, ownerOrgID primitive.ObjectID) []crmdto.CrmConversationSummary {
+	if len(customerIds) == 0 && len(conversationIds) == 0 {
 		return []crmdto.CrmConversationSummary{}
 	}
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.FbConvesations)
@@ -189,7 +193,7 @@ func (s *CrmCustomerService) fetchConversations(ctx context.Context, customerIds
 		return []crmdto.CrmConversationSummary{}
 	}
 
-	filter := buildConversationFilterForCustomerIds(customerIds, ownerOrgID)
+	filter := buildConversationFilterForCustomerIds(customerIds, ownerOrgID, conversationIds)
 	opts := mongoopts.Find().SetLimit(20).SetSort(bson.D{{Key: "panCakeUpdatedAt", Value: -1}})
 	cursor, err := coll.Find(ctx, filter, opts)
 	if err != nil {

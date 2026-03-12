@@ -98,10 +98,10 @@ func (s *ReportService) computeCustomerPhatSinhBatch(ctx context.Context, ownerO
 
 // computeCeoGroupForLTV gán mỗi khách vào đúng 1 nhóm CEO (mutually exclusive) để tính LTV.
 func computeCeoGroupForLTV(valueTier, lifecycleStage, journeyStage, loyaltyStage, momentumStage string) string {
-	if valueTier == "vip" && lifecycleStage == "active" {
+	if valueTier == "top" && lifecycleStage == "active" {
 		return "vip_active"
 	}
-	if valueTier == "vip" && (lifecycleStage == "inactive" || lifecycleStage == "dead") {
+	if valueTier == "top" && (lifecycleStage == "inactive" || lifecycleStage == "dead") {
 		return "vip_inactive"
 	}
 	if momentumStage == "rising" {

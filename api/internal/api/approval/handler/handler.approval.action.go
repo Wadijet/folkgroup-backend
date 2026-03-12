@@ -47,6 +47,11 @@ type RejectInput struct {
 	DecisionNote string `json:"decisionNote"`
 }
 
+// ExecuteInput body cho execute (thực thi thủ công đề xuất đã duyệt — dùng cho test).
+type ExecuteInput struct {
+	ActionId string `json:"actionId"`
+}
+
 // HandlePropose POST /approval/actions/propose
 func HandlePropose(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {
@@ -129,6 +134,43 @@ func HandleApprove(c fiber.Ctx) error {
 	})
 }
 
+// HandleExecute POST /approval/actions/execute — thực thi thủ công đề xuất đã duyệt (status=queued). Dùng cho test.
+func HandleExecute(c fiber.Ctx) error {
+	return basehdl.SafeHandlerWrapper(c, func() error {
+		var input ExecuteInput
+		if err := c.Bind().JSON(&input); err != nil {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationFormat.Code, "message": "Dữ liệu gửi lên không đúng định dạng JSON", "status": "error",
+			})
+			return nil
+		}
+		if input.ActionId == "" {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationFormat.Code, "message": "actionId không được để trống", "status": "error",
+			})
+			return nil
+		}
+		orgID := getActiveOrgID(c)
+		if orgID == nil {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationFormat.Code, "message": "Chưa chọn tổ chức", "status": "error",
+			})
+			return nil
+		}
+		result, err := approval.Execute(c.Context(), input.ActionId, *orgID)
+		if err != nil {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationFormat.Code, "message": err.Error(), "status": "error",
+			})
+			return nil
+		}
+		c.Status(common.StatusOK).JSON(fiber.Map{
+			"code": common.StatusOK, "message": "Đã thực thi thành công", "data": result, "status": "success",
+		})
+		return nil
+	})
+}
+
 // HandleReject POST /approval/actions/reject
 func HandleReject(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {
@@ -161,6 +203,239 @@ func HandleReject(c fiber.Ctx) error {
 		}
 		c.Status(common.StatusOK).JSON(fiber.Map{
 			"code": common.StatusOK, "message": "Đã từ chối đề xuất", "data": result, "status": "success",
+		})
+		return nil
+	})
+}
+
+// HandleFindById GET /approval/actions/find-by-id/:id — xem chi tiết một đề xuất.
+func HandleFindById(c fiber.Ctx) error {
+	return basehdl.SafeHandlerWrapper(c, func() error {
+		id := c.Params("id")
+		if id == "" {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationFormat.Code, "message": "id không được để trống", "status": "error",
+			})
+			return nil
+		}
+		orgID := getActiveOrgID(c)
+		if orgID == nil {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationFormat.Code, "message": "Chưa chọn tổ chức", "status": "error",
+			})
+			return nil
+		}
+		result, err := approval.FindById(c.Context(), id, *orgID)
+		if err != nil {
+			errCode, msg, statusCode := common.GetErrorResponseInfo(err, "Không tìm thấy đề xuất")
+			c.Status(statusCode).JSON(fiber.Map{
+				"code": errCode, "message": msg, "status": "error",
+			})
+			return nil
+		}
+		c.Status(common.StatusOK).JSON(fiber.Map{
+			"code": common.StatusOK, "message": "Thành công", "data": result, "status": "success",
+		})
+		return nil
+	})
+}
+
+// HandleFind GET /approval/actions/find — danh sách với filter (domain, status, limit, sortField, sortOrder).
+func HandleFind(c fiber.Ctx) error {
+	return basehdl.SafeHandlerWrapper(c, func() error {
+		orgID := getActiveOrgID(c)
+		if orgID == nil {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationFormat.Code, "message": "Chưa chọn tổ chức", "status": "error",
+			})
+			return nil
+		}
+		filter := approval.FindFilter{
+			Domain:    c.Query("domain"),
+			Status:    c.Query("status"),
+			Limit:     50,
+			SortField: "proposedAt",
+			SortOrder: -1,
+		}
+		if s := c.Query("limit"); s != "" {
+			if n, err := strconv.Atoi(s); err == nil && n > 0 {
+				filter.Limit = n
+			}
+		}
+		if s := c.Query("sortField"); s != "" {
+			filter.SortField = s
+		}
+		if s := c.Query("sortOrder"); s != "" {
+			if n, err := strconv.Atoi(s); err == nil {
+				filter.SortOrder = n
+			}
+		}
+		if s := c.Query("from"); s != "" {
+			if n, err := strconv.ParseInt(s, 10, 64); err == nil && n > 0 {
+				filter.FromProposedAt = n
+			}
+		}
+		if s := c.Query("to"); s != "" {
+			if n, err := strconv.ParseInt(s, 10, 64); err == nil && n > 0 {
+				filter.ToProposedAt = n
+			}
+		}
+		list, err := approval.Find(c.Context(), *orgID, filter)
+		if err != nil {
+			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
+				"code": common.ErrCodeInternalServer.Code, "message": err.Error(), "status": "error",
+			})
+			return nil
+		}
+		c.Status(common.StatusOK).JSON(fiber.Map{
+			"code": common.StatusOK, "message": "Thành công", "data": list, "status": "success",
+		})
+		return nil
+	})
+}
+
+// HandleFindWithPagination GET /approval/actions/find-with-pagination — danh sách có phân trang.
+func HandleFindWithPagination(c fiber.Ctx) error {
+	return basehdl.SafeHandlerWrapper(c, func() error {
+		orgID := getActiveOrgID(c)
+		if orgID == nil {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationFormat.Code, "message": "Chưa chọn tổ chức", "status": "error",
+			})
+			return nil
+		}
+		filter := approval.FindWithPaginationFilter{
+			FindFilter: approval.FindFilter{
+				Domain:    c.Query("domain"),
+				Status:    c.Query("status"),
+				Limit:     50,
+				SortField: "proposedAt",
+				SortOrder: -1,
+			},
+			Page: 1,
+		}
+		if s := c.Query("limit"); s != "" {
+			if n, err := strconv.Atoi(s); err == nil && n > 0 {
+				filter.Limit = n
+			}
+		}
+		if s := c.Query("page"); s != "" {
+			if n, err := strconv.ParseInt(s, 10, 64); err == nil && n > 0 {
+				filter.Page = n
+			}
+		}
+		if s := c.Query("sortField"); s != "" {
+			filter.SortField = s
+		}
+		if s := c.Query("sortOrder"); s != "" {
+			if n, err := strconv.Atoi(s); err == nil {
+				filter.SortOrder = n
+			}
+		}
+		if s := c.Query("from"); s != "" {
+			if n, err := strconv.ParseInt(s, 10, 64); err == nil && n > 0 {
+				filter.FromProposedAt = n
+			}
+		}
+		if s := c.Query("to"); s != "" {
+			if n, err := strconv.ParseInt(s, 10, 64); err == nil && n > 0 {
+				filter.ToProposedAt = n
+			}
+		}
+		items, total, err := approval.FindWithPagination(c.Context(), *orgID, filter)
+		if err != nil {
+			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
+				"code": common.ErrCodeInternalServer.Code, "message": err.Error(), "status": "error",
+			})
+			return nil
+		}
+		totalPage := int64(0)
+		if filter.Limit > 0 && total > 0 {
+			totalPage = (total + int64(filter.Limit) - 1) / int64(filter.Limit)
+		}
+		c.Status(common.StatusOK).JSON(fiber.Map{
+			"code": common.StatusOK, "message": "Thành công", "data": fiber.Map{
+				"items":     items,
+				"page":      filter.Page,
+				"limit":     int64(filter.Limit),
+				"itemCount": int64(len(items)),
+				"total":     total,
+				"totalPage": totalPage,
+			}, "status": "success",
+		})
+		return nil
+	})
+}
+
+// HandleCount GET /approval/actions/count — đếm theo filter (dashboard badges).
+func HandleCount(c fiber.Ctx) error {
+	return basehdl.SafeHandlerWrapper(c, func() error {
+		orgID := getActiveOrgID(c)
+		if orgID == nil {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationFormat.Code, "message": "Chưa chọn tổ chức", "status": "error",
+			})
+			return nil
+		}
+		domain := c.Query("domain")
+		status := c.Query("status")
+		var fromProposedAt, toProposedAt int64
+		if s := c.Query("from"); s != "" {
+			if n, err := strconv.ParseInt(s, 10, 64); err == nil && n > 0 {
+				fromProposedAt = n
+			}
+		}
+		if s := c.Query("to"); s != "" {
+			if n, err := strconv.ParseInt(s, 10, 64); err == nil && n > 0 {
+				toProposedAt = n
+			}
+		}
+		count, err := approval.Count(c.Context(), *orgID, domain, status, fromProposedAt, toProposedAt)
+		if err != nil {
+			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
+				"code": common.ErrCodeInternalServer.Code, "message": err.Error(), "status": "error",
+			})
+			return nil
+		}
+		c.Status(common.StatusOK).JSON(fiber.Map{
+			"code": common.StatusOK, "message": "Thành công", "data": fiber.Map{"count": count}, "status": "success",
+		})
+		return nil
+	})
+}
+
+// HandleCancel POST /approval/actions/cancel — hủy đề xuất pending.
+func HandleCancel(c fiber.Ctx) error {
+	return basehdl.SafeHandlerWrapper(c, func() error {
+		var input ApproveInput
+		if err := c.Bind().JSON(&input); err != nil {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationFormat.Code, "message": "Dữ liệu gửi lên không đúng định dạng JSON", "status": "error",
+			})
+			return nil
+		}
+		if input.ActionId == "" {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationFormat.Code, "message": "actionId không được để trống", "status": "error",
+			})
+			return nil
+		}
+		orgID := getActiveOrgID(c)
+		if orgID == nil {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationFormat.Code, "message": "Chưa chọn tổ chức", "status": "error",
+			})
+			return nil
+		}
+		result, err := approval.Cancel(c.Context(), input.ActionId, *orgID)
+		if err != nil {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationFormat.Code, "message": err.Error(), "status": "error",
+			})
+			return nil
+		}
+		c.Status(common.StatusOK).JSON(fiber.Map{
+			"code": common.StatusOK, "message": "Đã hủy đề xuất", "data": result, "status": "success",
 		})
 		return nil
 	})

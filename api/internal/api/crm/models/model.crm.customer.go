@@ -90,9 +90,9 @@ type CrmCustomer struct {
 
 	// Phân loại hiện tại (cập nhật cùng lúc với metrics qua hooks).
 	// Dùng cho filter/sort dashboard; activity history giữ snapshot lịch sử theo từng sự kiện.
-	ValueTier      string `json:"valueTier,omitempty" bson:"valueTier,omitempty" index:"single:1,compound:crm_customer_org_value"`             // vip|high|medium|low|new
-	LifecycleStage string `json:"lifecycleStage,omitempty" bson:"lifecycleStage,omitempty" index:"single:1,compound:crm_customer_org_lifecycle"`   // active|cooling|inactive|dead|never_purchased
-	JourneyStage   string `json:"journeyStage,omitempty" bson:"journeyStage,omitempty" index:"single:1,compound:crm_customer_org_journey"`       // visitor|engaged|first|repeat|vip|inactive
+	ValueTier      string `json:"valueTier,omitempty" bson:"valueTier,omitempty" index:"single:1,compound:crm_customer_org_value"`             // top|high|medium|low|new
+	LifecycleStage string `json:"lifecycleStage,omitempty" bson:"lifecycleStage,omitempty" index:"single:1,compound:crm_customer_org_lifecycle"`   // active|cooling|inactive|dead (chưa mua = rỗng, dùng Journey)
+	JourneyStage   string `json:"journeyStage,omitempty" bson:"journeyStage,omitempty" index:"single:1,compound:crm_customer_org_journey"`       // visitor|engaged|blocked_spam|first|repeat|promoter (VIP dùng valueTier; inactive dùng lifecycleStage)
 	Channel        string `json:"channel,omitempty" bson:"channel,omitempty" index:"single:1,compound:crm_customer_org_channel"`                 // online|offline|omnichannel
 	LoyaltyStage   string `json:"loyaltyStage,omitempty" bson:"loyaltyStage,omitempty" index:"single:1,compound:crm_customer_org_loyalty"`       // core|repeat|one_time
 	MomentumStage  string `json:"momentumStage,omitempty" bson:"momentumStage,omitempty" index:"single:1,compound:crm_customer_org_momentum"`    // rising|stable|declining|lost

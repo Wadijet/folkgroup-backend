@@ -56,11 +56,36 @@ func (w *CrmBulkWorker) Start(ctx context.Context) {
 			log.Info("📋 [CRM_BULK] CRM Bulk Worker stopped")
 			return
 		case <-ticker.C:
-			if ShouldThrottle(PriorityNormal) {
+			if !IsWorkerActive(WorkerCrmBulk) {
+				time.Sleep(1 * time.Minute)
 				continue
 			}
-			if effInterval := GetEffectiveInterval(w.interval, PriorityNormal); effInterval > w.interval {
-				time.Sleep(effInterval - w.interval)
+			p := GetPriority(WorkerCrmBulk, PriorityLow)
+			// Lấy batch trước để kiểm tra có job ưu tiên không
+			batchSize := GetEffectiveBatchSize(w.batchSize, p)
+			list, err := w.bulkJobSvc.GetUnprocessed(ctx, batchSize)
+			if err != nil {
+				log.WithError(err).Error("📋 [CRM_BULK] Lỗi lấy danh sách bulk jobs")
+				continue
+			}
+			if len(list) == 0 {
+				continue
+			}
+			// Job ưu tiên: bắt buộc chạy, không bị throttle
+			hasPriority := false
+			for i := range list {
+				if list[i].IsPriority {
+					hasPriority = true
+					break
+				}
+			}
+			if !hasPriority && ShouldThrottle(p) {
+				continue
+			}
+			if !hasPriority {
+				if effInterval := GetEffectiveInterval(w.interval, p); effInterval > w.interval {
+					time.Sleep(effInterval - w.interval)
+				}
 			}
 			func() {
 				defer func() {
@@ -68,16 +93,6 @@ func (w *CrmBulkWorker) Start(ctx context.Context) {
 						log.WithFields(map[string]interface{}{"panic": r}).Error("📋 [CRM_BULK] Panic khi xử lý, sẽ tiếp tục lần sau")
 					}
 				}()
-
-				batchSize := GetEffectiveBatchSize(w.batchSize, PriorityNormal)
-				list, err := w.bulkJobSvc.GetUnprocessed(ctx, batchSize)
-				if err != nil {
-					log.WithError(err).Error("📋 [CRM_BULK] Lỗi lấy danh sách bulk jobs")
-					return
-				}
-				if len(list) == 0 {
-					return
-				}
 
 				customerSvc, err := crmvc.NewCrmCustomerService()
 				if err != nil {
@@ -164,7 +179,8 @@ func (w *CrmBulkWorker) processJob(ctx context.Context, svc *crmvc.CrmCustomerSe
 
 	case crmmodels.CrmBulkJobRecalculateAll:
 		limit := parseInt(params, "limit", 0)
-		result, err := svc.RecalculateAllCustomers(ctx, job.OwnerOrganizationID, limit)
+		poolSize := GetEffectivePoolSize(12, PriorityLow)
+		result, err := svc.RecalculateAllCustomers(ctx, job.OwnerOrganizationID, limit, poolSize)
 		if err != nil {
 			return nil, err
 		}

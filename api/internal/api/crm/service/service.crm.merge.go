@@ -129,14 +129,23 @@ func (s *CrmCustomerService) MergeFromPosCustomer(ctx context.Context, doc *pcmo
 		}
 	}
 
+	// Đồng nhất với Recalculate: expand ids để match đơn khi khách chưa merge hoặc link qua SĐT.
+	tmpCustomer := &crmmodels.CrmCustomer{SourceIds: sourceIds, UnifiedId: unifiedId}
 	ids := []string{customerId, sourceIds.Fb, unifiedId}
+	ids = s.expandCustomerIdsForAggregation(ctx, tmpCustomer, ids, phones, ownerOrgID)
+	convIds := s.getConversationIdsFromPosCustomers(ctx, []string{sourceIds.Pos}, ownerOrgID)
+	for _, cid := range s.getConversationIdsFromFbMatch(ctx, ids, ownerOrgID) {
+		if cid != "" {
+			convIds = appendUnique(convIds, cid)
+		}
+	}
 	metrics := s.aggregateOrderMetricsForCustomer(ctx, ids, ownerOrgID, phones, 0)
-	convMetrics := s.aggregateConversationMetricsForCustomer(ctx, ids, ownerOrgID, 0)
-	hasConv := convMetrics.ConversationCount > 0 || s.checkHasConversation(ctx, ids, ownerOrgID)
+	convMetrics := s.aggregateConversationMetricsForCustomer(ctx, ids, convIds, ownerOrgID, 0)
+	hasConv := convMetrics.ConversationCount > 0 || s.checkHasConversation(ctx, ids, ownerOrgID, convIds)
 
 	// Raw metrics chỉ lưu trong currentMetrics; top-level chỉ giữ denormalized cho filter/sort.
 	cm := BuildCurrentMetricsFromOrderAndConv(metrics, convMetrics, hasConv)
-	class := ComputeClassificationFromMetrics(metrics.TotalSpent, metrics.OrderCount, metrics.LastOrderAt, metrics.RevenueLast30d, metrics.RevenueLast90d, metrics.OrderCountOnline, metrics.OrderCountOffline, hasConv)
+	class := ComputeClassificationFromMetrics(metrics.TotalSpent, metrics.OrderCount, metrics.LastOrderAt, metrics.RevenueLast30d, metrics.RevenueLast90d, metrics.OrderCountOnline, metrics.OrderCountOffline, hasConv, convMetrics.ConversationTags)
 
 	profileObj := crmmodels.CrmCustomerProfile{
 		Name: name, PhoneNumbers: phones, Emails: emails,
@@ -297,14 +306,23 @@ func (s *CrmCustomerService) MergeFromFbCustomer(ctx context.Context, doc *fbmod
 		}
 	}
 
+	// Đồng nhất với Recalculate: expand ids để match đơn khi khách chưa merge hoặc link qua SĐT.
+	tmpCustomer := &crmmodels.CrmCustomer{SourceIds: sourceIds, UnifiedId: unifiedId}
 	fbIds := []string{sourceIds.Pos, fbCustomerId, unifiedId}
+	fbIds = s.expandCustomerIdsForAggregation(ctx, tmpCustomer, fbIds, phones, ownerOrgID)
+	convIds := s.getConversationIdsFromPosCustomers(ctx, []string{sourceIds.Pos}, ownerOrgID)
+	for _, cid := range s.getConversationIdsFromFbMatch(ctx, fbIds, ownerOrgID) {
+		if cid != "" {
+			convIds = appendUnique(convIds, cid)
+		}
+	}
 	metrics := s.aggregateOrderMetricsForCustomer(ctx, fbIds, ownerOrgID, phones, 0)
-	convMetrics := s.aggregateConversationMetricsForCustomer(ctx, fbIds, ownerOrgID, 0)
-	hasConv := convMetrics.ConversationCount > 0 || s.checkHasConversation(ctx, fbIds, ownerOrgID)
+	convMetrics := s.aggregateConversationMetricsForCustomer(ctx, fbIds, convIds, ownerOrgID, 0)
+	hasConv := convMetrics.ConversationCount > 0 || s.checkHasConversation(ctx, fbIds, ownerOrgID, convIds)
 
 	// Raw metrics chỉ lưu trong currentMetrics; top-level chỉ giữ denormalized.
 	fbCm := BuildCurrentMetricsFromOrderAndConv(metrics, convMetrics, hasConv)
-	fbClass := ComputeClassificationFromMetrics(metrics.TotalSpent, metrics.OrderCount, metrics.LastOrderAt, metrics.RevenueLast30d, metrics.RevenueLast90d, metrics.OrderCountOnline, metrics.OrderCountOffline, hasConv)
+	fbClass := ComputeClassificationFromMetrics(metrics.TotalSpent, metrics.OrderCount, metrics.LastOrderAt, metrics.RevenueLast30d, metrics.RevenueLast90d, metrics.OrderCountOnline, metrics.OrderCountOffline, hasConv, convMetrics.ConversationTags)
 
 	fbProfile := crmmodels.CrmCustomerProfile{
 		Name: name, PhoneNumbers: phones, Emails: emails,
@@ -422,7 +440,7 @@ func (s *CrmCustomerService) UpsertMinimalFromPosId(ctx context.Context, custome
 		"lastOrderAt":         0,
 		"valueTier":           "new",
 		"journeyStage":        "visitor",
-		"lifecycleStage":      "never_purchased",
+		"lifecycleStage":      "", // Chưa mua — dùng Journey
 		"channel":             "",
 		"loyaltyStage":        "",
 		"momentumStage":       "lost",
@@ -485,7 +503,7 @@ func (s *CrmCustomerService) UpsertMinimalFromFbId(ctx context.Context, customer
 		"lastOrderAt":         0,
 		"valueTier":           "new",
 		"journeyStage":        "visitor",
-		"lifecycleStage":      "never_purchased",
+		"lifecycleStage":      "", // Chưa mua — dùng Journey
 		"channel":             "",
 		"loyaltyStage":        "",
 		"momentumStage":       "lost",

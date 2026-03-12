@@ -27,11 +27,12 @@ const (
 type Priority int
 
 const (
-	PriorityCritical Priority = 1 // CRM Ingest, Delivery Processor — real-time + cảnh báo hệ thống, không dừng hẳn
-	PriorityHigh     Priority = 2 // Report Dirty — báo cáo dashboard
-	PriorityNormal   Priority = 3 // CRM Bulk — user gọi API
-	PriorityLow      Priority = 4 // Command Cleanup, Agent Command Cleanup
-	PriorityLowest   Priority = 5 // Classification Refresh — batch định kỳ
+	// Order > Ads > Customer; trong từng nhóm Report ưu tiên hơn
+	PriorityCritical Priority = 1 // Report: ReportDirtyWorker (order + customer reports) — Report ưu tiên nhất
+	PriorityHigh     Priority = 2 // Order: CrmIngest, Delivery Processor
+	PriorityNormal   Priority = 3 // Ads: tất cả Ads workers
+	PriorityLow      Priority = 4 // Customer: CrmBulkWorker
+	PriorityLowest   Priority = 5 // Command Cleanup, Agent Cleanup, Classification Refresh
 )
 
 // ResourceMetrics chứa CPU, RAM, disk hiện tại.
@@ -67,6 +68,7 @@ type Controller struct {
 	enabled              bool
 	thresholdThrottle    float64
 	thresholdPause       float64
+	thresholdCPUAlert    float64
 	thresholdRAMThrottle float64
 	thresholdRAMPause    float64
 	thresholdRAMAlert    float64
@@ -108,6 +110,13 @@ func newController() *Controller {
 			thresholdPause = n
 		}
 	}
+	// Ngưỡng CPU để gửi cảnh báo (mặc định 95% — chỉ cảnh báo khi CPU rất cao)
+	thresholdCPUAlert := 95.0
+	if v := os.Getenv("WORKER_CPU_THRESHOLD_ALERT"); v != "" {
+		if n, err := strconv.ParseFloat(v, 64); err == nil && n > 0 {
+			thresholdCPUAlert = n
+		}
+	}
 	// Mặc định 3s/lần — phản ứng nhanh hơn để phát hiện spike CPU/RAM sớm.
 	sampleInterval := 3 * time.Second
 	if v := os.Getenv("WORKER_CPU_SAMPLE_INTERVAL"); v != "" {
@@ -129,25 +138,26 @@ func newController() *Controller {
 		}
 	}
 	// Ngưỡng RAM để throttle/pause — kiểm soát tràn RAM như CPU.
-		// Hạ ngưỡng để phản ứng sớm trước khi swap, tránh tràn.
-		thresholdRAMThrottle := 60.0
-		if v := os.Getenv("WORKER_RAM_THRESHOLD_THROTTLE"); v != "" {
-			if n, err := strconv.ParseFloat(v, 64); err == nil && n > 0 {
-				thresholdRAMThrottle = n
-			}
+	// Hạ ngưỡng để phản ứng sớm trước khi swap, tránh tràn.
+	thresholdRAMThrottle := 60.0
+	if v := os.Getenv("WORKER_RAM_THRESHOLD_THROTTLE"); v != "" {
+		if n, err := strconv.ParseFloat(v, 64); err == nil && n > 0 {
+			thresholdRAMThrottle = n
 		}
-		thresholdRAMPause := 75.0
+	}
+	thresholdRAMPause := 75.0
 	if v := os.Getenv("WORKER_RAM_THRESHOLD_PAUSE"); v != "" {
 		if n, err := strconv.ParseFloat(v, 64); err == nil && n > 0 {
 			thresholdRAMPause = n
 		}
 	}
-	thresholdRAMAlert := 70.0
+	thresholdRAMAlert := 95.0
 	if v := os.Getenv("WORKER_RAM_THRESHOLD_ALERT"); v != "" {
 		if n, err := strconv.ParseFloat(v, 64); err == nil && n > 0 {
 			thresholdRAMAlert = n
 		}
 	}
+	// Ngưỡng Disk để gửi cảnh báo (mặc định 90%)
 	thresholdDiskAlert := 90.0
 	if v := os.Getenv("WORKER_DISK_THRESHOLD_ALERT"); v != "" {
 		if n, err := strconv.ParseFloat(v, 64); err == nil && n > 0 {
@@ -160,6 +170,7 @@ func newController() *Controller {
 		enabled:              enabled,
 		thresholdThrottle:    thresholdThrottle,
 		thresholdPause:       thresholdPause,
+		thresholdCPUAlert:    thresholdCPUAlert,
 		thresholdRAMThrottle: thresholdRAMThrottle,
 		thresholdRAMPause:    thresholdRAMPause,
 		thresholdRAMAlert:    thresholdRAMAlert,
@@ -190,6 +201,7 @@ func (c *Controller) Start(ctx context.Context) {
 		"sampleInterval":         c.sampleInterval.String(),
 		"thresholdThrottle":      c.thresholdThrottle,
 		"thresholdPause":         c.thresholdPause,
+		"thresholdCPUAlert":      c.thresholdCPUAlert,
 		"thresholdRAMThrottle":   c.thresholdRAMThrottle,
 		"thresholdRAMPause":      c.thresholdRAMPause,
 	}).Info("⚙️ [WORKER_CONTROLLER] Worker CPU/RAM throttle controller started")
@@ -249,7 +261,7 @@ func (c *Controller) sampleCPU() {
 		}).Info("⚙️ [WORKER_CONTROLLER] Trạng thái CPU/RAM thay đổi")
 	}
 	now := time.Now().Unix()
-	shouldAlert := (cpuPct >= c.thresholdThrottle || ramPct >= c.thresholdRAMAlert || diskPct >= c.thresholdDiskAlert) &&
+	shouldAlert := (cpuPct >= c.thresholdCPUAlert || ramPct >= c.thresholdRAMAlert || diskPct >= c.thresholdDiskAlert) &&
 		(now-c.lastAlertAt >= 1800) // Cooldown 30 phút
 	if shouldAlert {
 		c.lastAlertAt = now
@@ -370,6 +382,28 @@ func (c *Controller) GetEffectiveBatchSize(base int, p Priority) int {
 	return base
 }
 
+// GetEffectivePoolSize trả về pool size hiệu dụng theo trạng thái CPU/RAM.
+// Khi Throttled: base/2 (tối thiểu 1); khi Paused: 1 (chạy tuần tự để giảm tải).
+func (c *Controller) GetEffectivePoolSize(base int, p Priority) int {
+	if !c.enabled || base <= 1 {
+		return base
+	}
+	c.mu.RLock()
+	s := c.state
+	c.mu.RUnlock()
+	if s == StatePaused {
+		return 1
+	}
+	if s == StateThrottled {
+		n := base / 2
+		if n < 1 {
+			n = 1
+		}
+		return n
+	}
+	return base
+}
+
 // GetState trả về trạng thái hiện tại (để debug).
 func (c *Controller) GetState() (ThrottleState, float64) {
 	c.mu.RLock()
@@ -388,6 +422,81 @@ func (c *Controller) GetResourceMetrics() ResourceMetrics {
 	}
 }
 
+// WorkerThresholds cấu hình ngưỡng throttle (để API GET/PUT).
+type WorkerThresholds struct {
+	Enabled                bool    `json:"enabled"`
+	CPUThresholdThrottle   float64 `json:"cpuThresholdThrottle"`
+	CPUThresholdPause      float64 `json:"cpuThresholdPause"`
+	CPUThresholdAlert      float64 `json:"cpuThresholdAlert"`
+	RAMThresholdThrottle   float64 `json:"ramThresholdThrottle"`
+	RAMThresholdPause      float64 `json:"ramThresholdPause"`
+	RAMThresholdAlert      float64 `json:"ramThresholdAlert"`
+	DiskThresholdAlert     float64 `json:"diskThresholdAlert"`
+	SampleIntervalSeconds  int     `json:"sampleIntervalSeconds"`
+	IntervalMultiplier     int     `json:"intervalMultiplier"`
+	BatchDivisor           int     `json:"batchDivisor"`
+}
+
+// GetThresholds trả về ngưỡng hiện tại (để API GET).
+func (c *Controller) GetThresholds() WorkerThresholds {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return WorkerThresholds{
+		Enabled:               c.enabled,
+		CPUThresholdThrottle:  c.thresholdThrottle,
+		CPUThresholdPause:     c.thresholdPause,
+		CPUThresholdAlert:     c.thresholdCPUAlert,
+		RAMThresholdThrottle:  c.thresholdRAMThrottle,
+		RAMThresholdPause:     c.thresholdRAMPause,
+		RAMThresholdAlert:     c.thresholdRAMAlert,
+		DiskThresholdAlert:    c.thresholdDiskAlert,
+		SampleIntervalSeconds: int(c.sampleInterval.Seconds()),
+		IntervalMultiplier:    c.intervalMultiplier,
+		BatchDivisor:          c.batchDivisor,
+	}
+}
+
+// SetThresholds cập nhật ngưỡng (runtime, qua API). Chỉ cập nhật các field có giá trị hợp lệ.
+// enabled: cập nhật nếu có; số: chỉ cập nhật khi > 0 (hoặc >= 1 cho multiplier/divisor).
+func (c *Controller) SetThresholds(t *WorkerThresholds) {
+	if t == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.enabled = t.Enabled
+	if t.CPUThresholdThrottle > 0 {
+		c.thresholdThrottle = t.CPUThresholdThrottle
+	}
+	if t.CPUThresholdPause > 0 {
+		c.thresholdPause = t.CPUThresholdPause
+	}
+	if t.CPUThresholdAlert > 0 {
+		c.thresholdCPUAlert = t.CPUThresholdAlert
+	}
+	if t.RAMThresholdThrottle > 0 {
+		c.thresholdRAMThrottle = t.RAMThresholdThrottle
+	}
+	if t.RAMThresholdPause > 0 {
+		c.thresholdRAMPause = t.RAMThresholdPause
+	}
+	if t.RAMThresholdAlert > 0 {
+		c.thresholdRAMAlert = t.RAMThresholdAlert
+	}
+	if t.DiskThresholdAlert > 0 {
+		c.thresholdDiskAlert = t.DiskThresholdAlert
+	}
+	if t.SampleIntervalSeconds > 0 {
+		c.sampleInterval = time.Duration(t.SampleIntervalSeconds) * time.Second
+	}
+	if t.IntervalMultiplier >= 1 {
+		c.intervalMultiplier = t.IntervalMultiplier
+	}
+	if t.BatchDivisor >= 1 {
+		c.batchDivisor = t.BatchDivisor
+	}
+}
+
 // ShouldThrottle package-level helper. Truyền priority để xác định có skip khi CPU/RAM quá tải không.
 func ShouldThrottle(p Priority) bool {
 	return DefaultController().ShouldThrottle(p)
@@ -401,4 +510,9 @@ func GetEffectiveInterval(base time.Duration, p Priority) time.Duration {
 // GetEffectiveBatchSize package-level helper. Truyền priority để xác định batch size khi Throttled.
 func GetEffectiveBatchSize(base int, p Priority) int {
 	return DefaultController().GetEffectiveBatchSize(base, p)
+}
+
+// GetEffectivePoolSize package-level helper. Truyền priority để xác định pool size khi Throttled/Paused.
+func GetEffectivePoolSize(base int, p Priority) int {
+	return DefaultController().GetEffectivePoolSize(base, p)
 }

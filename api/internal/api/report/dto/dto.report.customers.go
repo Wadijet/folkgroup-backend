@@ -31,11 +31,11 @@ type CustomersQueryParams struct {
 	CoolingDays       int    `query:"coolingDays"`       // Ngưỡng Cooling: 30 < days ≤ 60
 	InactiveDays      int    `query:"inactiveDays"`      // Ngưỡng Inactive: 60 < days ≤ 90
 	// Query params mới theo CUSTOMER_CLASSIFICATION_SYSTEM_DESIGN (dùng crm_customers)
-	// Mỗi tiêu chí có thể nhận nhiều giá trị (comma-separated), ví dụ: journey=vip,engaged,first
-	Journey   string `query:"journey"`   // visitor|engaged|first|repeat|vip|inactive
+	// Mỗi tiêu chí có thể nhận nhiều giá trị (comma-separated), ví dụ: journey=engaged,first
+	Journey   string `query:"journey"`   // visitor|engaged|blocked_spam|first|repeat|promoter
 	Channel   string `query:"channel"`  // online|offline|omnichannel
-	ValueTier string `query:"valueTier"` // vip|high|medium|low|new
-	Lifecycle string `query:"lifecycle"` // active|cooling|inactive|dead|never_purchased
+	ValueTier string `query:"valueTier"` // top|high|medium|low|new
+	Lifecycle string `query:"lifecycle"` // active|cooling|inactive|dead
 	Loyalty   string `query:"loyalty"`  // core|repeat|one_time
 	Momentum  string `query:"momentum"`  // rising|stable|declining|lost
 	CeoGroup  string `query:"ceoGroup"`  // vip_active|vip_inactive|rising|new|one_time|dead
@@ -54,7 +54,7 @@ type CustomerSummary struct {
 	ActiveTodayCount     int64   `json:"activeTodayCount"`    // Khách có đơn trong period
 	TotalLTV             float64 `json:"totalLTV"`             // Tổng giá trị tài sản = SUM(totalSpent)
 	AvgLTV               float64 `json:"avgLTV"`              // Giá trị trung bình = totalLTV / totalCustomers
-	VipLTV               float64 `json:"vipLTV"`              // Tổng giá trị khách VIP = SUM(totalSpent) where valueTier=vip
+	VipLTV               float64 `json:"vipLTV"`              // Tổng giá trị khách VIP = SUM(totalSpent) where valueTier=top
 }
 
 // FirstMetrics metrics dành riêng cho stage First Purchase (mua lần đầu).
@@ -95,7 +95,7 @@ type CustomerItem struct {
 	First *FirstMetrics `json:"first,omitempty"`
 	// Repeat Intelligence — nested theo stage (chỉ có khi journeyStage=repeat)
 	Repeat *RepeatMetrics `json:"repeat,omitempty"`
-	// VIP Intelligence — nested theo stage (chỉ có khi journeyStage=vip)
+	// VIP Intelligence — nested theo valueTier=top (orderCount>=8)
 	Vip *VipMetrics `json:"vip,omitempty"`
 	// Inactive Intelligence — nested khi lifecycle cooling|inactive|dead (tài sản đang chết)
 	Inactive *InactiveMetrics `json:"inactive,omitempty"`
@@ -138,35 +138,36 @@ type VipInactiveItem struct {
 	AssignedSale   string  `json:"assignedSale"`
 }
 
-// ValueDistribution phân bố theo Value (CRM): vip, high, medium, low, new, unspecified.
+// ValueDistribution phân bố theo Value (CRM): new, low, medium, high, top, unspecified.
 type ValueDistribution struct {
-	Vip         int64 `json:"vip"`
-	High        int64 `json:"high"`
-	Medium      int64 `json:"medium"`
-	Low         int64 `json:"low"`
 	New         int64 `json:"new"`
+	Low         int64 `json:"low"`
+	Medium      int64 `json:"medium"`
+	High        int64 `json:"high"`
+	Top         int64 `json:"top"`
 	Unspecified int64 `json:"unspecified"` // Khi metricsSnapshot không có valueTier
 }
 
-// JourneyDistribution phân bố theo Journey (CRM): visitor, engaged, first, repeat, vip, inactive, unspecified.
+// JourneyDistribution phân bố theo Journey (CRM): visitor, engaged, blocked_spam, first, repeat, promoter, unspecified.
+// inactive bỏ khỏi journey — dùng lifecycleStage (Lớp 2).
 type JourneyDistribution struct {
-	Visitor     int64 `json:"visitor"`
-	Engaged     int64 `json:"engaged"`
-	First       int64 `json:"first"`
-	Repeat      int64 `json:"repeat"`
-	Vip         int64 `json:"vip"`
-	Inactive    int64 `json:"inactive"`
-	Unspecified int64 `json:"unspecified"` // Khi metricsSnapshot không có journeyStage
+	Visitor      int64 `json:"visitor"`
+	Engaged      int64 `json:"engaged"`
+	BlockedSpam  int64 `json:"blockedSpam"`
+	First        int64 `json:"first"`
+	Repeat       int64 `json:"repeat"`
+	Promoter     int64 `json:"promoter"`
+	Unspecified  int64 `json:"unspecified"` // Khi metricsSnapshot không có journeyStage
 }
 
-// LifecycleDistribution phân bố theo Lifecycle (CRM): active, cooling, inactive, dead, never_purchased, unspecified.
+// LifecycleDistribution phân bố theo Lifecycle/Recency (CRM): active, cooling, inactive, dead, unspecified.
+// never_purchased bỏ — khách chưa mua dùng Journey.
 type LifecycleDistribution struct {
-	Active         int64 `json:"active"`
-	Cooling        int64 `json:"cooling"`
-	Inactive       int64 `json:"inactive"`
-	Dead           int64 `json:"dead"`
-	NeverPurchased int64 `json:"never_purchased"`
-	Unspecified    int64 `json:"unspecified"` // Khi metricsSnapshot không có lifecycleStage
+	Active      int64 `json:"active"`
+	Cooling     int64 `json:"cooling"`
+	Inactive    int64 `json:"inactive"`
+	Dead        int64 `json:"dead"`
+	Unspecified int64 `json:"unspecified"` // Chưa mua hoặc không có lifecycleStage
 }
 
 // ChannelDistribution phân bố theo Channel (CRM): online, offline, omnichannel.
@@ -256,35 +257,34 @@ type EngagedLayer3Distribution struct {
 	SourceType              map[string]int64 `json:"sourceType"`
 }
 
-// ValueLTV LTV theo nhóm Value — client derive totalLTV, vipLTV, avgLTV từ đây.
+// ValueLTV LTV theo nhóm Value — client derive totalLTV, topLTV (top tier), avgLTV từ đây.
 type ValueLTV struct {
-	Vip         float64 `json:"vip"`
-	High        float64 `json:"high"`
-	Medium      float64 `json:"medium"`
-	Low         float64 `json:"low"`
 	New         float64 `json:"new"`
+	Low         float64 `json:"low"`
+	Medium      float64 `json:"medium"`
+	High        float64 `json:"high"`
+	Top         float64 `json:"top"`
 	Unspecified float64 `json:"unspecified"`
 }
 
 // JourneyLTV LTV theo nhóm Journey.
 type JourneyLTV struct {
-	Visitor     float64 `json:"visitor"`
-	Engaged     float64 `json:"engaged"`
-	First       float64 `json:"first"`
-	Repeat      float64 `json:"repeat"`
-	Vip         float64 `json:"vip"`
-	Inactive    float64 `json:"inactive"`
-	Unspecified float64 `json:"unspecified"`
+	Visitor      float64 `json:"visitor"`
+	Engaged      float64 `json:"engaged"`
+	BlockedSpam  float64 `json:"blockedSpam"`
+	First        float64 `json:"first"`
+	Repeat       float64 `json:"repeat"`
+	Promoter     float64 `json:"promoter"`
+	Unspecified  float64 `json:"unspecified"`
 }
 
-// LifecycleLTV LTV theo nhóm Lifecycle.
+// LifecycleLTV LTV theo nhóm Lifecycle/Recency.
 type LifecycleLTV struct {
-	Active         float64 `json:"active"`
-	Cooling        float64 `json:"cooling"`
-	Inactive       float64 `json:"inactive"`
-	Dead           float64 `json:"dead"`
-	NeverPurchased float64 `json:"never_purchased"`
-	Unspecified    float64 `json:"unspecified"`
+	Active      float64 `json:"active"`
+	Cooling     float64 `json:"cooling"`
+	Inactive    float64 `json:"inactive"`
+	Dead        float64 `json:"dead"`
+	Unspecified float64 `json:"unspecified"`
 }
 
 // ChannelLTV LTV theo nhóm Channel.

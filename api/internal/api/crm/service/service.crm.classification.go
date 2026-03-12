@@ -3,7 +3,8 @@
 // Kiến trúc 2 lớp:
 //
 //	LỚP 1 — CUSTOMER JOURNEY (hành trình trưởng thành, thuần):
-//	  VISITOR | ENGAGED | FIRST | REPEAT | VIP | INACTIVE
+//	  VISITOR | ENGAGED | BLOCKED_SPAM | FIRST | REPEAT | PROMOTER
+//	  (VIP dùng valueTier Lớp 2; inactive dùng lifecycleStage Lớp 2; promoter chờ dữ liệu referral)
 //
 //	LỚP 2 — CUSTOMER SEGMENTATION (5 trục phân loại):
 //	  CHANNEL | VALUE | LIFECYCLE | LOYALTY | MOMENTUM
@@ -12,6 +13,7 @@
 package crmvc
 
 import (
+	"strings"
 	"time"
 
 	crmmodels "meta_commerce/internal/api/crm/models"
@@ -51,10 +53,10 @@ func daysSinceLastOrder(lastOrderAt int64) int64 {
 }
 
 // ComputeValueTier trả về tier theo total_spent (VNĐ).
-// vip | high | medium | low | new
+// new | low | medium | high | top (đổi vip → top cho đồng bộ với 4 tier còn lại)
 func ComputeValueTier(totalSpent float64) string {
 	if totalSpent >= valueVip {
-		return "vip"
+		return "top"
 	}
 	if totalSpent >= valueHigh {
 		return "high"
@@ -68,12 +70,12 @@ func ComputeValueTier(totalSpent float64) string {
 	return "new"
 }
 
-// ComputeLifecycleStage trả về stage theo days_since_last_order.
-// active | cooling | inactive | dead | never_purchased
+// ComputeLifecycleStage trả về stage theo days_since_last_order (chỉ khách đã mua).
+// active | cooling | inactive | dead — never_purchased bỏ, khách chưa mua dùng Journey.
 func ComputeLifecycleStage(lastOrderAt int64) string {
 	daysSince := daysSinceLastOrder(lastOrderAt)
 	if daysSince < 0 {
-		return "never_purchased"
+		return "" // Chưa mua — không thuộc lifecycle (recency), dùng Journey
 	}
 	if daysSince <= lifecycleActive {
 		return "active"
@@ -87,29 +89,52 @@ func ComputeLifecycleStage(lastOrderAt int64) string {
 	return "dead"
 }
 
+// HasSpamOrBlockTag kiểm tra tags có chứa Block, Spam, Chặn — dùng để nhóm blocked_spam.
+func HasSpamOrBlockTag(tags []string) bool {
+	for _, t := range tags {
+		lower := strings.ToLower(strings.TrimSpace(t))
+		if lower == "block" || lower == "spam" ||
+			strings.Contains(lower, "spam") || strings.Contains(lower, "block") || strings.Contains(lower, "chặn") {
+			return true
+		}
+	}
+	return false
+}
+
 // ComputeJourneyStage trả về stage Lớp 1 theo logic ưu tiên (design 4.1.2).
-// visitor | engaged | first | repeat | vip | inactive
-// Đọc metrics từ currentMetrics hoặc top-level (backward compat).
+// visitor | engaged | blocked_spam | first | repeat | promoter
+// blocked_spam: khách có conv tag Block/Spam/Chặn, chưa mua — nhóm riêng để quản lý.
+// inactive: bỏ khỏi journey — dùng lifecycleStage (Lớp 2). Khách đã mua, >90 ngày → first/repeat theo orderCount.
+// promoter: placeholder — TODO khi có referralCount/isPromoter trong customer.
 func ComputeJourneyStage(c *crmmodels.CrmCustomer) string {
 	orderCount := getOrderCount(c)
 	if orderCount == 0 {
+		if HasSpamOrBlockTag(c.ConversationTags) {
+			return "blocked_spam"
+		}
 		if getHasConversation(c) {
 			return "engaged"
 		}
 		return "visitor"
 	}
-	lastOrderAt := getLastOrderAt(c)
-	daysSince := daysSinceLastOrder(lastOrderAt)
-	if daysSince > lifecycleCooling {
-		return "inactive"
+	// TODO: khi có referralCount/isPromoter trong customer → return "promoter" (ưu tiên trước first/repeat)
+	if getReferralCount(c) > 0 {
+		return "promoter"
 	}
-	if getTotalSpent(c) >= valueVip {
-		return "vip"
-	}
+	// inactive bỏ khỏi journey — khách >90 ngày vẫn là first/repeat theo độ sâu mua (lifecycleStage Lớp 2)
 	if orderCount >= 2 {
 		return "repeat"
 	}
 	return "first"
+}
+
+// getReferralCount trả về số referral — placeholder, chờ dữ liệu. Hiện luôn 0.
+func getReferralCount(c *crmmodels.CrmCustomer) int {
+	if c == nil {
+		return 0
+	}
+	// TODO: khi có field referralCount trong CurrentMetrics hoặc crm_customers → đọc và trả về
+	return 0
 }
 
 func getOrderCount(c *crmmodels.CrmCustomer) int {
@@ -264,8 +289,8 @@ func getFloatFromCustomer(c *crmmodels.CrmCustomer, key string) float64 {
 
 // ComputeClassificationFromMetrics trả về map các field phân loại để $set vào crm_customers.
 // Dùng khi đã có metrics từ aggregate (RefreshMetrics, Merge) — lưu classification hiện tại.
-// metricsSnapshot trong activity history giữ lịch sử theo từng sự kiện.
-func ComputeClassificationFromMetrics(totalSpent float64, orderCount int, lastOrderAt int64, revenueLast30d, revenueLast90d float64, orderCountOnline, orderCountOffline int, hasConversation bool) map[string]interface{} {
+// conversationTags: union từ panCakeData.tags — dùng để phát hiện blocked_spam.
+func ComputeClassificationFromMetrics(totalSpent float64, orderCount int, lastOrderAt int64, revenueLast30d, revenueLast90d float64, orderCountOnline, orderCountOffline int, hasConversation bool, conversationTags []string) map[string]interface{} {
 	c := &crmmodels.CrmCustomer{
 		TotalSpent:        totalSpent,
 		OrderCount:        orderCount,
@@ -275,6 +300,7 @@ func ComputeClassificationFromMetrics(totalSpent float64, orderCount int, lastOr
 		OrderCountOnline:  orderCountOnline,
 		OrderCountOffline: orderCountOffline,
 		HasConversation:   hasConversation,
+		ConversationTags:  conversationTags,
 	}
 	return map[string]interface{}{
 		"valueTier":      ComputeValueTier(totalSpent),

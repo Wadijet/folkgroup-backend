@@ -10,9 +10,10 @@ type CrmBulkJobCreateInput struct {
 	Params  bson.M `json:"params,omitempty"`
 }
 
-// CrmBulkJobUpdateInput dùng cho cập nhật CrmBulkJob (vd: set processedAt, result).
-// Lưu ý: API ReadOnlyConfig không expose Update; struct cần cho BaseHandler.
+// CrmBulkJobUpdateInput dùng cho cập nhật CrmBulkJob qua PUT update-by-id.
+// Dùng cho: retry (processedAt=null, processError=""), đặt isPriority.
 type CrmBulkJobUpdateInput struct {
 	ProcessedAt  *int64 `json:"processedAt,omitempty"`
 	ProcessError string `json:"processError,omitempty"`
+	IsPriority   *bool  `json:"isPriority,omitempty"`
 }

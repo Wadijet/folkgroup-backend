@@ -52,10 +52,15 @@ func (w *CrmIngestWorker) Start(ctx context.Context) {
 			log.Info("📋 [CRM_INGEST] CRM Ingest Worker stopped")
 			return
 		case <-ticker.C:
-			if ShouldThrottle(PriorityCritical) {
+			if !IsWorkerActive(WorkerCrmIngest) {
+				time.Sleep(1 * time.Minute)
 				continue
 			}
-			if effInterval := GetEffectiveInterval(w.interval, PriorityCritical); effInterval > w.interval {
+			p := GetPriority(WorkerCrmIngest, PriorityHigh)
+			if ShouldThrottle(p) {
+				continue
+			}
+			if effInterval := GetEffectiveInterval(w.interval, p); effInterval > w.interval {
 				time.Sleep(effInterval - w.interval)
 			}
 			func() {
@@ -66,7 +71,7 @@ func (w *CrmIngestWorker) Start(ctx context.Context) {
 				}()
 
 				totalProcessed := 0
-				baseBatchSize := GetEffectiveBatchSize(w.batchSize, PriorityCritical)
+				baseBatchSize := GetEffectiveBatchSize(w.batchSize, p)
 				// Adaptive batch: khi backlog lớn thì tăng batch size để xử lý nhanh hơn (giảm DB round-trips).
 				batchSize := baseBatchSize
 				if count, err := crmvc.CountUnprocessedCrmIngest(ctx); err == nil && count > int64(baseBatchSize*3) {
@@ -84,7 +89,7 @@ func (w *CrmIngestWorker) Start(ctx context.Context) {
 				}
 				for {
 					// Kiểm tra throttle giữa mỗi batch — tránh xử lý hết hàng đợi khi CPU/RAM đã tăng trong lúc chạy.
-					if ShouldThrottle(PriorityCritical) {
+					if ShouldThrottle(p) {
 						break
 					}
 					list, err := crmvc.GetUnprocessedCrmIngest(ctx, batchSize)

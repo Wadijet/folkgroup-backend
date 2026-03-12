@@ -103,7 +103,7 @@ func DeriveFromMap(m map[string]interface{}, endMs int64) *Layer3Aggregate {
 	if journeyStage == "repeat" && orderCount >= 2 {
 		out.Repeat = deriveRepeat(m, daysSinceLast)
 	}
-	if (journeyStage == "vip" || valueTier == "vip") && orderCount >= 8 {
+	if valueTier == "top" && orderCount >= 8 {
 		out.Vip = deriveVip(m, daysSinceLast)
 	}
 	if (lifecycleStage == "cooling" || lifecycleStage == "inactive" || lifecycleStage == "dead") && orderCount >= 1 {
@@ -563,7 +563,7 @@ func inactiveEngagementDrop(lastConv, lastMs int64) string {
 func inactiveReactivationPotential(valueTier, lifecycle string, oc int, engagement string) string {
 	score := 0
 	switch valueTier {
-	case "vip":
+	case "top":
 		score += 3
 	case "high":
 		score += 2

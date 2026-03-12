@@ -638,7 +638,7 @@ func buildInboxConversationItem(c inboxConvData, pageName string, respMin float6
 	engagementDepth := computeEngagementDepth(c.PanCakeData)
 	sourceType := computeSourceType(c.PanCakeData)
 	carePriority := computeCarePriority(isBacklog, isUnassigned, waitingMins, temperature)
-	isEngaged := c.CustomerId != "" && !customersWithOrders[c.CustomerId]
+	isEngaged := c.CustomerId != "" && !customersWithOrders[c.CustomerId] && !hasSpamOrBlockTagInConv(c.PanCakeData)
 
 	return reportdto.InboxConversationItem{
 		ConversationID:     c.ConversationId,
@@ -742,13 +742,29 @@ func computeCarePriority(isBacklog, isUnassigned bool, waitingMins int64, temper
 	return "P4"
 }
 
+// hasSpamOrBlockTagInConv kiểm tra conv có tag Block/Spam/Chặn — loại trừ khỏi Engaged count.
+func hasSpamOrBlockTagInConv(pc map[string]interface{}) bool {
+	tags := extractTags(pc)
+	for _, t := range tags {
+		lower := strings.ToLower(strings.TrimSpace(t))
+		if lower == "block" || lower == "spam" ||
+			strings.Contains(lower, "spam") || strings.Contains(lower, "block") || strings.Contains(lower, "chặn") {
+			return true
+		}
+	}
+	return false
+}
+
 // computeEngagedStats tính Engaged Volume và Aging buckets.
-// Engaged = khách có conversation nhưng chưa có đơn.
+// Engaged = khách có conversation (không block/spam) nhưng chưa có đơn. Blocked_spam có nhóm riêng.
 func computeEngagedStats(convs []inboxConvData, customersWithOrders map[string]bool, nowSec int64) (engagedCount, aging1d, aging3d, aging7d int64) {
 	seen := make(map[string]bool)
 	for _, c := range convs {
 		if c.CustomerId == "" || customersWithOrders[c.CustomerId] {
 			continue
+		}
+		if hasSpamOrBlockTagInConv(c.PanCakeData) {
+			continue // Blocked_spam không tính vào Engaged
 		}
 		if seen[c.CustomerId] {
 			continue

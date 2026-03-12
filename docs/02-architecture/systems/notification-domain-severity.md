@@ -1,4 +1,4 @@
-﻿# Notification Domain và Severity System
+# Notification Domain và Severity System
 
 ## 📋 Tổng Quan
 
@@ -24,8 +24,25 @@ const (
     DomainSecurity    = "security"    // Security alerts, login failed
     DomainPayment     = "payment"     // Payment processing
     DomainAnalytics   = "analytics"   // Analytics, reports
+    DomainAds         = "ads"        // Ads Intelligence — đề xuất, duyệt, thực thi
 )
 ```
+
+### Định tuyến Domain → Team (Routing theo domain)
+Hệ thống tự động định tuyến thông báo đến các team theo domain:
+
+| Domain | Team | Mô tả |
+|--------|------|-------|
+| `ads` | Marketing Team | Quảng cáo, đề xuất Ads |
+| `analytics` | Marketing Team | Báo cáo, phân tích |
+| `conversation` | Sales Team | Chat, tin nhắn khách hàng |
+| `order` | Vận hành (Operations) | Đơn hàng |
+| `payment` | Vận hành (Operations) | Thanh toán |
+| `system` | Tech Team | Hệ thống, lỗi API |
+| `security` | Tech Team | Bảo mật, đăng nhập |
+| `user` | Tech Team | Quản lý người dùng |
+
+Các team mặc định: Tech Team, Marketing Team, Sales Team, Vận hành (Operations). Mỗi team có channel riêng; admin cấu hình recipients/chatIDs để nhận thông báo.
 
 ### Severity (Mức Độ Nghiêm Trọng)
 ```go

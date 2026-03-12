@@ -41,8 +41,8 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 	// CRUD crm-pending-ingest (chỉ đọc) — queue Merge/Ingest, xem trạng thái job.
 	r.RegisterCRUDRoutes(v1, "/crm-pending-ingest", pendingIngestHandler, apirouter.ReadOnlyConfig, "Report")
 
-	// CRUD crm-bulk-jobs (chỉ đọc) — queue sync/backfill/recalculate, xem trạng thái job.
-	r.RegisterCRUDRoutes(v1, "/crm-bulk-jobs", bulkJobHandler, apirouter.ReadOnlyConfig, "Report")
+	// CRUD crm-bulk-jobs — đọc + update-by-id (retry, isPriority). Queue sync/backfill/recalculate.
+	r.RegisterCRUDRoutes(v1, "/crm-bulk-jobs", bulkJobHandler, apirouter.CrmBulkJobConfig, "Report")
 
 	// POST /customers/rebuild — API hợp nhất sync + backfill. Query/Body: sources=pos,fb,order,conversation,note (rỗng=tất cả)
 	apirouter.RegisterRouteWithMiddleware(v1, "/customers", "POST", "/rebuild", middlewares, customerHandler.HandleRebuildCrm)

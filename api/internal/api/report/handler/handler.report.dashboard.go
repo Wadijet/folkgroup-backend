@@ -7,9 +7,9 @@ import (
 
 	basehdl "meta_commerce/internal/api/base/handler"
 	crmvc "meta_commerce/internal/api/crm/service"
-	"meta_commerce/internal/common"
 	reportdto "meta_commerce/internal/api/report/dto"
 	"meta_commerce/internal/api/report/layer3"
+	"meta_commerce/internal/common"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -298,11 +298,11 @@ func buildCustomersDashboardDataFromCrm(items []crmvc.CrmDashboardCustomerItem, 
 		if it.OrderCount >= 2 {
 			customersRepeat++
 		}
-		if it.ValueTier == "vip" && (it.LifecycleStage == "inactive" || it.LifecycleStage == "dead") {
+		if it.ValueTier == "top" && (it.LifecycleStage == "inactive" || it.LifecycleStage == "dead") {
 			reactivationValue += it.TotalSpend
 		}
 		totalLTV += it.TotalSpend
-		if it.ValueTier == "vip" {
+		if it.ValueTier == "top" {
 			vipLTV += it.TotalSpend
 		}
 		incValueDistribution(&valueDist, it.ValueTier)
@@ -425,7 +425,7 @@ func crmItemToLayer3Map(it crmvc.CrmDashboardCustomerItem) map[string]interface{
 
 func incValueLTV(d *reportdto.ValueLTV, v string, spend float64) {
 	switch v {
-	case "vip": d.Vip += spend
+	case "top": d.Top += spend
 	case "high": d.High += spend
 	case "medium": d.Medium += spend
 	case "low": d.Low += spend
@@ -438,10 +438,11 @@ func incJourneyLTV(d *reportdto.JourneyLTV, v string, spend float64) {
 	switch v {
 	case "visitor": d.Visitor += spend
 	case "engaged": d.Engaged += spend
+	case "blocked_spam": d.BlockedSpam += spend
 	case "first": d.First += spend
 	case "repeat": d.Repeat += spend
-	case "vip": d.Vip += spend
-	case "inactive": d.Inactive += spend
+	case "promoter": d.Promoter += spend
+	case "inactive": d.Unspecified += spend // Backward compat: inactive bỏ khỏi journey
 	case "", "_unspecified": d.Unspecified += spend
 	default: d.Unspecified += spend
 	}
@@ -452,7 +453,7 @@ func incLifecycleLTV(d *reportdto.LifecycleLTV, lifecycle, valueTier string, spe
 	case "cooling": d.Cooling += spend
 	case "inactive": d.Inactive += spend
 	case "dead": d.Dead += spend
-	case "never_purchased": d.NeverPurchased += spend
+	case "never_purchased": d.Unspecified += spend // Backward compat: bỏ never_purchased
 	case "", "_unspecified": d.Unspecified += spend
 	default: d.Unspecified += spend
 	}
@@ -498,10 +499,10 @@ func incCeoGroupLTV(d *reportdto.CeoGroupLTV, valueTier, lifecycleStage, journey
 	}
 }
 func buildCeoGroupForLTV(valueTier, lifecycleStage, journeyStage, loyaltyStage, momentumStage string) string {
-	if valueTier == "vip" && lifecycleStage == "active" {
+	if valueTier == "top" && lifecycleStage == "active" {
 		return "vip_active"
 	}
-	if valueTier == "vip" && (lifecycleStage == "inactive" || lifecycleStage == "dead") {
+	if valueTier == "top" && (lifecycleStage == "inactive" || lifecycleStage == "dead") {
 		return "vip_inactive"
 	}
 	if momentumStage == "rising" {
@@ -521,7 +522,7 @@ func buildCeoGroupForLTV(valueTier, lifecycleStage, journeyStage, loyaltyStage, 
 
 func incValueDistribution(d *reportdto.ValueDistribution, v string) {
 	switch v {
-	case "vip": d.Vip++
+	case "top": d.Top++
 	case "high": d.High++
 	case "medium": d.Medium++
 	case "low": d.Low++
@@ -534,10 +535,11 @@ func incJourneyDistribution(d *reportdto.JourneyDistribution, v string) {
 	switch v {
 	case "visitor": d.Visitor++
 	case "engaged": d.Engaged++
+	case "blocked_spam": d.BlockedSpam++
 	case "first": d.First++
 	case "repeat": d.Repeat++
-	case "vip": d.Vip++
-	case "inactive": d.Inactive++
+	case "promoter": d.Promoter++
+	case "inactive": d.Unspecified++ // Backward compat: inactive bỏ khỏi journey
 	case "", "_unspecified": d.Unspecified++
 	default: d.Unspecified++
 	}
@@ -548,7 +550,7 @@ func incLifecycleDistribution(d *reportdto.LifecycleDistribution, v, valueTier s
 	case "cooling": d.Cooling++
 	case "inactive": d.Inactive++
 	case "dead": d.Dead++
-	case "never_purchased": d.NeverPurchased++
+	case "never_purchased": d.Unspecified++ // Backward compat: bỏ never_purchased
 	case "", "_unspecified": d.Unspecified++
 	default: d.Unspecified++
 	}
@@ -579,10 +581,10 @@ func incMomentumDistribution(d *reportdto.MomentumDistribution, v string) {
 	}
 }
 func incCeoDistribution(d *reportdto.CeoGroupDistribution, valueTier, lifecycleStage, journeyStage, loyaltyStage, momentumStage string) {
-	if valueTier == "vip" && lifecycleStage == "active" {
+	if valueTier == "top" && lifecycleStage == "active" {
 		d.VipActive++
 	}
-	if valueTier == "vip" && (lifecycleStage == "inactive" || lifecycleStage == "dead") {
+	if valueTier == "top" && (lifecycleStage == "inactive" || lifecycleStage == "dead") {
 		d.VipInactive++
 	}
 	if momentumStage == "rising" {
@@ -689,7 +691,7 @@ func buildVipInactiveFromCrm(items []crmvc.CrmDashboardCustomerItem, limit int) 
 	}
 	var vipInactive []crmvc.CrmDashboardCustomerItem
 	for _, it := range items {
-		if it.ValueTier == "vip" && (it.LifecycleStage == "inactive" || it.LifecycleStage == "dead") {
+		if it.ValueTier == "top" && (it.LifecycleStage == "inactive" || it.LifecycleStage == "dead") {
 			vipInactive = append(vipInactive, it)
 		}
 	}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	crmmodels "meta_commerce/internal/api/crm/models"
+	reportconstants "meta_commerce/internal/api/report/constants"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -20,7 +21,7 @@ type CrmDashboardCustomerItem struct {
 	CustomerID          string   `json:"customerId"`
 	Name                string   `json:"name"`
 	Phone               string   `json:"phone"`
-	JourneyStage        string   `json:"journeyStage"`   // visitor|engaged|first|repeat|vip|inactive
+	JourneyStage        string   `json:"journeyStage"`   // visitor|engaged|blocked_spam|first|repeat|promoter (VIP dùng valueTier; inactive dùng lifecycleStage)
 	Channel             string   `json:"channel"`       // online|offline|omnichannel (rỗng nếu chưa mua)
 	ValueTier           string   `json:"valueTier"`
 	LifecycleStage      string   `json:"lifecycleStage"`
@@ -45,12 +46,12 @@ type CrmDashboardCustomerItem struct {
 }
 
 // CrmDashboardFilters filter cho ListCustomersForDashboard.
-// Mỗi tiêu chí có thể nhận nhiều giá trị (comma-separated), ví dụ: journey=vip,engaged,first.
+// Mỗi tiêu chí có thể nhận nhiều giá trị (comma-separated), ví dụ: journey=engaged,first.
 type CrmDashboardFilters struct {
-	Journey   []string // visitor|engaged|first|repeat|vip|inactive
+	Journey   []string // visitor|engaged|blocked_spam|first|repeat|promoter
 	Channel   []string // online|offline|omnichannel
-	ValueTier []string // vip|high|medium|low|new
-	Lifecycle []string // active|cooling|inactive|dead|never_purchased
+	ValueTier []string // top|high|medium|low|new
+	Lifecycle []string // active|cooling|inactive|dead
 	Loyalty   []string // core|repeat|one_time
 	Momentum  []string // rising|stable|declining|lost
 	CeoGroup  []string // vip_active|vip_inactive|rising|new|one_time|dead
@@ -147,14 +148,14 @@ func buildDashboardMongoFilter(ownerOrgID primitive.ObjectID, f *CrmDashboardFil
 	filter := bson.M{"ownerOrganizationId": ownerOrgID}
 
 	if len(f.Journey) > 0 {
-		vals := make([]string, 0, len(f.Journey))
+		journeyVals := make([]string, 0, len(f.Journey))
 		for _, v := range f.Journey {
 			if n := normalizeJourneyFilter(v); n != "" {
-				vals = append(vals, n)
+				journeyVals = append(journeyVals, n)
 			}
 		}
-		if len(vals) > 0 {
-			filter["journeyStage"] = bson.M{"$in": vals}
+		if len(journeyVals) > 0 {
+			filter["journeyStage"] = bson.M{"$in": journeyVals}
 		}
 	}
 	if len(f.Channel) > 0 {
@@ -188,9 +189,9 @@ func buildCeoGroupOrConditions(ceoGroups []string) []bson.M {
 		var cond bson.M
 		switch g {
 		case "vip_active":
-			cond = bson.M{"valueTier": "vip", "lifecycleStage": "active"}
+			cond = bson.M{"valueTier": "top", "lifecycleStage": "active"}
 		case "vip_inactive":
-			cond = bson.M{"valueTier": "vip", "lifecycleStage": bson.M{"$in": []string{"inactive", "dead"}}}
+			cond = bson.M{"valueTier": "top", "lifecycleStage": bson.M{"$in": []string{"inactive", "dead"}}}
 		case "rising":
 			cond = bson.M{"momentumStage": "rising"}
 		case "new":
@@ -356,9 +357,9 @@ func contains(slice []string, s string) bool {
 func matchCeoGroup(item CrmDashboardCustomerItem, ceoGroup string) bool {
 	switch ceoGroup {
 	case "vip_active":
-		return item.ValueTier == "vip" && item.LifecycleStage == "active"
+		return item.ValueTier == "top" && item.LifecycleStage == "active"
 	case "vip_inactive":
-		return item.ValueTier == "vip" && (item.LifecycleStage == "inactive" || item.LifecycleStage == "dead")
+		return item.ValueTier == "top" && (item.LifecycleStage == "inactive" || item.LifecycleStage == "dead")
 	case "rising":
 		return item.MomentumStage == "rising"
 	case "new":
@@ -381,8 +382,12 @@ func normalizeJourneyFilter(s string) string {
 		return "engaged"
 	case "first_online", "first_offline", "first":
 		return "first"
-	case "visitor", "repeat", "vip", "inactive":
+	case "visitor", "blocked_spam", "repeat", "promoter":
 		return s
+	case "inactive":
+		return "" // Bỏ khỏi journey — dùng lifecycle filter
+	case "top":
+		return "" // Bỏ qua — top dùng valueTier, không có trong journey
 	case "omni", "reactivated":
 		return "" // Stage cũ, filter journey bỏ qua
 	default:
@@ -458,7 +463,7 @@ func (s *CrmCustomerService) GetJourneyFunnel(ctx context.Context, ownerOrgID pr
 		return nil, err
 	}
 
-	stageOrder := []string{"visitor", "engaged", "first", "repeat", "vip", "inactive"}
+	stageOrder := reportconstants.JourneyOrderForMatrix
 
 	// Gom khách theo stage
 	byStage := make(map[string][]CrmDashboardCustomerItem)
@@ -466,7 +471,11 @@ func (s *CrmCustomerService) GetJourneyFunnel(ctx context.Context, ownerOrgID pr
 		byStage[stage] = nil
 	}
 	for _, it := range items {
-		byStage[it.JourneyStage] = append(byStage[it.JourneyStage], it)
+		stage := it.JourneyStage
+		if stage == "inactive" {
+			stage = "repeat" // Backward compat: inactive bỏ khỏi journey
+		}
+		byStage[stage] = append(byStage[stage], it)
 	}
 
 	funnel := make([]JourneyFunnelItem, 0, len(stageOrder))
@@ -483,11 +492,11 @@ func (s *CrmCustomerService) GetJourneyFunnel(ctx context.Context, ownerOrgID pr
 
 // buildJourneyStageBreakdowns tạo breakdown channel/value/lifecycle/loyalty/momentum cho 1 stage.
 func buildJourneyStageBreakdowns(items []CrmDashboardCustomerItem) map[string]map[string]int {
-	channelOrder := []string{"online", "offline", "omnichannel"}
-	valueOrder := []string{"vip", "high", "medium", "low", "new"}
-	lifecycleOrder := []string{"active", "cooling", "inactive", "dead", "never_purchased"}
-	loyaltyOrder := []string{"core", "repeat", "one_time"}
-	momentumOrder := []string{"rising", "stable", "declining", "lost"}
+	channelOrder := reportconstants.ChannelOrder
+	valueOrder := reportconstants.ValueOrder
+	lifecycleOrder := reportconstants.LifecycleOrder
+	loyaltyOrder := reportconstants.LoyaltyOrder
+	momentumOrder := reportconstants.MomentumOrder
 
 	channel := make(map[string]int)
 	value := make(map[string]int)
@@ -497,7 +506,6 @@ func buildJourneyStageBreakdowns(items []CrmDashboardCustomerItem) map[string]ma
 	for _, v := range channelOrder {
 		channel[v] = 0
 	}
-	channel[""] = 0 // chưa mua
 	for _, v := range valueOrder {
 		value[v] = 0
 	}
@@ -557,8 +565,8 @@ func (s *CrmCustomerService) GetAssetMatrix(ctx context.Context, ownerOrgID prim
 		return nil, err
 	}
 
-	rows := []string{"vip", "high", "medium", "low", "new"}
-	cols := []string{"active", "cooling", "inactive", "dead", "never_purchased"}
+	rows := reportconstants.ValueOrderForMatrix
+	cols := reportconstants.LifecycleOrderForMatrix
 
 	matrix := make(map[string]map[string]int)
 	for _, r := range rows {
@@ -585,30 +593,21 @@ func (s *CrmCustomerService) GetAssetMatrix(ctx context.Context, ownerOrgID prim
 	}, nil
 }
 
-// L2 axis orders cho ma trận (channel, value, lifecycle, loyalty, momentum).
-var (
-	l2ChannelOrder   = []string{"online", "offline", "omnichannel", ""}
-	l2ValueOrder     = []string{"vip", "high", "medium", "low", "new"}
-	l2LifecycleOrder = []string{"active", "cooling", "inactive", "dead", "never_purchased"}
-	l2LoyaltyOrder   = []string{"core", "repeat", "one_time", ""}
-	l2MomentumOrder  = []string{"rising", "stable", "declining", "lost", ""}
-)
-
-// getL2Cols trả về thứ tự cột cho trục L2.
+// getL2Cols trả về thứ tự cột cho trục L2 (ma trận) — dùng constants tập trung.
 func getL2Cols(axis string) []string {
 	switch axis {
 	case "channel":
-		return l2ChannelOrder
+		return reportconstants.L2ChannelOrderForMatrix
 	case "value":
-		return l2ValueOrder
+		return reportconstants.ValueOrderForMatrix
 	case "lifecycle":
-		return l2LifecycleOrder
+		return reportconstants.LifecycleOrderForMatrix
 	case "loyalty":
-		return l2LoyaltyOrder
+		return reportconstants.L2LoyaltyOrderForMatrix
 	case "momentum":
-		return l2MomentumOrder
+		return reportconstants.L2MomentumOrderForMatrix
 	default:
-		return l2ValueOrder
+		return reportconstants.ValueOrderForMatrix
 	}
 }
 
@@ -637,7 +636,7 @@ func (s *CrmCustomerService) GetMatrixJourneyValue(ctx context.Context, ownerOrg
 	if err != nil {
 		return nil, err
 	}
-	rows := []string{"visitor", "engaged", "first", "repeat", "vip", "inactive"}
+	rows := reportconstants.JourneyOrderForMatrix
 	if colsAxis == "" {
 		colsAxis = "value"
 	}
@@ -652,6 +651,9 @@ func (s *CrmCustomerService) GetMatrixJourneyValue(ctx context.Context, ownerOrg
 	}
 	for _, it := range items {
 		row := it.JourneyStage
+		if row == "inactive" {
+			row = "repeat" // Backward compat: inactive bỏ khỏi journey
+		}
 		col := getL2Value(it, colsAxis)
 		if matrix[row] == nil {
 			matrix[row] = make(map[string]int)
@@ -671,10 +673,10 @@ func (s *CrmCustomerService) GetMatrixValueLoyalty(ctx context.Context, ownerOrg
 	rows := getL2Cols(rowAxis)
 	cols := getL2Cols(colAxis)
 	if rowAxis == "" {
-		rows = l2ValueOrder
+		rows = reportconstants.ValueOrderForMatrix
 	}
 	if colAxis == "" {
-		cols = l2LoyaltyOrder
+		cols = reportconstants.L2LoyaltyOrderForMatrix
 	}
 
 	matrix := make(map[string]map[string]int)

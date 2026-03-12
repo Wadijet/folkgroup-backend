@@ -46,7 +46,9 @@ func GetSeverityFromEventType(eventType string) string {
 		strings.Contains(eventType, "_alert") ||
 		strings.Contains(eventType, "_timeout") ||
 		strings.Contains(eventType, "_overload") ||
-		strings.Contains(eventType, "ads_action_pending_approval") {
+		strings.Contains(eventType, "ads_action_pending_approval") ||
+		strings.Contains(eventType, "ads_action_executed_failed") ||
+		strings.Contains(eventType, "ads_chs_kill") {
 		return SeverityHigh
 	}
 	if strings.Contains(eventType, "_warning") ||
@@ -57,7 +59,8 @@ func GetSeverityFromEventType(eventType string) string {
 		strings.Contains(eventType, "_created") ||
 		strings.Contains(eventType, "_updated") ||
 		strings.Contains(eventType, "ads_action_executed") ||
-		strings.Contains(eventType, "ads_action_rejected") {
+		strings.Contains(eventType, "ads_action_rejected") ||
+		strings.Contains(eventType, "ads_action_cancelled") {
 		return SeverityInfo
 	}
 	return SeverityMedium // Default

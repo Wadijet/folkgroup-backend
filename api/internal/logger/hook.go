@@ -123,13 +123,16 @@ func (h *AsyncHook) processEntries() {
 				return
 			}
 
-			// Loại bỏ field "_filtered" khỏi entry trước khi format
-			// (field này chỉ dùng để đánh dấu, không cần ghi vào log)
-			filteredEntry := entry
+			// Luôn dùng Dup() để tạo bản sao trước khi format — tránh race với luồng sync.
+			// Entry gốc được format bởi entry.write(); nếu dùng chung entry sẽ gây panic
+			// (slice bounds out of range, nil pointer) do dùng chung Buffer.
+			// Dup() tạo entry mới với Buffer=nil, formatter sẽ tạo buffer riêng.
+			formatEntry := entry.Dup()
+			formatEntry.Level = entry.Level
+			formatEntry.Message = entry.Message
+			formatEntry.Caller = entry.Caller
 			if _, ok := entry.Data["_filtered"]; ok {
-				// Tạo entry mới không có field "_filtered"
-				filteredEntry = entry.Dup()
-				delete(filteredEntry.Data, "_filtered")
+				delete(formatEntry.Data, "_filtered")
 			}
 
 			// Format entry thành bytes sử dụng formatter của logger
@@ -137,12 +140,12 @@ func (h *AsyncHook) processEntries() {
 			var data []byte
 			var err error
 
-			if filteredEntry.Logger.Formatter != nil {
+			if formatEntry.Logger.Formatter != nil {
 				// Dùng formatter của logger để format entry
-				data, err = filteredEntry.Logger.Formatter.Format(filteredEntry)
+				data, err = formatEntry.Logger.Formatter.Format(formatEntry)
 			} else {
 				// Fallback: dùng String() nếu không có formatter
-				line, strErr := filteredEntry.String()
+				line, strErr := formatEntry.String()
 				if strErr != nil {
 					return // Bỏ qua entry này nếu không format được
 				}

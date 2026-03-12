@@ -10,9 +10,11 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/sirupsen/logrus"
 
-	approval "meta_commerce/internal/approval"
+	adsworker "meta_commerce/internal/api/ads/worker"
 	crmvc "meta_commerce/internal/api/crm/service"
+	approval "meta_commerce/internal/approval"
 	"meta_commerce/internal/delivery"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/logger"
@@ -62,6 +64,52 @@ func runBackfillConvAndExit(argIdx int) {
 	fmt.Printf("✓ Xong. Conversations processed: %d, logged: %d, skipped: %d\n",
 		result.ConversationsProcessed, result.ConversationsLogged, result.ConversationsSkippedNoResolve)
 	os.Exit(0)
+}
+
+// runRecalcMismatchOnStart chạy RecalculateMismatchCustomers và RecalculateOrderCountMismatchCustomers trong goroutine khi khởi động.
+// 1. Engaged crm nhưng visitor trong activity snapshot
+// 2. First/repeat/vip/inactive — recalc để đảm bảo metrics khớp DB
+func runRecalcMismatchOnStart(ctx context.Context, orgID primitive.ObjectID, limit int, log *logrus.Logger) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "[CRM] RecalcMismatch: Panic recovered, tiến trình không bị dừng: %v\n", r)
+		}
+	}()
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Minute)
+	defer cancel()
+	svc, err := crmvc.NewCrmCustomerService()
+	if err != nil {
+		log.WithError(err).Error("[CRM] RecalcMismatch: NewCrmCustomerService thất bại")
+		return
+	}
+	// 1. Engaged vs visitor mismatch
+	log.WithFields(map[string]interface{}{"orgId": orgID.Hex(), "limit": limit}).
+		Info("[CRM] RecalcMismatch: Bắt đầu recalc engaged/visitor mismatch")
+	poolSize1 := worker.GetEffectivePoolSize(10, worker.PriorityLow)
+	result1, err := svc.RecalculateMismatchCustomers(ctx, orgID, limit, poolSize1)
+	if err != nil {
+		log.WithError(err).Error("[CRM] RecalcMismatch: Engaged/visitor thất bại")
+		return
+	}
+	log.WithFields(map[string]interface{}{
+		"processed": result1.TotalProcessed,
+		"failed":    result1.TotalFailed,
+		"failedIds": result1.FailedIds,
+	}).Info("[CRM] RecalcMismatch: Engaged/visitor hoàn thành")
+
+	// 2. Order count mismatch (first/repeat/vip/inactive)
+	log.Info("[CRM] RecalcMismatch: Bắt đầu recalc order count mismatch (first/repeat/vip/inactive)")
+	poolSize2 := worker.GetEffectivePoolSize(12, worker.PriorityLow)
+	result2, err := svc.RecalculateOrderCountMismatchCustomers(ctx, orgID, limit, poolSize2)
+	if err != nil {
+		log.WithError(err).Error("[CRM] RecalcMismatch: Order count thất bại")
+		return
+	}
+	log.WithFields(map[string]interface{}{
+		"processed": result2.TotalProcessed,
+		"failed":    result2.TotalFailed,
+		"failedIds": result2.FailedIds,
+	}).Info("[CRM] RecalcMismatch: Order count hoàn thành")
 }
 
 // main_thread khởi tạo và chạy Fiber server
@@ -221,11 +269,9 @@ func main() {
 	// Khởi tạo dữ liệu mặc định
 	InitDefaultData()
 
-	// Khởi tạo và chạy Delivery Processor (background worker - Hệ thống 1)
 	// Lấy base URL từ environment variable hoặc dùng default
 	baseURL := os.Getenv("BASE_URL")
 	if baseURL == "" {
-		// Default base URL nếu không có config
 		cfg := global.MongoDB_ServerConfig
 		protocol := "http"
 		if cfg.EnableTLS {
@@ -233,229 +279,120 @@ func main() {
 		}
 		baseURL = fmt.Sprintf("%s://localhost:%s", protocol, cfg.Address)
 	}
-	
+
 	log := logger.GetAppLogger()
-	processor, err := delivery.NewProcessor(baseURL)
-	if err != nil {
-		log.WithError(err).Error("Failed to create delivery processor, continuing without delivery worker")
-	} else {
-		// Tạo context với cancel để có thể dừng processor khi cần
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
 
-		// Chạy processor trong goroutine riêng với recover
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.WithFields(map[string]interface{}{
-						"panic": r,
-					}).Error("📦 [DELIVERY] Processor goroutine panic, processor sẽ tự khởi động lại")
-				}
-			}()
-			
-			log.Info("📦 [DELIVERY] Starting Delivery Processor...")
-			processor.Start(ctx)
-			log.Warn("📦 [DELIVERY] Processor đã dừng (có thể do context cancelled)")
-		}()
-
-		log.Info("📦 [DELIVERY] Delivery Processor started successfully")
-	}
-
-	// Worker Controller: lấy mẫu CPU định kỳ, throttle workers khi CPU quá tải
-	// Đăng ký callback gửi cảnh báo khi CPU/RAM/disk quá tải cho team system
+	// Đăng ký callback cảnh báo CPU/RAM/disk quá tải (phải gọi trước khi khởi động workers)
 	systemalert.Register()
-	ctxWorkerCtrl, cancelWorkerCtrl := context.WithCancel(context.Background())
-	defer cancelWorkerCtrl()
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.WithFields(map[string]interface{}{"panic": r}).Error("⚙️ [WORKER_CONTROLLER] Panic")
-			}
-		}()
-		worker.DefaultController().Start(ctxWorkerCtrl)
-	}()
 
-	// Khởi tạo và chạy Command Cleanup Worker (background worker - Module 2)
-	// Worker này tự động giải phóng các AI workflow commands bị stuck
-	commandCleanupWorker, err := worker.NewCommandCleanupWorker(1*time.Minute, 300) // Chạy mỗi 1 phút, timeout 5 phút
-	if err != nil {
-		log.WithError(err).Error("Failed to create command cleanup worker, continuing without cleanup worker")
+	// Đăng ký tất cả workers vào Registry thống nhất
+	reg := worker.DefaultRegistry()
+
+	// Worker Controller: lấy mẫu CPU định kỳ, throttle workers khi quá tải — đăng ký đầu tiên
+	reg.Register("system_worker_controller", worker.DefaultController())
+
+	// Delivery Processor (Hệ thống 1)
+	if processor, err := delivery.NewProcessor(baseURL); err != nil {
+		log.WithError(err).Error("Failed to create delivery processor, continuing without delivery worker")
+		reg.Register(worker.WorkerDelivery, nil)
 	} else {
-		// Tạo context với cancel để có thể dừng worker khi cần
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		// Chạy worker trong goroutine riêng với recover
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.WithFields(map[string]interface{}{
-						"panic": r,
-					}).Error("🔄 [COMMAND_CLEANUP] Worker goroutine panic, worker sẽ tự khởi động lại")
-				}
-			}()
-
-			log.Info("🔄 [COMMAND_CLEANUP] Starting Command Cleanup Worker...")
-			commandCleanupWorker.Start(ctx)
-			log.Warn("🔄 [COMMAND_CLEANUP] Worker đã dừng (có thể do context cancelled)")
-		}()
-
-		log.Info("🔄 [COMMAND_CLEANUP] Command Cleanup Worker started successfully")
+		reg.Register(worker.WorkerDelivery, processor)
 	}
 
-	// Khởi tạo và chạy Agent Command Cleanup Worker (background worker - Agent Management)
-	// Worker này tự động giải phóng các agent commands bị stuck
-	agentCommandCleanupWorker, err := worker.NewAgentCommandCleanupWorker(1*time.Minute, 300) // Chạy mỗi 1 phút, timeout 5 phút
-	if err != nil {
-		log.WithError(err).Error("Failed to create agent command cleanup worker, continuing without cleanup worker")
+	// Command Cleanup Worker (Module 2)
+	if w, err := worker.NewCommandCleanupWorker(1*time.Minute, 300); err != nil {
+		log.WithError(err).Error("Failed to create command cleanup worker")
+		reg.Register(worker.WorkerCommandCleanup, nil)
 	} else {
-		// Tạo context với cancel để có thể dừng worker khi cần
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		// Chạy worker trong goroutine riêng với recover
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.WithFields(map[string]interface{}{
-						"panic": r,
-					}).Error("🔄 [AGENT_COMMAND_CLEANUP] Worker goroutine panic, worker sẽ tự khởi động lại")
-				}
-			}()
-
-			log.Info("🔄 [AGENT_COMMAND_CLEANUP] Starting Agent Command Cleanup Worker...")
-			agentCommandCleanupWorker.Start(ctx)
-			log.Warn("🔄 [AGENT_COMMAND_CLEANUP] Worker đã dừng (có thể do context cancelled)")
-		}()
-
-		log.Info("🔄 [AGENT_COMMAND_CLEANUP] Agent Command Cleanup Worker started successfully")
+		reg.Register(worker.WorkerCommandCleanup, w)
 	}
 
-	// Khởi tạo và chạy Agent Activity Cleanup Worker (xóa activity logs cũ định kỳ)
-	agentActivityCleanupWorker, err := worker.NewAgentActivityCleanupWorker(1*time.Hour, 1) // Chạy mỗi 1 giờ, giữ 1 ngày
-	if err != nil {
-		log.WithError(err).Error("Failed to create agent activity cleanup worker, continuing without cleanup worker")
+	// Agent Command Cleanup Worker
+	if w, err := worker.NewAgentCommandCleanupWorker(1*time.Minute, 300); err != nil {
+		log.WithError(err).Error("Failed to create agent command cleanup worker")
+		reg.Register(worker.WorkerAgentCommandCleanup, nil)
 	} else {
-		ctxActCleanup, cancelActCleanup := context.WithCancel(context.Background())
-		defer cancelActCleanup()
-
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.WithFields(map[string]interface{}{
-						"panic": r,
-					}).Error("🗑️ [AGENT_ACTIVITY_CLEANUP] Worker goroutine panic, worker sẽ tự khởi động lại")
-				}
-			}()
-
-			log.Info("🗑️ [AGENT_ACTIVITY_CLEANUP] Starting Agent Activity Cleanup Worker...")
-			agentActivityCleanupWorker.Start(ctxActCleanup)
-			log.Warn("🗑️ [AGENT_ACTIVITY_CLEANUP] Worker đã dừng (có thể do context cancelled)")
-		}()
-
-		log.Info("🗑️ [AGENT_ACTIVITY_CLEANUP] Agent Activity Cleanup Worker started successfully")
+		reg.Register(worker.WorkerAgentCommandCleanup, w)
 	}
 
-	// Worker báo cáo theo chu kỳ: xử lý report_dirty_periods (Compute → set processedAt)
-	// Interval 2 phút, batch 30 — giảm tải mặc định để tránh CPU spike.
-	reportDirtyWorker, err := worker.NewReportDirtyWorker(2*time.Minute, 30)
-	if err != nil {
-		log.WithError(err).Warn("Failed to create report dirty worker, continuing without report worker")
+	// Agent Activity Cleanup Worker
+	if w, err := worker.NewAgentActivityCleanupWorker(1*time.Hour, 1); err != nil {
+		log.WithError(err).Error("Failed to create agent activity cleanup worker")
+		reg.Register(worker.WorkerAgentActivityCleanup, nil)
 	} else {
-		ctxReport, cancelReport := context.WithCancel(context.Background())
-		defer cancelReport()
-
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.WithFields(map[string]interface{}{
-						"panic": r,
-					}).Error("📊 [REPORT_DIRTY] Worker goroutine panic")
-				}
-			}()
-			log.Info("📊 [REPORT_DIRTY] Starting Report Dirty Worker...")
-			reportDirtyWorker.Start(ctxReport)
-			log.Warn("📊 [REPORT_DIRTY] Worker đã dừng")
-		}()
-
-		log.Info("📊 [REPORT_DIRTY] Report Dirty Worker started successfully")
+		reg.Register(worker.WorkerAgentActivityCleanup, w)
 	}
 
-	// Worker CRM Ingest: xử lý crm_pending_ingest (Merge/Ingest thay vì chạy trong hook)
-	// Interval 30s, batch 50 — tăng throughput để theo kịp agent sync; adaptive batch khi backlog cao.
-	crmIngestWorker := worker.NewCrmIngestWorker(30*time.Second, 50)
-	ctxCrmIngest, cancelCrmIngest := context.WithCancel(context.Background())
-	defer cancelCrmIngest()
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.WithFields(map[string]interface{}{"panic": r}).Error("📋 [CRM_INGEST] Worker goroutine panic")
-			}
-		}()
-		log.Info("📋 [CRM_INGEST] Starting CRM Ingest Worker...")
-		crmIngestWorker.Start(ctxCrmIngest)
-		log.Warn("📋 [CRM_INGEST] Worker đã dừng")
-	}()
-	log.Info("📋 [CRM_INGEST] CRM Ingest Worker started successfully")
+	// Report Dirty Worker
+	if w, err := worker.NewReportDirtyWorker(2*time.Minute, 30); err != nil {
+		log.WithError(err).Warn("Failed to create report dirty worker")
+		reg.Register(worker.WorkerReportDirty, nil)
+	} else {
+		reg.Register(worker.WorkerReportDirty, w)
+	}
 
-	// Worker CRM Bulk: xử lý crm_bulk_jobs (sync, backfill, rebuild, recalculate)
-	// Interval 2 phút, batch 2 — giảm tải mặc định để tránh CPU spike.
-	crmBulkWorker, err := worker.NewCrmBulkWorker(2*time.Minute, 2)
-	if err != nil {
+	// CRM Ingest Worker
+	reg.Register(worker.WorkerCrmIngest, worker.NewCrmIngestWorker(30*time.Second, 50))
+
+	// CRM Bulk Worker
+	if w, err := worker.NewCrmBulkWorker(2*time.Minute, 2); err != nil {
 		log.WithError(err).Warn("Failed to create CRM Bulk Worker")
+		reg.Register(worker.WorkerCrmBulk, nil)
 	} else {
-		ctxCrmBulk, cancelCrmBulk := context.WithCancel(context.Background())
-		defer cancelCrmBulk()
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.WithFields(map[string]interface{}{"panic": r}).Error("📋 [CRM_BULK] Worker goroutine panic")
-				}
-			}()
-			log.Info("📋 [CRM_BULK] Starting CRM Bulk Worker...")
-			crmBulkWorker.Start(ctxCrmBulk)
-			log.Warn("📋 [CRM_BULK] Worker đã dừng")
-		}()
-		log.Info("📋 [CRM_BULK] CRM Bulk Worker started successfully")
+		reg.Register(worker.WorkerCrmBulk, w)
 	}
 
-	// Worker tính lại phân loại khách hàng (full: hàng ngày; smart: mỗi 6h, chỉ khách gần ngưỡng)
-	classificationRefreshFullWorker, err := worker.NewClassificationRefreshWorker(24*time.Hour, 200, worker.ClassificationRefreshModeFull)
-	if err != nil {
+	// Ads Workers
+	reg.Register(worker.WorkerAdsExecution, adsworker.NewAdsExecutionWorker(30*time.Second, 10))
+	reg.Register(worker.WorkerAdsAutoPropose, adsworker.NewAdsAutoProposeWorker(30*time.Minute, baseURL))
+	reg.Register(worker.WorkerAdsCircuitBreaker, adsworker.NewAdsCircuitBreakerWorker(10*time.Minute))
+	reg.Register(worker.WorkerAdsDailyScheduler, adsworker.NewAdsDailySchedulerWorker(1*time.Minute, baseURL))
+	reg.Register(worker.WorkerAdsPancakeHeartbeat, adsworker.NewAdsPancakeHeartbeatWorker(15*time.Minute))
+	reg.Register(worker.WorkerAdsCounterfactual, adsworker.NewAdsCounterfactualWorker(30*time.Minute))
+
+	// Classification Refresh Workers
+	if w, err := worker.NewClassificationRefreshWorker(24*time.Hour, 200, worker.ClassificationRefreshModeFull); err != nil {
 		log.WithError(err).Warn("Failed to create classification refresh full worker")
+		reg.Register(worker.WorkerClassificationFull, nil)
 	} else {
-		ctxClassFull, cancelClassFull := context.WithCancel(context.Background())
-		defer cancelClassFull()
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.WithFields(map[string]interface{}{"panic": r}).Error("📊 [CLASSIFICATION_FULL] Worker panic")
-				}
-			}()
-			log.Info("📊 [CLASSIFICATION_FULL] Starting Classification Refresh Worker (full mode)...")
-			classificationRefreshFullWorker.Start(ctxClassFull)
-		}()
-		log.Info("📊 [CLASSIFICATION_FULL] Classification Refresh Full Worker started (chạy mỗi 24h)")
+		reg.Register(worker.WorkerClassificationFull, w)
 	}
-
-	classificationRefreshSmartWorker, err := worker.NewClassificationRefreshWorker(6*time.Hour, 200, worker.ClassificationRefreshModeSmart)
-	if err != nil {
+	if w, err := worker.NewClassificationRefreshWorker(6*time.Hour, 200, worker.ClassificationRefreshModeSmart); err != nil {
 		log.WithError(err).Warn("Failed to create classification refresh smart worker")
+		reg.Register(worker.WorkerClassificationSmart, nil)
 	} else {
-		ctxClassSmart, cancelClassSmart := context.WithCancel(context.Background())
-		defer cancelClassSmart()
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.WithFields(map[string]interface{}{"panic": r}).Error("📊 [CLASSIFICATION_SMART] Worker panic")
-				}
-			}()
-			log.Info("📊 [CLASSIFICATION_SMART] Starting Classification Refresh Worker (smart mode)...")
-			classificationRefreshSmartWorker.Start(ctxClassSmart)
-		}()
-		log.Info("📊 [CLASSIFICATION_SMART] Classification Refresh Smart Worker started (chạy mỗi 6h)")
+		reg.Register(worker.WorkerClassificationSmart, w)
 	}
 
-	// Chạy Fiber server trên main thread
+	// Context chung cho tất cả workers — cancel khi shutdown
+	ctxWorkers, cancelWorkers := context.WithCancel(context.Background())
+	defer cancelWorkers()
+
+	// Khởi động tất cả workers qua Registry (panic recovery tích hợp sẵn)
+	reg.StartAll(ctxWorkers)
+	log.WithFields(map[string]interface{}{"count": reg.Count()}).Info("Đã khởi động workers qua Registry")
+
+	// Recalc mismatch khi khởi động — dành cho đồng bộ thủ công. Mặc định tắt.
+	// Bật bằng CRM_RECALC_MISMATCH_ON_START=1, CRM_RECALC_MISMATCH_ORG, CRM_RECALC_MISMATCH_LIMIT.
+	// if os.Getenv("CRM_RECALC_MISMATCH_ON_START") == "1" {
+	// 	orgStr := os.Getenv("CRM_RECALC_MISMATCH_ORG")
+	// 	if orgStr == "" {
+	// 		orgStr = "69a655f0088600c32e62f955"
+	// 	}
+	// 	limit := 0
+	// 	if s := os.Getenv("CRM_RECALC_MISMATCH_LIMIT"); s != "" {
+	// 		if n, err := strconv.Atoi(s); err == nil && n >= 0 {
+	// 			limit = n
+	// 		}
+	// 	}
+	// 	orgID, errOrg := primitive.ObjectIDFromHex(orgStr)
+	// 	if errOrg == nil {
+	// 		go runRecalcMismatchOnStart(ctxWorkers, orgID, limit, log)
+	// 	} else {
+	// 		log.WithError(errOrg).Warn("CRM_RECALC_MISMATCH_ON_START: ownerOrganizationId không hợp lệ, bỏ qua")
+	// 	}
+	// }
+
+	// Chạy Fiber server trên main thread (blocking)
 	main_thread()
 }

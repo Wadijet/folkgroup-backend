@@ -63,10 +63,15 @@ func (w *AgentActivityCleanupWorker) Start(ctx context.Context) {
 			log.Info("🗑️ [AGENT_ACTIVITY_CLEANUP] Agent Activity Cleanup Worker stopped")
 			return
 		case <-ticker.C:
-			if ShouldThrottle(PriorityLow) {
+			if !IsWorkerActive(WorkerAgentActivityCleanup) {
+				time.Sleep(1 * time.Minute)
 				continue
 			}
-			if effInterval := GetEffectiveInterval(w.interval, PriorityLow); effInterval > w.interval {
+			p := GetPriority(WorkerAgentActivityCleanup, PriorityLow)
+			if ShouldThrottle(p) {
+				continue
+			}
+			if effInterval := GetEffectiveInterval(w.interval, p); effInterval > w.interval {
 				time.Sleep(effInterval - w.interval)
 			}
 			func() {

@@ -1,179 +1,89 @@
-// Package metasvc - computeAlertFlags: tính tất cả tiêu chí cảnh báo từ raw, layer1, layer2, layer3.
-// Theo FolkForm AI Agent Master Rules v4.1. Lưu vào currentMetrics.alertFlags (field riêng).
-// Chưa gửi notification; chỉ lưu trạng thái để UI hiển thị.
+// Package metasvc - FLAG_RULE: đánh giá metrics → tạo flag (sl_a, chs_critical, ...).
+// Khác với ACTION_RULE (ads/rules): flag → action (PAUSE, DECREASE).
+// Theo FolkForm v4.1 (WF-03). Lưu vào currentMetrics.alertFlags.
+// Đọc ngưỡng từ ads/config khi cfg != nil.
+// Dùng ads/rules evaluator driven bởi FlagDefinitions.
 package metasvc
 
-// Ngưỡng theo Master Rules (đơn vị VND, %)
-const (
-	CPA_MESS_KILL_VND      = 180_000
-	CPA_PURCHASE_HARD_STOP = 1_050_000
-	CONV_RATE_MESS_TRAP    = 0.05
-	CONV_RATE_MESS_TRAP_6  = 0.06
-	CTR_KILL               = 0.0035
-	MSG_RATE_LOW           = 0.02
-	CPM_MESS_TRAP_LOW      = 60_000
-	CPM_HIGH               = 180_000
-	CPM_KO_C_MULTIPLIER    = 2.5
-	FREQUENCY_HIGH         = 3.0
-	FREQUENCY_TRIM         = 2.2
-	MESS_TRAP_SUSPECT_MIN  = 20
-	MESS_TRAP_SL_D_MIN     = 15
-	CTR_TRAFFIC_RAC        = 0.018
-	CHS_WARNING_THRESHOLD  = 40
-	SAFETY_NET_ORDERS_MIN  = 3
-	SAFETY_NET_CR_MIN      = 0.10
-	SL_E_ORDERS_MIN        = 3
-	SL_E_CR_MAX            = 0.10
+import (
+	"context"
+
+	adsconfig "meta_commerce/internal/api/ads/config"
+	adsmodels "meta_commerce/internal/api/ads/models"
+	adsrules "meta_commerce/internal/api/ads/rules"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // computeAlertFlags tính danh sách flags cảnh báo từ metrics.
-// Trả về []string — các mã flag đang trigger (vd: chs_critical, mess_trap_suspect).
-func computeAlertFlags(raw, layer1, layer2, layer3 map[string]interface{}) []string {
-	var flags []string
-
-	meta, _ := raw["meta"].(map[string]interface{})
-	pancake, _ := raw["pancake"].(map[string]interface{})
-	pos, _ := mapOrNil(pancake, "pos").(map[string]interface{})
-
-	spend := toFloat(meta, "spend")
-	mess := toInt64(meta, "mess")
-	impressions := toInt64(meta, "impressions")
-	cpm := toFloat(meta, "cpm")
-	ctr := toFloat(meta, "ctr")
-	frequency := toFloat(meta, "frequency")
-	orders := toInt64(pos, "orders")
-
-	msgRate := toFloat(layer1, "msgRate")
-	cpaMess := toFloat(layer1, "cpaMess")
-	cpaPurchase := toFloat(layer1, "cpaPurchase")
-	convRate := toFloat(layer1, "convRate")
-
-	chs := toFloat(layer3, "chs")
-	healthState, _ := layer3["healthState"].(string)
-	portfolioCell, _ := layer3["portfolioCell"].(string)
-
-	// --- CHS & Health ---
-	if healthState == "critical" || chs < CHS_WARNING_THRESHOLD {
-		flags = append(flags, "chs_critical")
-	}
-	if healthState == "warning" || (chs >= CHS_WARNING_THRESHOLD && chs < 60) {
-		flags = append(flags, "chs_warning")
-	}
-
-	// --- CPA / Conv ---
-	if cpaMess > CPA_MESS_KILL_VND && mess > 0 {
-		flags = append(flags, "cpa_mess_high")
-	}
-	if cpaPurchase > CPA_PURCHASE_HARD_STOP && orders > 0 {
-		flags = append(flags, "cpa_purchase_high")
-	}
-	if convRate > 0 && convRate < CONV_RATE_MESS_TRAP && mess >= MESS_TRAP_SL_D_MIN {
-		flags = append(flags, "conv_rate_low")
-	}
-
-	// --- CTR / MsgRate ---
-	if ctr > 0 && ctr < CTR_KILL {
-		flags = append(flags, "ctr_critical")
-	}
-	if msgRate > 0 && msgRate < MSG_RATE_LOW {
-		flags = append(flags, "msg_rate_low")
-	}
-
-	// --- CPM ---
-	if cpm > 0 && cpm < CPM_MESS_TRAP_LOW {
-		flags = append(flags, "cpm_low")
-	}
-	if cpm > CPM_HIGH {
-		flags = append(flags, "cpm_high")
-	}
-
-	// --- Frequency ---
-	if frequency > FREQUENCY_HIGH {
-		flags = append(flags, "frequency_high")
-	}
-
-	// --- Mess Trap Suspect ---
-	if cpm < CPM_MESS_TRAP_LOW && convRate < CONV_RATE_MESS_TRAP_6 &&
-		mess >= MESS_TRAP_SUSPECT_MIN && orders == 0 {
-		flags = append(flags, "mess_trap_suspect")
-	}
-
-	// --- Stop Loss SL-A ---
-	if cpaMess > CPA_MESS_KILL_VND && mess < 3 {
-		flags = append(flags, "sl_a")
-	}
-
-	// --- Stop Loss SL-B ---
-	if spend > 0 && mess == 0 {
-		flags = append(flags, "sl_b")
-	}
-
-	// --- Stop Loss SL-C ---
-	if ctr > 0 && ctr < CTR_KILL && cpm > CPM_HIGH {
-		flags = append(flags, "sl_c")
-	}
-
-	// --- Stop Loss SL-D ---
-	if mess >= MESS_TRAP_SL_D_MIN && convRate < CONV_RATE_MESS_TRAP && spend > 0 {
-		flags = append(flags, "sl_d")
-	}
-
-	// --- Stop Loss SL-E ---
-	if cpaPurchase > CPA_PURCHASE_HARD_STOP && orders >= SL_E_ORDERS_MIN && convRate < SL_E_CR_MAX {
-		flags = append(flags, "sl_e")
-	}
-
-	// --- Kill Off KO-B ---
-	if ctr > CTR_TRAFFIC_RAC && msgRate < MSG_RATE_LOW && orders == 0 && spend > 0 {
-		flags = append(flags, "ko_b")
-	}
-
-	// --- Kill Off KO-C ---
-	if cpm > CPM_HIGH*CPM_KO_C_MULTIPLIER && impressions < 800 {
-		flags = append(flags, "ko_c")
-	}
-
-	// --- Trim eligible ---
-	if frequency > FREQUENCY_TRIM && chs < 60 {
-		flags = append(flags, "trim_eligible")
-	}
-
-	// --- Safety Net ---
-	if orders >= SAFETY_NET_ORDERS_MIN && convRate >= SAFETY_NET_CR_MIN && chs >= 60 {
-		flags = append(flags, "safety_net")
-	}
-
-	// --- Portfolio attention ---
-	if portfolioCell == "fix" || portfolioCell == "recover" {
-		flags = append(flags, "portfolio_attention")
-	}
-
-	// --- Conv rate strong (exception) ---
-	if convRate >= 0.20 {
-		flags = append(flags, "conv_rate_strong")
-	}
-
-	// --- Diagnoses ---
-	if diag, ok := layer3["diagnoses"].([]interface{}); ok && len(diag) > 0 {
-		for _, d := range diag {
-			if s, ok := d.(string); ok && s != "" {
-				flags = append(flags, "diagnosis_"+s)
-			}
+// cfg: config từ ads_meta_config (nil = dùng default). Trả về []string — các mã flag đang trigger.
+// Dùng rules.EvaluateFlags với FlagDefinitions từ config.
+// Khi campaignId != "": dùng Per-Camp Adaptive Threshold (FolkForm v4.1 Section 2.2).
+// PATCH 04: DetectWindowShoppingPattern → thêm window_shopping_pattern để suspend Mess Trap đến 14:00.
+func computeAlertFlags(ctx context.Context, raw, layer1, layer2, layer3 map[string]interface{}, cfg *adsmodels.CampaignConfigView, campaignId, adAccountId string, ownerOrgID primitive.ObjectID) []string {
+	factsCtx := adsrules.BuildFactsContext(raw, layer1, layer2, layer3, cfg)
+	var campCtx *adsrules.EvalCampaignContext
+	if campaignId != "" && adAccountId != "" {
+		campCtx = &adsrules.EvalCampaignContext{
+			CampaignId:  campaignId,
+			AdAccountId: adAccountId,
+			OwnerOrgID:  ownerOrgID,
 		}
 	}
-
-	return dedupeStrings(flags)
+	flags := adsrules.EvaluateFlags(ctx, &factsCtx, cfg, campCtx)
+	if DetectWindowShoppingPattern(ctx, campaignId, adAccountId, ownerOrgID) {
+		flags = append(flags, "window_shopping_pattern")
+	}
+	return flags
 }
 
-// dedupeStrings loại bỏ trùng lặp, giữ thứ tự.
-func dedupeStrings(ss []string) []string {
-	seen := make(map[string]bool)
-	var out []string
-	for _, s := range ss {
-		if !seen[s] {
-			seen[s] = true
-			out = append(out, s)
+// computeSuggestedActions tính action đề xuất cho tình trạng hiện tại từ alertFlags.
+// Ưu tiên: Kill → Decrease → Increase (theo FolkForm WF-03, WF-04).
+// raw, layer1: optional — dùng cho PATCH 04 Safety guard (Msg_Rate < 1%, CPM < 40k vẫn kill dù window_shopping_pattern).
+func computeSuggestedActions(ctx context.Context, alertFlags []string, adAccountId string, ownerOrgID primitive.ObjectID, cfg *adsmodels.CampaignConfigView, raw, layer1 map[string]interface{}) []map[string]interface{} {
+	if len(alertFlags) == 0 {
+		return nil
+	}
+	flags := make([]interface{}, len(alertFlags))
+	for i, f := range alertFlags {
+		flags[i] = f
+	}
+	killEnabled := adsconfig.GetKillRulesEnabled(ctx, adAccountId, ownerOrgID)
+	opts := &adsrules.EvalOptions{KillRulesEnabled: killEnabled}
+	if layer1 != nil {
+		opts.MsgRateRatio = toFloat(layer1, "msgRate_7d")
+	}
+	if raw != nil {
+		meta, _ := raw["meta"].(map[string]interface{})
+		if meta != nil {
+			opts.CpmVnd = toFloat(meta, "cpm")
 		}
 	}
-	return out
+
+	var result *adsrules.RuleResult
+	result = adsrules.EvaluateAlertFlagsWithConfig(flags, opts, cfg)
+	if result == nil {
+		result = adsrules.EvaluateForDecreaseWithConfig(flags, cfg)
+	}
+	if result == nil {
+		result = adsrules.EvaluateForIncrease(flags, cfg)
+	}
+	if result == nil || !result.ShouldPropose {
+		return nil
+	}
+
+	label := result.Label
+	if label == "" {
+		label = result.RuleCode
+	}
+	action := map[string]interface{}{
+		"actionType": result.ActionType,
+		"ruleCode":   result.RuleCode,
+		"reason":     result.Reason,
+		"label":      label,
+	}
+	if result.Value != nil {
+		action["value"] = result.Value
+	}
+	return []map[string]interface{}{action}
 }

@@ -450,9 +450,9 @@ func getIntFromItem(m map[string]interface{}, key string) int {
 }
 
 // checkHasConversation kiểm tra có conversation hoặc message với customerIds.
-// Match theo: customerId (root), panCakeData (customer_id, customer.id, customers[].id), fb_messages.customerId.
-// Hỗ trợ cả id dạng string và number (Pancake API có thể trả customer_id là số).
-func (s *CrmCustomerService) checkHasConversation(ctx context.Context, customerIds []string, ownerOrgID primitive.ObjectID) bool {
+// Match theo: customerId (root), panCakeData (customer_id, customer.id, customers[].id), conversationId (từ posData.fb_id).
+// conversationIds: từ pc_pos_customers.posData.fb_id — link POS customer với conv khi customerId trong conv khác.
+func (s *CrmCustomerService) checkHasConversation(ctx context.Context, customerIds []string, ownerOrgID primitive.ObjectID, conversationIds []string) bool {
 	var ids []string
 	var numIds []interface{}
 	for _, id := range customerIds {
@@ -463,24 +463,33 @@ func (s *CrmCustomerService) checkHasConversation(ctx context.Context, customerI
 			}
 		}
 	}
-	if len(ids) == 0 {
+	if len(ids) == 0 && len(conversationIds) == 0 {
 		return false
 	}
 	baseFilter := bson.M{"ownerOrganizationId": ownerOrgID}
 
-	// Điều kiện match customer trong fb_conversations — nhiều cấu trúc Pancake có thể dùng
+	// Điều kiện match customer trong fb_conversations — đồng nhất với buildConversationFilterForCustomerIds.
 	convCustomerOr := []bson.M{
 		{"customerId": bson.M{"$in": ids}},
 		bson.M{"panCakeData.customer_id": bson.M{"$in": ids}},
 		bson.M{"panCakeData.customer.id": bson.M{"$in": ids}},
 		bson.M{"panCakeData.customers.id": bson.M{"$in": ids}},
+		bson.M{"panCakeData.page_customer.id": bson.M{"$in": ids}},
+		bson.M{"panCakeData.page_customer.customer_id": bson.M{"$in": ids}},
 	}
 	if len(numIds) > 0 {
 		convCustomerOr = append(convCustomerOr,
 			bson.M{"panCakeData.customer_id": bson.M{"$in": numIds}},
 			bson.M{"panCakeData.customer.id": bson.M{"$in": numIds}},
 			bson.M{"panCakeData.customers.id": bson.M{"$in": numIds}},
+			bson.M{"panCakeData.page_customer.id": bson.M{"$in": numIds}},
+			bson.M{"panCakeData.page_customer.customer_id": bson.M{"$in": numIds}},
 		)
+	}
+	for _, cid := range conversationIds {
+		if cid != "" {
+			convCustomerOr = append(convCustomerOr, bson.M{"conversationId": cid})
+		}
 	}
 
 	// 1. fb_conversations
@@ -517,13 +526,33 @@ func (s *CrmCustomerService) checkHasConversation(ctx context.Context, customerI
 
 // GetMetricsForSnapshotAt trả về metrics map cho snapshot tại activityAt — chỉ đơn/conv có timestamp <= activityAt.
 // Dùng cho BuildSnapshotWithChanges để timeline đúng: metrics tăng dần theo từng order/chat.
+// Phải dùng expandCustomerIdsForAggregation và checkHasConversation — đồng nhất với Recalculate, tránh hasConv sai.
 func (s *CrmCustomerService) GetMetricsForSnapshotAt(ctx context.Context, c *crmmodels.CrmCustomer, activityAt int64) map[string]interface{} {
 	if c == nil || activityAt <= 0 {
 		return nil
 	}
-	ids := []string{c.SourceIds.Pos, c.SourceIds.Fb, c.UnifiedId}
-	om := s.aggregateOrderMetricsForCustomer(ctx, ids, c.OwnerOrganizationID, GetPhoneNumbersFromCustomer(c), activityAt)
-	cm := s.aggregateConversationMetricsForCustomer(ctx, ids, c.OwnerOrganizationID, activityAt)
+	ids := buildCustomerIdsForRecalculate(c)
+	phones := GetPhoneNumbersFromCustomer(c)
+	ids = s.expandCustomerIdsForAggregation(ctx, c, ids, phones, c.OwnerOrganizationID)
+	convIds := s.getConversationIdsFromPosCustomers(ctx, []string{c.SourceIds.Pos}, c.OwnerOrganizationID)
+	for _, cid := range s.getConversationIdsFromFbMatch(ctx, ids, c.OwnerOrganizationID) {
+		if cid == "" {
+			continue
+		}
+		has := false
+		for _, x := range convIds {
+			if x == cid {
+				has = true
+				break
+			}
+		}
+		if !has {
+			convIds = append(convIds, cid)
+		}
+	}
+	om := s.aggregateOrderMetricsForCustomer(ctx, ids, c.OwnerOrganizationID, phones, activityAt)
+	convMetrics := s.aggregateConversationMetricsForCustomer(ctx, ids, convIds, c.OwnerOrganizationID, activityAt)
+	hasConv := convMetrics.ConversationCount > 0 || s.checkHasConversation(ctx, ids, c.OwnerOrganizationID, convIds)
 	avgOrderValue := 0.0
 	if om.OrderCount > 0 {
 		avgOrderValue = om.TotalSpent / float64(om.OrderCount)
@@ -547,17 +576,17 @@ func (s *CrmCustomerService) GetMetricsForSnapshotAt(ctx context.Context, c *crm
 		FirstOrderChannel:          om.FirstOrderChannel,
 		LastOrderChannel:           om.LastOrderChannel,
 		IsOmnichannel:              om.OrderCountOnline > 0 && om.OrderCountOffline > 0,
-		HasConversation:            cm.ConversationCount > 0,
+		HasConversation:            hasConv,
 		HasOrder:                   om.OrderCount > 0,
-		ConversationCount:          cm.ConversationCount,
-		ConversationCountByInbox:    cm.ConversationCountByInbox,
-		ConversationCountByComment:  cm.ConversationCountByComment,
-		LastConversationAt:         cm.LastConversationAt,
-		FirstConversationAt:        cm.FirstConversationAt,
-		TotalMessages:              cm.TotalMessages,
-		LastMessageFromCustomer:    cm.LastMessageFromCustomer,
-		ConversationFromAds:         cm.ConversationFromAds,
-		ConversationTags:            cm.ConversationTags,
+		ConversationCount:          convMetrics.ConversationCount,
+		ConversationCountByInbox:   convMetrics.ConversationCountByInbox,
+		ConversationCountByComment: convMetrics.ConversationCountByComment,
+		LastConversationAt:         convMetrics.LastConversationAt,
+		FirstConversationAt:        convMetrics.FirstConversationAt,
+		TotalMessages:              convMetrics.TotalMessages,
+		LastMessageFromCustomer:    convMetrics.LastMessageFromCustomer,
+		ConversationFromAds:        convMetrics.ConversationFromAds,
+		ConversationTags:            convMetrics.ConversationTags,
 		OwnedSkuQuantities:          om.OwnedSkuQuantities,
 	}
 	return buildMetricsSnapshot(&tmp)
@@ -685,15 +714,24 @@ func (s *CrmCustomerService) RefreshMetrics(ctx context.Context, unifiedId strin
 			return err
 		}
 	}
-	ids := []string{customer.SourceIds.Pos, customer.SourceIds.Fb, customer.UnifiedId}
-	metrics := s.aggregateOrderMetricsForCustomer(ctx, ids, ownerOrgID, GetPhoneNumbersFromCustomer(&customer), 0)
-	// Tối ưu: aggregateConversationMetrics trước — nếu ConversationCount > 0 thì bỏ qua checkHasConversation (2 CountDocuments).
-	convMetrics := s.aggregateConversationMetricsForCustomer(ctx, ids, ownerOrgID, 0)
-	hasConv := convMetrics.ConversationCount > 0 || s.checkHasConversation(ctx, ids, ownerOrgID)
+	// Đồng nhất với Recalculate: dùng buildCustomerIdsForRecalculate + expandCustomerIdsForAggregation
+	// để match đơn khi khách chưa merge hoặc link qua SĐT chưa có trong sourceIds.
+	ids := buildCustomerIdsForRecalculate(&customer)
+	phones := GetPhoneNumbersFromCustomer(&customer)
+	ids = s.expandCustomerIdsForAggregation(ctx, &customer, ids, phones, ownerOrgID)
+	convIds := s.getConversationIdsFromPosCustomers(ctx, []string{customer.SourceIds.Pos}, ownerOrgID)
+	for _, cid := range s.getConversationIdsFromFbMatch(ctx, ids, ownerOrgID) {
+		if cid != "" {
+			convIds = appendUnique(convIds, cid)
+		}
+	}
+	metrics := s.aggregateOrderMetricsForCustomer(ctx, ids, ownerOrgID, phones, 0)
+	convMetrics := s.aggregateConversationMetricsForCustomer(ctx, ids, convIds, ownerOrgID, 0)
+	hasConv := convMetrics.ConversationCount > 0 || s.checkHasConversation(ctx, ids, ownerOrgID, convIds)
 
 	now := time.Now().UnixMilli()
 	cm := BuildCurrentMetricsFromOrderAndConv(metrics, convMetrics, hasConv)
-	class := ComputeClassificationFromMetrics(metrics.TotalSpent, metrics.OrderCount, metrics.LastOrderAt, metrics.RevenueLast30d, metrics.RevenueLast90d, metrics.OrderCountOnline, metrics.OrderCountOffline, hasConv)
+	class := ComputeClassificationFromMetrics(metrics.TotalSpent, metrics.OrderCount, metrics.LastOrderAt, metrics.RevenueLast30d, metrics.RevenueLast90d, metrics.OrderCountOnline, metrics.OrderCountOffline, hasConv, convMetrics.ConversationTags)
 
 	setFields := bson.M{
 		"totalSpent":         metrics.TotalSpent,

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"meta_commerce/internal/common/activity"
 	crmmodels "meta_commerce/internal/api/crm/models"
 	basesvc "meta_commerce/internal/api/base/service"
 	"meta_commerce/internal/api/events"
@@ -34,7 +35,7 @@ type LogActivityInput struct {
 	DisplaySubtext string
 	ActorId        *primitive.ObjectID
 	ActorName      string
-	Changes        []crmmodels.ActivityChangeItem
+	Changes        []activity.ActivityChangeItem
 	Reason         string
 	ClientIp       string
 	UserAgent      string
@@ -80,27 +81,28 @@ func (s *CrmActivityService) LogActivity(ctx context.Context, input LogActivityI
 		}
 		return err
 	}
-	// Không có sourceRef → insert mới (ActorId nil = omitempty, không lưu 000...000)
+	// Không có sourceRef → insert mới
+	snapshot, metaChanges, metadataClean := splitSnapshotFromMetadata(input.Metadata)
+	changes := input.Changes
+	if len(changes) == 0 && len(metaChanges) > 0 {
+		changes = metaChanges
+	}
 	doc := crmmodels.CrmActivityHistory{
-		UnifiedId:           input.UnifiedId,
-		OwnerOrganizationID: input.OwnerOrgID,
-		Domain:              domain,
-		ActivityType:        input.ActivityType,
-		ActivityAt:          activityAt,
-		Source:              input.Source,
-		SourceRef:           input.SourceRef,
-		Metadata:            input.Metadata,
-		DisplayLabel:        input.DisplayLabel,
-		DisplayIcon:         input.DisplayIcon,
-		DisplaySubtext:     input.DisplaySubtext,
-		ActorId:             input.ActorId, // nil → omitempty, không lưu
-		ActorName:           input.ActorName,
-		Changes:             input.Changes,
-		Reason:              input.Reason,
-		ClientIp:            input.ClientIp,
-		UserAgent:           input.UserAgent,
-		Status:              input.Status,
-		CreatedAt:           now,
+		ActivityBase: activity.ActivityBase{
+			UnifiedId:           input.UnifiedId,
+			OwnerOrganizationID: input.OwnerOrgID,
+			Domain:              domain,
+			ActivityType:        input.ActivityType,
+			ActivityAt:          activityAt,
+			Source:              input.Source,
+			SourceRef:           input.SourceRef,
+			Actor:               activity.ToActor(input.ActorId, input.ActorName, activity.ActorTypeSystem),
+			Display:             activity.Display{Label: input.DisplayLabel, Icon: input.DisplayIcon, Subtext: input.DisplaySubtext},
+			Snapshot:            snapshot,
+			Changes:             changes,
+			Metadata:            mergeMetadata(metadataClean, input.Reason, input.ClientIp, input.UserAgent, input.Status),
+			CreatedAt:           now,
+		},
 	}
 	_, err := s.InsertOne(ctx, doc)
 	if err != nil {
@@ -125,29 +127,26 @@ func (s *CrmActivityService) logActivityUpsert(ctx context.Context, input LogAct
 	if domain != crmmodels.ActivityDomainOrder {
 		filter["activityType"] = input.ActivityType
 	}
-	setFields := bson.M{
-		"activityAt":    activityAt,
-		"activityType":  input.ActivityType, // Order: cập nhật khi trạng thái đổi
-		"metadata":      input.Metadata,
-		"displayLabel":  input.DisplayLabel,
-		"displayIcon":   input.DisplayIcon,
-		"displaySubtext": input.DisplaySubtext,
-		"actorName":     input.ActorName,
-		"changes":       input.Changes,
-		"reason":        input.Reason,
-		"clientIp":      input.ClientIp,
-		"userAgent":     input.UserAgent,
-		"status":        input.Status,
+	snapshot, metaChanges, metadataClean := splitSnapshotFromMetadata(input.Metadata)
+	changes := input.Changes
+	if len(changes) == 0 && len(metaChanges) > 0 {
+		changes = metaChanges
 	}
-	if input.ActorId != nil && !input.ActorId.IsZero() {
-		setFields["actorId"] = *input.ActorId
+	metadata := mergeMetadata(metadataClean, input.Reason, input.ClientIp, input.UserAgent, input.Status)
+	actor := activity.ToActor(input.ActorId, input.ActorName, activity.ActorTypeSystem)
+	display := activity.Display{Label: input.DisplayLabel, Icon: input.DisplayIcon, Subtext: input.DisplaySubtext}
+	setFields := bson.M{
+		"activityAt":   activityAt,
+		"activityType": input.ActivityType,
+		"metadata":     metadata,
+		"display":      display,
+		"actor":        actor,
+		"snapshot":     snapshot,
+		"changes":      changes,
 	}
 	update := bson.M{
 		"$set":        setFields,
 		"$setOnInsert": buildSetOnInsert(input, domain, now),
-	}
-	if input.ActorId == nil || input.ActorId.IsZero() {
-		update["$unset"] = bson.M{"actorId": ""} // Xóa actorId cũ (tránh lưu 000...000)
 	}
 	opts := mongoopts.Update().SetUpsert(true)
 	_, err := s.Collection().UpdateOne(ctx, filter, update, opts)
@@ -157,9 +156,11 @@ func (s *CrmActivityService) logActivityUpsert(ctx context.Context, input LogAct
 	// Phát event để report hook MarkDirty báo cáo customer (customer_daily, customer_weekly, ...).
 	// logActivityUpsert dùng Collection().UpdateOne trực tiếp nên không qua BaseServiceMongoImpl → không tự emit.
 	doc := &crmmodels.CrmActivityHistory{
-		OwnerOrganizationID: input.OwnerOrgID,
-		ActivityAt:          activityAt,
-		CreatedAt:           now,
+		ActivityBase: activity.ActivityBase{
+			OwnerOrganizationID: input.OwnerOrgID,
+			ActivityAt:          activityAt,
+			CreatedAt:           now,
+		},
 	}
 	events.EmitDataChanged(ctx, events.DataChangeEvent{
 		CollectionName: global.MongoDB_ColNames.CrmActivityHistory,
@@ -169,20 +170,84 @@ func (s *CrmActivityService) logActivityUpsert(ctx context.Context, input LogAct
 	return nil
 }
 
+// buildSetOnInsert chỉ chứa field chỉ set khi insert. Không trùng path với $set (MongoDB báo conflict).
 func buildSetOnInsert(input LogActivityInput, domain string, now int64) bson.M {
-	// Không thêm activityType, source, sourceRef vào $setOnInsert — đã có trong $set hoặc gây conflict
-	m := bson.M{
+	return bson.M{
 		"unifiedId":            input.UnifiedId,
-		"ownerOrganizationId": input.OwnerOrgID,
+		"ownerOrganizationId":  input.OwnerOrgID,
 		"domain":               domain,
 		"source":               input.Source,
 		"sourceRef":            input.SourceRef,
 		"createdAt":            now,
 	}
-	if input.ActorId != nil && !input.ActorId.IsZero() {
-		m["actorId"] = *input.ActorId
+}
+
+// splitSnapshotFromMetadata tách profileSnapshot, metricsSnapshot, snapshotChanges từ metadata.
+// SnapshotChanges → changes (top-level); không để trong metadata.
+func splitSnapshotFromMetadata(metadata map[string]interface{}) (activity.Snapshot, []activity.ActivityChangeItem, map[string]interface{}) {
+	clean := make(map[string]interface{})
+	for k, v := range metadata {
+		if k != "profileSnapshot" && k != "metricsSnapshot" && k != "snapshotChanges" {
+			clean[k] = v
+		}
 	}
-	return m
+	var snap activity.Snapshot
+	if p, ok := metadata["profileSnapshot"].(map[string]interface{}); ok {
+		snap.Profile = p
+	}
+	if m, ok := metadata["metricsSnapshot"].(map[string]interface{}); ok {
+		snap.Metrics = m
+	}
+	changes := parseSnapshotChangesFromMetadata(metadata["snapshotChanges"])
+	return snap, changes, clean
+}
+
+// parseSnapshotChangesFromMetadata chuyển snapshotChanges (từ BSON/map) sang []ActivityChangeItem.
+func parseSnapshotChangesFromMetadata(v interface{}) []activity.ActivityChangeItem {
+	if v == nil {
+		return nil
+	}
+	sl, ok := v.([]interface{})
+	if !ok || len(sl) == 0 {
+		return nil
+	}
+	out := make([]activity.ActivityChangeItem, 0, len(sl))
+	for _, item := range sl {
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		field, _ := m["field"].(string)
+		if field == "" {
+			continue
+		}
+		out = append(out, activity.ActivityChangeItem{
+			Field:    field,
+			OldValue: m["oldValue"],
+			NewValue: m["newValue"],
+		})
+	}
+	return out
+}
+
+// mergeMetadata gộp reason, clientIp, userAgent, status vào metadata.
+func mergeMetadata(metadata map[string]interface{}, reason, clientIp, userAgent, status string) map[string]interface{} {
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	if reason != "" {
+		metadata["reason"] = reason
+	}
+	if clientIp != "" {
+		metadata["clientIp"] = clientIp
+	}
+	if userAgent != "" {
+		metadata["userAgent"] = userAgent
+	}
+	if status != "" {
+		metadata["status"] = status
+	}
+	return metadata
 }
 
 // LogActivityLegacy ghi hoạt động (signature cũ — backward compatible cho backfill).
@@ -232,17 +297,15 @@ func (s *CrmActivityService) FindByUnifiedId(ctx context.Context, unifiedId stri
 	return s.Find(ctx, filter, opts)
 }
 
-// GetLastSnapshotForCustomer lấy profileSnapshot và metricsSnapshot từ activity gần nhất có snapshot.
+// GetLastSnapshotForCustomer lấy profile và metrics từ activity gần nhất có snapshot.
 // Dùng để so sánh và chỉ lưu snapshot mới khi có thay đổi.
-// excludeSource + excludeSourceRef: loại trừ activity khớp (vd: order đang upsert, conversation đang upsert)
-// để so sánh với snapshot TRƯỚC sự kiện này — tránh metrics không thay đổi khi order_completed so với order_created.
 func (s *CrmActivityService) GetLastSnapshotForCustomer(ctx context.Context, unifiedId string, ownerOrgID primitive.ObjectID, excludeSource string, excludeSourceRef map[string]interface{}) (profile, metrics map[string]interface{}, ok bool) {
 	filter := bson.M{
-		"unifiedId": unifiedId,
+		"unifiedId":           unifiedId,
 		"ownerOrganizationId": ownerOrgID,
 		"$or": []bson.M{
-			{"metadata.profileSnapshot": bson.M{"$exists": true}},
-			{"metadata.metricsSnapshot": bson.M{"$exists": true}},
+			{"snapshot.profile": bson.M{"$exists": true}},
+			{"snapshot.metrics": bson.M{"$exists": true}},
 		},
 	}
 	if excludeSource != "" && len(excludeSourceRef) > 0 {
@@ -257,16 +320,7 @@ func (s *CrmActivityService) GetLastSnapshotForCustomer(ctx context.Context, uni
 	if err := s.Collection().FindOne(ctx, filter, opts).Decode(&doc); err != nil {
 		return nil, nil, false
 	}
-	if doc.Metadata == nil {
-		return nil, nil, false
-	}
-	if p, ok := doc.Metadata["profileSnapshot"].(map[string]interface{}); ok {
-		profile = p
-	}
-	if m, ok := doc.Metadata["metricsSnapshot"].(map[string]interface{}); ok {
-		metrics = m
-	}
-	return profile, metrics, profile != nil || metrics != nil
+	return doc.Snapshot.Profile, doc.Snapshot.Metrics, doc.Snapshot.Profile != nil || doc.Snapshot.Metrics != nil
 }
 
 // FindActivitiesNewerThan lấy các activity có activityAt > afterActivityAt, sắp xếp theo activityAt tăng dần (cũ trước).
@@ -281,16 +335,15 @@ func (s *CrmActivityService) FindActivitiesNewerThan(ctx context.Context, unifie
 	return s.Find(ctx, filter, opts)
 }
 
-// GetLastSnapshotBeforeActivityAt lấy profileSnapshot và metricsSnapshot từ activity gần nhất có activityAt < beforeActivityAt.
-// Dùng cho recalc: cần "snapshot trước" khi tính lại snapshot của activity mới hơn.
+// GetLastSnapshotBeforeActivityAt lấy profile và metrics từ activity gần nhất có activityAt < beforeActivityAt.
 func (s *CrmActivityService) GetLastSnapshotBeforeActivityAt(ctx context.Context, unifiedId string, ownerOrgID primitive.ObjectID, beforeActivityAt int64) (profile, metrics map[string]interface{}, ok bool) {
 	filter := bson.M{
 		"unifiedId":           unifiedId,
 		"ownerOrganizationId": ownerOrgID,
 		"activityAt":          bson.M{"$lt": beforeActivityAt},
 		"$or": []bson.M{
-			{"metadata.profileSnapshot": bson.M{"$exists": true}},
-			{"metadata.metricsSnapshot": bson.M{"$exists": true}},
+			{"snapshot.profile": bson.M{"$exists": true}},
+			{"snapshot.metrics": bson.M{"$exists": true}},
 		},
 	}
 	opts := mongoopts.FindOne().SetSort(bson.D{{Key: "activityAt", Value: -1}})
@@ -298,57 +351,54 @@ func (s *CrmActivityService) GetLastSnapshotBeforeActivityAt(ctx context.Context
 	if err := s.Collection().FindOne(ctx, filter, opts).Decode(&doc); err != nil {
 		return nil, nil, false
 	}
-	if doc.Metadata == nil {
-		return nil, nil, false
-	}
-	if p, ok := doc.Metadata["profileSnapshot"].(map[string]interface{}); ok {
-		profile = p
-	}
-	if m, ok := doc.Metadata["metricsSnapshot"].(map[string]interface{}); ok {
-		metrics = m
-	}
-	return profile, metrics, profile != nil || metrics != nil
+	return doc.Snapshot.Profile, doc.Snapshot.Metrics, doc.Snapshot.Profile != nil || doc.Snapshot.Metrics != nil
 }
 
-// UpdateActivityMetadata cập nhật metadata của activity theo _id (dùng cho recalc snapshot).
+// UpdateActivityMetadata cập nhật snapshot của activity theo _id (dùng cho recalc).
+// metadataUpdates: profileSnapshot → snapshot.profile, metricsSnapshot → snapshot.metrics, snapshotChanges → changes
 func (s *CrmActivityService) UpdateActivityMetadata(ctx context.Context, activityID primitive.ObjectID, metadataUpdates map[string]interface{}) error {
 	if len(metadataUpdates) == 0 {
 		return nil
 	}
 	set := bson.M{}
 	for k, v := range metadataUpdates {
-		set["metadata."+k] = v
+		path := "metadata." + k
+		if k == "profileSnapshot" {
+			path = "snapshot.profile"
+		} else if k == "metricsSnapshot" {
+			path = "snapshot.metrics"
+		} else if k == "snapshotChanges" {
+			path = "changes"
+		}
+		set[path] = v
 	}
 	_, err := s.Collection().UpdateOne(ctx, bson.M{"_id": activityID}, bson.M{"$set": set})
 	return err
 }
 
-// GetActivitiesInPeriod lấy các activity trong khoảng [startMs, endMs] có metricsSnapshot, sắp xếp theo unifiedId, activityAt tăng dần.
-// Dùng cho report customer phát sinh: so sánh classification giữa các activity để tính in/out.
+// GetActivitiesInPeriod lấy các activity trong khoảng [startMs, endMs] có snapshot.metrics.
 func (s *CrmActivityService) GetActivitiesInPeriod(ctx context.Context, ownerOrgID primitive.ObjectID, startMs, endMs int64) ([]crmmodels.CrmActivityHistory, error) {
 	filter := bson.M{
 		"ownerOrganizationId": ownerOrgID,
 		"activityAt":          bson.M{"$gte": startMs, "$lte": endMs},
-		"metadata.metricsSnapshot": bson.M{"$exists": true},
+		"snapshot.metrics":    bson.M{"$exists": true},
 	}
 	opts := mongoopts.Find().SetSort(bson.D{{Key: "unifiedId", Value: 1}, {Key: "activityAt", Value: 1}})
 	return s.Find(ctx, filter, opts)
 }
 
-// GetLastSnapshotPerCustomerBeforeEndMs lấy metricsSnapshot cuối cùng của mỗi khách trước endMs (dùng cho report).
-// Aggregation: $match ownerOrgId, activityAt<=endMs, metadata.metricsSnapshot exists; $sort activityAt desc; $group by unifiedId $first.
-// Trả về map[unifiedId]metricsSnapshot. Khách không có activity với snapshot không có trong map.
+// GetLastSnapshotPerCustomerBeforeEndMs lấy snapshot.metrics cuối cùng của mỗi khách trước endMs.
 func (s *CrmActivityService) GetLastSnapshotPerCustomerBeforeEndMs(ctx context.Context, ownerOrgID primitive.ObjectID, endMs int64) (map[string]map[string]interface{}, error) {
 	pipe := []bson.M{
 		{"$match": bson.M{
 			"ownerOrganizationId": ownerOrgID,
 			"activityAt":          bson.M{"$lte": endMs},
-			"metadata.metricsSnapshot": bson.M{"$exists": true},
+			"snapshot.metrics":    bson.M{"$exists": true},
 		}},
 		{"$sort": bson.M{"activityAt": -1}},
 		{"$group": bson.M{
-			"_id": "$unifiedId",
-			"metricsSnapshot": bson.M{"$first": "$metadata.metricsSnapshot"},
+			"_id":             "$unifiedId",
+			"metricsSnapshot": bson.M{"$first": "$snapshot.metrics"},
 		}},
 	}
 	cursor, err := s.Collection().Aggregate(ctx, pipe)
@@ -374,6 +424,31 @@ func (s *CrmActivityService) GetLastSnapshotPerCustomerBeforeEndMs(ctx context.C
 		return nil, common.ConvertMongoError(err)
 	}
 	return result, nil
+}
+
+// CopySnapshotToMetadata ghi snapshot và changes từ activity vào metadata (format cũ).
+// Dùng khi upsert "giữ snapshot cũ" — ingest cần metadata có profileSnapshot, metricsSnapshot, snapshotChanges.
+func CopySnapshotToMetadata(metadata map[string]interface{}, act *crmmodels.CrmActivityHistory) {
+	if metadata == nil || act == nil {
+		return
+	}
+	// Cấu trúc mới: Snapshot + Changes
+	if act.Snapshot.Profile != nil && metadata["profileSnapshot"] == nil {
+		metadata["profileSnapshot"] = act.Snapshot.Profile
+	}
+	if act.Snapshot.Metrics != nil && metadata["metricsSnapshot"] == nil {
+		metadata["metricsSnapshot"] = act.Snapshot.Metrics
+	}
+	if len(act.Changes) > 0 && metadata["snapshotChanges"] == nil {
+		sl := make([]interface{}, len(act.Changes))
+		for i, c := range act.Changes {
+			sl[i] = map[string]interface{}{"field": c.Field, "oldValue": c.OldValue, "newValue": c.NewValue}
+		}
+		metadata["snapshotChanges"] = sl
+	}
+	if (act.Snapshot.Profile != nil || act.Snapshot.Metrics != nil) && metadata["snapshotAt"] == nil && act.ActivityAt > 0 {
+		metadata["snapshotAt"] = act.ActivityAt
+	}
 }
 
 // GetExistingActivityBySourceRef lấy activity đã tồn tại theo source + sourceRef (dùng khi upsert).

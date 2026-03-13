@@ -126,6 +126,16 @@ type MongoDB_Auth_CollectionName struct {
 
 	// Module Ads — Rule 13 Throttle Gỡ cap (FolkForm v4.1)
 	AdsThrottleState string // ads_throttle_state: ad set đang bị cap, dùng cho logic remove
+
+	// Module Decision Brain — Learning memory cho AI Commerce
+	DecisionCases string // decision_cases: case quyết định đã hoàn thành
+
+	// Module Rule Intelligence — Script-Only Logic Architecture
+	RuleDefinitions      string // rule_definitions: Rule Definition
+	RuleLogicDefinitions string // rule_logic_definitions: Logic Script
+	RuleParamSets        string // rule_param_sets: Parameter Set
+	RuleOutputDefinitions string // rule_output_definitions: Output Contract
+	RuleExecutionLogs    string // rule_execution_logs: Execution Trace
 }
 
 // Các biến toàn cục

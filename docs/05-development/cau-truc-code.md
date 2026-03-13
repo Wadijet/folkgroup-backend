@@ -10,22 +10,27 @@ Dự án được tổ chức theo kiến trúc layered với các layer rõ rà
 
 ```
 api/
-├── cmd/
-│   └── server/          # Entry point
-├── core/
+├── cmd/server/          # Entry point
+├── internal/
 │   ├── api/            # API layer
-│   │   ├── handler/    # HTTP handlers
-│   │   ├── services/   # Business logic
-│   │   ├── models/     # Data models
-│   │   ├── dto/        # Data Transfer Objects
+│   │   ├── handler/    # HTTP handlers (shared)
 │   │   ├── middleware/ # HTTP middleware
-│   │   └── router/     # Route definitions
+│   │   ├── router/     # Route definitions, CRUD config
+│   │   ├── dto/        # Data Transfer Objects
+│   │   ├── models/mongodb/  # Data models
+│   │   ├── auth/       # Module auth (handler, service, router)
+│   │   ├── crm/        # Module CRM
+│   │   ├── meta/       # Module Meta Ads
+│   │   ├── notification/
+│   │   ├── ...         # Các module khác (ads, approval, fb, pc, delivery, agent, content, ai, ...)
 │   ├── database/       # Database connections
 │   ├── global/         # Global variables
 │   ├── logger/         # Logging utilities
-│   └── utility/        # Utility functions
+│   └── ...             # approval, delivery, worker, notifytrigger, ...
 └── config/             # Configuration files
 ```
+
+**Lưu ý:** Services nằm trong từng module (ví dụ: `api/internal/api/crm/service/`), không phải `api/core/api/services/`.
 
 ## 📝 Naming Conventions
 

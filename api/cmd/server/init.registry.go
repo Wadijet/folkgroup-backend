@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
 	"meta_commerce/config"
+	basesvc "meta_commerce/internal/api/base/service"
+	ruleintelmigration "meta_commerce/internal/api/ruleintel/migration"
 	"meta_commerce/internal/global"
 
 	"github.com/sirupsen/logrus"
@@ -18,6 +21,14 @@ func InitRegistry() {
 		logrus.Fatalf("Failed to initialize collections: %v", err)
 	}
 	logrus.Info("Initialized collection registry")
+
+	// Seed Rule Intelligence — toàn bộ rules Ads (OwnerOrganizationID + IsSystem, chuẩn init)
+	initCtx := basesvc.WithSystemDataInsertAllowed(context.Background())
+	if err := ruleintelmigration.SeedRuleAdsSystem(initCtx); err != nil {
+		logrus.Warnf("Rule Intelligence seed (optional): %v", err)
+	} else {
+		logrus.Info("Rule Intelligence seed completed (system rules)")
+	}
 }
 
 // InitCollections khởi tạo và đăng ký các collections MongoDB
@@ -41,7 +52,9 @@ func InitCollections(client *mongo.Client, cfg *config.Configuration) error {
 		"meta_ad_accounts", "meta_campaigns", "meta_adsets", "meta_ads", "meta_ad_insights", "meta_ad_insights_daily_snapshots",
 		"action_pending_approval", "ads_approval_config", "ads_activity_history", "ads_meta_config", "ads_metric_definitions", "ads_camp_thresholds",
 		"ads_kill_snapshots", "ads_counterfactual_outcomes", "ads_self_competition_state",
-		"ads_campaign_hourly", "ads_camp_peak_profiles", "ads_throttle_state"}
+		"ads_campaign_hourly", "ads_camp_peak_profiles", "ads_throttle_state",
+		"decision_cases",
+		"rule_definitions", "rule_logic_definitions", "rule_param_sets", "rule_output_definitions", "rule_execution_logs"}
 
 	for _, name := range colNames {
 		registered, err := global.RegistryCollections.Register(name, db.Collection(name))

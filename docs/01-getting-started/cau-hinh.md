@@ -216,5 +216,5 @@ Các biến bắt buộc sẽ được validate khi server khởi động. Nếu
 
 - [Cài Đặt và Cấu Hình](cai-dat.md)
 - [Khởi Tạo Hệ Thống](khoi-tao.md)
-- [Hướng Dẫn Cài Đặt Firebase](../huong-dan-cai-dat-firebase.md)
+- [Hướng Dẫn Cài Đặt Firebase](../04-deployment/huong-dan-cai-dat-firebase.md)
 

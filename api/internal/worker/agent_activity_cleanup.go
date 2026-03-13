@@ -83,7 +83,7 @@ func (w *AgentActivityCleanupWorker) Start(ctx context.Context) {
 					}
 				}()
 
-				cutoff := time.Now().AddDate(0, 0, -int(w.retentionDays)).Unix()
+				cutoff := time.Now().AddDate(0, 0, -int(w.retentionDays)).UnixMilli()
 				start := time.Now()
 				deletedCount, err := w.activityService.DeleteOlderThan(ctx, cutoff)
 				metrics.RecordDuration("agent_activity_cleanup", time.Since(start))

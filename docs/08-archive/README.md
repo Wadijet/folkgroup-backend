@@ -8,6 +8,11 @@ Thư mục này chứa các tài liệu phân tích và báo cáo cũ được l
 - `nguy-co-bao-mat-va-chuyen-vai-tro.md` - Phân tích nguy cơ bảo mật
 - `organization-structure-analysis.md` - Phân tích cấu trúc tổ chức (đã có trong 02-architecture/organization.md)
 - `xu-ly-admin-voi-firebase.md` - Xử lý admin với Firebase (đã được tích hợp vào tài liệu mới)
+- `REVIEW_BACKEND_DOCS_2025-03.md` - Báo cáo review docs (2025-03-13)
+- `organization-config-endpoints-proposal.md` - Đề xuất endpoint org config (đã triển khai)
+- `organization-config-constraints.md` - Ràng buộc org config (đã triển khai)
+- `organization-config-storage-models.md` - Model lưu trữ org config (đã triển khai)
+- `organization-config-system-keys-proposal.md` - Đề xuất system keys (đã triển khai)
 
 ## 📝 Lưu ý
 

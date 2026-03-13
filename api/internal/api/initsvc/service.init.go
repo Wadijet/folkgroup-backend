@@ -509,6 +509,24 @@ var InitialPermissions = []authmodels.Permission{
 	{Name: "CTALibrary.Update", Describe: "Quyền cập nhật CTA Library", Group: "CTA", Category: "CTALibrary"},
 	{Name: "CTALibrary.Delete", Describe: "Quyền xóa CTA Library", Group: "CTA", Category: "CTALibrary"},
 
+	// ==================================== RULE INTELLIGENCE MODULE ===========================================
+	{Name: "RuleDefinition.Insert", Describe: "Quyền tạo Rule Definition", Group: "RuleIntelligence", Category: "RuleDefinition"},
+	{Name: "RuleDefinition.Read", Describe: "Quyền xem Rule Definition", Group: "RuleIntelligence", Category: "RuleDefinition"},
+	{Name: "RuleDefinition.Update", Describe: "Quyền cập nhật Rule Definition", Group: "RuleIntelligence", Category: "RuleDefinition"},
+	{Name: "RuleDefinition.Delete", Describe: "Quyền xóa Rule Definition", Group: "RuleIntelligence", Category: "RuleDefinition"},
+	{Name: "LogicScript.Insert", Describe: "Quyền tạo Logic Script", Group: "RuleIntelligence", Category: "LogicScript"},
+	{Name: "LogicScript.Read", Describe: "Quyền xem Logic Script", Group: "RuleIntelligence", Category: "LogicScript"},
+	{Name: "LogicScript.Update", Describe: "Quyền cập nhật Logic Script", Group: "RuleIntelligence", Category: "LogicScript"},
+	{Name: "LogicScript.Delete", Describe: "Quyền xóa Logic Script", Group: "RuleIntelligence", Category: "LogicScript"},
+	{Name: "ParamSet.Insert", Describe: "Quyền tạo Param Set", Group: "RuleIntelligence", Category: "ParamSet"},
+	{Name: "ParamSet.Read", Describe: "Quyền xem Param Set", Group: "RuleIntelligence", Category: "ParamSet"},
+	{Name: "ParamSet.Update", Describe: "Quyền cập nhật Param Set", Group: "RuleIntelligence", Category: "ParamSet"},
+	{Name: "ParamSet.Delete", Describe: "Quyền xóa Param Set", Group: "RuleIntelligence", Category: "ParamSet"},
+	{Name: "OutputContract.Insert", Describe: "Quyền tạo Output Contract", Group: "RuleIntelligence", Category: "OutputContract"},
+	{Name: "OutputContract.Read", Describe: "Quyền xem Output Contract", Group: "RuleIntelligence", Category: "OutputContract"},
+	{Name: "OutputContract.Update", Describe: "Quyền cập nhật Output Contract", Group: "RuleIntelligence", Category: "OutputContract"},
+	{Name: "OutputContract.Delete", Describe: "Quyền xóa Output Contract", Group: "RuleIntelligence", Category: "OutputContract"},
+
 	// ==================================== DELIVERY MODULE ===========================================
 	// Delivery Send: Gửi notification trực tiếp
 	{Name: "Delivery.Send", Describe: "Quyền gửi notification trực tiếp qua Delivery Service", Group: "Delivery", Category: "Delivery"},

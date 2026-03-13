@@ -12,7 +12,6 @@ import (
 
 	adsconfig "meta_commerce/internal/api/ads/config"
 	adsmodels "meta_commerce/internal/api/ads/models"
-	adsrules "meta_commerce/internal/api/ads/rules"
 	"meta_commerce/internal/approval"
 	"meta_commerce/internal/global"
 	metasvc "meta_commerce/internal/api/meta/service"
@@ -232,11 +231,11 @@ func GetChsFromYesterday(ctx context.Context, campaignId string, ownerOrgID prim
 	now := time.Now().In(loc)
 	yesterdayStart := time.Date(now.Year(), now.Month(), now.Day()-1, 0, 0, 0, 0, loc).UnixMilli()
 	yesterdayEnd := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc).UnixMilli()
-	opts := mongoopts.FindOne().SetSort(bson.D{{Key: "activityAt", Value: -1}}).SetProjection(bson.M{"metadata.metricsSnapshot": 1})
+	opts := mongoopts.FindOne().SetSort(bson.D{{Key: "activityAt", Value: -1}}).SetProjection(bson.M{"snapshot.metrics": 1})
 	var doc struct {
-		Metadata struct {
-			MetricsSnapshot map[string]interface{} `bson:"metricsSnapshot"`
-		} `bson:"metadata"`
+		Snapshot struct {
+			Metrics map[string]interface{} `bson:"metrics"`
+		} `bson:"snapshot"`
 	}
 	err := coll.FindOne(ctx, bson.M{
 		"objectType":          "campaign",
@@ -247,7 +246,7 @@ func GetChsFromYesterday(ctx context.Context, campaignId string, ownerOrgID prim
 	if err != nil {
 		return 0, false
 	}
-	layer3, _ := doc.Metadata.MetricsSnapshot["layer3"].(map[string]interface{})
+	layer3, _ := doc.Snapshot.Metrics["layer3"].(map[string]interface{})
 	if layer3 == nil {
 		return 0, false
 	}
@@ -366,17 +365,20 @@ func GetPendingProposalForCampaign(ctx context.Context, campaignId string, owner
 
 // increaseCandidate ứng viên tăng budget — dùng cho Anti Self-Competition (FolkForm v4.1 Section 06).
 type increaseCandidate struct {
-	c           CampaignForEval
-	result      *adsrules.RuleResult
+	c              CampaignForEval
+	action         map[string]interface{}
+	actions        []map[string]interface{}
+	report         map[string]interface{}
 	currentMetrics map[string]interface{}
-	metaCfg     *adsmodels.CampaignConfigView
-	cpaPurchase float64
-	chs         float64
-	mqs         float64
-	frequency   float64
+	metaCfg        *adsmodels.CampaignConfigView
+	cpaPurchase    float64
+	chs            float64
+	mqs            float64
+	frequency      float64
 }
 
 // RunAutoPropose đánh giá campaigns và tạo đề xuất khi rule trigger.
+// Dùng ComputeActionsFromMetrics (metasvc.ComputeFinalActions) — logic đầy đủ trong ads module.
 // Anti Self-Competition: Increase chỉ cho top N camp/account (PROTECT:1, EFFICIENCY:1, NORMAL:2, BLITZ:3).
 func RunAutoPropose(ctx context.Context, baseURL string) (proposed int, err error) {
 	campaigns, err := GetCampaignsForAutoPropose(ctx, 30)
@@ -387,21 +389,16 @@ func RunAutoPropose(ctx context.Context, baseURL string) (proposed int, err erro
 	if !ok {
 		return 0, fmt.Errorf("không tìm thấy collection meta_campaigns")
 	}
-	killEnabledByAccount := make(map[string]bool)
 	campaignConfigByAccount := make(map[string]*adsmodels.CampaignConfigView)
 	increaseCandidatesByAccount := make(map[string][]increaseCandidate)
 
 	for _, c := range campaigns {
 		cacheKey := c.AdAccountId + "|" + c.OwnerOrganizationID.Hex()
-		if _, ok := killEnabledByAccount[cacheKey]; !ok {
-			killEnabledByAccount[cacheKey] = GetKillRulesEnabled(ctx, c.AdAccountId, c.OwnerOrganizationID)
-		}
 		if _, ok := campaignConfigByAccount[cacheKey]; !ok {
 			cfg, _ := GetCampaignConfig(ctx, c.AdAccountId, c.OwnerOrganizationID)
 			campaignConfigByAccount[cacheKey] = cfg
 		}
 		metaCfg := campaignConfigByAccount[cacheKey]
-		opts := &adsrules.EvalOptions{KillRulesEnabled: killEnabledByAccount[cacheKey]}
 
 		pendingInfo, pendingErr := GetPendingProposalForCampaign(ctx, c.CampaignId, c.OwnerOrganizationID)
 		if pendingErr != nil {
@@ -409,55 +406,39 @@ func RunAutoPropose(ctx context.Context, baseURL string) (proposed int, err erro
 		}
 		hasPending := pendingInfo != nil
 
-		var flags []interface{}
+		// Recalculate nếu có pending (để lấy metrics mới nhất)
 		if hasPending {
 			if recalcErr := metasvc.RecalculateForEntity(ctx, "campaign", c.CampaignId, c.AdAccountId, c.OwnerOrganizationID); recalcErr != nil {
 				continue
 			}
-			var doc struct {
-				CurrentMetrics map[string]interface{} `bson:"currentMetrics"`
-			}
-			filter := bson.M{"campaignId": c.CampaignId, "ownerOrganizationId": c.OwnerOrganizationID}
-			if findErr := campaignsColl.FindOne(ctx, filter, mongoopts.FindOne().SetProjection(bson.M{"currentMetrics.alertFlags": 1})).Decode(&doc); findErr != nil {
-				continue
-			}
-			alertFlags, _ := doc.CurrentMetrics["alertFlags"]
-			flags = ParseAlertFlags(alertFlags)
-		} else {
-			flags = ParseAlertFlags(c.AlertFlags)
-		}
-		if len(flags) == 0 && !hasPending {
-			continue
 		}
 
-		result := adsrules.EvaluateAlertFlagsWithConfig(flags, opts, metaCfg)
-		if result == nil {
-			result = adsrules.EvaluateForDecreaseWithConfig(flags, metaCfg)
-		}
-		if result == nil && !adsconfig.IsNoonCutWindow(time.Now()) {
-			result = adsrules.EvaluateForIncrease(flags, metaCfg)
-		}
-
-		if result == nil || !result.ShouldPropose {
+		currentMetrics := getCampaignCurrentMetrics(ctx, campaignsColl, c.CampaignId, c.OwnerOrganizationID)
+		if currentMetrics == nil {
 			if hasPending {
 				_, _ = approval.Cancel(ctx, pendingInfo.ID.Hex(), c.OwnerOrganizationID)
 			}
 			continue
 		}
-		if metaCfg != nil && !ShouldAutoPropose(result.RuleCode, metaCfg) {
+
+		// Gọi logic tính action (metasvc.ComputeFinalActions) — lifecycle, rules, noon cut, dual-source, chs
+		actions, report := ComputeActionsFromMetrics(ctx, c.CampaignId, c.AdAccountId, c.OwnerOrganizationID, currentMetrics)
+
+		if len(actions) == 0 {
 			if hasPending {
 				_, _ = approval.Cancel(ctx, pendingInfo.ID.Hex(), c.OwnerOrganizationID)
 			}
 			continue
 		}
+		action := actions[0]
+		actionType, _ := action["actionType"].(string)
+		ruleCode, _ := action["ruleCode"].(string)
 
 		// Increase: thu thập ứng viên, xử lý sau (Anti Self-Competition — top N)
-		if result.ActionType == "INCREASE" {
+		if actionType == "INCREASE" {
 			if IsSelfCompetitionSuspect(ctx, c.AdAccountId, c.OwnerOrganizationID) {
 				continue
 			}
-			currentMetrics := getCampaignCurrentMetrics(ctx, campaignsColl, c.CampaignId, c.OwnerOrganizationID)
-			cand := increaseCandidate{c: c, result: result, currentMetrics: currentMetrics, metaCfg: metaCfg}
 			layer1, _ := currentMetrics["layer1"].(map[string]interface{})
 			layer3, _ := currentMetrics["layer3"].(map[string]interface{})
 			raw, _ := currentMetrics["raw"].(map[string]interface{})
@@ -471,57 +452,51 @@ func RunAutoPropose(ctx context.Context, baseURL string) (proposed int, err erro
 			}
 			if meta7d != nil {
 				spend = toFloat64FromInterface(meta7d["spend"])
-				cand.frequency = toFloat64FromInterface(meta7d["frequency"])
 			}
-			cand.cpaPurchase = 0
+			cpaPurchase := 0.0
 			if orders > 0 {
-				cand.cpaPurchase = spend / orders
+				cpaPurchase = spend / orders
 			}
-			cand.chs = toFloat64FromInterface(layer3["chs"])
-			cand.mqs = toFloat64FromInterface(layer1["mqs_7d"])
+			cand := increaseCandidate{
+				c: c, action: action, actions: actions, report: report,
+				currentMetrics: currentMetrics, metaCfg: metaCfg,
+				cpaPurchase: cpaPurchase,
+				chs:        toFloat64FromInterface(layer3["chs"]),
+				mqs:        toFloat64FromInterface(layer1["mqs_7d"]),
+				frequency:  toFloat64FromInterface(meta7d["frequency"]),
+			}
 			increaseCandidatesByAccount[cacheKey] = append(increaseCandidatesByAccount[cacheKey], cand)
 			continue
 		}
 
-		// Kill/Decrease: xử lý ngay
-		if hasPending && pendingInfo.ActionType == result.ActionType && pendingInfo.RuleCode == result.RuleCode {
+		// Kill/Decrease: cập nhật currentMetrics.actions, ghi activity, propose
+		if hasPending && pendingInfo.ActionType == actionType && pendingInfo.RuleCode == ruleCode {
 			continue
 		}
 		if hasPending {
 			_, _ = approval.Cancel(ctx, pendingInfo.ID.Hex(), c.OwnerOrganizationID)
 		}
-		currentMetrics := getCampaignCurrentMetrics(ctx, campaignsColl, c.CampaignId, c.OwnerOrganizationID)
-		// Dual-source confirm (FolkForm v4.1 PATCH 05): Pancake=0 VÀ FB Purchases>0 → attribution gap, chờ 1 checkpoint.
-		if (result.ActionType == "PAUSE" || result.ActionType == "KILL") && dualSourceKillRules[result.RuleCode] {
-			orders2h, _ := getPancakeOrdersFromCurrentMetrics(currentMetrics)
-			if orders2h > 0 {
-				continue // Pancake có đơn → không kill
-			}
-			if fbPurchases, ok := metasvc.GetFBPurchasesForCampaign(ctx, c.CampaignId, c.AdAccountId, c.OwnerOrganizationID); ok && fbPurchases > 0 {
-				continue // FB có purchase, Pancake chưa → attribution gap, chờ checkpoint
-			}
-		}
-		if result.RuleCode == "chs_critical" {
-			if chsYesterday, ok := GetChsFromYesterday(ctx, c.CampaignId, c.OwnerOrganizationID); ok && chsYesterday >= 60 {
-				continue
-			}
+		if err := UpdateCampaignActionsAndRecordActivity(ctx, c.CampaignId, c.AdAccountId, c.OwnerOrganizationID, currentMetrics, actions, report); err != nil {
+			continue
 		}
 		metricsPayload := buildMetricsPayloadForNotification(ctx, campaignsColl, c.CampaignId, c.AdAccountId, c.OwnerOrganizationID, currentMetrics)
+		reason, _ := action["reason"].(string)
+		value := action["value"]
 		pending, err := Propose(ctx, &ProposeInput{
-			ActionType:   result.ActionType,
+			ActionType:   actionType,
 			AdAccountId:  c.AdAccountId,
 			CampaignId:   c.CampaignId,
 			CampaignName: c.CampaignName,
-			Reason:       result.Reason,
-			Value:        result.Value,
-			RuleCode:     result.RuleCode,
+			Reason:       reason,
+			Value:        value,
+			RuleCode:     ruleCode,
 			Payload:      metricsPayload,
 		}, c.OwnerOrganizationID, baseURL)
 		if err != nil {
 			return proposed, fmt.Errorf("propose campaign %s: %w", c.CampaignId, err)
 		}
 		proposed++
-		if pending != nil && metaCfg != nil && ShouldAutoApprove(result.RuleCode, metaCfg) {
+		if pending != nil && metaCfg != nil && ShouldAutoApprove(ruleCode, metaCfg) {
 			_, _ = approval.Approve(ctx, pending.ID.Hex(), c.OwnerOrganizationID)
 		}
 	}
@@ -537,7 +512,6 @@ func RunAutoPropose(ctx context.Context, baseURL string) (proposed int, err erro
 		if len(candidates) == 0 {
 			continue
 		}
-		// Sắp xếp theo priority: CPA_Purchase thấp nhất, CHS healthy (>=60), MQS cao nhất, Frequency thấp nhất
 		sortIncreaseCandidates(candidates)
 		topN := candidates
 		if len(topN) > limit {
@@ -547,22 +521,27 @@ func RunAutoPropose(ctx context.Context, baseURL string) (proposed int, err erro
 			if hasPending, _ := HasPendingProposalForCampaign(ctx, cand.c.CampaignId, cand.c.OwnerOrganizationID); hasPending {
 				continue
 			}
+			if err := UpdateCampaignActionsAndRecordActivity(ctx, cand.c.CampaignId, cand.c.AdAccountId, cand.c.OwnerOrganizationID, cand.currentMetrics, cand.actions, cand.report); err != nil {
+				continue
+			}
 			metricsPayload := buildMetricsPayloadForNotification(ctx, campaignsColl, cand.c.CampaignId, cand.c.AdAccountId, cand.c.OwnerOrganizationID, cand.currentMetrics)
+			reason, _ := cand.action["reason"].(string)
+			ruleCode, _ := cand.action["ruleCode"].(string)
 			pending, err := Propose(ctx, &ProposeInput{
-				ActionType:   cand.result.ActionType,
+				ActionType:   "INCREASE",
 				AdAccountId:  cand.c.AdAccountId,
 				CampaignId:   cand.c.CampaignId,
 				CampaignName: cand.c.CampaignName,
-				Reason:       cand.result.Reason,
-				Value:        cand.result.Value,
-				RuleCode:     cand.result.RuleCode,
+				Reason:       reason,
+				Value:        cand.action["value"],
+				RuleCode:     ruleCode,
 				Payload:      metricsPayload,
 			}, cand.c.OwnerOrganizationID, baseURL)
 			if err != nil {
 				return proposed, fmt.Errorf("propose campaign %s: %w", cand.c.CampaignId, err)
 			}
 			proposed++
-			if pending != nil && cand.metaCfg != nil && ShouldAutoApprove(cand.result.RuleCode, cand.metaCfg) {
+			if pending != nil && cand.metaCfg != nil && ShouldAutoApprove(ruleCode, cand.metaCfg) {
 				_, _ = approval.Approve(ctx, pending.ID.Hex(), cand.c.OwnerOrganizationID)
 			}
 		}

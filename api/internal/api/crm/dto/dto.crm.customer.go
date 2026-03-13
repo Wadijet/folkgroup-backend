@@ -2,6 +2,8 @@
 package dto
 
 import (
+	"meta_commerce/internal/common/activity"
+
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -89,13 +91,6 @@ type CrmNoteSummary struct {
 	CreatedAt      int64  `json:"createdAt"`
 }
 
-// ActivityChangeItem mô tả một thay đổi (field, oldValue, newValue).
-type ActivityChangeItem struct {
-	Field    string      `json:"field"`
-	OldValue interface{} `json:"oldValue,omitempty"`
-	NewValue interface{} `json:"newValue,omitempty"`
-}
-
 // CrmActivitySummary tóm tắt hoạt động (lịch sử).
 type CrmActivitySummary struct {
 	ActivityType   string                 `json:"activityType"`
@@ -109,7 +104,7 @@ type CrmActivitySummary struct {
 	DisplaySubtext string                 `json:"displaySubtext,omitempty"`
 	ActorId        string                 `json:"actorId,omitempty"`
 	ActorName      string                 `json:"actorName,omitempty"`
-	Changes        []ActivityChangeItem   `json:"changes,omitempty"`
+	Changes        []activity.ActivityChangeItem `json:"changes,omitempty"`
 	Reason         string                 `json:"reason,omitempty"`
 	ClientIp       string                 `json:"clientIp,omitempty"`
 	UserAgent      string                 `json:"userAgent,omitempty"`

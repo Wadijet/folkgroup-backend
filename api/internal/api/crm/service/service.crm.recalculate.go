@@ -173,17 +173,17 @@ func (s *CrmCustomerService) RecalculateMismatchCustomers(ctx context.Context, o
 	}
 
 	nowMs := time.Now().UnixMilli()
-	// 1. Lấy last metricsSnapshot per customer từ activity
+	// 1. Lấy last snapshot.metrics per customer từ activity
 	pipe := []bson.M{
 		{"$match": bson.M{
-			"ownerOrganizationId":      ownerOrgID,
-			"activityAt":               bson.M{"$lte": nowMs},
-			"metadata.metricsSnapshot": bson.M{"$exists": true, "$ne": nil},
+			"ownerOrganizationId": ownerOrgID,
+			"activityAt":         bson.M{"$lte": nowMs},
+			"snapshot.metrics":   bson.M{"$exists": true, "$ne": nil},
 		}},
 		{"$sort": bson.M{"activityAt": -1}},
 		{"$group": bson.M{
 			"_id":             "$unifiedId",
-			"metricsSnapshot": bson.M{"$first": "$metadata.metricsSnapshot"},
+			"metricsSnapshot": bson.M{"$first": "$snapshot.metrics"},
 		}},
 	}
 	cursor, err := actColl.Aggregate(ctx, pipe)

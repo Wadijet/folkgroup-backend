@@ -343,6 +343,66 @@ func GetConfigForCampaign(ctx context.Context, adAccountId string, ownerOrgID pr
 	return &v, nil
 }
 
+// RuleRequiresDualSourceConfirm trả về true nếu rule cần xác nhận dual-source (FB + Pancake) trước kill (FolkForm v4.1 PATCH 05).
+// Dùng bởi metasvc computeFinalActions (tránh import cycle với adssvc).
+func RuleRequiresDualSourceConfirm(ruleCode string) bool {
+	dualSource := map[string]bool{
+		"sl_b": true, "sl_d": true, "ko_b": true,
+		"mess_trap_suspect": true, "mess_trap_confirmed": true,
+	}
+	return dualSource[ruleCode]
+}
+
+// GetShouldAutoPropose kiểm tra ruleCode có được tự động đề xuất không. Đọc từ ActionRuleConfig.
+// Dùng bởi metasvc computeFinalActions (tránh import cycle với adssvc). metaCfg nil = true.
+func GetShouldAutoPropose(ruleCode string, metaCfg *adsmodels.CampaignConfigView) bool {
+	rules := getActionRulesForConfig(metaCfg)
+	for _, r := range rules {
+		if r.code == ruleCode {
+			return r.autoPropose
+		}
+	}
+	return true
+}
+
+func getActionRulesForConfig(metaCfg *adsmodels.CampaignConfigView) []struct{ code string; autoPropose, autoApprove bool } {
+	var rules []struct{ code string; autoPropose, autoApprove bool }
+	if metaCfg != nil && len(metaCfg.ActionRuleConfig.KillRules)+len(metaCfg.ActionRuleConfig.DecreaseRules) > 0 {
+		arc := &metaCfg.ActionRuleConfig
+		for _, r := range arc.KillRules {
+			code := r.RuleCode
+			if code == "" {
+				code = r.Flag
+			}
+			rules = append(rules, struct{ code string; autoPropose, autoApprove bool }{code, r.AutoPropose, r.AutoApprove})
+		}
+		for _, r := range arc.DecreaseRules {
+			code := r.RuleCode
+			if code == "" {
+				code = r.Flag
+			}
+			rules = append(rules, struct{ code string; autoPropose, autoApprove bool }{code, r.AutoPropose, r.AutoApprove})
+		}
+		return rules
+	}
+	def := DefaultActionRuleConfig()
+	for _, r := range def.KillRules {
+		code := r.RuleCode
+		if code == "" {
+			code = r.Flag
+		}
+		rules = append(rules, struct{ code string; autoPropose, autoApprove bool }{code, r.AutoPropose, r.AutoApprove})
+	}
+	for _, r := range def.DecreaseRules {
+		code := r.RuleCode
+		if code == "" {
+			code = r.Flag
+		}
+		rules = append(rules, struct{ code string; autoPropose, autoApprove bool }{code, r.AutoPropose, r.AutoApprove})
+	}
+	return rules
+}
+
 // GetKillRulesEnabled đọc công tắc kill rules từ ads_meta_config. FALSE → skip SL-D, SL-E, CHS Kill, KO-B (vd: Pancake down).
 // Dùng bởi metasvc computeSuggestedActions (tránh import cycle với adssvc).
 func GetKillRulesEnabled(ctx context.Context, adAccountId string, ownerOrgID primitive.ObjectID) bool {

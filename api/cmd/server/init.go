@@ -18,6 +18,7 @@ import (
 	notifmodels "meta_commerce/internal/api/notification/models"
 	pcmodels "meta_commerce/internal/api/pc/models"
 	reportmodels "meta_commerce/internal/api/report/models"
+	ruleintelmodels "meta_commerce/internal/api/ruleintel/models"
 	"meta_commerce/internal/database"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/utility"
@@ -135,6 +136,14 @@ func initColNames() {
 	global.MongoDB_ColNames.AdsCampaignHourly = "ads_campaign_hourly"
 	global.MongoDB_ColNames.AdsCampPeakProfiles = "ads_camp_peak_profiles"
 	global.MongoDB_ColNames.AdsThrottleState = "ads_throttle_state"
+	global.MongoDB_ColNames.DecisionCases = "decision_cases"
+
+	// Module Rule Intelligence
+	global.MongoDB_ColNames.RuleDefinitions = "rule_definitions"
+	global.MongoDB_ColNames.RuleLogicDefinitions = "rule_logic_definitions"
+	global.MongoDB_ColNames.RuleParamSets = "rule_param_sets"
+	global.MongoDB_ColNames.RuleOutputDefinitions = "rule_output_definitions"
+	global.MongoDB_ColNames.RuleExecutionLogs = "rule_execution_logs"
 
 	logrus.Info("Initialized collection names") // Ghi log thông báo đã khởi tạo tên các collection
 }
@@ -239,7 +248,7 @@ func initDatabase_MongoDB() {
 	// Module CRM
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmCustomers), crmmodels.CrmCustomer{})
 	database.CreateCrmCustomerProfileIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmCustomers))
-	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmActivityHistory), crmmodels.CrmActivityHistory{})
+	database.CreateCrmActivityIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmActivityHistory))
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmNotes), crmmodels.CrmNote{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmPendingIngest), crmmodels.CrmPendingIngest{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmBulkJobs), crmmodels.CrmBulkJob{})
@@ -253,7 +262,7 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.MetaAdInsightsDailySnapshots), metamodels.MetaAdInsightDailySnapshot{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.ActionPendingApproval), pkgapproval.ActionPending{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsApprovalConfig), adsmodels.AdsApprovalConfig{})
-	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsActivityHistory), metamodels.AdsActivityHistory{})
+	database.CreateAdsActivityIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsActivityHistory))
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsMetricDefinitions), adsmodels.AdsMetricDefinition{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsCampThresholds), adsmodels.AdsCampThresholds{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsKillSnapshots), adsmodels.AdsKillSnapshot{})
@@ -261,6 +270,14 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsCampaignHourly), adsmodels.AdsCampaignHourly{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsCampPeakProfiles), adsmodels.AdsCampPeakProfile{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsThrottleState), adsmodels.AdsThrottleState{})
+	database.CreateDecisionCaseIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DecisionCases))
+
+	// Module Rule Intelligence
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.RuleDefinitions), ruleintelmodels.RuleDefinition{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.RuleLogicDefinitions), ruleintelmodels.LogicScript{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.RuleParamSets), ruleintelmodels.ParamSet{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.RuleOutputDefinitions), ruleintelmodels.OutputContract{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.RuleExecutionLogs), ruleintelmodels.RuleExecutionTrace{})
 }
 
 // initFirebase khởi tạo Firebase Admin SDK

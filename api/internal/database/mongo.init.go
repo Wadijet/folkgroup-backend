@@ -408,6 +408,60 @@ func CreateIndexes(ctx context.Context, collection *mongo.Collection, model inte
 	return nil
 }
 
+// CreateCrmActivityIndexes tạo index cho crm_activity_history (ActivityBase).
+// Dùng snapshot.profile, snapshot.metrics thay metadata.profileSnapshot, metadata.metricsSnapshot.
+func CreateCrmActivityIndexes(ctx context.Context, collection *mongo.Collection) error {
+	indexes := []mongo.IndexModel{
+		{Keys: bson.D{{Key: "unifiedId", Value: 1}}, Options: options.Index().SetName("unifiedId_single")},
+		{Keys: bson.D{{Key: "ownerOrganizationId", Value: 1}}, Options: options.Index().SetName("ownerOrganizationId_single")},
+		{Keys: bson.D{{Key: "domain", Value: 1}}, Options: options.Index().SetName("domain_single")},
+		{Keys: bson.D{{Key: "activityType", Value: 1}}, Options: options.Index().SetName("activityType_single")},
+		{Keys: bson.D{{Key: "activityAt", Value: -1}}, Options: options.Index().SetName("activityAt_single")},
+		{Keys: bson.D{{Key: "source", Value: 1}}, Options: options.Index().SetName("source_single")},
+		{Keys: bson.D{{Key: "createdAt", Value: -1}}, Options: options.Index().SetName("createdAt_single")},
+		{Keys: bson.D{{Key: "ownerOrganizationId", Value: 1}, {Key: "unifiedId", Value: 1}, {Key: "activityAt", Value: -1}}, Options: options.Index().SetName("crm_activity_org_unified_at")},
+		{Keys: bson.D{{Key: "ownerOrganizationId", Value: 1}, {Key: "activityType", Value: 1}, {Key: "activityAt", Value: -1}}, Options: options.Index().SetName("crm_activity_org_type_at")},
+		{Keys: bson.D{{Key: "ownerOrganizationId", Value: 1}, {Key: "source", Value: 1}, {Key: "activityAt", Value: -1}}, Options: options.Index().SetName("crm_activity_org_source_at")},
+		{Keys: bson.D{{Key: "ownerOrganizationId", Value: 1}, {Key: "activityAt", Value: -1}}, Options: options.Index().SetName("crm_activity_org_at_report")},
+		{Keys: bson.D{{Key: "ownerOrganizationId", Value: 1}, {Key: "activityAt", Value: -1}}, Options: options.Index().SetName("crm_activity_org_at_report_snapshot").SetPartialFilterExpression(bson.M{"snapshot.metrics": bson.M{"$exists": true}})},
+		{Keys: bson.D{{Key: "ownerOrganizationId", Value: 1}, {Key: "createdAt", Value: -1}}, Options: options.Index().SetName("crm_activity_org_created")},
+	}
+	_, err := collection.Indexes().CreateMany(ctx, indexes)
+	return err
+}
+
+// CreateAdsActivityIndexes tạo index cho ads_activity_history (ActivityBase + AdAccountId, ObjectType, ObjectId).
+func CreateAdsActivityIndexes(ctx context.Context, collection *mongo.Collection) error {
+	indexes := []mongo.IndexModel{
+		{Keys: bson.D{{Key: "activityType", Value: 1}}, Options: options.Index().SetName("activityType_single")},
+		{Keys: bson.D{{Key: "adAccountId", Value: 1}}, Options: options.Index().SetName("adAccountId_single")},
+		{Keys: bson.D{{Key: "objectType", Value: 1}}, Options: options.Index().SetName("objectType_single")},
+		{Keys: bson.D{{Key: "objectId", Value: 1}}, Options: options.Index().SetName("objectId_single")},
+		{Keys: bson.D{{Key: "ownerOrganizationId", Value: 1}}, Options: options.Index().SetName("ownerOrganizationId_single")},
+		{Keys: bson.D{{Key: "activityAt", Value: -1}}, Options: options.Index().SetName("activityAt_single")},
+		{Keys: bson.D{{Key: "ownerOrganizationId", Value: 1}, {Key: "adAccountId", Value: 1}, {Key: "objectType", Value: 1}, {Key: "objectId", Value: 1}, {Key: "activityAt", Value: -1}}, Options: options.Index().SetName("ads_activity_by_entity")},
+	}
+	_, err := collection.Indexes().CreateMany(ctx, indexes)
+	return err
+}
+
+// CreateDecisionCaseIndexes tạo index cho decision_cases.
+func CreateDecisionCaseIndexes(ctx context.Context, collection *mongo.Collection) error {
+	indexes := []mongo.IndexModel{
+		{Keys: bson.D{{Key: "caseId", Value: 1}}, Options: options.Index().SetName("caseId_unique").SetUnique(true)},
+		{Keys: bson.D{{Key: "ownerOrganizationId", Value: 1}, {Key: "domain", Value: 1}, {Key: "createdAt", Value: -1}}, Options: options.Index().SetName("decision_org_domain_created")},
+		{Keys: bson.D{{Key: "ownerOrganizationId", Value: 1}, {Key: "targetType", Value: 1}, {Key: "targetId", Value: 1}}, Options: options.Index().SetName("decision_org_target")},
+		{Keys: bson.D{{Key: "caseType", Value: 1}}, Options: options.Index().SetName("caseType_single")},
+		{Keys: bson.D{{Key: "caseCategory", Value: 1}}, Options: options.Index().SetName("caseCategory_single")},
+		{Keys: bson.D{{Key: "goalCode", Value: 1}}, Options: options.Index().SetName("goalCode_single")},
+		{Keys: bson.D{{Key: "result", Value: 1}}, Options: options.Index().SetName("result_single")},
+		{Keys: bson.D{{Key: "sourceClosedAt", Value: -1}}, Options: options.Index().SetName("sourceClosedAt_single")},
+		{Keys: bson.D{{Key: "sourceRef.refType", Value: 1}, {Key: "sourceRef.refId", Value: 1}}, Options: options.Index().SetName("decision_source_ref")},
+	}
+	_, err := collection.Indexes().CreateMany(ctx, indexes)
+	return err
+}
+
 // CreateCrmCustomerProfileIndexes tạo index cho profile nested (profile.name, profile.phoneNumbers).
 // Gọi sau CreateIndexes cho CrmCustomer.
 func CreateCrmCustomerProfileIndexes(ctx context.Context, collection *mongo.Collection) error {

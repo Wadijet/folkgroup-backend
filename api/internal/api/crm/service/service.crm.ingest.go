@@ -82,12 +82,15 @@ func (s *CrmCustomerService) IngestOrderTouchpoint(ctx context.Context, customer
 			MergeSnapshotIntoMetadata(metadata, snap)
 		} else {
 			// Upsert: giữ snapshot cũ khi không có thay đổi (tránh mất snapshot khi order_created → order_completed)
-			if existing := actSvc.GetExistingActivityBySourceRef(ctx, unifiedId, ownerOrgID, "pos", sourceRef); existing != nil && existing.Metadata != nil {
-				for _, key := range []string{"profileSnapshot", "metricsSnapshot", "snapshotChanges", "snapshotAt"} {
-					if v, ok := existing.Metadata[key]; ok {
-						metadata[key] = v
+			if existing := actSvc.GetExistingActivityBySourceRef(ctx, unifiedId, ownerOrgID, "pos", sourceRef); existing != nil {
+				if existing.Metadata != nil {
+					for _, key := range []string{"profileSnapshot", "metricsSnapshot", "snapshotChanges", "snapshotAt"} {
+						if v, ok := existing.Metadata[key]; ok {
+							metadata[key] = v
+						}
 					}
 				}
+				CopySnapshotToMetadata(metadata, existing) // Cấu trúc mới: Snapshot + Changes
 			}
 		}
 	}
@@ -433,12 +436,15 @@ func (s *CrmCustomerService) IngestConversationTouchpoint(ctx context.Context, c
 			MergeSnapshotIntoMetadata(metadata, snap)
 		} else {
 			// Upsert: giữ snapshot cũ khi không có thay đổi
-			if existing := actSvc.GetExistingActivityBySourceRef(ctx, unifiedId, ownerOrgID, "fb", sourceRef); existing != nil && existing.Metadata != nil {
-				for _, key := range []string{"profileSnapshot", "metricsSnapshot", "snapshotChanges", "snapshotAt"} {
-					if v, ok := existing.Metadata[key]; ok {
-						metadata[key] = v
+			if existing := actSvc.GetExistingActivityBySourceRef(ctx, unifiedId, ownerOrgID, "fb", sourceRef); existing != nil {
+				if existing.Metadata != nil {
+					for _, key := range []string{"profileSnapshot", "metricsSnapshot", "snapshotChanges", "snapshotAt"} {
+						if v, ok := existing.Metadata[key]; ok {
+							metadata[key] = v
+						}
 					}
 				}
+				CopySnapshotToMetadata(metadata, existing) // Cấu trúc mới: Snapshot + Changes
 			}
 		}
 	}

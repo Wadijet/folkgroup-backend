@@ -20,12 +20,14 @@ import (
 	contentrouter "meta_commerce/internal/api/content/router"
 	crmrouter "meta_commerce/internal/api/crm/router"
 	ctarouter "meta_commerce/internal/api/cta/router"
+	decisionrouter "meta_commerce/internal/api/decision/router"
 	deliveryrouter "meta_commerce/internal/api/delivery/router"
 	fbrouter "meta_commerce/internal/api/fb/router"
 	metarouter "meta_commerce/internal/api/meta/router"
 	notificationrouter "meta_commerce/internal/api/notification/router"
 	pcrouter "meta_commerce/internal/api/pc/router"
 	reportrouter "meta_commerce/internal/api/report/router"
+	ruleintelrouter "meta_commerce/internal/api/ruleintel/router"
 	"meta_commerce/internal/api/router"
 	webhookrouter "meta_commerce/internal/api/webhook/router"
 	"meta_commerce/internal/common"
@@ -301,6 +303,8 @@ func InitFiberApp() *fiber.App {
 		authrouter.Register,
 		approvalrouter.Register,
 		adsrouter.Register,
+		decisionrouter.Register,
+		ruleintelrouter.Register,
 		fbrouter.Register,
 		metarouter.Register,
 		pcrouter.Register,

@@ -254,7 +254,5 @@ Headers: Authorization: Bearer <admin-token>
 
 ## 📚 Tài Liệu Liên Quan
 
-- [Quy Trình Khởi Tạo Hệ Thống](../quy-trinh-khoi-tao-he-thong.md) - Tài liệu chi tiết
-- [Xử Lý Admin với Firebase](../xu-ly-admin-voi-firebase.md)
-- [Rà Soát Hệ Thống](../ra-soat-he-thong-hoan-chinh.md)
+- [Xử Lý Admin với Firebase](../08-archive/xu-ly-admin-voi-firebase.md)
 

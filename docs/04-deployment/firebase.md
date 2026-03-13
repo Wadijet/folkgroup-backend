@@ -56,7 +56,7 @@ FIREBASE_API_KEY=your-api-key
 
 ## 📚 Tài Liệu Liên Quan
 
-- [Hướng Dẫn Đăng Ký Firebase](../huong-dan-dang-ky-firebase.md)
-- [Hướng Dẫn Cài Đặt Firebase](../huong-dan-cai-dat-firebase.md)
+- [Hướng Dẫn Đăng Ký Firebase](huong-dan-dang-ky-firebase.md)
+- [Hướng Dẫn Cài Đặt Firebase](huong-dan-cai-dat-firebase.md)
 - [Firebase Authentication với Database](../firebase-auth-voi-database.md)
 

@@ -14,6 +14,7 @@ import (
 	adsadaptive "meta_commerce/internal/api/ads/adaptive"
 	adsconfig "meta_commerce/internal/api/ads/config"
 	"meta_commerce/internal/api/meta/models"
+	"meta_commerce/internal/common/activity"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/logger"
 
@@ -393,36 +394,52 @@ func updateAdCurrentMetrics(ctx context.Context, adId, adAccountId string, owner
 
 // recordActivityIfChanged so sánh old vs current, nếu khác thì ghi AdsActivityHistory với snapshotChanges (cho Ad).
 func recordActivityIfChanged(ctx context.Context, adId, adAccountId string, ownerOrgID primitive.ObjectID, old, current map[string]interface{}, trigger string) {
-	recordActivityForEntity(ctx, "ad", adId, adAccountId, ownerOrgID, old, current, trigger)
+	RecordActivityForEntity(ctx, "ad", adId, adAccountId, ownerOrgID, old, current, trigger, nil)
 }
 
-// recordActivityForEntity ghi ads_activity_history khi currentMetrics thay đổi (Ad, AdSet, Campaign, Account).
-func recordActivityForEntity(ctx context.Context, objectType, objectId, adAccountId string, ownerOrgID primitive.ObjectID, old, current map[string]interface{}, trigger string) {
-	changes := diffMapsFlatten(old, current)
-	if len(changes) == 0 {
+// RecordActivityForEntity ghi ads_activity_history khi currentMetrics thay đổi (Ad, AdSet, Campaign, Account).
+// extraMetadata (vd: actionDebugReport) được merge vào Metadata.
+func RecordActivityForEntity(ctx context.Context, objectType, objectId, adAccountId string, ownerOrgID primitive.ObjectID, old, current map[string]interface{}, trigger string, extraMetadata map[string]interface{}) {
+	changesRaw := diffMapsFlatten(old, current)
+	if len(changesRaw) == 0 {
 		return
 	}
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.AdsActivityHistory)
-	if !ok {
-		logger.GetAppLogger().WithError(fmt.Errorf("không tìm thấy collection ads_activity_history")).Warn("[META] Không ghi activity history")
+	svc, err := NewMetaAdsActivityHistoryService()
+	if err != nil {
+		logger.GetAppLogger().WithError(err).Warn("[META] Không ghi activity history")
 		return
 	}
 	now := time.Now().UnixMilli()
-	doc := models.AdsActivityHistory{
-		ActivityType:        models.AdsActivityTypeMetricsChanged,
-		AdAccountId:         adAccountId,
-		ObjectType:          objectType,
-		ObjectId:            objectId,
-		OwnerOrganizationID: ownerOrgID,
-		ActivityAt:          now,
-		Metadata: map[string]interface{}{
-			"metricsSnapshot": current,
-			"snapshotChanges": changes,
-			"trigger":         trigger,
-		},
-		CreatedAt: now,
+	changes := make([]activity.ActivityChangeItem, 0, len(changesRaw))
+	for _, c := range changesRaw {
+		f, _ := c["field"].(string)
+		changes = append(changes, activity.ActivityChangeItem{
+			Field:    f,
+			OldValue: c["oldValue"],
+			NewValue: c["newValue"],
+		})
 	}
-	if _, err := coll.InsertOne(ctx, doc); err != nil {
+	unifiedId := adAccountId + ":" + objectType + ":" + objectId
+	doc := models.AdsActivityHistory{
+		ActivityBase: activity.ActivityBase{
+			ActivityType:        models.AdsActivityTypeMetricsChanged,
+			Domain:               "ads",
+			OwnerOrganizationID:  ownerOrgID,
+			UnifiedId:            unifiedId,
+			Source:               "meta",
+			Actor:                activity.Actor{Type: activity.ActorTypeSystem},
+			ActivityAt:           now,
+			Snapshot:             activity.Snapshot{Metrics: current},
+			Context:              map[string]interface{}{"trigger": trigger},
+			Changes:              changes,
+			Metadata:             extraMetadata,
+			CreatedAt:            now,
+		},
+		AdAccountId: adAccountId,
+		ObjectType:  objectType,
+		ObjectId:    objectId,
+	}
+	if _, err := svc.InsertOne(ctx, doc); err != nil {
 		logger.GetAppLogger().WithError(err).Warn("[META] Ghi activity history thất bại")
 	}
 }
@@ -1200,13 +1217,11 @@ func rollupFromChildren(ctx context.Context, objectType, objectId, adAccountId s
 	}
 	layer3 := computeLayer3(layer1, layer2)
 	// Theo FolkForm v4.1: toàn bộ 13 rules CHỈ apply cho campaign. AdSet/AdAccount không có FLAG_RULE.
-	// Rules engine cần raw.7d (có meta, pancake) — getRaw7d hỗ trợ cả cấu trúc mới và cũ.
+	// Server rollup CHỈ tạo flags — không tạo actions. Worker (ads module) sẽ tính actions và ghi activity riêng.
 	var alertFlags []string
-	var actions []map[string]interface{}
 	if objectType == "campaign" {
 		cfg, _ := adsconfig.GetConfigForCampaign(ctx, adAccountId, ownerOrgID)
 		alertFlags = computeAlertFlags(ctx, getRaw7d(raw), layer1, layer2, layer3, cfg, objectId, adAccountId, ownerOrgID)
-		actions = computeSuggestedActions(ctx, alertFlags, adAccountId, ownerOrgID, cfg, getRaw7d(raw), layer1)
 		// Cập nhật ads_camp_thresholds (P25/P50/P75) cho Per-Camp Adaptive — FolkForm v4.1 Section 2.2
 		if metaCreatedAt := toInt64(getRaw7d(raw), "metaCreatedAt"); metaCreatedAt > 0 {
 			if err := adsadaptive.ComputeCampThresholds(ctx, objectId, adAccountId, ownerOrgID, metaCreatedAt); err != nil {
@@ -1217,14 +1232,13 @@ func rollupFromChildren(ctx context.Context, objectType, objectId, adAccountId s
 		}
 	}
 	current := map[string]interface{}{
-		"raw":         raw,
+		"raw":        raw,
 		"layer1":     layer1,
 		"layer2":     layer2,
 		"layer3":     layer3,
 		"alertFlags": alertFlags,
-		"actions":    actions,
 	}
-	return updateParentCurrentMetrics(ctx, objectType, objectId, adAccountId, ownerOrgID, current)
+	return updateParentCurrentMetrics(ctx, objectType, objectId, adAccountId, ownerOrgID, current, nil)
 }
 
 // enrichLayer2WithAdAccountMode bổ sung currentMode vào layer2.
@@ -1474,8 +1488,8 @@ func aggregateRawFromChildren(ctx context.Context, objectType, objectId, adAccou
 }
 
 // updateParentCurrentMetrics cập nhật currentMetrics cho AdSet, Campaign, hoặc AdAccount.
-// Ghi ads_activity_history khi có thay đổi.
-func updateParentCurrentMetrics(ctx context.Context, objectType, objectId, adAccountId string, ownerOrgID primitive.ObjectID, current map[string]interface{}) error {
+// Ghi ads_activity_history khi có thay đổi. extraActivityMetadata (vd: actionDebugReport) được merge vào Metadata.
+func updateParentCurrentMetrics(ctx context.Context, objectType, objectId, adAccountId string, ownerOrgID primitive.ObjectID, current map[string]interface{}, extraActivityMetadata map[string]interface{}) error {
 	var coll *mongo.Collection
 	var idField string
 	switch objectType {
@@ -1502,7 +1516,7 @@ func updateParentCurrentMetrics(ctx context.Context, objectType, objectId, adAcc
 		filter["adAccountId"] = adAccountIdFilterForMeta(adAccountId)
 	}
 	old := getParentCurrentMetrics(ctx, coll, filter)
-	recordActivityForEntity(ctx, objectType, objectId, adAccountId, ownerOrgID, old, current, "rollup")
+	RecordActivityForEntity(ctx, objectType, objectId, adAccountId, ownerOrgID, old, current, "rollup", extraActivityMetadata)
 	_, err := coll.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"currentMetrics": current, "updatedAt": time.Now().UnixMilli()}})
 	return err
 }

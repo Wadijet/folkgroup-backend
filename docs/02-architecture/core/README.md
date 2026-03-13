@@ -19,6 +19,12 @@ Thư mục này chứa các tài liệu về kiến trúc cốt lõi của hệ 
 - **[database.md](./database.md)** - Cấu trúc database
 - **[organization.md](./organization.md)** - Cấu trúc tổ chức
 
+### Intelligence Pipeline
+- **[activity-framework.md](./activity-framework.md)** - Activity Framework — event stream, snapshot
+- **[decision-brain.md](./decision-brain.md)** - Decision Brain — learning memory layer
+- **[rule-intelligence.md](./rule-intelligence.md)** - Rule Intelligence — đề xuất kiến trúc module biến đổi pipeline
+- **[ads-metrics-pipeline.md](./ads-metrics-pipeline.md)** - Ads Metrics Pipeline — raw → layer1/2/3 → flag → action (trích từ codebase)
+
 ## 🎯 Mục Đích
 
 Các tài liệu trong thư mục này mô tả các thành phần cốt lõi và nền tảng của hệ thống, là nền tảng để hiểu các phần khác của kiến trúc.

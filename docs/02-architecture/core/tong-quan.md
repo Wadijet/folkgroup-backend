@@ -1,4 +1,4 @@
-﻿# Tổng Quan Kiến Trúc
+# Tổng Quan Kiến Trúc
 
 Tài liệu về kiến trúc tổng thể của hệ thống FolkForm Auth Backend.
 
@@ -45,7 +45,7 @@ Tài liệu về kiến trúc tổng thể của hệ thống FolkForm Auth Back
        ▼
 ┌─────────────────────────────────┐
 │      Service Layer              │
-│  (api/internal/api/services/)        │
+│  (api/internal/api/<module>/service/) │
 │  - Business logic               │
 │  - Data validation              │
 │  - Call repository              │
@@ -134,7 +134,7 @@ Tài liệu về kiến trúc tổng thể của hệ thống FolkForm Auth Back
 
 ### 5. Service Layer
 
-**Vị trí:** `api/internal/api/services/`
+**Vị trí:** `api/internal/api/<module>/service/` (mỗi module có service riêng)
 
 **Chức năng:**
 - Business logic
@@ -142,10 +142,7 @@ Tài liệu về kiến trúc tổng thể của hệ thống FolkForm Auth Back
 - Gọi repository
 - Xử lý nghiệp vụ phức tạp
 
-**Files:**
-- `service.auth.*.go` - Auth services
-- `service.admin.*.go` - Admin services
-- `service.*.go` - Các services khác
+**Ví dụ:** `auth/service/`, `crm/service/`, `meta/service/`, ... Base: `base/service/service.base.mongo.go`
 
 ### 6. Repository Layer
 

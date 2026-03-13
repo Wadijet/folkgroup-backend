@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 
+	"meta_commerce/internal/common/activity"
 	crmdto "meta_commerce/internal/api/crm/dto"
 	crmmodels "meta_commerce/internal/api/crm/models"
 	"meta_commerce/internal/global"
@@ -264,21 +265,23 @@ func (s *CrmCustomerService) fetchActivityHistory(ctx context.Context, unifiedId
 	}
 	result := make([]crmdto.CrmActivitySummary, 0, len(activities))
 	for _, a := range activities {
-		changes := make([]crmdto.ActivityChangeItem, 0, len(a.Changes))
+		changes := make([]activity.ActivityChangeItem, 0, len(a.Changes))
 		for _, c := range a.Changes {
-			changes = append(changes, crmdto.ActivityChangeItem{
+			changes = append(changes, activity.ActivityChangeItem{
 				Field:    c.Field,
 				OldValue: c.OldValue,
 				NewValue: c.NewValue,
 			})
 		}
-		actorIdStr := ""
-		if a.ActorId != nil && !a.ActorId.IsZero() {
-			actorIdStr = a.ActorId.Hex()
-		}
+		actorIdStr := a.Actor.Id
+		actorName := a.Actor.Name
+		reason, _ := a.Metadata["reason"].(string)
+		clientIp, _ := a.Metadata["clientIp"].(string)
+		userAgent, _ := a.Metadata["userAgent"].(string)
+		status, _ := a.Metadata["status"].(string)
 		activityAt := a.ActivityAt
 		if activityAt <= 0 {
-			activityAt = a.CreatedAt // Fallback cho bản ghi cũ
+			activityAt = a.CreatedAt
 		}
 		result = append(result, crmdto.CrmActivitySummary{
 			ActivityType:   a.ActivityType,
@@ -287,16 +290,16 @@ func (s *CrmCustomerService) fetchActivityHistory(ctx context.Context, unifiedId
 			Source:         a.Source,
 			SourceRef:      a.SourceRef,
 			Metadata:       a.Metadata,
-			DisplayLabel:   a.DisplayLabel,
-			DisplayIcon:    a.DisplayIcon,
-			DisplaySubtext: a.DisplaySubtext,
+			DisplayLabel:   a.Display.Label,
+			DisplayIcon:    a.Display.Icon,
+			DisplaySubtext: a.Display.Subtext,
 			ActorId:        actorIdStr,
-			ActorName:      a.ActorName,
+			ActorName:      actorName,
 			Changes:        changes,
-			Reason:         a.Reason,
-			ClientIp:       a.ClientIp,
-			UserAgent:      a.UserAgent,
-			Status:         a.Status,
+			Reason:         reason,
+			ClientIp:       clientIp,
+			UserAgent:      userAgent,
+			Status:         status,
 		})
 	}
 	return result

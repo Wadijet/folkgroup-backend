@@ -16,7 +16,7 @@ Hướng dẫn chi tiết về cách cài đặt và cấu hình hệ thống Fo
   
 - **Firebase Project**: Cần có Firebase project với Authentication enabled
   - Tạo project: https://console.firebase.google.com/
-  - Xem hướng dẫn: [Hướng Dẫn Đăng Ký Firebase](../huong-dan-dang-ky-firebase.md)
+  - Xem hướng dẫn: [Hướng Dẫn Đăng Ký Firebase](../04-deployment/huong-dan-dang-ky-firebase.md)
 
 ### Hệ Điều Hành
 
@@ -82,7 +82,7 @@ mongo
    - Vào Project Settings > General
    - Copy "Web API Key"
 
-Xem chi tiết tại [Hướng Dẫn Cài Đặt Firebase](../huong-dan-cai-dat-firebase.md)
+Xem chi tiết tại [Hướng Dẫn Cài Đặt Firebase](../04-deployment/huong-dan-cai-dat-firebase.md)
 
 ### Bước 5: Cấu Hình Môi Trường
 
@@ -249,6 +249,6 @@ Xem thêm tại [Xử Lý Sự Cố](../07-troubleshooting/loi-thuong-gap.md)
 
 - [Cấu Hình Môi Trường](cau-hinh.md) - Chi tiết về biến môi trường
 - [Khởi Tạo Hệ Thống](khoi-tao.md) - Quy trình khởi tạo hệ thống lần đầu
-- [Hướng Dẫn Cài Đặt Firebase](../huong-dan-cai-dat-firebase.md)
-- [Hướng Dẫn Đăng Ký Firebase](../huong-dan-dang-ky-firebase.md)
+- [Hướng Dẫn Cài Đặt Firebase](../04-deployment/huong-dan-cai-dat-firebase.md)
+- [Hướng Dẫn Đăng Ký Firebase](../04-deployment/huong-dan-dang-ky-firebase.md)
 

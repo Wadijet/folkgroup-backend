@@ -445,6 +445,28 @@ func CreateAdsActivityIndexes(ctx context.Context, collection *mongo.Collection)
 	return err
 }
 
+// CreateActionPendingIdempotencyIndex tạo index cho payload.idempotencyKey (Vision 08 idempotency lookup).
+func CreateActionPendingIdempotencyIndex(ctx context.Context, collection *mongo.Collection) error {
+	indexes := []mongo.IndexModel{
+		{
+			Keys:    bson.D{{Key: "payload.idempotencyKey", Value: 1}},
+			Options: options.Index().SetName("payload_idempotencyKey_single").SetSparse(true),
+		},
+		{
+			Keys: bson.D{
+				{Key: "ownerOrganizationId", Value: 1},
+				{Key: "payload.idempotencyKey", Value: 1},
+				{Key: "status", Value: 1},
+			},
+			Options: options.Index().SetName("action_pending_idempotency_lookup").SetPartialFilterExpression(
+				bson.M{"payload.idempotencyKey": bson.M{"$exists": true}},
+			),
+		},
+	}
+	_, err := collection.Indexes().CreateMany(ctx, indexes)
+	return err
+}
+
 // CreateDecisionCaseIndexes tạo index cho decision_cases.
 func CreateDecisionCaseIndexes(ctx context.Context, collection *mongo.Collection) error {
 	indexes := []mongo.IndexModel{

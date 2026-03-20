@@ -2,7 +2,9 @@ package pcsvc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -71,4 +73,60 @@ func (s *PcPosOrderService) SyncFlattenedFromPosData(ctx context.Context, id pri
 // Dùng chung logic với Upsert; khác biệt duy nhất là so sánh updated_at.
 func (s *PcPosOrderService) SyncUpsertOne(ctx context.Context, filter interface{}, data interface{}) (pcmodels.PcPosOrder, bool, error) {
 	return basesvc.DoSyncUpsert(ctx, s.BaseServiceMongoImpl, filter, data, "posData", "posUpdatedAt")
+}
+
+// RunSyncUpsertOneFromJSON gom logic sync-upsert từ JSON body + filter (CIO ingest domain order).
+func (s *PcPosOrderService) RunSyncUpsertOneFromJSON(ctx context.Context, filter map[string]interface{}, body []byte, activeOrgID *primitive.ObjectID) (pcmodels.PcPosOrder, bool, error) {
+	var zero pcmodels.PcPosOrder
+	var order pcmodels.PcPosOrder
+	if err := json.Unmarshal(body, &order); err != nil {
+		return zero, false, common.NewError(common.ErrCodeValidationFormat, "Body không đúng định dạng JSON", common.StatusBadRequest, err)
+	}
+	if activeOrgID != nil && !activeOrgID.IsZero() && order.OwnerOrganizationID.IsZero() {
+		order.OwnerOrganizationID = *activeOrgID
+	}
+	if err := utility.ExtractDataIfExists(&order); err != nil {
+		return zero, false, common.NewError(common.ErrCodeValidationFormat, "Dữ liệu posData không hợp lệ: "+err.Error(), common.StatusBadRequest, err)
+	}
+	filter = buildPcPosOrderSyncUpsertFilter(filter, &order)
+	if filter["orderId"] == nil || filter["ownerOrganizationId"] == nil {
+		return zero, false, common.NewError(common.ErrCodeValidationFormat, "Filter hoặc body phải có orderId và ownerOrganizationId để sync-upsert đơn hàng", common.StatusBadRequest, nil)
+	}
+	return s.SyncUpsertOne(ctx, filter, &order)
+}
+
+func buildPcPosOrderSyncUpsertFilter(filter map[string]interface{}, order *pcmodels.PcPosOrder) map[string]interface{} {
+	if filter == nil {
+		filter = make(map[string]interface{})
+	}
+	result := make(map[string]interface{})
+	for k, v := range filter {
+		result[k] = v
+	}
+	if result["orderId"] == nil && order != nil && order.OrderId != 0 {
+		result["orderId"] = order.OrderId
+	}
+	if result["ownerOrganizationId"] == nil && order != nil && !order.OwnerOrganizationID.IsZero() {
+		result["ownerOrganizationId"] = order.OwnerOrganizationID
+	}
+	if v := result["orderId"]; v != nil {
+		switch x := v.(type) {
+		case string:
+			if n, err := strconv.ParseInt(x, 10, 64); err == nil {
+				result["orderId"] = n
+			}
+		case float64:
+			result["orderId"] = int64(x)
+		case int:
+			result["orderId"] = int64(x)
+		}
+	}
+	if v := result["ownerOrganizationId"]; v != nil {
+		if s, ok := v.(string); ok && primitive.IsValidObjectID(s) {
+			if oid, err := primitive.ObjectIDFromHex(s); err == nil {
+				result["ownerOrganizationId"] = oid
+			}
+		}
+	}
+	return result
 }

@@ -6,6 +6,13 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
+// ResultCheckConfig cấu hình check kết quả sau khi thực thi action (từ Rule).
+type ResultCheckConfig struct {
+	AfterHours float64  `json:"afterHours" bson:"afterHours"` // Số giờ sau khi thực thi mới check (vd: 4)
+	Source     string   `json:"source" bson:"source"`         // Nguồn data: "siblings", "self", ...
+	Fields     []string `json:"fields" bson:"fields"`         // Các field cần lấy: cr, orders, ...
+}
+
 // AdsKillSnapshot lưu snapshot khi kill một campaign. Dùng cho Counterfactual Tracker B1–B2.
 // Mỗi document = 1 lần kill. siblingCampIds lưu danh sách campaign anh em (pattern tương tự).
 type AdsKillSnapshot struct {
@@ -25,5 +32,6 @@ type AdsKillSnapshot struct {
 	SpendPct            float64              `json:"spendPct" bson:"spendPct"`
 	SiblingCampIds      []string             `json:"siblingCampIds" bson:"siblingCampIds"` // B2: danh sách camp anh em
 	ActionPendingId     primitive.ObjectID   `json:"actionPendingId,omitempty" bson:"actionPendingId,omitempty"`
+	ResultCheckConfig   *ResultCheckConfig   `json:"resultCheckConfig,omitempty" bson:"resultCheckConfig,omitempty"` // Từ Rule: sau bao lâu check, lấy field nào
 	CreatedAt           int64                `json:"createdAt" bson:"createdAt"`
 }

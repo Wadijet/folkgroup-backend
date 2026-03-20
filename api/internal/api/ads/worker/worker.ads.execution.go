@@ -37,11 +37,9 @@ func NewAdsExecutionWorker(interval time.Duration, batchSize int) *AdsExecutionW
 	return &AdsExecutionWorker{interval: interval, batchSize: batchSize}
 }
 
-// Start chạy worker trong vòng lặp. Tích hợp Worker Controller để throttle khi CPU/RAM quá tải.
+// Start chạy worker trong vòng lặp. Đọc config mỗi vòng (hỗ trợ thay đổi qua API).
 func (w *AdsExecutionWorker) Start(ctx context.Context) {
 	log := logger.GetAppLogger()
-	ticker := time.NewTicker(w.interval)
-	defer ticker.Stop()
 
 	log.WithFields(map[string]interface{}{
 		"interval":  w.interval.String(),
@@ -49,29 +47,48 @@ func (w *AdsExecutionWorker) Start(ctx context.Context) {
 	}).Info("📢 [ADS_EXECUTION] Starting Ads Execution Worker...")
 
 	for {
+		interval, batchSize := coreworker.GetEffectiveWorkerSchedule(coreworker.WorkerAdsExecution, w.interval, w.batchSize)
+
+		if !coreworker.IsWorkerActive(coreworker.WorkerAdsExecution) {
+			select {
+			case <-ctx.Done():
+				log.Info("📢 [ADS_EXECUTION] Ads Execution Worker stopped")
+				return
+			case <-time.After(1 * time.Minute):
+			}
+			continue
+		}
+		p := coreworker.GetPriority(coreworker.WorkerAdsExecution, coreworker.PriorityNormal)
+		if coreworker.ShouldThrottle(p) {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(interval):
+			}
+			continue
+		}
+		if effInterval := coreworker.GetEffectiveInterval(interval, p); effInterval > interval {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(effInterval - interval):
+			}
+		}
+
 		select {
 		case <-ctx.Done():
 			log.Info("📢 [ADS_EXECUTION] Ads Execution Worker stopped")
 			return
-		case <-ticker.C:
-			if !coreworker.IsWorkerActive(coreworker.WorkerAdsExecution) {
-				time.Sleep(1 * time.Minute)
-				continue
-			}
-			p := coreworker.GetPriority(coreworker.WorkerAdsExecution, coreworker.PriorityNormal)
-			if coreworker.ShouldThrottle(p) {
-				continue
-			}
-			if effInterval := coreworker.GetEffectiveInterval(w.interval, p); effInterval > w.interval {
-				time.Sleep(effInterval - w.interval)
-			}
-			w.processBatch(ctx)
+		case <-time.After(interval):
 		}
+
+		effBatchSize := coreworker.GetEffectiveBatchSize(batchSize, p)
+		w.processBatch(ctx, effBatchSize)
 	}
 }
 
 // processBatch xử lý một batch items từ queue. Dùng worker pool khi poolSize > 1.
-func (w *AdsExecutionWorker) processBatch(ctx context.Context) {
+func (w *AdsExecutionWorker) processBatch(ctx context.Context, batchSize int) {
 	log := logger.GetAppLogger()
 	defer func() {
 		if r := recover(); r != nil {
@@ -80,7 +97,6 @@ func (w *AdsExecutionWorker) processBatch(ctx context.Context) {
 	}()
 
 	prio := coreworker.GetPriority(coreworker.WorkerAdsExecution, coreworker.PriorityNormal)
-	batchSize := coreworker.GetEffectiveBatchSize(w.batchSize, prio)
 	list, err := approval.FindQueued(ctx, domainAds, batchSize)
 	if err != nil {
 		log.WithError(err).Error("📢 [ADS_EXECUTION] Lỗi lấy danh sách queued")
@@ -121,6 +137,19 @@ func (w *AdsExecutionWorker) processBatch(ctx context.Context) {
 // processOne xử lý một item: execute, cập nhật kết quả hoặc retry.
 func (w *AdsExecutionWorker) processOne(ctx context.Context, doc *pkgapproval.ActionPending) {
 	log := logger.GetAppLogger()
+
+	// Phase 3 Idempotency: nếu idempotencyKey đã xử lý → skip
+	if doc.Payload != nil {
+		if idk, ok := doc.Payload["idempotencyKey"].(string); ok && idk != "" {
+			if existing, err := approval.FindByIdempotencyKey(ctx, idk, doc.OwnerOrganizationID); err == nil && existing != nil {
+				log.WithFields(map[string]interface{}{
+					"actionId": doc.ID.Hex(), "idempotencyKey": idk,
+				}).Info("📢 [ADS_EXECUTION] Idempotency skip — đã xử lý trước đó")
+				return
+			}
+		}
+	}
+
 	now := time.Now().UnixMilli()
 	doc.UpdatedAt = now
 
@@ -139,6 +168,7 @@ func (w *AdsExecutionWorker) processOne(ctx context.Context, doc *pkgapproval.Ac
 			return
 		}
 		approval.NotifyExecuted(ctx, doc)
+		// Learning: OnActionClosed (NotifyExecuted) tạo learning case
 		// B1 Counterfactual: snapshot khi kill campaign (PAUSE/KILL với rule kill)
 		_ = adssvc.SaveKillSnapshotIfKill(ctx, doc)
 		log.WithFields(map[string]interface{}{
@@ -189,6 +219,7 @@ func (w *AdsExecutionWorker) processOne(ctx context.Context, doc *pkgapproval.Ac
 			return
 		}
 		approval.NotifyFailed(ctx, doc)
+		// Learning: OnActionClosed (NotifyFailed) tạo learning case
 		log.WithError(execErr).WithFields(map[string]interface{}{
 			"actionId":   doc.ID.Hex(),
 			"retryCount": doc.RetryCount,

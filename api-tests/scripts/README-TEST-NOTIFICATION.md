@@ -4,14 +4,14 @@
 
 Hệ thống notification có 2 cách gửi thông báo:
 
-1. **Hệ thống 1 - Direct Send** (`/delivery/send`): Gửi trực tiếp không cần routing rules
+1. **Hệ thống 1 - Direct Send** (`/executor/send`): Gửi trực tiếp không cần routing rules
 2. **Hệ thống 2 - Trigger với Routing** (`/notification/trigger`): Gửi qua routing rules và templates
 
 ## Scripts Test
 
 ### 1. `test-delivery-send.ps1` ✅ HOẠT ĐỘNG TỐT
 
-**Mô tả**: Test gửi notification trực tiếp qua endpoint `/delivery/send`
+**Mô tả**: Test gửi notification trực tiếp qua endpoint `/executor/send`
 
 **Cách sử dụng**:
 ```powershell
@@ -82,7 +82,7 @@ Hệ thống notification có 2 cách gửi thông báo:
 
 ## Kết Luận
 
-1. **Endpoint `/delivery/send` hoạt động tốt** - Có thể dùng để gửi notification trực tiếp
+1. **Endpoint `/executor/send` hoạt động tốt** - Có thể dùng để gửi notification trực tiếp
 2. **Endpoint `/notification/trigger` cần kiểm tra** - Routing rules và templates đều có, nhưng không queue được notification
 
 ## Gợi Ý Debug

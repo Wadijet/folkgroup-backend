@@ -15,7 +15,6 @@ import (
 	"meta_commerce/internal/api/ruleintel/engine"
 	"meta_commerce/internal/api/ruleintel/models"
 	"meta_commerce/internal/common"
-	"meta_commerce/internal/global"
 )
 
 // RuleEngineService service chạy Rule Engine.
@@ -25,6 +24,7 @@ type RuleEngineService struct {
 	logicSvc       *LogicScriptService
 	paramSvc       *ParamSetService
 	outputSvc      *OutputContractService
+	traceSvc       *RuleExecutionTraceService
 }
 
 // NewRuleEngineService tạo service.
@@ -45,12 +45,17 @@ func NewRuleEngineService() (*RuleEngineService, error) {
 	if err != nil {
 		return nil, fmt.Errorf("OutputContractService: %w", err)
 	}
+	traceSvc, err := NewRuleExecutionTraceService()
+	if err != nil {
+		return nil, fmt.Errorf("RuleExecutionTraceService: %w", err)
+	}
 	return &RuleEngineService{
 		executor:  engine.NewScriptExecutor("evaluate"),
 		ruleSvc:   ruleSvc,
 		logicSvc:  logicSvc,
 		paramSvc:  paramSvc,
 		outputSvc: outputSvc,
+		traceSvc:  traceSvc,
 	}, nil
 }
 
@@ -110,7 +115,7 @@ func (s *RuleEngineService) Run(ctx context.Context, input *RunInput) (*engine.R
 		errMsg = err.Error()
 	}
 
-	// 7. Ghi trace
+	// 7. Ghi trace — mọi lần chạy đều phải có explanation.log (audit, debug)
 	trace := &models.RuleExecutionTrace{
 		TraceID:            traceID,
 		RuleID:             rule.RuleID,
@@ -133,6 +138,9 @@ func (s *RuleEngineService) Run(ctx context.Context, input *RunInput) (*engine.R
 	if evalResult != nil {
 		trace.OutputObject = evalResult.Output
 		trace.Explanation = evalResult.Report
+	} else if err != nil {
+		// Khi lỗi: vẫn ghi explanation để có log cho mọi lần chạy
+		trace.Explanation = map[string]interface{}{"log": errMsg, "result": "error"}
 	}
 
 	if err := s.saveTrace(ctx, trace); err != nil {
@@ -214,10 +222,21 @@ func (s *RuleEngineService) loadOutput(ctx context.Context, outputID string, out
 }
 
 func (s *RuleEngineService) saveTrace(ctx context.Context, trace *models.RuleExecutionTrace) error {
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.RuleExecutionLogs)
-	if !ok {
-		return fmt.Errorf("không tìm thấy collection rule_execution_logs")
-	}
-	_, err := coll.InsertOne(ctx, trace)
+	_, err := s.traceSvc.InsertOne(ctx, *trace)
 	return err
+}
+
+// FindTraceByTraceID tìm rule execution log theo trace_id. Dùng cho link "Xem log tạo đề xuất" từ proposal.
+func (s *RuleEngineService) FindTraceByTraceID(ctx context.Context, traceID string) (*models.RuleExecutionTrace, error) {
+	if traceID == "" {
+		return nil, common.ErrNotFound
+	}
+	trace, err := s.traceSvc.FindOne(ctx, bson.M{"trace_id": traceID}, nil)
+	if err != nil {
+		if errors.Is(err, common.ErrNotFound) {
+			return nil, common.ErrNotFound
+		}
+		return nil, err
+	}
+	return &trace, nil
 }

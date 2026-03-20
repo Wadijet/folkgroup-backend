@@ -8,11 +8,9 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
-	"time"
 
 	adsconfig "meta_commerce/internal/api/ads/config"
 	adsmodels "meta_commerce/internal/api/ads/models"
-	adsrules "meta_commerce/internal/api/ads/rules"
 )
 
 // FormatMetricsForNotification tạo các chuỗi summary từ currentMetrics để hiển thị trong notification.
@@ -187,17 +185,13 @@ func formatFlagsSummary(alertFlags interface{}) string {
 	return strings.Join(flags, ", ")
 }
 
-// formatFlagsDetail format chi tiết từng flag — mỗi flag một block, mỗi điều kiện một dòng thụt lề.
-// Trình bày: Flag → điều kiện 1 ✓ | điều kiện 2 ✓ | ... (logic, dễ đọc).
+// formatFlagsDetail format chi tiết từng flag — dùng FlagDefinitions (label, LogicText).
+// Không dùng BuildFactsContext/EvaluateCondition — flags đã được tính qua Rule Engine.
 func formatFlagsDetail(raw, layer1, layer2, layer3 map[string]interface{}, alertFlags interface{}, cfg *adsmodels.CampaignConfigView) string {
 	flags := parseFlagsForNotification(alertFlags)
 	if len(flags) == 0 {
 		return ""
 	}
-	ctx := adsrules.BuildFactsContext(getRaw7dForNotificationMap(raw), layer1, layer2, layer3, cfg)
-	loc, _ := time.LoadLocation("Asia/Ho_Chi_Minh")
-	now := time.Now().In(loc)
-	th := func(k string) float64 { return adsconfig.GetThresholdWithEventOverride(k, cfg, now) }
 	defs := adsconfig.GetFlagDefinitions(cfg)
 	flagDefByCode := make(map[string]*adsmodels.FlagDefinition)
 	for i := range defs {
@@ -205,7 +199,6 @@ func formatFlagsDetail(raw, layer1, layer2, layer3 map[string]interface{}, alert
 	}
 
 	var blocks []string
-	indent := "  "
 	for i, code := range flags {
 		fd, ok := flagDefByCode[code]
 		if !ok {
@@ -216,199 +209,20 @@ func formatFlagsDetail(raw, layer1, layer2, layer3 map[string]interface{}, alert
 			}
 			continue
 		}
-		// Tìm group điều kiện đã match
-		var matchedGroup []adsmodels.FlagConditionItem
-		for _, group := range fd.ConditionGroups {
-			allMatch := true
-			for _, c := range group {
-				if !adsrules.EvaluateCondition(c, &ctx, th) {
-					allMatch = false
-					break
-				}
-			}
-			if allMatch {
-				matchedGroup = group
-				break
-			}
-		}
-		if len(matchedGroup) == 0 {
-			matchedGroup = fd.ConditionGroups[0]
-		}
 		label := fd.Label
 		if label == "" {
 			label = code
 		}
-		// Block: tiêu đề flag + các điều kiện thụt lề
-		condLines := make([]string, 0, len(matchedGroup))
-		for _, c := range matchedGroup {
-			s := formatConditionDetail(c, &ctx, th)
-			if s != "" {
-				condLines = append(condLines, indent+"• "+s)
-			}
+		if i > 0 {
+			blocks = append(blocks, "")
 		}
-		if len(condLines) > 0 {
-			prefix := "• "
-			if i > 0 {
-				blocks = append(blocks, "")
-			}
-			blocks = append(blocks, prefix+label+":")
-			blocks = append(blocks, condLines...)
-		} else {
+		if fd.LogicText != "" {
 			blocks = append(blocks, "• "+label+": "+fd.LogicText)
+		} else {
+			blocks = append(blocks, "• "+label)
 		}
 	}
 	return strings.Join(blocks, "\n")
-}
-
-// formatConditionDetail format một điều kiện: "metric = value op ngưỡng" — gọn, dễ đọc.
-func formatConditionDetail(c adsmodels.FlagConditionItem, ctx *adsrules.FactsContext, th func(string) float64) string {
-	factKey := c.Fact
-	if factKey == "" {
-		factKey = c.MetricKey
-	}
-	valNum, valStr, ok := ctx.GetFact(factKey)
-	if !ok {
-		return ""
-	}
-	var compareNum float64
-	var compareStr string
-	if c.ThresholdKey != "" {
-		tv := th(c.ThresholdKey)
-		if c.ThresholdKeyByMode != "" {
-			if parts := strings.SplitN(c.ThresholdKeyByMode, ":", 2); len(parts) == 2 {
-				modes := strings.Split(parts[0], ",")
-				for _, m := range modes {
-					if strings.TrimSpace(m) == ctx.CurrentMode {
-						tv = th(strings.TrimSpace(parts[1]))
-						break
-					}
-				}
-			}
-		}
-		if c.ThresholdKey2 != "" {
-			compareNum = tv * th(c.ThresholdKey2)
-		} else {
-			compareNum = tv
-		}
-	} else if c.Value != nil {
-		compareNum = *c.Value
-	} else if c.ValueStr != "" {
-		compareStr = c.ValueStr
-	}
-	opStr := operatorToStr(c.Operator)
-	label := factLabel(factKey)
-	valDisp := formatFactValue(factKey, valNum, valStr)
-	compareDisp := formatCompareValue(factKey, compareNum, compareStr)
-	// Format gọn: "CPA_Mess 195k > 180k" hoặc "CR_7d 4.5% < 6%"
-	return fmt.Sprintf("%s %s %s %s", label, valDisp, opStr, compareDisp)
-}
-
-func operatorToStr(op string) string {
-	switch op {
-	case adsconfig.OpGreaterThan:
-		return ">"
-	case adsconfig.OpLessThan:
-		return "<"
-	case adsconfig.OpGreaterThanOrEqual:
-		return ">="
-	case adsconfig.OpLessThanOrEqual:
-		return "<="
-	case adsconfig.OpEqual:
-		return "="
-	case adsconfig.OpNotEqual:
-		return "≠"
-	case adsconfig.OpIn:
-		return "∈"
-	case adsconfig.OpNotIn:
-		return "∉"
-	}
-	return op
-}
-
-func factLabel(key string) string {
-	labels := map[string]string{
-		"spend": "Spend", "mess": "Mess", "orders": "Orders", "impressions": "Impressions",
-		"cpm": "CPM", "ctr": "CTR", "frequency": "Freq", "deliveryStatus": "Delivery",
-		"cpaMess_7d": "CPA_Mess", "cpaPurchase_7d": "CPA_Purchase",
-		"convRate_7d": "CR_7d", "convRate_2h": "CR_2h", "convRate_1h": "CR_1h",
-		"msgRate_7d": "Msg_Rate", "mqs_7d": "MQS", "roas_7d": "RoAS",
-		"spendPct_7d": "Spend%", "spendPct": "Spend%",
-		"runtimeMinutes": "Runtime", "chs": "CHS", "healthState": "Health",
-		"portfolioCell": "Cell", "inTrimWindow": "TrimWindow",
-	}
-	if l, ok := labels[key]; ok {
-		return l
-	}
-	return key
-}
-
-func factFormula(key string) string {
-	formulas := map[string]string{
-		"cpaMess_7d": "spend/mess", "cpaPurchase_7d": "spend/orders",
-		"convRate_7d": "orders/mess", "msgRate_7d": "mess/clicks",
-		"mqs_7d": "mess×CR", "roas_7d": "revenue/spend",
-		"spendPct_7d": "spend/budget",
-	}
-	if f, ok := formulas[key]; ok {
-		return f
-	}
-	return ""
-}
-
-func formatFactValue(key string, num float64, str string) string {
-	if str != "" {
-		return str
-	}
-	// %: convRate, spendPct, ctr, msgRate (0-1 hoặc 0-100)
-	if strings.Contains(key, "convRate") || strings.Contains(key, "spendPct") || key == "ctr" || key == "msgRate_7d" {
-		return fmt.Sprintf("%.1f%%", num*100)
-	}
-	// VND: spend, cpm, cpaMess, cpaPurchase
-	if key == "spend" || key == "cpm" || key == "cpaMess_7d" || key == "cpaPurchase_7d" {
-		if num >= 1000 {
-			return fmt.Sprintf("%.0fk", num/1000)
-		}
-		return fmt.Sprintf("%.0f", num)
-	}
-	// Phút
-	if key == "runtimeMinutes" {
-		return fmt.Sprintf("%.0fp", num)
-	}
-	// Số nguyên
-	if key == "mess" || key == "orders" || key == "impressions" {
-		return fmt.Sprintf("%.0f", num)
-	}
-	// Mặc định
-	return fmt.Sprintf("%v", num)
-}
-
-func formatCompareValue(key string, num float64, str string) string {
-	if str != "" {
-		return str
-	}
-	if strings.Contains(key, "convRate") || strings.Contains(key, "spendPct") || key == "ctr" || key == "msgRate_7d" {
-		return fmt.Sprintf("%.1f%%", num*100)
-	}
-	if key == "spend" || key == "cpm" || key == "cpaMess_7d" || key == "cpaPurchase_7d" {
-		if num >= 1000 {
-			return fmt.Sprintf("%.0fk", num/1000)
-		}
-		return fmt.Sprintf("%.0f", num)
-	}
-	if key == "runtimeMinutes" {
-		return fmt.Sprintf("%.0fp", num)
-	}
-	return fmt.Sprintf("%v", num)
-}
-
-func getRaw7dForNotificationMap(raw map[string]interface{}) map[string]interface{} {
-	if raw == nil {
-		return nil
-	}
-	if r, ok := raw["7d"].(map[string]interface{}); ok && r != nil {
-		return r
-	}
-	return raw
 }
 
 func getRaw7dForNotification(raw map[string]interface{}) map[string]interface{} {

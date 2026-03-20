@@ -6,8 +6,8 @@ Cho phép chỉnh ngưỡng CPU/RAM và mức ưu tiên từng worker qua biến
 
 | Method | Path | Mô tả | Permission |
 |--------|------|-------|------------|
-| `GET` | `/api/v1/system/worker-config` | Lấy cấu hình hiện tại (ngưỡng + priorities + state) | `MongoDB.Manage` |
-| `PUT` | `/api/v1/system/worker-config` | Cập nhật cấu hình (ngưỡng + priorities) | `MongoDB.Manage` |
+| `GET` | `/api/v1/system/worker-config` | Lấy cấu hình: ngưỡng, priorities, active, schedules, pool sizes, retentions, alert webhook, state | `MongoDB.Manage` |
+| `PUT` | `/api/v1/system/worker-config` | Cập nhật cấu hình (tất cả field hỗ trợ runtime) | `MongoDB.Manage` |
 
 ### GET Response
 
@@ -27,14 +27,30 @@ Cho phép chỉnh ngưỡng CPU/RAM và mức ưu tiên từng worker qua biến
       ...
     },
     "priorities": { "crm_bulk": 3 },
-    "workerPriorities": { "report_dirty": 1, "crm_ingest": 2, "crm_bulk": 4, ... },
-    "workerActive": { "report_dirty": true, "crm_bulk": true, ... },
+    "workerPriorities": { "report_dirty_ads": 1, "report_dirty_order": 1, "report_dirty_customer": 1, "crm_ingest": 2, "crm_bulk": 4, ... },
+    "workerActive": { "report_dirty_ads": true, "report_dirty_customer": true, "crm_bulk": true, ... },
     "workerActiveOverrides": { "crm_bulk": false },
-    "workerMetadata": {
-      "report_dirty": { "module": "report", "description": "Tính toán lại báo cáo khi có dirty periods (order, customer, ads)" },
-      "crm_ingest": { "module": "crm", "description": "Đồng bộ dữ liệu customer từ agent vào hệ thống" },
-      ...
+    "workerMetadata": { "report_dirty_ads": { "module": "report", "domain": "ads", "description": "..." }, ... },
+    "reportSchedules": {
+      "ads": { "interval": "2m0s", "batchSize": 20 },
+      "order": { "interval": "5m0s", "batchSize": 15 },
+      "customer": { "interval": "10m0s", "batchSize": 10 }
     },
+    "reportScheduleOverrides": { "customer": { "interval": "24h", "batchSize": 10 } },
+    "workerSchedules": {
+      "crm_ingest": { "interval": "30s", "batchSize": 50 },
+      "crm_bulk": { "interval": "2m0s", "batchSize": 2 },
+      "ads_execution": { "interval": "30s", "batchSize": 10 },
+      "report_dirty_ads": { "interval": "2m0s", "batchSize": 20 },
+      "report_dirty_order": { "interval": "5m0s", "batchSize": 15 },
+      "report_dirty_customer": { "interval": "10m0s", "batchSize": 10 }
+    },
+    "workerScheduleOverrides": { "crm_bulk": { "interval": "5m", "batchSize": 5 } },
+    "workerPoolSizes": { "notification_delivery_processor": 6, "report_dirty_ads": 6, "report_dirty_order": 6, "report_dirty_customer": 6, "ads_execution": 4 },
+    "workerPoolSizeOverrides": { "report_dirty_customer": 3 },
+    "workerRetentions": { "notification_agent_activity_cleanup": 1 },
+    "workerRetentionOverrides": {},
+    "alertWebhookURL": "",
     "state": "normal",
     "cpuPercent": 25.5,
     "ramPercent": 45.2,
@@ -55,18 +71,43 @@ Cho phép chỉnh ngưỡng CPU/RAM và mức ưu tiên từng worker qua biến
   },
   "priorities": {
     "crm_bulk": 3,
-    "report_dirty": 1
+    "report_dirty_customer": 2
   },
   "workerActive": {
     "crm_bulk": false,
-    "report_dirty": true
-  }
+    "report_dirty_customer": true
+  },
+  "reportSchedules": {
+    "ads": { "interval": "15m", "batchSize": 20 },
+    "customer": { "interval": "24h", "batchSize": 10 }
+  },
+  "reportSchedulesClear": ["order"],
+  "workerSchedules": {
+    "crm_ingest": { "interval": "1m", "batchSize": 100 },
+    "crm_bulk": { "interval": "5m", "batchSize": 5 },
+    "report_dirty_customer": { "interval": "24h", "batchSize": 5 }
+  },
+  "workerSchedulesClear": ["notification_command_cleanup"],
+  "workerPoolSizes": { "report_dirty_customer": 3, "ads_execution": 2 },
+  "workerPoolSizesClear": ["notification_delivery_processor"],
+  "workerRetentions": { "notification_agent_activity_cleanup": 7 },
+  "workerRetentionsClear": [],
+  "alertWebhookURL": "https://hooks.slack.com/..."
 }
 ```
 
 - **thresholds**: Chỉ gửi các field cần thay đổi. Giá trị 0 = không đổi.
 - **priorities**: Map worker_name → 1–5. Gửi `0` hoặc xóa key để reset về mặc định/env.
 - **workerActive**: Map worker_name → true/false. Bật/tắt từng worker: `false` = tạm dừng, `true` = chạy bình thường.
+- **reportSchedules**: Map domain (ads, order, customer) → { interval, batchSize }. interval: duration string ("2m", "15m", "24h"). batchSize: 0 = không đổi.
+- **reportSchedulesClear**: Mảng domain cần xóa override (dùng lại env/default).
+- **workerSchedules**: Map worker_name → { interval, batchSize }. interval: "30s", "2m", "24h". batchSize: 0 = không đổi. report_dirty_ads/order/customer → map tới reportSchedules (ads, order, customer).
+- **workerSchedulesClear**: Mảng worker_name cần xóa override (dùng lại env/default).
+- **workerPoolSizes**: Map worker_name → pool size (số goroutine song song). Workers: notification_delivery_processor, report_dirty_ads, report_dirty_order, report_dirty_customer, ads_execution.
+- **workerPoolSizesClear**: Mảng worker_name cần xóa override pool size.
+- **workerRetentions**: Map worker_name → retentionDays (số ngày giữ log). Ví dụ: notification_agent_activity_cleanup: 7.
+- **workerRetentionsClear**: Mảng worker_name cần xóa override retention.
+- **alertWebhookURL**: URL để POST khi CPU/RAM/disk quá tải. Rỗng = tắt. Env: `WORKER_ALERT_WEBHOOK_URL`.
 
 ---
 
@@ -101,7 +142,11 @@ Ba worker sau dùng worker pool để xử lý song song items trong mỗi batch
 |-----|----------|-------|
 | `WORKER_POOL_SIZE_DELIVERY` | `6` | Số goroutine song song cho Delivery Processor (notification_delivery_processor) |
 | `WORKER_POOL_SIZE_ADS_EXECUTION` | `4` | Số goroutine song song cho Ads Execution Worker |
-| `WORKER_POOL_SIZE_REPORT_DIRTY` | `6` | Số goroutine song song cho Report Dirty Worker |
+| `WORKER_POOL_SIZE_REPORT_DIRTY_ADS` | `6` | Số goroutine song song cho Report Dirty Ads Worker |
+| `WORKER_POOL_SIZE_REPORT_DIRTY_ORDER` | `6` | Số goroutine song song cho Report Dirty Order Worker |
+| `WORKER_POOL_SIZE_REPORT_DIRTY_CUSTOMER` | `6` | Số goroutine song song cho Report Dirty Customer Worker |
+
+**API override:** `workerPoolSizes` trong PUT body — map worker_name → số. Thay đổi có hiệu lực ngay.
 
 **Điều chỉnh theo CPU/RAM qua Controller:**
 - **Throttled**: pool size = base / 2 (tối thiểu 1)
@@ -141,25 +186,75 @@ Ba worker sau dùng worker pool để xử lý song song items trong mỗi batch
 
 API: `workerActive` trong PUT body — map worker_name → true/false.
 
+### Lịch chạy (interval, batchSize) từng worker
+
+| Env | Mặc định | Mô tả |
+|-----|----------|-------|
+| `WORKER_<NAME>_INTERVAL` | (xem bảng) | Khoảng thời gian giữa các lần chạy. Ví dụ: `WORKER_CRM_INGEST_INTERVAL=1m` |
+| `WORKER_<NAME>_BATCH` | (xem bảng) | Số item mỗi batch. Ví dụ: `WORKER_CRM_BULK_BATCH=5` |
+
+API: `workerSchedules` trong PUT body — map worker_name → { interval, batchSize }. Thay đổi có hiệu lực ngay, không cần restart.
+
+### Retention (số ngày giữ log)
+
+| Env | Mặc định | Mô tả |
+|-----|----------|-------|
+| `WORKER_<NAME>_RETENTION_DAYS` | (xem bảng) | Số ngày giữ log trước khi xóa. Ví dụ: `WORKER_NOTIFICATION_AGENT_ACTIVITY_CLEANUP_RETENTION_DAYS=7` |
+
+API: `workerRetentions` trong PUT body — map worker_name → retentionDays.
+
+### Alert webhook
+
+| Env | Mặc định | Mô tả |
+|-----|----------|-------|
+| `WORKER_ALERT_WEBHOOK_URL` | (rỗng) | URL để POST khi CPU/RAM/disk quá tải. Payload JSON: `{ timestamp, state, cpuPercent, ramPercent, diskPercent }` |
+
+API: `alertWebhookURL` trong PUT body — string. Rỗng = tắt.
+
+**Workers đã hỗ trợ config runtime (interval, batch):** crm_ingest, crm_bulk, notification_command_cleanup, ads_execution.
+
+**Report workers (interval, batch qua reportSchedules hoặc workerSchedules):** report_dirty_ads, report_dirty_order, report_dirty_customer — mỗi worker độc lập, config riêng (priority, active, pool size).
+
+**Workers hỗ trợ config runtime (interval, retention):** notification_agent_activity_cleanup.
+
+**Identity Backfill Worker:**
+- `WORKER_IDENTITY_BACKFILL_MODE`: `uid` | `sourceIds` | `links` | `all` — mặc định `uid`. Chế độ `all` chạy cả 3 mode trong mỗi chu kỳ.
+
+### Domain (phân loại theo nghiệp vụ)
+
+| Domain | Workers |
+|--------|---------|
+| `ads` | report_dirty_ads, ads_execution, ads_auto_propose, ads_circuit_breaker, ads_daily_scheduler, ads_pancake_heartbeat, ads_counterfactual |
+| `order` | report_dirty_order |
+| `customer` | report_dirty_customer, crm_ingest, crm_bulk, crm_classification_full, crm_classification_smart |
+| `notification` | notification_delivery_processor, notification_delivery_cleanup |
+| `system` | notification_command_cleanup, notification_agent_command_cleanup, notification_agent_activity_cleanup |
+
+API GET trả `workerMetadata` với field `domain` — dùng để nhóm/filter workers theo domain.
+
 ### Tên Worker (format module_suffix) và mặc định
 
-| Tên Worker | Module | Mô tả | Env override | Mặc định |
-|------------|--------|-------|-------------|----------|
-| `report_dirty` | report | Tính toán lại báo cáo khi có dirty periods | `WORKER_PRIORITY_REPORT_DIRTY` | 1 (Critical) |
-| `notification_delivery_processor` | notification | Xử lý hàng đợi gửi thông báo (email, Telegram, SMS...) | `WORKER_PRIORITY_NOTIFICATION_DELIVERY_PROCESSOR` | 2 (High) |
-| `notification_delivery_cleanup` | notification | Dọn item bị kẹt trong hàng đợi delivery | `WORKER_PRIORITY_NOTIFICATION_DELIVERY_CLEANUP` | 4 (Low) |
-| `notification_command_cleanup` | notification | Dọn command cũ hết hạn | `WORKER_PRIORITY_NOTIFICATION_COMMAND_CLEANUP` | 4 (Low) |
-| `notification_agent_command_cleanup` | notification | Dọn agent command cũ hết hạn | `WORKER_PRIORITY_NOTIFICATION_AGENT_COMMAND_CLEANUP` | 4 (Low) |
-| `notification_agent_activity_cleanup` | notification | Dọn agent activity log cũ | `WORKER_PRIORITY_NOTIFICATION_AGENT_ACTIVITY_CLEANUP` | 4 (Low) |
-| `crm_ingest` | crm | Đồng bộ dữ liệu customer từ agent vào hệ thống | `WORKER_PRIORITY_CRM_INGEST` | 2 (High) |
-| `crm_bulk` | crm | Xử lý bulk job cập nhật customer hàng loạt | `WORKER_PRIORITY_CRM_BULK` | 4 (Low) |
-| `ads_execution` | ads | Thực thi đề xuất quảng cáo đã duyệt | `WORKER_PRIORITY_ADS_EXECUTION` | 3 (Normal) |
-| `ads_auto_propose` | ads | Tạo đề xuất quảng cáo tự động theo rule | `WORKER_PRIORITY_ADS_AUTO_PROPOSE` | 3 (Normal) |
-| `ads_circuit_breaker` | ads | Giám sát và tạm dừng account khi lỗi Meta API | `WORKER_PRIORITY_ADS_CIRCUIT_BREAKER` | 3 (Normal) |
-| `ads_daily_scheduler` | ads | Lên lịch mode detection và task ads hàng ngày | `WORKER_PRIORITY_ADS_DAILY_SCHEDULER` | 3 (Normal) |
-| `ads_pancake_heartbeat` | ads | Gửi heartbeat đến Pancake đồng bộ trạng thái | `WORKER_PRIORITY_ADS_PANCAKE_HEARTBEAT` | 3 (Normal) |
-| `crm_classification_full` | crm | Refresh toàn bộ phân loại khách hàng (24h) | `WORKER_PRIORITY_CRM_CLASSIFICATION_FULL` | 5 (Lowest) |
-| `crm_classification_smart` | crm | Refresh phân loại thông minh — khách gần ngưỡng lifecycle (6h) | `WORKER_PRIORITY_CRM_CLASSIFICATION_SMART` | 5 (Lowest) |
+| Tên Worker | Module | Domain | Mô tả | Env override | Mặc định |
+|------------|--------|--------|-------|-------------|----------|
+| `report_dirty_ads` | report | ads | Tính toán lại báo cáo ads_daily khi có dirty periods | `WORKER_PRIORITY_REPORT_DIRTY_ADS` | 1 (Critical) |
+| `report_dirty_order` | report | order | Tính toán lại báo cáo order_daily khi có dirty periods | `WORKER_PRIORITY_REPORT_DIRTY_ORDER` | 1 (Critical) |
+| `report_dirty_customer` | report | customer | Tính toán lại báo cáo customer_daily khi có dirty periods | `WORKER_PRIORITY_REPORT_DIRTY_CUSTOMER` | 1 (Critical) |
+| `notification_delivery_processor` | notification | notification | Xử lý hàng đợi gửi thông báo (email, Telegram, SMS...) | `WORKER_PRIORITY_NOTIFICATION_DELIVERY_PROCESSOR` | 2 (High) |
+| `notification_delivery_cleanup` | notification | notification | Dọn item bị kẹt trong hàng đợi delivery | `WORKER_PRIORITY_NOTIFICATION_DELIVERY_CLEANUP` | 4 (Low) |
+| `notification_command_cleanup` | notification | system | Dọn command cũ hết hạn | `WORKER_PRIORITY_NOTIFICATION_COMMAND_CLEANUP` | 4 (Low) |
+| `notification_agent_command_cleanup` | notification | system | Dọn agent command cũ hết hạn | `WORKER_PRIORITY_NOTIFICATION_AGENT_COMMAND_CLEANUP` | 4 (Low) |
+| `notification_agent_activity_cleanup` | notification | system | Dọn agent activity log cũ | `WORKER_PRIORITY_NOTIFICATION_AGENT_ACTIVITY_CLEANUP` | 4 (Low) |
+| `crm_ingest` | crm | customer | Đồng bộ dữ liệu customer từ agent vào hệ thống | `WORKER_PRIORITY_CRM_INGEST` | 2 (High) |
+| `crm_bulk` | crm | customer | Xử lý bulk job cập nhật customer hàng loạt | `WORKER_PRIORITY_CRM_BULK` | 4 (Low) |
+| `ads_execution` | ads | ads | Thực thi đề xuất quảng cáo đã duyệt | `WORKER_PRIORITY_ADS_EXECUTION` | 3 (Normal) |
+| `ads_auto_propose` | ads | ads | Tạo đề xuất quảng cáo tự động theo rule | `WORKER_PRIORITY_ADS_AUTO_PROPOSE` | 3 (Normal) |
+| `ads_circuit_breaker` | ads | ads | Giám sát và tạm dừng account khi lỗi Meta API | `WORKER_PRIORITY_ADS_CIRCUIT_BREAKER` | 3 (Normal) |
+| `ads_daily_scheduler` | ads | ads | Lên lịch mode detection và task ads hàng ngày | `WORKER_PRIORITY_ADS_DAILY_SCHEDULER` | 3 (Normal) |
+| `ads_pancake_heartbeat` | ads | ads | Gửi heartbeat đến Pancake đồng bộ trạng thái | `WORKER_PRIORITY_ADS_PANCAKE_HEARTBEAT` | 3 (Normal) |
+| `ads_counterfactual` | ads | ads | Đánh giá kill đã qua 4h → counterfactual outcomes | `WORKER_PRIORITY_ADS_COUNTERFACTUAL` | 4 (Low) |
+| `crm_classification_full` | crm | customer | Refresh toàn bộ phân loại khách hàng (24h) | `WORKER_PRIORITY_CRM_CLASSIFICATION_FULL` | 5 (Lowest) |
+| `crm_classification_smart` | crm | customer | Refresh phân loại thông minh — khách gần ngưỡng lifecycle (6h) | `WORKER_PRIORITY_CRM_CLASSIFICATION_SMART` | 5 (Lowest) |
+| `identity_backfill` | identity | system | Backfill uid, sourceIds, links cho document cũ (4 lớp identity) | `WORKER_PRIORITY_IDENTITY_BACKFILL` | 5 (Lowest) |
 
 ### Ví dụ override
 
@@ -177,7 +272,8 @@ WORKER_CPU_THRESHOLD_PAUSE=80
 # Worker pool — tăng song song hóa (Delivery, Ads, Report Dirty)
 WORKER_POOL_SIZE_DELIVERY=8
 WORKER_POOL_SIZE_ADS_EXECUTION=6
-WORKER_POOL_SIZE_REPORT_DIRTY=8
+WORKER_POOL_SIZE_REPORT_DIRTY_ADS=8
+WORKER_POOL_SIZE_REPORT_DIRTY_CUSTOMER=4
 ```
 
 ### Debug mismatch — chỉ chạy crm_bulk (recalc)
@@ -204,7 +300,8 @@ Job được đánh dấu ưu tiên sẽ **bắt buộc chạy** mà không bị
 
 ### CrmBulkJob
 
-- **isPriority** (bool): Thêm vào body khi gọi API rebuild/recalculate-all/recalculate-one.
+- **isPriority** (bool): Thêm vào body khi gọi API rebuild, recalculate-all, recalculate-one.
+- **batchSize** (int): Body recalculate-all — số khách mỗi batch (mặc định 200). Rebuild tạo 2 job (sync + backfill).
 - Sort: job ưu tiên lấy trước khi GetUnprocessed.
 - Khi batch có ít nhất 1 job có `isPriority=true`, worker bỏ qua ShouldThrottle.
 
@@ -217,5 +314,7 @@ Job được đánh dấu ưu tiên sẽ **bắt buộc chạy** mà không bị
 
 ## 4. File tham chiếu
 
-- `api/internal/worker/controller.go` — Throttle logic, `GetEffectivePoolSize`, đọc ngưỡng từ env
+- `api/internal/worker/controller.go` — Throttle logic, `GetEffectivePoolSize`, alert webhook, đọc ngưỡng từ env
 - `api/internal/worker/config.go` — `GetPriority`, `GetPoolSize`, đọc override từ env
+- `api/internal/worker/schedule.go` — `GetEffectiveWorkerSchedule`, worker schedules (interval, batch)
+- `api/internal/worker/retention.go` — `GetEffectiveWorkerRetention`, retention days

@@ -266,9 +266,16 @@ func (s *CrmCustomerService) toDashboardItem(c *crmmodels.CrmCustomer) CrmDashbo
 	if c.SourceIds.Fb != "" {
 		sources = append(sources, "fb")
 	}
+	if c.SourceIds.Zalo != "" {
+		sources = append(sources, "zalo")
+	}
 
+	customerID := c.UnifiedId
+	if c.Uid != "" {
+		customerID = c.Uid // Ưu tiên uid (Identity 4 lớp)
+	}
 	return CrmDashboardCustomerItem{
-		CustomerID:          c.UnifiedId,
+		CustomerID:          customerID,
 		Name:                GetNameFromCustomer(c),
 		Phone:               phone,
 		JourneyStage:        c.JourneyStage,

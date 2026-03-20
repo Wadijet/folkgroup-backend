@@ -45,12 +45,9 @@ func NewAgentActivityCleanupWorker(interval time.Duration, retentionDays int64) 
 	}, nil
 }
 
-// Start bắt đầu background worker xóa activity logs cũ.
+// Start bắt đầu background worker xóa activity logs cũ. Đọc config mỗi vòng (hỗ trợ thay đổi qua API).
 func (w *AgentActivityCleanupWorker) Start(ctx context.Context) {
 	log := logger.GetAppLogger()
-
-	ticker := time.NewTicker(w.interval)
-	defer ticker.Stop()
 
 	log.WithFields(map[string]interface{}{
 		"interval":      w.interval.String(),
@@ -58,47 +55,63 @@ func (w *AgentActivityCleanupWorker) Start(ctx context.Context) {
 	}).Info("🗑️ [AGENT_ACTIVITY_CLEANUP] Starting Agent Activity Cleanup Worker...")
 
 	for {
+		interval, _ := GetEffectiveWorkerSchedule(WorkerAgentActivityCleanup, w.interval, 0)
+		retentionDays := GetEffectiveWorkerRetention(WorkerAgentActivityCleanup, w.retentionDays)
+
+		if !IsWorkerActive(WorkerAgentActivityCleanup) {
+			select {
+			case <-ctx.Done():
+				log.Info("🗑️ [AGENT_ACTIVITY_CLEANUP] Agent Activity Cleanup Worker stopped")
+				return
+			case <-time.After(1 * time.Minute):
+			}
+			continue
+		}
+		p := GetPriority(WorkerAgentActivityCleanup, PriorityLow)
+		if ShouldThrottle(p) {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(interval):
+			}
+			continue
+		}
+		if effInterval := GetEffectiveInterval(interval, p); effInterval > interval {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(effInterval - interval):
+			}
+		}
+
 		select {
 		case <-ctx.Done():
 			log.Info("🗑️ [AGENT_ACTIVITY_CLEANUP] Agent Activity Cleanup Worker stopped")
 			return
-		case <-ticker.C:
-			if !IsWorkerActive(WorkerAgentActivityCleanup) {
-				time.Sleep(1 * time.Minute)
-				continue
-			}
-			p := GetPriority(WorkerAgentActivityCleanup, PriorityLow)
-			if ShouldThrottle(p) {
-				continue
-			}
-			if effInterval := GetEffectiveInterval(w.interval, p); effInterval > w.interval {
-				time.Sleep(effInterval - w.interval)
-			}
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						log.WithFields(map[string]interface{}{
-							"panic": r,
-						}).Error("🗑️ [AGENT_ACTIVITY_CLEANUP] Panic khi xóa activity logs, sẽ tiếp tục ở lần chạy tiếp theo")
-					}
-				}()
+		case <-time.After(interval):
+		}
 
-				cutoff := time.Now().AddDate(0, 0, -int(w.retentionDays)).UnixMilli()
-				start := time.Now()
-				deletedCount, err := w.activityService.DeleteOlderThan(ctx, cutoff)
-				metrics.RecordDuration("agent_activity_cleanup", time.Since(start))
-				if err != nil {
-					log.WithError(err).Error("🗑️ [AGENT_ACTIVITY_CLEANUP] Failed to delete old activity logs")
-					return
-				}
-
-				if deletedCount > 0 {
-					log.WithFields(map[string]interface{}{
-						"deletedCount":   deletedCount,
-						"retentionDays": w.retentionDays,
-					}).Info("🗑️ [AGENT_ACTIVITY_CLEANUP] Đã xóa activity logs cũ")
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.WithFields(map[string]interface{}{"panic": r}).Error("🗑️ [AGENT_ACTIVITY_CLEANUP] Panic khi xóa activity logs, sẽ tiếp tục ở lần chạy tiếp theo")
 				}
 			}()
-		}
+
+			cutoff := time.Now().AddDate(0, 0, -int(retentionDays)).UnixMilli()
+			start := time.Now()
+			deletedCount, err := w.activityService.DeleteOlderThan(ctx, cutoff)
+			metrics.RecordDuration("agent_activity_cleanup", time.Since(start))
+			if err != nil {
+				log.WithError(err).Error("🗑️ [AGENT_ACTIVITY_CLEANUP] Failed to delete old activity logs")
+				return
+			}
+			if deletedCount > 0 {
+				log.WithFields(map[string]interface{}{
+					"deletedCount":   deletedCount,
+					"retentionDays": retentionDays,
+				}).Info("🗑️ [AGENT_ACTIVITY_CLEANUP] Đã xóa activity logs cũ")
+			}
+		}()
 	}
 }

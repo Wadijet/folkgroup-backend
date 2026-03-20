@@ -300,8 +300,8 @@ func toFloat64FromInterface(v interface{}) float64 {
 	return 0
 }
 
-// getCampaignCurrentMetrics lấy currentMetrics từ campaign. Trả về nil nếu không tìm thấy.
-func getCampaignCurrentMetrics(ctx context.Context, campaignsColl *mongo.Collection, campaignId string, ownerOrgID primitive.ObjectID) map[string]interface{} {
+// GetCampaignCurrentMetrics lấy currentMetrics từ campaign. Trả về nil nếu không tìm thấy. Export cho diagnose.
+func GetCampaignCurrentMetrics(ctx context.Context, campaignsColl *mongo.Collection, campaignId string, ownerOrgID primitive.ObjectID) map[string]interface{} {
 	var doc struct {
 		CurrentMetrics map[string]interface{} `bson:"currentMetrics"`
 	}
@@ -321,7 +321,7 @@ func getCampaignCurrentMetrics(ctx context.Context, campaignsColl *mongo.Collect
 // currentMetrics nil → fetch từ DB. Trả về map với keys: rawSummary, layer1Summary, flagsSummary, flagsDetail.
 func buildMetricsPayloadForNotification(ctx context.Context, campaignsColl *mongo.Collection, campaignId string, adAccountId string, ownerOrgID primitive.ObjectID, currentMetrics map[string]interface{}) map[string]interface{} {
 	if currentMetrics == nil {
-		currentMetrics = getCampaignCurrentMetrics(ctx, campaignsColl, campaignId, ownerOrgID)
+		currentMetrics = GetCampaignCurrentMetrics(ctx, campaignsColl, campaignId, ownerOrgID)
 	}
 	if currentMetrics == nil {
 		return nil
@@ -413,7 +413,7 @@ func RunAutoPropose(ctx context.Context, baseURL string) (proposed int, err erro
 			}
 		}
 
-		currentMetrics := getCampaignCurrentMetrics(ctx, campaignsColl, c.CampaignId, c.OwnerOrganizationID)
+		currentMetrics := GetCampaignCurrentMetrics(ctx, campaignsColl, c.CampaignId, c.OwnerOrganizationID)
 		if currentMetrics == nil {
 			if hasPending {
 				_, _ = approval.Cancel(ctx, pendingInfo.ID.Hex(), c.OwnerOrganizationID)
@@ -480,9 +480,20 @@ func RunAutoPropose(ctx context.Context, baseURL string) (proposed int, err erro
 			continue
 		}
 		metricsPayload := buildMetricsPayloadForNotification(ctx, campaignsColl, c.CampaignId, c.AdAccountId, c.OwnerOrganizationID, currentMetrics)
+		if metricsPayload == nil {
+			metricsPayload = make(map[string]interface{})
+		}
+		if rc := action["result_check"]; rc != nil {
+			metricsPayload["result_check"] = rc
+		}
+		if traceId, _ := action["traceId"].(string); traceId != "" {
+			metricsPayload["traceId"] = traceId
+		}
 		reason, _ := action["reason"].(string)
 		value := action["value"]
-		pending, err := Propose(ctx, &ProposeInput{
+		traceID, _ := action["traceId"].(string)
+		// Vision 08: Luôn gọi Propose; ResolveImmediate (Executor) quyết định auto-approve theo ApprovalModeConfig.
+		_, err = Propose(ctx, &ProposeInput{
 			ActionType:   actionType,
 			AdAccountId:  c.AdAccountId,
 			CampaignId:   c.CampaignId,
@@ -490,15 +501,13 @@ func RunAutoPropose(ctx context.Context, baseURL string) (proposed int, err erro
 			Reason:       reason,
 			Value:        value,
 			RuleCode:     ruleCode,
+			TraceID:      traceID,
 			Payload:      metricsPayload,
 		}, c.OwnerOrganizationID, baseURL)
 		if err != nil {
-			return proposed, fmt.Errorf("propose campaign %s: %w", c.CampaignId, err)
+			return proposed, fmt.Errorf("emit propose campaign %s: %w", c.CampaignId, err)
 		}
 		proposed++
-		if pending != nil && metaCfg != nil && ShouldAutoApprove(ruleCode, metaCfg) {
-			_, _ = approval.Approve(ctx, pending.ID.Hex(), c.OwnerOrganizationID)
-		}
 	}
 
 	// Anti Self-Competition: xử lý Increase — chỉ top N camp/account
@@ -525,9 +534,20 @@ func RunAutoPropose(ctx context.Context, baseURL string) (proposed int, err erro
 				continue
 			}
 			metricsPayload := buildMetricsPayloadForNotification(ctx, campaignsColl, cand.c.CampaignId, cand.c.AdAccountId, cand.c.OwnerOrganizationID, cand.currentMetrics)
+			if metricsPayload == nil {
+				metricsPayload = make(map[string]interface{})
+			}
+			if rc := cand.action["result_check"]; rc != nil {
+				metricsPayload["result_check"] = rc
+			}
+			if traceId, _ := cand.action["traceId"].(string); traceId != "" {
+				metricsPayload["traceId"] = traceId
+			}
 			reason, _ := cand.action["reason"].(string)
 			ruleCode, _ := cand.action["ruleCode"].(string)
-			pending, err := Propose(ctx, &ProposeInput{
+			traceID, _ := cand.action["traceId"].(string)
+			// Vision 08: Luôn gọi Propose; ResolveImmediate (Executor) quyết định auto-approve theo ApprovalModeConfig.
+			_, err = Propose(ctx, &ProposeInput{
 				ActionType:   "INCREASE",
 				AdAccountId:  cand.c.AdAccountId,
 				CampaignId:   cand.c.CampaignId,
@@ -535,15 +555,13 @@ func RunAutoPropose(ctx context.Context, baseURL string) (proposed int, err erro
 				Reason:       reason,
 				Value:        cand.action["value"],
 				RuleCode:     ruleCode,
+				TraceID:      traceID,
 				Payload:      metricsPayload,
 			}, cand.c.OwnerOrganizationID, baseURL)
 			if err != nil {
-				return proposed, fmt.Errorf("propose campaign %s: %w", cand.c.CampaignId, err)
+				return proposed, fmt.Errorf("emit propose campaign %s: %w", cand.c.CampaignId, err)
 			}
 			proposed++
-			if pending != nil && cand.metaCfg != nil && ShouldAutoApprove(ruleCode, cand.metaCfg) {
-				_, _ = approval.Approve(ctx, pending.ID.Hex(), cand.c.OwnerOrganizationID)
-			}
 		}
 	}
 	return proposed, nil

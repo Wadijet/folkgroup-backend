@@ -32,6 +32,20 @@ func Propose(ctx context.Context, domain string, input ProposeInput, ownerOrgID 
 	}, ownerOrgID, baseURL)
 }
 
+// ProposeAndApproveAuto tạo proposal và approve ngay (cho action auto).
+// Không gửi notify pending — Executor chạy ngay. Dùng khi action không cần duyệt người.
+func ProposeAndApproveAuto(ctx context.Context, domain string, input ProposeInput, ownerOrgID primitive.ObjectID) (*pkgapproval.ActionPending, error) {
+	Init()
+	return GetEngine().ProposeAndApproveAuto(ctx, domain, pkgapproval.ProposeInput{
+		ActionType:       input.ActionType,
+		Reason:           input.Reason,
+		Payload:          input.Payload,
+		EventTypePending: input.EventTypePending,
+		ApprovePath:      input.ApprovePath,
+		RejectPath:       input.RejectPath,
+	}, ownerOrgID)
+}
+
 // Approve duyệt đề xuất. Delegate sang engine.
 func Approve(ctx context.Context, actionId string, ownerOrgID primitive.ObjectID) (*pkgapproval.ActionPending, error) {
 	Init()
@@ -84,6 +98,12 @@ func Count(ctx context.Context, ownerOrgID primitive.ObjectID, domain, status st
 func Cancel(ctx context.Context, actionId string, ownerOrgID primitive.ObjectID) (*pkgapproval.ActionPending, error) {
 	Init()
 	return GetEngine().Cancel(ctx, actionId, ownerOrgID)
+}
+
+// FindByIdempotencyKey tìm action đã xử lý theo idempotencyKey (Phase 3 idempotency).
+func FindByIdempotencyKey(ctx context.Context, idempotencyKey string, ownerOrgID primitive.ObjectID) (*pkgapproval.ActionPending, error) {
+	Init()
+	return GetEngine().FindByIdempotencyKey(ctx, idempotencyKey, ownerOrgID)
 }
 
 // FindQueued danh sách item status=queued để worker xử lý (domain ads).

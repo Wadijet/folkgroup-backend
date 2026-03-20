@@ -7,9 +7,9 @@ import (
 	"time"
 
 	basehdl "meta_commerce/internal/api/base/handler"
-	webhookdto "meta_commerce/internal/api/webhook/dto"
 	fbsvc "meta_commerce/internal/api/fb/service"
 	pcsvc "meta_commerce/internal/api/pc/service"
+	webhookdto "meta_commerce/internal/api/webhook/dto"
 	webhookmodels "meta_commerce/internal/api/webhook/models"
 	webhooksvc "meta_commerce/internal/api/webhook/service"
 	"meta_commerce/internal/common"
@@ -28,7 +28,7 @@ type PancakeWebhookHandler struct {
 	fbMessageService      *fbsvc.FbMessageService
 	fbCustomerService     *fbsvc.FbCustomerService
 	fbPageService         *fbsvc.FbPageService
-	webhookLogService     *webhooksvc.WebhookLogService
+	webhookLogService *webhooksvc.WebhookLogService
 }
 
 // NewPancakeWebhookHandler tạo mới PancakeWebhookHandler

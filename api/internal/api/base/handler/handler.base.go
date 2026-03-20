@@ -865,6 +865,16 @@ func (h *BaseHandler[T, CreateInput, UpdateInput]) ProcessFilter(c fiber.Ctx) (m
 	return filter, nil
 }
 
+// ProcessMergedFilter chuẩn hóa + validate map filter đã merge (vd. query ?filter= + body.filter từ CIO).
+// Dùng cùng quy tắc NormalizeFilter/validateFilter với ProcessFilter.
+func (h *BaseHandler[T, CreateInput, UpdateInput]) ProcessMergedFilter(filter map[string]interface{}) (map[string]interface{}, error) {
+	filter = h.NormalizeFilter(filter)
+	if err := h.validateFilter(filter); err != nil {
+		return nil, err
+	}
+	return filter, nil
+}
+
 // normalizeFilter chuyển đổi các string có format ObjectId thành ObjectID trong filter
 // Hỗ trợ các trường có tên kết thúc bằng "Id" hoặc "ID"
 // NormalizeFilter chuẩn hóa filter (export để domain handler gọi).

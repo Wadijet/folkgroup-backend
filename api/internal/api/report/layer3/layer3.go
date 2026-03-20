@@ -38,6 +38,7 @@ type EngagedAgg struct {
 	ConversationTemperature string // hot|warm|cooling|cold — theo daysSinceLastConversation
 	EngagementDepth         string // light|medium|deep — theo totalMessages
 	SourceType              string // organic|ads — theo conversationFromAds
+	PurchasePotential       string // high|medium|low — tiềm năng mua (chuyển nhóm engaged → first), tổng hợp từ 3 tiêu chí trên
 }
 
 type FirstAgg struct {
@@ -100,7 +101,8 @@ func DeriveFromMap(m map[string]interface{}, endMs int64) *Layer3Aggregate {
 	if journeyStage == "first" && orderCount == 1 {
 		out.First = deriveFirst(m, daysSinceLast)
 	}
-	if journeyStage == "repeat" && orderCount >= 2 {
+	// Repeat: design 2–7 đơn, chưa VIP. valueTier=top (8+ đơn) → Vip, không overlap Repeat.
+	if journeyStage == "repeat" && orderCount >= 2 && (orderCount <= 7 || valueTier != "top") {
 		out.Repeat = deriveRepeat(m, daysSinceLast)
 	}
 	if valueTier == "top" && orderCount >= 8 {
@@ -487,7 +489,8 @@ func deriveEngaged(m map[string]interface{}, endMs int64) *EngagedAgg {
 	temp := engagedConversationTemperature(lastConv, endMs)
 	depth := engagedEngagementDepth(totalMsgs)
 	source := engagedSourceType(fromAds)
-	return &EngagedAgg{ConversationTemperature: temp, EngagementDepth: depth, SourceType: source}
+	pp := engagedPurchasePotential(temp, depth, source)
+	return &EngagedAgg{ConversationTemperature: temp, EngagementDepth: depth, SourceType: source, PurchasePotential: pp}
 }
 
 func engagedConversationTemperature(lastConvAtMs, endMs int64) string {
@@ -528,6 +531,40 @@ func engagedSourceType(fromAds bool) string {
 		return "ads"
 	}
 	return "organic"
+}
+
+// engagedPurchasePotential tính tiềm năng mua (chuyển nhóm engaged → first) từ Temperature + Depth + Source.
+// Tương tự RepeatProbability, UpgradePotential, ReactivationPotential — output high|medium|low.
+func engagedPurchasePotential(temp, depth, source string) string {
+	score := 0
+	switch temp {
+	case "hot":
+		score += 2
+	case "warm":
+		score += 1
+	case "cooling":
+		score += 0
+	case "cold":
+		score -= 1
+	}
+	switch depth {
+	case "deep":
+		score += 2
+	case "medium":
+		score += 1
+	case "light":
+		score += 0
+	}
+	if source == "ads" {
+		score += 1 // Traffic từ ads thường có intent mua cao hơn
+	}
+	if score >= 4 {
+		return "high"
+	}
+	if score <= 1 {
+		return "low"
+	}
+	return "medium"
 }
 
 func getBool(m map[string]interface{}, k string) bool {
@@ -711,6 +748,7 @@ func ToMapForStorage(a *Layer3Aggregate) map[string]interface{} {
 			"conversationTemperature": a.Engaged.ConversationTemperature,
 			"engagementDepth":         a.Engaged.EngagementDepth,
 			"sourceType":              a.Engaged.SourceType,
+			"purchasePotential":       a.Engaged.PurchasePotential,
 		}
 	}
 	if len(out) == 0 {

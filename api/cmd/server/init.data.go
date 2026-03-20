@@ -159,24 +159,34 @@ func InitDefaultData() {
 		log.Info("✅ [INIT] Step 13: Không có ads_meta_config cần backfill actionRuleConfig")
 	}
 
-	// 14. Seed ads_metric_definitions theo FolkForm v4.1 (7d, 2h, 1h, 30p)
-	log.Info("🔄 [INIT] Step 14: Seeding ads_metric_definitions...")
-	if n, err := adsMigration.SeedAdsMetricDefinitions(ctx); err != nil {
-		log.WithError(err).Warn("⚠️ [INIT] Step 14: Seed ads_metric_definitions thất bại (bỏ qua)")
+	// 14. Map ads_meta_config.ActionRuleConfig (autoApprove) sang approval_mode_config (Vision 08)
+	log.Info("🔄 [INIT] Step 14: Migrating ads_meta_config to approval_mode_config...")
+	if n, err := adsMigration.MigrateAdsMetaConfigToApprovalMode(ctx); err != nil {
+		log.WithError(err).Warn("⚠️ [INIT] Step 14: Migration ads_meta_config→approval_mode_config thất bại (bỏ qua)")
 	} else if n > 0 {
-		log.Infof("✅ [INIT] Step 14: Đã seed %d ads_metric_definitions", n)
+		log.Infof("✅ [INIT] Step 14: Đã tạo %d approval_mode_config từ ads_meta_config", n)
 	} else {
-		log.Info("✅ [INIT] Step 14: ads_metric_definitions đã có sẵn")
+		log.Info("✅ [INIT] Step 14: Không có approval_mode_config cần migrate")
 	}
 
-	// 15. Init ads notification events (templates + routing cho Circuit Breaker, Pancake Down, v.v.)
-	log.Info("🔄 [INIT] Step 15: Initializing ads notification events...")
-	if n, err := adsMigration.InitAdsNotificationEvents(ctx); err != nil {
-		log.WithError(err).Warn("⚠️ [INIT] Step 15: Init ads notification events thất bại (bỏ qua)")
+	// 15. Seed ads_metric_definitions theo FolkForm v4.1 (7d, 2h, 1h, 30p)
+	log.Info("🔄 [INIT] Step 15: Seeding ads_metric_definitions...")
+	if n, err := adsMigration.SeedAdsMetricDefinitions(ctx); err != nil {
+		log.WithError(err).Warn("⚠️ [INIT] Step 15: Seed ads_metric_definitions thất bại (bỏ qua)")
 	} else if n > 0 {
-		log.Infof("✅ [INIT] Step 15: Đã tạo %d ads notification templates/rules", n)
+		log.Infof("✅ [INIT] Step 15: Đã seed %d ads_metric_definitions", n)
 	} else {
-		log.Info("✅ [INIT] Step 15: Ads notification events đã có sẵn")
+		log.Info("✅ [INIT] Step 15: ads_metric_definitions đã có sẵn")
+	}
+
+	// 16. Init ads notification events (templates + routing cho Circuit Breaker, Pancake Down, v.v.)
+	log.Info("🔄 [INIT] Step 16: Initializing ads notification events...")
+	if n, err := adsMigration.InitAdsNotificationEvents(ctx); err != nil {
+		log.WithError(err).Warn("⚠️ [INIT] Step 16: Init ads notification events thất bại (bỏ qua)")
+	} else if n > 0 {
+		log.Infof("✅ [INIT] Step 16: Đã tạo %d ads notification templates/rules", n)
+	} else {
+		log.Info("✅ [INIT] Step 16: Ads notification events đã có sẵn")
 	}
 
 	log.Info("✅ [INIT] InitDefaultData completed successfully")

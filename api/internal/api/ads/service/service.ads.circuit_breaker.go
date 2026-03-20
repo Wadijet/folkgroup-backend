@@ -11,7 +11,6 @@ import (
 	"time"
 
 	adsconfig "meta_commerce/internal/api/ads/config"
-	"meta_commerce/internal/approval"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/logger"
 	metasvc "meta_commerce/internal/api/meta/service"
@@ -368,23 +367,17 @@ func pauseAllCampaigns(ctx context.Context, adAccountId string, ownerOrgID primi
 		if err := cursor.Decode(&doc); err != nil {
 			continue
 		}
-		pending, err := Propose(ctx, &ProposeInput{
+		_, err := Propose(ctx, &ProposeInput{
 			ActionType:   "PAUSE",
 			AdAccountId:  adAccountId,
 			CampaignId:   doc.CampaignId,
 			Reason:       "Circuit Breaker — PAUSE toàn account",
 			RuleCode:     "circuit_breaker",
-		}, ownerOrgID, "")
+		}, ownerOrgID, getProposeBaseURL())
 		if err != nil {
 			logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
 				"campaignId": doc.CampaignId,
 			}).Warn("[CIRCUIT_BREAKER] Lỗi tạo proposal PAUSE")
-			continue
-		}
-		if _, err := approval.Approve(ctx, pending.ID.Hex(), ownerOrgID); err != nil {
-			logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
-				"campaignId": doc.CampaignId,
-			}).Warn("[CIRCUIT_BREAKER] Lỗi approve PAUSE")
 		}
 	}
 	return nil

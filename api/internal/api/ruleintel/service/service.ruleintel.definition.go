@@ -2,15 +2,12 @@
 package service
 
 import (
-	"context"
 	"fmt"
 
 	basesvc "meta_commerce/internal/api/base/service"
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/api/ruleintel/models"
-
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // RuleDefinitionService CRUD cho Rule Definition.
@@ -27,9 +24,4 @@ func NewRuleDefinitionService() (*RuleDefinitionService, error) {
 	return &RuleDefinitionService{
 		BaseServiceMongoImpl: basesvc.NewBaseServiceMongo[models.RuleDefinition](coll),
 	}, nil
-}
-
-// FindOne tìm Rule Definition theo filter.
-func (s *RuleDefinitionService) FindOne(ctx context.Context, filter interface{}, opts *options.FindOneOptions) (models.RuleDefinition, error) {
-	return s.BaseServiceMongoImpl.FindOne(ctx, filter, opts)
 }

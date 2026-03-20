@@ -9,10 +9,13 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -92,6 +95,9 @@ func main() {
 
 	// 12. pc_pos_orders.posData: ad_id, post_id, conversation_id, page_id — rà soát liên kết
 	check12(db, ctx, &results)
+
+	// 13. crm_customers (engaged) ↔ fb_conversations — theo filter buildConversationFilterForCustomerIds
+	check13(db, ctx, &results)
 
 	// In kết quả
 	for _, r := range results {
@@ -675,6 +681,122 @@ func check12(db *mongo.Database, ctx context.Context, results *[]string) {
 	*results = append(*results, fmt.Sprintf("    • post_id: %d orders có | %d/%d khớp fb_posts", withPostId, postMatch, postTotal))
 	*results = append(*results, fmt.Sprintf("    • conversation_id: %d orders có | %d/%d khớp fb_conversations", withConvId, convMatch, convTotal))
 	*results = append(*results, fmt.Sprintf("    • page_id: %d orders có | %d/%d khớp fb_pages (tổng %d orders)", withPageId, pageMatch, pageTotal, total))
+}
+
+// check13: crm_customers (engaged) ↔ fb_conversations — theo filter buildConversationFilterForCustomerIds
+func check13(db *mongo.Database, ctx context.Context, results *[]string) {
+	crm := db.Collection("crm_customers")
+	convs := db.Collection("fb_conversations")
+
+	engagedTotal, _ := crm.CountDocuments(ctx, bson.M{"journeyStage": "engaged"})
+	if engagedTotal == 0 {
+		*results = append(*results, "13. crm_customers (engaged) ↔ fb_conversations: ⚠️ Không có engaged")
+		return
+	}
+
+	// Lấy mẫu engaged (tối đa 500) từ mỗi org
+	orgsRaw, _ := crm.Distinct(ctx, "ownerOrganizationId", bson.M{"journeyStage": "engaged"})
+	matched, total := 0, 0
+	for _, v := range orgsRaw {
+		orgID, ok := v.(primitive.ObjectID)
+		if !ok || orgID.IsZero() {
+			continue
+		}
+		cur, err := crm.Find(ctx, bson.M{"journeyStage": "engaged", "ownerOrganizationId": orgID},
+			options.Find().SetProjection(bson.M{"unifiedId": 1, "sourceIds": 1}).SetLimit(200))
+		if err != nil {
+			continue
+		}
+		var customers []bson.M
+		_ = cur.All(ctx, &customers)
+		cur.Close(ctx)
+		for _, c := range customers {
+			ids := buildIdsFromCustomer13(c)
+			if len(ids) == 0 {
+				continue
+			}
+			total++
+			filter := buildConvFilter13(ids, orgID, nil)
+			n, _ := convs.CountDocuments(ctx, filter)
+			if n > 0 {
+				matched++
+			}
+		}
+	}
+	if total == 0 {
+		*results = append(*results, "13. crm_customers (engaged) ↔ fb_conversations: ⚠️ Không có engaged có ids")
+		return
+	}
+	pct := float64(matched) / float64(total) * 100
+	if pct >= 90 {
+		*results = append(*results, fmt.Sprintf("13. crm_customers (engaged) ↔ fb_conversations: ✅ ĐÚNG (%d/%d match, %.1f%%)", matched, total, pct))
+	} else if pct >= 30 {
+		*results = append(*results, fmt.Sprintf("13. crm_customers (engaged) ↔ fb_conversations: ⚠️ MỘT PHẦN (%d/%d match, %.1f%%) — phần còn lại có thể match qua fb_messages/expandIds", matched, total, pct))
+	} else {
+		*results = append(*results, fmt.Sprintf("13. crm_customers (engaged) ↔ fb_conversations: ⚠️ Tỷ lệ thấp (%d/%d match, %.1f%%)", matched, total, pct))
+	}
+}
+
+func buildIdsFromCustomer13(c bson.M) []string {
+	var ids []string
+	add := func(s string) {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			ids = append(ids, s)
+		}
+	}
+	if uid, ok := c["unifiedId"].(string); ok {
+		add(uid)
+	}
+	if si, ok := c["sourceIds"].(bson.M); ok {
+		if p, ok := si["pos"].(string); ok {
+			add(p)
+		}
+		if f, ok := si["fb"].(string); ok {
+			add(f)
+		}
+	}
+	return ids
+}
+
+func buildConvFilter13(customerIds []string, ownerOrgID primitive.ObjectID, conversationIds []string) bson.M {
+	var ids []string
+	var numIds []interface{}
+	for _, id := range customerIds {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			ids = append(ids, id)
+			if n, err := strconv.ParseInt(id, 10, 64); err == nil {
+				numIds = append(numIds, n)
+			}
+		}
+	}
+	convCustomerOr := []bson.M{
+		{"customerId": bson.M{"$in": ids}},
+		{"panCakeData.customer_id": bson.M{"$in": ids}},
+		{"panCakeData.customer.id": bson.M{"$in": ids}},
+		{"panCakeData.customers.id": bson.M{"$in": ids}},
+		{"panCakeData.page_customer.id": bson.M{"$in": ids}},
+		{"panCakeData.page_customer.customer_id": bson.M{"$in": ids}},
+	}
+	if len(numIds) > 0 {
+		convCustomerOr = append(convCustomerOr,
+			bson.M{"panCakeData.customer_id": bson.M{"$in": numIds}},
+			bson.M{"panCakeData.customer.id": bson.M{"$in": numIds}},
+			bson.M{"panCakeData.customers.id": bson.M{"$in": numIds}},
+			bson.M{"panCakeData.page_customer.id": bson.M{"$in": numIds}},
+			bson.M{"panCakeData.page_customer.customer_id": bson.M{"$in": numIds}},
+		)
+	}
+	for _, cid := range conversationIds {
+		if cid != "" {
+			convCustomerOr = append(convCustomerOr, bson.M{"conversationId": cid})
+		}
+	}
+	if len(ids) == 0 && len(conversationIds) == 0 {
+		return bson.M{"ownerOrganizationId": ownerOrgID, "customerId": "__NO_MATCH__"}
+	}
+	return bson.M{"ownerOrganizationId": ownerOrgID, "$or": convCustomerOr}
 }
 
 func getString(m map[string]interface{}, key string) string {

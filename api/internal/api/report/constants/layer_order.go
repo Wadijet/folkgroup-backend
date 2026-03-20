@@ -270,7 +270,7 @@ var InactiveEngagementDropOrder = []string{"no_engagement", "dropped_engagement"
 var InactiveReactivationPotentialOrder = []string{"low", "medium", "high"}
 
 // EngagedLayer3CriteriaOrder thứ tự tiêu chí trong nhóm Engaged.
-var EngagedLayer3CriteriaOrder = []string{"conversationTemperature", "engagementDepth", "sourceType"}
+var EngagedLayer3CriteriaOrder = []string{"conversationTemperature", "engagementDepth", "sourceType", "purchasePotential"}
 
 // EngagedConversationTemperatureOrder giá trị conversationTemperature.
 var EngagedConversationTemperatureOrder = []string{"cold", "cooling", "warm", "hot"}
@@ -280,6 +280,9 @@ var EngagedEngagementDepthOrder = []string{"light", "medium", "deep"}
 
 // EngagedSourceTypeOrder giá trị sourceType.
 var EngagedSourceTypeOrder = []string{"organic", "ads"}
+
+// EngagedPurchasePotentialOrder giá trị purchasePotential (tiềm năng mua).
+var EngagedPurchasePotentialOrder = []string{"low", "medium", "high"}
 
 // ValueOrderForMatrix thứ tự Value cho ma trận (thấp → cao).
 var ValueOrderForMatrix = []string{"new", "low", "medium", "high", "top"}

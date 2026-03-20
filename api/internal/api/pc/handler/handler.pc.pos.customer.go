@@ -1,7 +1,6 @@
 package pchdl
 
 import (
-	"encoding/json"
 	"fmt"
 
 	basehdl "meta_commerce/internal/api/base/handler"
@@ -9,7 +8,6 @@ import (
 	pcmodels "meta_commerce/internal/api/pc/models"
 	pcsvc "meta_commerce/internal/api/pc/service"
 	"meta_commerce/internal/common"
-	"meta_commerce/internal/utility"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -31,24 +29,9 @@ func NewPcPosCustomerHandler() (*PcPosCustomerHandler, error) {
 	return hdl, nil
 }
 
-// HandleSyncUpsertOne xử lý sync-upsert-one: chỉ ghi khi dữ liệu mới hơn (giảm tải backend).
-// Unmarshal vào PcPosCustomer struct để extract chạy (flatten posData → customerId, shopId, name, ...).
-func (h *PcPosCustomerHandler) HandleSyncUpsertOne(c fiber.Ctx) error {
-	filter, err := h.ProcessFilter(c)
-	if err != nil {
-		return err
-	}
-	var customer pcmodels.PcPosCustomer
-	if err := json.Unmarshal(c.Body(), &customer); err != nil {
-		return common.NewError(common.ErrCodeValidationFormat, "Body không đúng định dạng JSON", common.StatusBadRequest, err)
-	}
-	if orgID := h.GetActiveOrganizationID(c); orgID != nil && !orgID.IsZero() && customer.OwnerOrganizationID.IsZero() {
-		customer.OwnerOrganizationID = *orgID
-	}
-	if err := utility.ExtractDataIfExists(&customer); err != nil {
-		return common.NewError(common.ErrCodeValidationFormat, "Dữ liệu posData không hợp lệ: "+err.Error(), common.StatusBadRequest, err)
-	}
-	result, skipped, err := h.PcPosCustomerService.SyncUpsertOne(c.Context(), filter, &customer)
+// SyncUpsertOneFromParts filter + body — logic ở PcPosCustomerService.RunSyncUpsertOneFromJSON.
+func (h *PcPosCustomerHandler) SyncUpsertOneFromParts(c fiber.Ctx, filter map[string]interface{}, body []byte) error {
+	result, skipped, err := h.PcPosCustomerService.RunSyncUpsertOneFromJSON(c.Context(), filter, body, h.GetActiveOrganizationID(c))
 	if err != nil {
 		h.HandleResponse(c, nil, err)
 		return nil

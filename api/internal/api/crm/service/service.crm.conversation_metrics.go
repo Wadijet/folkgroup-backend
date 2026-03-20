@@ -41,6 +41,7 @@ func buildConversationFilterForCustomerIds(customerIds []string, ownerOrgID prim
 	}
 	convCustomerOr := []bson.M{
 		{"customerId": bson.M{"$in": ids}},
+		{"links.customer.uid": bson.M{"$in": ids}}, // Identity 4 lớp — ưu tiên links
 		{"panCakeData.customer_id": bson.M{"$in": ids}},
 		{"panCakeData.customer.id": bson.M{"$in": ids}},
 		{"panCakeData.customers.id": bson.M{"$in": ids}},
@@ -91,54 +92,59 @@ func (s *CrmCustomerService) aggregateConversationMetricsForCustomer(ctx context
 
 	// Nguyên tắc: panCakeData/posData = ngày tháng nguồn (khi sự kiện xảy ra); root (createdAt, updatedAt, panCakeUpdatedAt) = thời gian đồng bộ.
 	// convUpdatedAt: ưu tiên panCakeData.updated_at (nguồn), fallback panCakeUpdatedAt/updatedAt (sync). Dùng cho lastConversationAt, firstConversationAt.
+	// Dùng $dateFromString với onError/onNull + $convert để tránh pipeline fail khi format không hợp lệ.
+	// Document bị exclude khi $toDate/$split lỗi → conversationCount=0 sai.
+	parseStringToLong := func(fieldPath string) bson.M {
+		return bson.M{
+			"$convert": bson.M{
+				"input": bson.M{
+					"$dateFromString": bson.M{
+						"dateString":     bson.M{"$arrayElemAt": bson.A{bson.M{"$split": bson.A{fieldPath, "."}}, 0}},
+						"onError":        nil,
+						"onNull":         nil,
+					},
+				},
+				"to":      "long",
+				"onError": nil,
+				"onNull":  nil,
+			},
+		}
+	}
 	convUpdatedAtParsed := bson.M{
-		"$cond": bson.A{
-			bson.M{"$eq": bson.A{bson.M{"$type": "$panCakeData.updated_at"}, "string"}},
-			bson.M{"$ifNull": bson.A{
-				bson.M{"$toLong": bson.M{"$toDate": bson.M{"$arrayElemAt": bson.A{
-					bson.M{"$split": bson.A{"$panCakeData.updated_at", "."}},
-					0,
-				}}}},
-				nil,
-			}},
-			bson.M{"$cond": bson.A{
-				bson.M{"$eq": bson.A{bson.M{"$type": "$panCakeData.updated_at"}, "long"}},
-				"$panCakeData.updated_at",
-				bson.M{"$cond": bson.A{
-					bson.M{"$eq": bson.A{bson.M{"$type": "$panCakeData.updated_at"}, "double"}},
-					bson.M{"$toLong": "$panCakeData.updated_at"},
-					bson.M{"$ifNull": bson.A{
-						bson.M{"$toLong": bson.M{"$toDate": "$panCakeData.updatedAt"}},
-						nil,
-					}},
-				}},
-			}},
+		"$switch": bson.M{
+			"branches": bson.A{
+				bson.M{"case": bson.M{"$eq": bson.A{bson.M{"$type": "$panCakeData.updated_at"}, "string"}},
+					"then": parseStringToLong("$panCakeData.updated_at")},
+				bson.M{"case": bson.M{"$in": bson.A{bson.M{"$type": "$panCakeData.updated_at"}, bson.A{"long", "int"}}},
+					"then": "$panCakeData.updated_at"},
+				bson.M{"case": bson.M{"$eq": bson.A{bson.M{"$type": "$panCakeData.updated_at"}, "double"}},
+					"then": bson.M{"$toLong": "$panCakeData.updated_at"}},
+				bson.M{"case": bson.M{"$eq": bson.A{bson.M{"$type": "$panCakeData.updated_at"}, "date"}},
+					"then": bson.M{"$toLong": "$panCakeData.updated_at"}},
+				bson.M{"case": bson.M{"$eq": bson.A{bson.M{"$type": "$panCakeData.updated_at"}, "timestamp"}},
+					"then": bson.M{"$toLong": "$panCakeData.updated_at"}},
+			},
+			"default": nil,
 		},
 	}
-	convUpdatedAt := bson.M{"$ifNull": bson.A{convUpdatedAtParsed, "$panCakeUpdatedAt", "$updatedAt"}}
+	// $ifNull chỉ nhận 2 tham số — dùng lồng nhau cho fallback chain
+	convUpdatedAt := bson.M{"$ifNull": bson.A{convUpdatedAtParsed, bson.M{"$ifNull": bson.A{"$panCakeUpdatedAt", "$updatedAt"}}}}
 	// convInsertedAt: thời điểm hội thoại bắt đầu — panCakeData.inserted_at (nguồn). Format: "2026-03-03T04:03:22.263935".
 	convInsertedAtMs := bson.M{
-		"$cond": bson.A{
-			bson.M{"$eq": bson.A{bson.M{"$type": "$panCakeData.inserted_at"}, "string"}},
-			bson.M{"$ifNull": bson.A{
-				bson.M{"$toLong": bson.M{"$toDate": bson.M{"$arrayElemAt": bson.A{
-					bson.M{"$split": bson.A{"$panCakeData.inserted_at", "."}},
-					0,
-				}}}},
-				nil,
-			}},
-			bson.M{"$cond": bson.A{
-				bson.M{"$eq": bson.A{bson.M{"$type": "$panCakeData.inserted_at"}, "long"}},
-				"$panCakeData.inserted_at",
-				bson.M{"$cond": bson.A{
-					bson.M{"$eq": bson.A{bson.M{"$type": "$panCakeData.inserted_at"}, "double"}},
-					bson.M{"$toLong": "$panCakeData.inserted_at"},
-					bson.M{"$ifNull": bson.A{
-						bson.M{"$toLong": bson.M{"$toDate": "$panCakeData.insertedAt"}},
-						bson.M{"$toLong": bson.M{"$toDate": "$panCakeData.created_at"}},
-					}},
-				}},
-			}},
+		"$switch": bson.M{
+			"branches": bson.A{
+				bson.M{"case": bson.M{"$eq": bson.A{bson.M{"$type": "$panCakeData.inserted_at"}, "string"}},
+					"then": parseStringToLong("$panCakeData.inserted_at")},
+				bson.M{"case": bson.M{"$in": bson.A{bson.M{"$type": "$panCakeData.inserted_at"}, bson.A{"long", "int"}}},
+					"then": "$panCakeData.inserted_at"},
+				bson.M{"case": bson.M{"$eq": bson.A{bson.M{"$type": "$panCakeData.inserted_at"}, "double"}},
+					"then": bson.M{"$toLong": "$panCakeData.inserted_at"}},
+				bson.M{"case": bson.M{"$eq": bson.A{bson.M{"$type": "$panCakeData.inserted_at"}, "date"}},
+					"then": bson.M{"$toLong": "$panCakeData.inserted_at"}},
+				bson.M{"case": bson.M{"$eq": bson.A{bson.M{"$type": "$panCakeData.inserted_at"}, "timestamp"}},
+					"then": bson.M{"$toLong": "$panCakeData.inserted_at"}},
+			},
+			"default": nil,
 		},
 	}
 	// convExistedAt: chỉ dùng panCakeData.inserted_at (theo sample-data: "2026-03-03T04:03:22.263935").
@@ -183,13 +189,13 @@ func (s *CrmCustomerService) aggregateConversationMetricsForCustomer(ctx context
 	defer cursor.Close(ctx)
 
 	var aggResult struct {
-		ConversationCount       int   `bson:"conversationCount"`
-		ConversationCountInbox  int   `bson:"conversationCountInbox"`
-		ConversationCountComment int  `bson:"conversationCountComment"`
-		LastConversationAt      int64 `bson:"lastConversationAt"`
-		FirstConversationAt     int64 `bson:"firstConversationAt"`
-		TotalMessages           int   `bson:"totalMessages"`
-		AnyFromAds              int   `bson:"anyFromAds"`
+		ConversationCount        int   `bson:"conversationCount"`
+		ConversationCountInbox   int   `bson:"conversationCountInbox"`
+		ConversationCountComment int   `bson:"conversationCountComment"`
+		LastConversationAt       int64 `bson:"lastConversationAt"`
+		FirstConversationAt      int64 `bson:"firstConversationAt"`
+		TotalMessages            int   `bson:"totalMessages"`
+		AnyFromAds               int   `bson:"anyFromAds"`
 	}
 	if cursor.Next(ctx) {
 		_ = cursor.Decode(&aggResult)

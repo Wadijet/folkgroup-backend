@@ -77,7 +77,7 @@ func handleProposeLogic(c fiber.Ctx) error {
 			return nil
 		}
 		baseURL := c.Protocol() + "://" + c.Host()
-		result, err := adssvc.Propose(c.Context(), &adssvc.ProposeInput{
+		eventID, err := adssvc.Propose(c.Context(), &adssvc.ProposeInput{
 			ActionType:   input.ActionType,
 			AdAccountId:  input.AdAccountId,
 			CampaignId:   input.CampaignId,
@@ -95,8 +95,8 @@ func handleProposeLogic(c fiber.Ctx) error {
 			})
 			return nil
 		}
-		c.Status(common.StatusCreated).JSON(fiber.Map{
-			"code": common.StatusCreated, "message": "Đã thêm lệnh vào hàng chờ duyệt", "data": result, "status": "success",
+		c.Status(common.StatusAccepted).JSON(fiber.Map{
+			"code": common.StatusAccepted, "message": "Đã nhận đề xuất, đang xử lý. Proposal sẽ xuất hiện trong vài giây.", "data": fiber.Map{"eventId": eventID}, "status": "success",
 		})
 		return nil
 }
@@ -212,6 +212,7 @@ func HandleReject(c fiber.Ctx) error {
 			})
 			return nil
 		}
+		// Learning: OnActionClosed (Reject) tạo learning case
 		c.Status(common.StatusOK).JSON(fiber.Map{
 			"code": common.StatusOK, "message": "Đã từ chối đề xuất", "data": result, "status": "success",
 		})

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -12,6 +13,8 @@ import (
 	fbmodels "meta_commerce/internal/api/fb/models"
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
+	"meta_commerce/internal/utility"
+
 	basesvc "meta_commerce/internal/api/base/service"
 )
 
@@ -31,13 +34,46 @@ func NewFbMessageItemService() (*FbMessageItemService, error) {
 	}, nil
 }
 
-// UpsertMessages upsert nhiều messages vào collection
+// messagePayloadSourceMS lấy mốc thời gian từ payload Pancake (ưu tiên updated_at, sau đó inserted_at) — Unix ms.
+// Khớp layout ISO trong mẫu fb_message_items-sample.json (messageData.inserted_at).
+func messagePayloadSourceMS(m map[string]interface{}) int64 {
+	if m == nil {
+		return 0
+	}
+	u := utility.ParseTimestampFromMap(m, "updated_at")
+	if u > 0 {
+		return u
+	}
+	return utility.ParseTimestampFromMap(m, "inserted_at")
+}
+
+// messageItemSyncUnchanged true → không cần ghi DB (đã có bản ≥ incoming theo thời gian hoặc JSON trùng).
+func messageItemSyncUnchanged(existingData, incoming map[string]interface{}) bool {
+	exTS := messagePayloadSourceMS(existingData)
+	inTS := messagePayloadSourceMS(incoming)
+	if exTS > 0 && inTS > 0 {
+		return exTS >= inTS
+	}
+	// incoming có mốc thời gian nhưng bản lưu chưa parse được → vẫn ghi để đồng bộ insertedAt/ messageData.
+	if inTS > 0 && exTS == 0 {
+		return false
+	}
+	// Một phía thiếu timestamp (hoặc cả hai 0) → so nội dung (cùng package với jsonCanonicalEqual trong service.fb.message.go).
+	return jsonCanonicalEqual(existingData, incoming)
+}
+
+// UpsertMessages upsert nhiều messages vào collection.
+// Bỏ qua ghi khi document đã có cùng messageId và messageData đã ≥ incoming (updated_at/inserted_at trong payload) hoặc JSON trùng khi thiếu mốc thời gian.
 func (s *FbMessageItemService) UpsertMessages(ctx context.Context, conversationId string, messages []interface{}) (int, error) {
 	if len(messages) == 0 {
 		return 0, nil
 	}
-	var operations []mongo.WriteModel
-	now := time.Now().UnixMilli()
+
+	type pair struct {
+		id  string
+		m   map[string]interface{}
+	}
+	var pairs []pair
 	for _, msg := range messages {
 		msgMap, ok := msg.(map[string]interface{})
 		if !ok {
@@ -47,12 +83,41 @@ func (s *FbMessageItemService) UpsertMessages(ctx context.Context, conversationI
 		if !ok || messageId == "" {
 			continue
 		}
-		var insertedAt int64 = 0
-		if insertedAtStr, ok := msgMap["inserted_at"].(string); ok {
-			if t, err := time.Parse("2006-01-02T15:04:05.000000", insertedAtStr); err == nil {
-				insertedAt = t.Unix()
+		pairs = append(pairs, pair{id: messageId, m: msgMap})
+	}
+	if len(pairs) == 0 {
+		return 0, nil
+	}
+
+	ids := make([]string, 0, len(pairs))
+	for _, p := range pairs {
+		ids = append(ids, p.id)
+	}
+	existingByID := make(map[string]fbmodels.FbMessageItem)
+	cursor, errFind := s.Collection().Find(ctx, bson.M{"messageId": bson.M{"$in": ids}})
+	if errFind != nil {
+		logrus.WithError(errFind).Warn("FbMessageItem UpsertMessages: không đọc được bản hiện có, sẽ bulk ghi đủ batch")
+	} else {
+		defer cursor.Close(ctx)
+		var existings []fbmodels.FbMessageItem
+		if allErr := cursor.All(ctx, &existings); allErr != nil {
+			logrus.WithError(allErr).Warn("FbMessageItem UpsertMessages: decode bản hiện có lỗi")
+		} else {
+			for _, e := range existings {
+				existingByID[e.MessageId] = e
 			}
 		}
+	}
+
+	var operations []mongo.WriteModel
+	now := time.Now().UnixMilli()
+	for _, p := range pairs {
+		messageId, msgMap := p.id, p.m
+		if ex, ok := existingByID[messageId]; ok && messageItemSyncUnchanged(ex.MessageData, msgMap) {
+			logrus.WithFields(logrus.Fields{"messageId": messageId, "conversationId": conversationId}).Debug("FbMessageItem: bỏ qua — không đổi theo inserted_at/updated_at hoặc payload trùng")
+			continue
+		}
+		insertedAt := messagePayloadSourceMS(msgMap)
 		docMap := bson.M{
 			"conversationId": conversationId,
 			"messageId":      messageId,
@@ -62,7 +127,7 @@ func (s *FbMessageItemService) UpsertMessages(ctx context.Context, conversationI
 		}
 		filter := bson.M{"messageId": messageId}
 		update := bson.M{
-			"$set": docMap,
+			"$set":         docMap,
 			"$setOnInsert": bson.M{"createdAt": now},
 		}
 		operations = append(operations, mongo.NewUpdateOneModel().SetFilter(filter).SetUpdate(update).SetUpsert(true))

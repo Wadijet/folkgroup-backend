@@ -1,4 +1,4 @@
-# Script test gửi thông báo trực tiếp qua endpoint /delivery/send
+# Script test gửi thông báo trực tiếp qua endpoint /executor/send
 # Endpoint này gửi trực tiếp không cần routing rules (Hệ thống 1)
 # Sử dụng: .\scripts\test-delivery-send.ps1
 
@@ -15,7 +15,7 @@ $headers = @{
     "Content-Type" = "application/json"
 }
 
-Write-Host "`n[TEST] Gửi thông báo trực tiếp qua /delivery/send" -ForegroundColor Magenta
+Write-Host "`n[TEST] Gửi thông báo trực tiếp qua /executor/send" -ForegroundColor Magenta
 Write-Host ("=" * 60) -ForegroundColor Magenta
 Write-Host "Base URL: $BaseURL" -ForegroundColor Cyan
 Write-Host "Token: $($token.Substring(0, 30))..." -ForegroundColor Cyan
@@ -75,7 +75,7 @@ if ($senderResponse.data) {
 
 if ($hasActiveEmailSender) {
     try {
-        $emailContent = "Day la noi dung thong bao test duoc gui qua he thong notification.`n`nThoi gian: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')`n`nNoi dung test nay duoc gui truc tiep qua endpoint /delivery/send."
+        $emailContent = "Day la noi dung thong bao test duoc gui qua he thong notification.`n`nThoi gian: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')`n`nNoi dung test nay duoc gui truc tiep qua endpoint /executor/send."
         $payload = @{
             channelType = "email"
             recipient = "test@example.com"
@@ -96,7 +96,7 @@ if ($hasActiveEmailSender) {
             )
         } | ConvertTo-Json -Depth 10 -Compress
 
-        $response = Invoke-RestMethod -Uri "$BaseURL/delivery/send" -Method POST -Headers $headers -Body $payload
+        $response = Invoke-RestMethod -Uri "$BaseURL/executor/send" -Method POST -Headers $headers -Body $payload
         
         Write-Host "`n[OK] Gửi thông báo email thành công!" -ForegroundColor Green
         Write-Host "   MessageID: $($response.messageId)" -ForegroundColor Gray
@@ -134,7 +134,7 @@ if ($senderResponse.data) {
 
 if ($hasActiveTelegramSender) {
     try {
-        $telegramContent = "Test Notification tu Script PowerShell`n`nDay la thong bao test duoc gui truc tiep qua endpoint /delivery/send.`n`nThoi gian: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+        $telegramContent = "Test Notification tu Script PowerShell`n`nDay la thong bao test duoc gui truc tiep qua endpoint /executor/send.`n`nThoi gian: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
         $payloadObj = @{
             channelType = "telegram"
             recipient = "-5139196836"  # Chat ID từ history trước đó
@@ -158,7 +158,7 @@ if ($hasActiveTelegramSender) {
         $payload = $payloadObj | ConvertTo-Json -Depth 10 -Compress
         $payloadBytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
 
-        $response = Invoke-RestMethod -Uri "$BaseURL/delivery/send" -Method POST -Headers $headers -Body $payloadBytes
+        $response = Invoke-RestMethod -Uri "$BaseURL/executor/send" -Method POST -Headers $headers -Body $payloadBytes
     
         Write-Host "`n[OK] Gửi thông báo telegram thành công!" -ForegroundColor Green
         Write-Host "   MessageID: $($response.messageId)" -ForegroundColor Gray

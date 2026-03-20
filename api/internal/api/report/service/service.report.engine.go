@@ -314,6 +314,7 @@ func extractRevenueCompletedStatuses(metadata map[string]interface{}) []interfac
 }
 
 // extractExcludeStatuses đọc excludeStatuses từ metadata (danh sách status cần loại trừ khỏi doanh thu, vd: 6=Đã hủy, 7=Đã xóa gần đây).
+// BSON decode có thể trả []int32 thay vì []interface{}, nên cần xử lý nhiều kiểu.
 func extractExcludeStatuses(metadata map[string]interface{}) []interface{} {
 	if metadata == nil {
 		return nil
@@ -322,11 +323,47 @@ func extractExcludeStatuses(metadata map[string]interface{}) []interface{} {
 	if !ok || raw == nil {
 		return nil
 	}
-	arr, ok := raw.([]interface{})
-	if !ok || len(arr) == 0 {
+	switch v := raw.(type) {
+	case []interface{}:
+		if len(v) == 0 {
+			return nil
+		}
+		return v
+	case primitive.A:
+		if len(v) == 0 {
+			return nil
+		}
+		return []interface{}(v)
+	case []int32:
+		if len(v) == 0 {
+			return nil
+		}
+		out := make([]interface{}, len(v))
+		for i, x := range v {
+			out[i] = int(x)
+		}
+		return out
+	case []int64:
+		if len(v) == 0 {
+			return nil
+		}
+		out := make([]interface{}, len(v))
+		for i, x := range v {
+			out[i] = int(x)
+		}
+		return out
+	case []int:
+		if len(v) == 0 {
+			return nil
+		}
+		out := make([]interface{}, len(v))
+		for i, x := range v {
+			out[i] = x
+		}
+		return out
+	default:
 		return nil
 	}
-	return arr
 }
 
 // extractStatusLabels đọc statusLabels từ metadata (mã status -> tên tiếng Việt).

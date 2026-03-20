@@ -9,7 +9,9 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}/api/cmd/server",
-            "env": {},
+            "env": {
+                "LOG_OUTPUT": "stdout"
+            },
             "args": []
         }
     ]

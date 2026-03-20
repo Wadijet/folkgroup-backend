@@ -1,8 +1,6 @@
 // Package metasvc - FLAG_RULE: đánh giá metrics → tạo flag (sl_a, chs_critical, ...).
-// Khác với ACTION_RULE (ads/rules): flag → action (PAUSE, DECREASE).
+// ACTION_RULE: flag → action (PAUSE, DECREASE) qua Rule Engine (ruleintel).
 // Theo FolkForm v4.1 (WF-03). Lưu vào currentMetrics.alertFlags.
-// Đọc ngưỡng từ ads/config khi cfg != nil.
-// Dùng ads/rules evaluator driven bởi FlagDefinitions.
 package metasvc
 
 import (
@@ -13,33 +11,142 @@ import (
 	adsadaptive "meta_commerce/internal/api/ads/adaptive"
 	adsconfig "meta_commerce/internal/api/ads/config"
 	adsmodels "meta_commerce/internal/api/ads/models"
-	adsrules "meta_commerce/internal/api/ads/rules"
 	ruleintelmodels "meta_commerce/internal/api/ruleintel/models"
 	ruleintelsvc "meta_commerce/internal/api/ruleintel/service"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// computeAlertFlags tính danh sách flags cảnh báo từ metrics.
-// cfg: config từ ads_meta_config (nil = dùng default). Trả về []string — các mã flag đang trigger.
-// Dùng rules.EvaluateFlags với FlagDefinitions từ config.
+// RuleResult kết quả đánh giá rule từ Rule Engine. Dùng cho scheduler và computeSuggestedActions.
+type RuleResult struct {
+	ShouldPropose bool        // Có nên tạo đề xuất không
+	ActionType    string      // PAUSE, DECREASE, INCREASE, RESUME, v.v.
+	Reason        string      // Lý do tự động (hiển thị khi duyệt)
+	RuleCode      string      // Mã rule (sl_a, sl_b, morning_on, noon_cut, v.v.)
+	Value         interface{} // Cho SET_BUDGET, INCREASE, DECREASE
+	Label         string      // Label hiển thị (SL-A, Morning On, ...)
+	ResultCheck   interface{} // Cấu hình check kết quả: afterHours, source, fields (từ Rule)
+	TraceID       string      // ID trace trong rule_execution_logs — link xem log tạo đề xuất
+}
+
+// ComputeAlertFlags tính danh sách flags cảnh báo từ metrics. Export cho scheduler và các module khác.
+// Toàn bộ flags dùng Rule Engine (RULE_ADS_FLAG_*). Không dùng EvaluateFlags.
 // Khi campaignId != "": dùng Per-Camp Adaptive Threshold (FolkForm v4.1 Section 2.2).
-// PATCH 04: DetectWindowShoppingPattern → thêm window_shopping_pattern để suspend Mess Trap đến 14:00.
+func ComputeAlertFlags(ctx context.Context, raw, layer1, layer2, layer3 map[string]interface{}, cfg *adsmodels.CampaignConfigView, campaignId, adAccountId string, ownerOrgID primitive.ObjectID) []string {
+	return computeAlertFlags(ctx, raw, layer1, layer2, layer3, cfg, campaignId, adAccountId, ownerOrgID)
+}
+
+// computeAlertFlags nội bộ — toàn bộ flags qua Rule Engine.
 func computeAlertFlags(ctx context.Context, raw, layer1, layer2, layer3 map[string]interface{}, cfg *adsmodels.CampaignConfigView, campaignId, adAccountId string, ownerOrgID primitive.ObjectID) []string {
-	factsCtx := adsrules.BuildFactsContext(raw, layer1, layer2, layer3, cfg)
-	var campCtx *adsrules.EvalCampaignContext
+	var flags []string
+	now := time.Now()
+	layers := map[string]interface{}{"layer1": layer1, "layer2": layer2, "layer3": layer3, "raw": raw}
+	gt := func(k string) float64 { return adsconfig.GetThresholdWithEventOverride(k, cfg, now) }
+	ga := func(k string) float64 {
+		v, ok := adsadaptive.GetAdaptiveThreshold(ctx, k, campaignId, adAccountId, ownerOrgID, cfg, now)
+		if ok && v != 0 {
+			return v
+		}
+		return gt(k)
+	}
+
+	// Window Shopping Pattern — params từ GetWindowShoppingInputs
 	if campaignId != "" && adAccountId != "" {
-		campCtx = &adsrules.EvalCampaignContext{
-			CampaignId:  campaignId,
-			AdAccountId: adAccountId,
-			OwnerOrgID:  ownerOrgID,
+		if params, ok := GetWindowShoppingInputs(ctx, campaignId, adAccountId, ownerOrgID); ok {
+			if f, matched := EvaluateRuleForFlag(ctx, "RULE_ADS_FLAG_WINDOW_SHOPPING", params, campaignId, adAccountId, ownerOrgID); matched {
+				flags = append(flags, f)
+			}
 		}
 	}
-	flags := adsrules.EvaluateFlags(ctx, &factsCtx, cfg, campCtx)
-	if DetectWindowShoppingPattern(ctx, campaignId, adAccountId, ownerOrgID) {
-		flags = append(flags, "window_shopping_pattern")
+
+	// Các flag layer-based — cần campaignId để adaptive (một số dùng gt khi không có campaign)
+	runFlag := func(ruleID string, params map[string]interface{}) {
+		if f, matched := EvaluateRuleForFlagWithLayers(ctx, ruleID, layers, params, campaignId, adAccountId, ownerOrgID); matched {
+			flags = append(flags, f)
+		}
 	}
+
+	// Trim: cần inTrimWindow từ config
+	inTrim := isInTrimWindow(cfg)
+
+	// 6 flags đã có (mo_eligible, sl_b, noon_cut_eligible, safety_net, increase_eligible)
+	if campaignId != "" && adAccountId != "" {
+		runFlag("RULE_ADS_FLAG_MO_ELIGIBLE", map[string]interface{}{"th_cpaMessMoMax": ga(adsconfig.KeyCpaMessMoMax)})
+		runFlag("RULE_ADS_FLAG_SL_B", map[string]interface{}{
+			"th_spendPctSlB": ga(adsconfig.KeySpendPctSlB), "th_spendPctSlBBlitz": ga(adsconfig.KeySpendPctSlBBlitz), "th_runtimeMinutesBase": ga(adsconfig.KeyRuntimeMinutesBase),
+		})
+		runFlag("RULE_ADS_FLAG_NOON_CUT_ELIGIBLE", map[string]interface{}{
+			"th_cpaMessNoonCutMin": ga(adsconfig.KeyCpaMessNoonCutMin), "th_spendPctNoonCutMax": gt(adsconfig.KeySpendPctNoonCutMax), "th_spendPctBase": gt(adsconfig.KeySpendPctBase),
+		})
+		runFlag("RULE_ADS_FLAG_SAFETY_NET", map[string]interface{}{
+			"th_safetyNetOrdersMin": gt(adsconfig.KeySafetyNetOrdersMin), "th_safetyNetCrMin": gt(adsconfig.KeySafetyNetCrMin), "th_chsMin": float64(60),
+		})
+		runFlag("RULE_ADS_FLAG_INCREASE_ELIGIBLE", nil)
+	}
+
+	// 23 flags còn lại — dùng gt (GetThresholdWithEventOverride) cho tất cả params
+	runFlag("RULE_ADS_FLAG_CPA_MESS_HIGH", map[string]interface{}{"th_cpaMessKill": gt(adsconfig.KeyCpaMessKill)})
+	runFlag("RULE_ADS_FLAG_CPA_PURCHASE_HIGH", map[string]interface{}{"th_cpaPurchaseHardStop": gt(adsconfig.KeyCpaPurchaseHardStop)})
+	runFlag("RULE_ADS_FLAG_CONV_RATE_LOW", map[string]interface{}{"th_convRateMessTrap": gt(adsconfig.KeyConvRateMessTrap), "th_messTrapSlDMin": gt(adsconfig.KeyMessTrapSlDMin)})
+	runFlag("RULE_ADS_FLAG_CTR_CRITICAL", map[string]interface{}{"th_ctrKill": gt(adsconfig.KeyCtrKill)})
+	runFlag("RULE_ADS_FLAG_MSG_RATE_LOW", map[string]interface{}{"th_msgRateLow": gt(adsconfig.KeyMsgRateLow)})
+	runFlag("RULE_ADS_FLAG_CPM_LOW", map[string]interface{}{"th_cpmMessTrapLow": gt(adsconfig.KeyCpmMessTrapLow)})
+	runFlag("RULE_ADS_FLAG_CPM_HIGH", map[string]interface{}{"th_cpmHigh": gt(adsconfig.KeyCpmHigh)})
+	runFlag("RULE_ADS_FLAG_FREQUENCY_HIGH", map[string]interface{}{"th_frequencyHigh": gt(adsconfig.KeyFrequencyHigh)})
+	runFlag("RULE_ADS_FLAG_CHS_CRITICAL", map[string]interface{}{"th_chsWarningThreshold": gt(adsconfig.KeyChsWarningThreshold)})
+	runFlag("RULE_ADS_FLAG_CHS_WARNING", map[string]interface{}{"th_chsWarningThreshold": gt(adsconfig.KeyChsWarningThreshold)})
+	runFlag("RULE_ADS_FLAG_SL_A", map[string]interface{}{"th_spendPctBase": gt(adsconfig.KeySpendPctBase), "th_runtimeMinutesBase": gt(adsconfig.KeyRuntimeMinutesBase), "th_cpaMessKill": gt(adsconfig.KeyCpaMessKill), "th_mqsSlAMax": gt(adsconfig.KeyMqsSlAMax)})
+	runFlag("RULE_ADS_FLAG_SL_A_DECREASE", map[string]interface{}{"th_spendPctBase": gt(adsconfig.KeySpendPctBase), "th_runtimeMinutesBase": gt(adsconfig.KeyRuntimeMinutesBase), "th_cpaMessKill": gt(adsconfig.KeyCpaMessKill), "th_mqsSlADecreaseMin": gt(adsconfig.KeyMqsSlADecreaseMin)})
+	runFlag("RULE_ADS_FLAG_SL_C", map[string]interface{}{"th_spendPctBase": gt(adsconfig.KeySpendPctBase), "th_runtimeMinutesBase": gt(adsconfig.KeyRuntimeMinutesBase), "th_ctrKill": gt(adsconfig.KeyCtrKill), "th_spendPctSlC": gt(adsconfig.KeySpendPctSlC), "th_cpmHigh": gt(adsconfig.KeyCpmHigh), "th_msgRateLow": gt(adsconfig.KeyMsgRateLow)})
+	runFlag("RULE_ADS_FLAG_SL_D", map[string]interface{}{"th_spendPctBase": gt(adsconfig.KeySpendPctBase), "th_runtimeMinutesBase": gt(adsconfig.KeyRuntimeMinutesBase), "th_messTrapSlDMin": gt(adsconfig.KeyMessTrapSlDMin), "th_convRateMessTrap": gt(adsconfig.KeyConvRateMessTrap), "th_spendPctSlD": gt(adsconfig.KeySpendPctSlD)})
+	runFlag("RULE_ADS_FLAG_SL_E", map[string]interface{}{"th_spendPctBase": gt(adsconfig.KeySpendPctBase), "th_runtimeMinutesBase": gt(adsconfig.KeyRuntimeMinutesBase), "th_cpaPurchaseHardStop": gt(adsconfig.KeyCpaPurchaseHardStop), "th_slEOrdersMin": gt(adsconfig.KeySlEOrdersMin), "th_slECrMax": gt(adsconfig.KeySlECrMax), "th_mqsSlEMax": gt(adsconfig.KeyMqsSlEMax)})
+	runFlag("RULE_ADS_FLAG_KO_A", map[string]interface{}{"th_runtimeMinutesKoA": gt(adsconfig.KeyRuntimeMinutesKoA), "th_spendPctKoAMax": gt(adsconfig.KeySpendPctKoAMax)})
+	runFlag("RULE_ADS_FLAG_KO_B", map[string]interface{}{"th_ctrTrafficRac": gt(adsconfig.KeyCtrTrafficRac), "th_msgRateLow": gt(adsconfig.KeyMsgRateLow), "th_spendPctKoB": gt(adsconfig.KeySpendPctKoB), "th_mqsKoBMax": gt(adsconfig.KeyMqsKoBMax)})
+	runFlag("RULE_ADS_FLAG_KO_C", map[string]interface{}{"th_cpmHigh": gt(adsconfig.KeyCpmHigh), "th_cpmKoCMultiplier": gt(adsconfig.KeyCpmKoCMultiplier), "th_spendPctKoC": gt(adsconfig.KeySpendPctKoC)})
+	runFlag("RULE_ADS_FLAG_MESS_TRAP_SUSPECT", map[string]interface{}{"th_cpaMessTrapLow": gt(adsconfig.KeyCpaMessTrapLow), "th_convRateMessTrap6": gt(adsconfig.KeyConvRateMessTrap6), "th_messTrapSuspectMin": gt(adsconfig.KeyMessTrapSuspectMin), "th_spendPctMessTrap": gt(adsconfig.KeySpendPctMessTrap)})
+	runFlag("RULE_ADS_FLAG_TRIM_ELIGIBLE", map[string]interface{}{"inTrimWindow": inTrim, "th_frequencyTrim": gt(adsconfig.KeyFrequencyTrim), "th_trimOrdersMin": gt(adsconfig.KeyTrimOrdersMin)})
+	runFlag("RULE_ADS_FLAG_TRIM_ELIGIBLE_DECREASE", map[string]interface{}{"inTrimWindow": inTrim, "th_frequencyTrim": gt(adsconfig.KeyFrequencyTrim), "th_trimOrdersMin": gt(adsconfig.KeyTrimOrdersMin)})
+	runFlag("RULE_ADS_FLAG_CONV_RATE_STRONG", map[string]interface{}{"th_convRateStrong": gt(adsconfig.KeyConvRateStrong)})
+	runFlag("RULE_ADS_FLAG_PORTFOLIO_ATTENTION", nil)
+
 	return flags
+}
+
+// isInTrimWindow true khi giờ hiện tại trong [TrimStartHour, TrimEndHour) theo config.
+func isInTrimWindow(cfg *adsmodels.CampaignConfigView) bool {
+	common := adsconfig.GetCommon(cfg)
+	loc, err := time.LoadLocation(common.Timezone)
+	if err != nil {
+		loc = time.FixedZone("UTC+7", 7*3600)
+	}
+	hour := time.Now().In(loc).Hour()
+	start, end := adsconfig.GetTrimWindow(cfg)
+	return hour >= start && hour < end
+}
+
+func filterOut(flags []string, s string) []string {
+	var out []string
+	for _, f := range flags {
+		if f != s {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// filterOutMultiple loại bỏ nhiều flag khỏi danh sách.
+func filterOutMultiple(flags []string, codes []string) []string {
+	set := make(map[string]bool)
+	for _, c := range codes {
+		set[c] = true
+	}
+	var out []string
+	for _, f := range flags {
+		if !set[f] {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // hasFlag kiểm tra flag có trong danh sách không.
@@ -96,10 +203,105 @@ var ruleCodeToRuleID = map[string]string{
 	"chs_critical": "RULE_ADS_KILL_CHS", "ko_a": "RULE_ADS_KILL_KO_A", "ko_b": "RULE_ADS_KILL_KO_B", "ko_c": "RULE_ADS_KILL_KO_C", "trim_eligible": "RULE_ADS_KILL_TRIM",
 	"sl_a_decrease": "RULE_ADS_DECREASE_SL_A", "mess_trap_suspect": "RULE_ADS_DECREASE_MESS_TRAP", "trim_eligible_decrease": "RULE_ADS_DECREASE_TRIM", "chs_warning": "RULE_ADS_DECREASE_CHS",
 	"increase_eligible": "RULE_ADS_INCREASE_ELIGIBLE", "increase_safety_net": "RULE_ADS_INCREASE_SAFETY",
+	"morning_on": "RULE_ADS_RESUME_MORNING_ON", "noon_cut": "RULE_ADS_KILL_NOON_CUT",
+	"noon_cut_resume": "RULE_ADS_RESUME_NOON_CUT", "night_off": "RULE_ADS_KILL_NIGHT_OFF",
+}
+
+// EvaluateRuleForScheduler gọi Rule Engine cho scheduler (morning_on, noon_cut). Export để ads/scheduler dùng.
+// Trả về *RuleResult nếu match; nil nếu không.
+func EvaluateRuleForScheduler(ctx context.Context, ruleID, ruleCode string, layers map[string]interface{}, params map[string]interface{}, campaignId, adAccountId string, ownerOrgID primitive.ObjectID, label string) *RuleResult {
+	return tryRuleEngine(ctx, ruleID, ruleCode, layers, params, campaignId, adAccountId, ownerOrgID, label)
+}
+
+// EvaluateRuleForFlag gọi Rule Engine cho Interpretation Rule (metric/params → flag). Dùng cho window_shopping_pattern.
+// Trả về (flag, true) nếu match; ("", false) nếu không.
+func EvaluateRuleForFlag(ctx context.Context, ruleID string, paramsOverride map[string]interface{}, campaignId, adAccountId string, ownerOrgID primitive.ObjectID) (flag string, matched bool) {
+	return EvaluateRuleForFlagWithLayers(ctx, ruleID, nil, paramsOverride, campaignId, adAccountId, ownerOrgID)
+}
+
+// EvaluateRuleForFlagWithLayers gọi Rule Engine với layers (layer1, layer2, layer3, raw). Dùng cho mo_eligible.
+func EvaluateRuleForFlagWithLayers(ctx context.Context, ruleID string, layers map[string]interface{}, paramsOverride map[string]interface{}, campaignId, adAccountId string, ownerOrgID primitive.ObjectID) (flag string, matched bool) {
+	svc, err := ruleintelsvc.NewRuleEngineService()
+	if err != nil {
+		return "", false
+	}
+	if layers == nil {
+		layers = map[string]interface{}{}
+	}
+	input := &ruleintelsvc.RunInput{
+		RuleID:         ruleID,
+		Domain:         "ads",
+		EntityRef:      ruleintelmodels.EntityRef{Domain: "ads", ObjectType: "campaign", ObjectID: campaignId, OwnerOrganizationID: ownerOrgID.Hex()},
+		Layers:         layers,
+		ParamsOverride: paramsOverride,
+	}
+	result, err := svc.Run(ctx, input)
+	if err != nil || result == nil || result.Result == nil {
+		return "", false
+	}
+	obj, ok := result.Result.(map[string]interface{})
+	if !ok {
+		return "", false
+	}
+	f, _ := obj["flag"].(string)
+	if f == "" {
+		return "", false
+	}
+	return f, true
+}
+
+// computeLayer1ViaRuleEngine gọi Rule Engine RULE_ADS_LAYER1. Trả về layer1 map hoặc nil khi lỗi (fallback computeLayer1).
+// Truyền nowMs và timeFactorForMQS qua params (script cần cho lifecycle, mqs, runtimeMinutes).
+func computeLayer1ViaRuleEngine(ctx context.Context, raw map[string]interface{}, entityId, adAccountId string, ownerOrgID primitive.ObjectID) map[string]interface{} {
+	params := map[string]interface{}{
+		"nowMs":            time.Now().UnixMilli(),
+		"timeFactorForMQS": getTimeFactorForMQS(),
+	}
+	layers := map[string]interface{}{"raw": raw}
+	return EvaluateRuleForLayer(ctx, "RULE_ADS_LAYER1", layers, params, entityId, adAccountId, ownerOrgID)
+}
+
+// computeLayer2ViaRuleEngine gọi Rule Engine RULE_ADS_LAYER2. Trả về layer2 map hoặc nil khi lỗi (fallback computeLayer2).
+func computeLayer2ViaRuleEngine(ctx context.Context, raw, layer1 map[string]interface{}, entityId, adAccountId string, ownerOrgID primitive.ObjectID) map[string]interface{} {
+	layers := map[string]interface{}{"raw": raw, "layer1": layer1}
+	return EvaluateRuleForLayer(ctx, "RULE_ADS_LAYER2", layers, nil, entityId, adAccountId, ownerOrgID)
+}
+
+// computeLayer3ViaRuleEngine gọi Rule Engine RULE_ADS_LAYER3. Trả về layer3 map hoặc nil khi lỗi (fallback computeLayer3).
+func computeLayer3ViaRuleEngine(ctx context.Context, layer1, layer2 map[string]interface{}, entityId, adAccountId string, ownerOrgID primitive.ObjectID) map[string]interface{} {
+	layers := map[string]interface{}{"layer1": layer1, "layer2": layer2}
+	return EvaluateRuleForLayer(ctx, "RULE_ADS_LAYER3", layers, nil, entityId, adAccountId, ownerOrgID)
+}
+
+// EvaluateRuleForLayer gọi Rule Engine cho Derivation Rule (layer1+layer2 → layer3). Trả về layer map hoặc nil khi lỗi.
+func EvaluateRuleForLayer(ctx context.Context, ruleID string, layers map[string]interface{}, paramsOverride map[string]interface{}, campaignId, adAccountId string, ownerOrgID primitive.ObjectID) map[string]interface{} {
+	svc, err := ruleintelsvc.NewRuleEngineService()
+	if err != nil {
+		return nil
+	}
+	if layers == nil {
+		layers = map[string]interface{}{}
+	}
+	input := &ruleintelsvc.RunInput{
+		RuleID:         ruleID,
+		Domain:         "ads",
+		EntityRef:      ruleintelmodels.EntityRef{Domain: "ads", ObjectType: "campaign", ObjectID: campaignId, OwnerOrganizationID: ownerOrgID.Hex()},
+		Layers:         layers,
+		ParamsOverride: paramsOverride,
+	}
+	result, err := svc.Run(ctx, input)
+	if err != nil || result == nil || result.Result == nil {
+		return nil
+	}
+	m, ok := result.Result.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	return m
 }
 
 // tryRuleEngine gọi Rule Engine cho rule. Trả về *RuleResult nếu match; nil nếu không.
-func tryRuleEngine(ctx context.Context, ruleID, ruleCode string, layers map[string]interface{}, paramsOverride map[string]interface{}, campaignId, adAccountId string, ownerOrgID primitive.ObjectID, label string) *adsrules.RuleResult {
+func tryRuleEngine(ctx context.Context, ruleID, ruleCode string, layers map[string]interface{}, paramsOverride map[string]interface{}, campaignId, adAccountId string, ownerOrgID primitive.ObjectID, label string) *RuleResult {
 	svc, err := ruleintelsvc.NewRuleEngineService()
 	if err != nil {
 		return nil
@@ -128,36 +330,34 @@ func tryRuleEngine(ctx context.Context, ruleID, ruleCode string, layers map[stri
 	if label == "" {
 		label = ruleCode
 	}
-	return &adsrules.RuleResult{
+	res := &RuleResult{
 		ShouldPropose: true,
 		ActionType:    actionCode,
 		Reason:        reason,
 		RuleCode:      ruleCode,
 		Label:         label,
 		Value:         val,
+		TraceID:       result.TraceID,
 	}
+	if rc, ok := actionObj["result_check"]; ok && rc != nil {
+		res.ResultCheck = rc
+	}
+	return res
 }
 
 // computeSuggestedActions tính action đề xuất cho tình trạng hiện tại từ alertFlags.
 // Ưu tiên: Kill → Decrease → Increase (theo FolkForm WF-03, WF-04).
-// Dùng Rule Engine cho tất cả rules (Owner=system). Fallback sang adsrules nếu Rule Engine lỗi.
+// Dùng Rule Engine cho tất cả rules (Owner=system). Không fallback.
 func computeSuggestedActions(ctx context.Context, alertFlags []string, campaignId, adAccountId string, ownerOrgID primitive.ObjectID, cfg *adsmodels.CampaignConfigView, raw, layer1 map[string]interface{}) []map[string]interface{} {
 	if len(alertFlags) == 0 {
 		return nil
 	}
-	flags := make([]interface{}, len(alertFlags))
-	for i, f := range alertFlags {
-		flags[i] = f
-	}
 	killEnabled := adsconfig.GetKillRulesEnabled(ctx, adAccountId, ownerOrgID)
-	opts := &adsrules.EvalOptions{KillRulesEnabled: killEnabled}
+	msgRateRatio := 0.0
 	if layer1 != nil {
-		opts.MsgRateRatio = toFloat(layer1, "msgRate_7d")
+		msgRateRatio = toFloat(layer1, "msgRate_7d")
 	}
 	metaForCpm, _ := raw["meta"].(map[string]interface{})
-	if metaForCpm != nil {
-		opts.CpmVnd = toFloat(metaForCpm, "cpm")
-	}
 
 	// Build layers.flag (map) cho flag-based rules
 	flagMap := make(map[string]interface{})
@@ -183,7 +383,7 @@ func computeSuggestedActions(ctx context.Context, alertFlags []string, campaignI
 	windowShopping := hasFlag(alertFlags, "window_shopping_pattern")
 	before1400 := adsconfig.IsBefore1400Vietnam(now)
 
-	var result *adsrules.RuleResult
+	var result *RuleResult
 
 	// Rule Engine: Kill rules (theo thứ tự config)
 	killRules := getKillRulesFromConfig(cfg)
@@ -208,8 +408,8 @@ func computeSuggestedActions(ctx context.Context, alertFlags []string, campaignI
 			params["skipMessTrapWindowShopping"] = true
 			params["windowShoppingPattern"] = windowShopping
 			params["isBefore1400"] = before1400
-			params["msgRateRatio"] = opts.MsgRateRatio
-			params["cpmVnd"] = opts.CpmVnd
+			params["msgRateRatio"] = msgRateRatio
+			params["cpmVnd"] = toFloat(metaForCpm, "cpm")
 		}
 		if ruleCode == "sl_a" {
 			if campaignId != "" && adAccountId != "" {
@@ -275,16 +475,6 @@ func computeSuggestedActions(ctx context.Context, alertFlags []string, campaignI
 		}
 	}
 
-	// Fallback sang adsrules nếu Rule Engine không trả kết quả
-	if result == nil {
-		result = adsrules.EvaluateAlertFlagsWithConfig(flags, opts, cfg)
-	}
-	if result == nil {
-		result = adsrules.EvaluateForDecreaseWithConfig(flags, cfg)
-	}
-	if result == nil {
-		result = adsrules.EvaluateForIncrease(flags, cfg)
-	}
 	if result == nil || !result.ShouldPropose {
 		return nil
 	}
@@ -301,6 +491,12 @@ func computeSuggestedActions(ctx context.Context, alertFlags []string, campaignI
 	}
 	if result.Value != nil {
 		action["value"] = result.Value
+	}
+	if result.ResultCheck != nil {
+		action["result_check"] = result.ResultCheck
+	}
+	if result.TraceID != "" {
+		action["traceId"] = result.TraceID
 	}
 	return []map[string]interface{}{action}
 }
@@ -367,11 +563,11 @@ func buildActionDebugReport(ctx context.Context, campaignId, adAccountId string,
 	step0["reason"] = "Lifecycle=" + fmt.Sprint(lifecycle) + " — đủ điều kiện đề xuất"
 	steps = append(steps, step0)
 
-	// Bước 1: Flag computation — metrics → alertFlags (EvaluateFlags + DetectWindowShoppingPattern)
+	// Bước 1: Flag computation — metrics → alertFlags (Rule Engine RULE_ADS_FLAG_*)
 	step1 := map[string]interface{}{
 		"step":   1,
 		"name":   "flag_computation",
-		"label":  "Đánh giá metrics → alert flags (EvaluateFlags, window_shopping_pattern)",
+		"label":  "Đánh giá metrics → alert flags (Rule Engine)",
 		"input":  inputSummary,
 		"output": alertFlags,
 		"result": "computed",

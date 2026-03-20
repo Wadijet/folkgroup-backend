@@ -254,155 +254,169 @@ func AuthMiddleware(requirePermission string) fiber.Handler {
 			return c.Next()
 		}
 
-		// Lấy active role ID từ header (role context)
-		// Logic: Nếu route có require permission, PHẢI có header X-Active-Role-ID để chỉ định role context
-		activeRoleIDStr := c.Get("X-Active-Role-ID")
-
-		// Header X-Active-Role-ID là BẮT BUỘC khi route yêu cầu permission
-		if activeRoleIDStr == "" {
-			logger.GetAppLogger().WithFields(logrus.Fields{
-				"user_id":    user.ID.Hex(),
-				"user_email": user.Email,
-				"path":       c.Path(),
-				"permission": requirePermission,
-			}).Warn("❌ [AUTH] Missing X-Active-Role-ID header")
-			HandleErrorResponse(c, common.NewError(
-				common.ErrCodeAuthRole,
-				"Thiếu header X-Active-Role-ID. Vui lòng chọn role để làm việc.",
-				common.StatusBadRequest,
-				nil,
-			))
+		if !enforceActiveRolePermission(c, authManager, user, requirePermission) {
 			return nil
 		}
-
-		// Parse và validate role ID
-		roleID, err := primitive.ObjectIDFromHex(activeRoleIDStr)
-		if err != nil {
-			logger.GetAppLogger().WithFields(logrus.Fields{
-				"user_id":        user.ID.Hex(),
-				"active_role_id": activeRoleIDStr,
-				"path":           c.Path(),
-				"error":          err.Error(),
-			}).Warn("❌ [AUTH] Invalid X-Active-Role-ID format")
-			HandleErrorResponse(c, common.NewError(
-				common.ErrCodeValidationFormat,
-				"X-Active-Role-ID không đúng định dạng",
-				common.StatusBadRequest,
-				nil,
-			))
-			return nil
-		}
-
-		// Lấy danh sách roles của user để kiểm tra
-		userRoles, err := authManager.UserRoleCRUD.BaseServiceMongoImpl.Find(context.Background(), bson.M{"userId": utility.String2ObjectID(user.ID.Hex())}, nil)
-		if err != nil {
-			logger.GetAppLogger().WithFields(logrus.Fields{
-				"user_id": user.ID.Hex(),
-				"error":   err.Error(),
-				"path":    c.Path(),
-			}).Error("❌ [AUTH] Failed to get user roles")
-			HandleErrorResponse(c, common.NewError(
-				common.ErrCodeAuthRole,
-				"Không thể kiểm tra quyền truy cập",
-				common.StatusForbidden,
-				nil,
-			))
-			return nil
-		}
-
-		// Nếu user không có role nào, từ chối truy cập ngay
-		if len(userRoles) == 0 {
-			logger.GetAppLogger().WithFields(logrus.Fields{
-				"user_id":    user.ID.Hex(),
-				"user_email": user.Email,
-				"path":       c.Path(),
-				"permission": requirePermission,
-			}).Warn("❌ [AUTH] User has no roles, denying access")
-			HandleErrorResponse(c, common.NewError(
-				common.ErrCodeAuthRole,
-				"Người dùng chưa được gán vai trò. Vui lòng liên hệ quản trị viên để được cấp quyền truy cập.",
-				common.StatusForbidden,
-				nil,
-			))
-			return nil
-		}
-
-		// Validate user có role này không
-		hasRole := false
-		for _, userRole := range userRoles {
-			// So sánh ObjectID - dùng .Hex() để đảm bảo so sánh đúng
-			if userRole.RoleID.Hex() == roleID.Hex() {
-				hasRole = true
-				break
-			}
-		}
-
-		// Nếu user không có role này, reject request và trả về role IDs hợp lệ (an toàn hơn fallback)
-		if !hasRole {
-			// Lấy danh sách role IDs hợp lệ để trả về trong error response
-			validRoleIDs := make([]string, 0, len(userRoles))
-			for _, userRole := range userRoles {
-				validRoleIDs = append(validRoleIDs, userRole.RoleID.Hex())
-			}
-			
-			logger.GetAppLogger().WithFields(logrus.Fields{
-				"user_id":        user.ID.Hex(),
-				"active_role_id": roleID.Hex(),
-				"valid_role_ids": validRoleIDs,
-				"path":           c.Path(),
-			}).Warn("⚠️ [AUTH] User does not have this role, rejecting request")
-			
-			// Reject với error code đặc biệt và trả về role IDs hợp lệ
-			// Frontend có thể catch error này và tự động refresh role list
-			HandleErrorResponse(c, common.NewError(
-				common.ErrCodeAuthRole,
-				"Người dùng không có quyền sử dụng role này. Vui lòng chọn role khác hoặc liên hệ quản trị viên.",
-				common.StatusForbidden,
-				map[string]interface{}{
-					"invalidRoleId": roleID.Hex(),
-					"validRoleIds":  validRoleIDs,
-					"errorCode":     "ROLE_CONTEXT_INVALID",
-				},
-			))
-			return nil
-		}
-
-		activeRoleID := &roleID
-
-		// Kiểm tra permission của user trong role context (active role)
-		permissions, err := authManager.getUserPermissions(user.ID.Hex(), activeRoleID)
-		if err != nil {
-			HandleErrorResponse(c, common.NewError(
-				common.ErrCodeAuthRole,
-				"Không thể lấy thông tin quyền",
-				common.StatusForbidden,
-				nil,
-			))
-			return nil
-		}
-
-		// Kiểm tra user có permission cần thiết trong role context không
-		scope, hasPermission := permissions[requirePermission]
-		if !hasPermission {
-			logger.GetAppLogger().WithFields(logrus.Fields{
-				"user_id":             user.ID.Hex(),
-				"user_email":          user.Email,
-				"active_role_id":      activeRoleID.Hex(),
-				"required_permission": requirePermission,
-				"path":                c.Path(),
-			}).Warn("❌ [AUTH] User does not have required permission")
-			HandleErrorResponse(c, common.NewError(
-				common.ErrCodeAuthRole,
-				"Không có quyền truy cập. Vui lòng kiểm tra lại role context hoặc liên hệ quản trị viên.",
-				common.StatusForbidden,
-				nil,
-			))
-			return nil
-		}
-
-		// Lưu scope tối thiểu và permission name vào context để sử dụng trong handler
-		c.Locals("minScope", scope)
-		c.Locals("permission_name", requirePermission) // Lưu permission name để handler sử dụng
 		return c.Next()
 	}
+}
+
+// enforceActiveRolePermission kiểm tra X-Active-Role-ID + permission trong role context.
+// Trả về true nếu cho phép tiếp tục; false nếu đã gọi HandleErrorResponse.
+func enforceActiveRolePermission(c fiber.Ctx, authManager *AuthManager, user authmodels.User, requirePermission string) bool {
+	if requirePermission == "" {
+		return true
+	}
+
+	// Lấy active role ID từ header (role context)
+	activeRoleIDStr := c.Get("X-Active-Role-ID")
+
+	if activeRoleIDStr == "" {
+		logger.GetAppLogger().WithFields(logrus.Fields{
+			"user_id":    user.ID.Hex(),
+			"user_email": user.Email,
+			"path":       c.Path(),
+			"permission": requirePermission,
+		}).Warn("❌ [AUTH] Missing X-Active-Role-ID header")
+		HandleErrorResponse(c, common.NewError(
+			common.ErrCodeAuthRole,
+			"Thiếu header X-Active-Role-ID. Vui lòng chọn role để làm việc.",
+			common.StatusBadRequest,
+			nil,
+		))
+		return false
+	}
+
+	roleID, err := primitive.ObjectIDFromHex(activeRoleIDStr)
+	if err != nil {
+		logger.GetAppLogger().WithFields(logrus.Fields{
+			"user_id":        user.ID.Hex(),
+			"active_role_id": activeRoleIDStr,
+			"path":           c.Path(),
+			"error":          err.Error(),
+		}).Warn("❌ [AUTH] Invalid X-Active-Role-ID format")
+		HandleErrorResponse(c, common.NewError(
+			common.ErrCodeValidationFormat,
+			"X-Active-Role-ID không đúng định dạng",
+			common.StatusBadRequest,
+			nil,
+		))
+		return false
+	}
+
+	userRoles, err := authManager.UserRoleCRUD.BaseServiceMongoImpl.Find(context.Background(), bson.M{"userId": utility.String2ObjectID(user.ID.Hex())}, nil)
+	if err != nil {
+		logger.GetAppLogger().WithFields(logrus.Fields{
+			"user_id": user.ID.Hex(),
+			"error":   err.Error(),
+			"path":    c.Path(),
+		}).Error("❌ [AUTH] Failed to get user roles")
+		HandleErrorResponse(c, common.NewError(
+			common.ErrCodeAuthRole,
+			"Không thể kiểm tra quyền truy cập",
+			common.StatusForbidden,
+			nil,
+		))
+		return false
+	}
+
+	if len(userRoles) == 0 {
+		logger.GetAppLogger().WithFields(logrus.Fields{
+			"user_id":    user.ID.Hex(),
+			"user_email": user.Email,
+			"path":       c.Path(),
+			"permission": requirePermission,
+		}).Warn("❌ [AUTH] User has no roles, denying access")
+		HandleErrorResponse(c, common.NewError(
+			common.ErrCodeAuthRole,
+			"Người dùng chưa được gán vai trò. Vui lòng liên hệ quản trị viên để được cấp quyền truy cập.",
+			common.StatusForbidden,
+			nil,
+		))
+		return false
+	}
+
+	hasRole := false
+	for _, userRole := range userRoles {
+		if userRole.RoleID.Hex() == roleID.Hex() {
+			hasRole = true
+			break
+		}
+	}
+
+	if !hasRole {
+		validRoleIDs := make([]string, 0, len(userRoles))
+		for _, userRole := range userRoles {
+			validRoleIDs = append(validRoleIDs, userRole.RoleID.Hex())
+		}
+
+		logger.GetAppLogger().WithFields(logrus.Fields{
+			"user_id":        user.ID.Hex(),
+			"active_role_id": roleID.Hex(),
+			"valid_role_ids": validRoleIDs,
+			"path":           c.Path(),
+		}).Warn("⚠️ [AUTH] User does not have this role, rejecting request")
+
+		HandleErrorResponse(c, common.NewError(
+			common.ErrCodeAuthRole,
+			"Người dùng không có quyền sử dụng role này. Vui lòng chọn role khác hoặc liên hệ quản trị viên.",
+			common.StatusForbidden,
+			map[string]interface{}{
+				"invalidRoleId": roleID.Hex(),
+				"validRoleIds":  validRoleIDs,
+				"errorCode":     "ROLE_CONTEXT_INVALID",
+			},
+		))
+		return false
+	}
+
+	activeRoleID := &roleID
+
+	permissions, err := authManager.getUserPermissions(user.ID.Hex(), activeRoleID)
+	if err != nil {
+		HandleErrorResponse(c, common.NewError(
+			common.ErrCodeAuthRole,
+			"Không thể lấy thông tin quyền",
+			common.StatusForbidden,
+			nil,
+		))
+		return false
+	}
+
+	scope, hasPermission := permissions[requirePermission]
+	if !hasPermission {
+		logger.GetAppLogger().WithFields(logrus.Fields{
+			"user_id":             user.ID.Hex(),
+			"user_email":          user.Email,
+			"active_role_id":      activeRoleID.Hex(),
+			"required_permission": requirePermission,
+			"path":                c.Path(),
+		}).Warn("❌ [AUTH] User does not have required permission")
+		HandleErrorResponse(c, common.NewError(
+			common.ErrCodeAuthRole,
+			"Không có quyền truy cập. Vui lòng kiểm tra lại role context hoặc liên hệ quản trị viên.",
+			common.StatusForbidden,
+			nil,
+		))
+		return false
+	}
+
+	c.Locals("minScope", scope)
+	c.Locals("permission_name", requirePermission)
+	return true
+}
+
+// EnforceActiveRolePermission dùng sau AuthMiddleware(""): kiểm tra quyền theo domain (ví dụ CIO ingest thống nhất).
+// Trả về false nếu đã gửi response lỗi — handler nên return nil ngay.
+func EnforceActiveRolePermission(c fiber.Ctx, requirePermission string) bool {
+	if requirePermission == "" {
+		return true
+	}
+	userVal := c.Locals("user")
+	user, ok := userVal.(authmodels.User)
+	if !ok {
+		HandleErrorResponse(c, common.ErrTokenInvalid)
+		return false
+	}
+	return enforceActiveRolePermission(c, GetAuthManager(), user, requirePermission)
 }

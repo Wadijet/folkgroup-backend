@@ -2,9 +2,11 @@ package fbsvc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
@@ -13,6 +15,7 @@ import (
 	fbmodels "meta_commerce/internal/api/fb/models"
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
+	"meta_commerce/internal/utility"
 )
 
 // FbConversationService là cấu trúc chứa các phương thức liên quan đến Facebook conversation
@@ -67,4 +70,20 @@ func (s *FbConversationService) FindAllSortByApiUpdate(ctx context.Context, page
 // Dùng chung logic với Upsert; khác biệt duy nhất là so sánh updated_at.
 func (s *FbConversationService) SyncUpsertOne(ctx context.Context, filter interface{}, data interface{}) (fbmodels.FbConversation, bool, error) {
 	return basesvc.DoSyncUpsert(ctx, s.BaseServiceMongoImpl, filter, data, "panCakeData", "panCakeUpdatedAt")
+}
+
+// RunSyncUpsertOneFromJSON logic đồng bộ với HandleSyncUpsertOne (parse body + extract + SyncUpsertOne).
+func (s *FbConversationService) RunSyncUpsertOneFromJSON(ctx context.Context, filter map[string]interface{}, body []byte, activeOrgID *primitive.ObjectID) (fbmodels.FbConversation, bool, error) {
+	var zero fbmodels.FbConversation
+	var conv fbmodels.FbConversation
+	if err := json.Unmarshal(body, &conv); err != nil {
+		return zero, false, common.NewError(common.ErrCodeValidationFormat, "Body không đúng định dạng JSON", common.StatusBadRequest, err)
+	}
+	if activeOrgID != nil && !activeOrgID.IsZero() && conv.OwnerOrganizationID.IsZero() {
+		conv.OwnerOrganizationID = *activeOrgID
+	}
+	if err := utility.ExtractDataIfExists(&conv); err != nil {
+		return zero, false, common.NewError(common.ErrCodeValidationFormat, "Dữ liệu panCakeData không hợp lệ: "+err.Error(), common.StatusBadRequest, err)
+	}
+	return s.SyncUpsertOne(ctx, filter, &conv)
 }

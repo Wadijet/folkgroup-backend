@@ -19,7 +19,6 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 	}
 	fbPageReadMiddleware := middleware.AuthMiddleware("FbPage.Read")
 	fbPageUpdateMiddleware := middleware.AuthMiddleware("FbPage.Update")
-	orgContextMiddleware := middleware.OrganizationContextMiddleware()
 	apirouter.RegisterRouteWithMiddleware(v1, "/facebook/page", "GET", "/find-by-page-id/:id", []fiber.Handler{fbPageReadMiddleware}, fbPageHandler.HandleFindOneByPageID)
 	apirouter.RegisterRouteWithMiddleware(v1, "/facebook/page", "PUT", "/update-token", []fiber.Handler{fbPageUpdateMiddleware}, fbPageHandler.HandleUpdateToken)
 	r.RegisterCRUDRoutes(v1, "/facebook/page", fbPageHandler, apirouter.ReadWriteConfig, "FbPage")
@@ -37,17 +36,14 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 		return fmt.Errorf("create facebook conversation handler: %w", err)
 	}
 	fbConvReadMiddleware := middleware.AuthMiddleware("FbConversation.Read")
-	fbConvUpdateMiddleware := middleware.AuthMiddleware("FbConversation.Update")
 	apirouter.RegisterRouteWithMiddleware(v1, "/facebook/conversation", "GET", "/sort-by-api-update", []fiber.Handler{fbConvReadMiddleware}, fbConvHandler.HandleFindAllSortByApiUpdate)
-	apirouter.RegisterRouteWithMiddleware(v1, "/facebook/conversation", "POST", "/sync-upsert-one", []fiber.Handler{fbConvUpdateMiddleware, orgContextMiddleware}, fbConvHandler.HandleSyncUpsertOne)
 	r.RegisterCRUDRoutes(v1, "/facebook/conversation", fbConvHandler, apirouter.ReadWriteConfig, "FbConversation")
 
 	fbMessageHandler, err := fbhdl.NewFbMessageHandler()
 	if err != nil {
 		return fmt.Errorf("create facebook message handler: %w", err)
 	}
-	fbMessageUpdateMiddleware := middleware.AuthMiddleware("FbMessage.Update")
-	apirouter.RegisterRouteWithMiddleware(v1, "/facebook/message", "POST", "/upsert-messages", []fiber.Handler{fbMessageUpdateMiddleware}, fbMessageHandler.HandleUpsertMessages)
+	// Đồng bộ tin nhắn (batch): chỉ qua POST /api/v1/cio/ingest domain interaction_message.
 	r.RegisterCRUDRoutes(v1, "/facebook/message", fbMessageHandler, apirouter.ReadWriteConfig, "FbMessage")
 
 	fbMessageItemHandler, err := fbhdl.NewFbMessageItemHandler()
@@ -63,7 +59,6 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 	if err != nil {
 		return fmt.Errorf("create fb customer handler: %w", err)
 	}
-	apirouter.RegisterRouteWithMiddleware(v1, "/fb-customer", "POST", "/sync-upsert-one", []fiber.Handler{middleware.AuthMiddleware("FbCustomer.Update"), orgContextMiddleware}, fbCustomerHandler.HandleSyncUpsertOne)
 	r.RegisterCRUDRoutes(v1, "/fb-customer", fbCustomerHandler, apirouter.ReadWriteConfig, "FbCustomer")
 
 	return nil

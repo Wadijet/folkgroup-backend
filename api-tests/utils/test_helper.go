@@ -68,17 +68,17 @@ func SetupTestWithAdminUser(t *testing.T, baseURL string) (*TestFixtures, string
 		return nil, "", "", nil, fmt.Errorf("TEST_FIREBASE_ID_TOKEN environment variable không được set")
 	}
 	
-	// 5. Tạo admin user với full quyền
-	adminEmail, _, adminToken, _, err := fixtures.CreateAdminUser(firebaseIDToken)
+	// 5. Login với user đã có full quyền admin (không cần CreateAdminUser)
+	adminEmail, _, adminToken, err := fixtures.CreateTestUser(firebaseIDToken)
 	if err != nil {
-		return nil, "", "", nil, fmt.Errorf("không thể tạo admin user: %v", err)
+		return nil, "", "", nil, fmt.Errorf("không thể login: %v", err)
 	}
 	
 	// 6. Tạo client với admin token
 	client := NewHTTPClient(baseURL, 10)
 	client.SetToken(adminToken)
 	
-	// 7. Set active role (nếu có)
+	// 7. Set active role (nếu có) - cần cho GetRootOrganizationID và các API yêu cầu X-Active-Role-ID
 	resp, body, err := client.GET("/auth/roles")
 	if err == nil && resp.StatusCode == http.StatusOK {
 		var result map[string]interface{}
@@ -87,6 +87,7 @@ func SetupTestWithAdminUser(t *testing.T, baseURL string) (*TestFixtures, string
 				if firstRole, ok := data[0].(map[string]interface{}); ok {
 					if roleID, ok := firstRole["roleId"].(string); ok && roleID != "" {
 						client.SetActiveRoleID(roleID)
+						fixtures.SetActiveRoleIDForClient(roleID)
 						t.Logf("✅ Đã set active role: %s", roleID)
 					}
 				}

@@ -100,6 +100,7 @@ type MongoDB_Auth_CollectionName struct {
 
 	// Module Approval — Cơ chế duyệt độc lập (ads, content, ... dùng chung)
 	ActionPendingApproval string // action_pending_approval: queue đề xuất chờ duyệt (generic)
+	ApprovalModeConfig    string // approval_mode_config: config mode duyệt theo domain/scope (Vision 08)
 
 	// Module Ads — Cấu hình duyệt theo ad account (tách khỏi meta)
 	AdsApprovalConfig string // ads_approval_config: cấu hình duyệt theo adAccountId
@@ -128,7 +129,10 @@ type MongoDB_Auth_CollectionName struct {
 	AdsThrottleState string // ads_throttle_state: ad set đang bị cap, dùng cho logic remove
 
 	// Module Decision Brain — Learning memory cho AI Commerce
-	DecisionCases string // decision_cases: case quyết định đã hoàn thành
+	DecisionCases           string // decision_cases: (deprecated) dùng cho migration, chuyển sang learning_cases
+	LearningCases           string // learning_cases: ký ức học tập — 1 case per action, sau outcome (PLATFORM_L1)
+	RuleSuggestions         string // rule_suggestions: gợi ý điều chỉnh rule từ learning (Phase 3)
+	LearningInsightsAggregate string // learning_insights_aggregate: thống kê anonymized cross-merchant (Phase 3)
 
 	// Module Rule Intelligence — Script-Only Logic Architecture
 	RuleDefinitions      string // rule_definitions: Rule Definition
@@ -136,6 +140,15 @@ type MongoDB_Auth_CollectionName struct {
 	RuleParamSets        string // rule_param_sets: Parameter Set
 	RuleOutputDefinitions string // rule_output_definitions: Output Contract
 	RuleExecutionLogs    string // rule_execution_logs: Execution Trace
+
+	// Module CIX — Contextual Conversation Intelligence
+	CixAnalysisResults  string // cix_analysis_results: kết quả phân tích hội thoại Raw→L1→L2→L3→Flag→Action
+	CixPendingAnalysis string // cix_pending_analysis: hàng đợi phân tích — CIO event → enqueue → worker
+
+	// Module AI Decision — Event & Decision Case (PLATFORM_L1_EVENT_DECISION_SUPPLEMENT)
+	DecisionEventsQueue   string // decision_events_queue: hàng đợi event chờ AI Decision xử lý
+	DecisionCasesRuntime string // decision_cases_runtime: case đang vận hành — từ trigger đến outcome
+	DecisionDebounceState string // decision_debounce_state: gom message trước message.batch_ready
 }
 
 // Các biến toàn cục

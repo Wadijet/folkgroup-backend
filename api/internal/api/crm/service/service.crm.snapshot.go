@@ -3,11 +3,14 @@
 package crmvc
 
 import (
+	"context"
 	"reflect"
 	"time"
 
 	crmmodels "meta_commerce/internal/api/crm/models"
 	"meta_commerce/internal/api/report/layer3"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 const (
@@ -24,7 +27,7 @@ type snapshotChange struct {
 // BuildSnapshotWithChanges tạo snapshot chỉ khi có thay đổi so với lastSnapshot.
 // metricsOverride: khi != nil dùng thay cho buildMetricsSnapshot(c) — cho snapshot đúng timeline (metrics as of activityAt).
 // profileOverride: khi != nil dùng thay cho buildProfileSnapshot(c) — cho snapshot đúng timeline (profile as of activityAt).
-func BuildSnapshotWithChanges(c *crmmodels.CrmCustomer, lastProfile, lastMetrics map[string]interface{}, snapshotAt int64, metricsOverride, profileOverride map[string]interface{}) map[string]interface{} {
+func BuildSnapshotWithChanges(ctx context.Context, c *crmmodels.CrmCustomer, lastProfile, lastMetrics map[string]interface{}, snapshotAt int64, metricsOverride, profileOverride map[string]interface{}) map[string]interface{} {
 	if c == nil {
 		return nil
 	}
@@ -38,7 +41,7 @@ func BuildSnapshotWithChanges(c *crmmodels.CrmCustomer, lastProfile, lastMetrics
 	if metricsOverride != nil {
 		metrics = metricsOverride
 	} else {
-		metrics = buildMetricsSnapshot(c)
+		metrics = buildMetricsSnapshot(ctx, c)
 	}
 	changes := diffSnapshot(profile, metrics, lastProfile, lastMetrics)
 	if len(changes) == 0 {
@@ -59,7 +62,7 @@ func BuildSnapshotWithChanges(c *crmmodels.CrmCustomer, lastProfile, lastMetrics
 // BuildSnapshotForNewCustomer snapshot cho khách mới (customer_created).
 // useEmptyMetrics: true = metrics = 0 — đúng timeline (metrics tăng dần theo mỗi order/chat); false = metrics từ customer hiện tại.
 // metricsOverride: khi != nil dùng thay cho buildEmpty/buildMetrics — cho metrics as-of activityAt (timeline đúng, có Lớp 3).
-func BuildSnapshotForNewCustomer(c *crmmodels.CrmCustomer, snapshotAt int64, useEmptyMetrics bool, metricsOverride map[string]interface{}) map[string]interface{} {
+func BuildSnapshotForNewCustomer(ctx context.Context, c *crmmodels.CrmCustomer, snapshotAt int64, useEmptyMetrics bool, metricsOverride map[string]interface{}) map[string]interface{} {
 	if c == nil {
 		return nil
 	}
@@ -68,9 +71,9 @@ func BuildSnapshotForNewCustomer(c *crmmodels.CrmCustomer, snapshotAt int64, use
 	if metricsOverride != nil {
 		metrics = metricsOverride
 	} else if useEmptyMetrics {
-		metrics = buildEmptyMetricsSnapshot()
+		metrics = buildEmptyMetricsSnapshot(ctx)
 	} else {
-		metrics = buildMetricsSnapshot(c)
+		metrics = buildMetricsSnapshot(ctx, c)
 	}
 	changes := buildChangesForNewCustomer(profile, metrics)
 	if snapshotAt <= 0 {
@@ -105,22 +108,23 @@ func buildProfileSnapshot(c *crmmodels.CrmCustomer) map[string]interface{} {
 // buildMetricsSnapshot trả về metricsSnapshot cấu trúc 3 lớp (raw, layer1, layer2, layer3).
 // Nếu customer có currentMetrics (nested) → trả về (đảm bảo có layer3 khi thiếu).
 // Nếu không (temp customer từ BuildCurrentMetricsFromOrderAndConv) → build từ top-level.
-func buildMetricsSnapshot(c *crmmodels.CrmCustomer) map[string]interface{} {
+func buildMetricsSnapshot(ctx context.Context, c *crmmodels.CrmCustomer) map[string]interface{} {
 	if c != nil && c.CurrentMetrics != nil {
 		if _, hasRaw := c.CurrentMetrics["raw"]; hasRaw {
 			return ensureLayer3InMetrics(c.CurrentMetrics)
 		}
 	}
-	// Build từ top-level (temp customer từ order+conv aggregate)
+	// Build từ top-level (temp customer từ order+conv aggregate) — classification qua Rule Engine
+	class := GetClassificationFromCustomer(ctx, c)
 	totalSpent := GetTotalSpentFromCustomer(c)
 	orderCount := GetOrderCountFromCustomer(c)
 	lastOrderAt := GetLastOrderAtFromCustomer(c)
-	journeyStage := ComputeJourneyStage(c)
-	valueTier := ComputeValueTier(totalSpent)
-	lifecycleStage := ComputeLifecycleStage(lastOrderAt)
-	channel := ComputeChannel(c)
-	loyaltyStage := ComputeLoyaltyStage(orderCount)
-	momentumStage := ComputeMomentumStage(c)
+	journeyStage := getStrFromMap(class, "journeyStage")
+	valueTier := getStrFromMap(class, "valueTier")
+	lifecycleStage := getStrFromMap(class, "lifecycleStage")
+	channel := getStrFromMap(class, "channel")
+	loyaltyStage := getStrFromMap(class, "loyaltyStage")
+	momentumStage := getStrFromMap(class, "momentumStage")
 
 	avgOrderValue := 0.0
 	if orderCount > 0 {
@@ -155,6 +159,7 @@ func buildMetricsSnapshot(c *crmmodels.CrmCustomer) map[string]interface{} {
 		"totalMessages":             GetIntFromCustomer(c, "totalMessages"),
 		"lastMessageFromCustomer":   GetBoolFromCustomer(c, "lastMessageFromCustomer"),
 		"conversationFromAds":       GetBoolFromCustomer(c, "conversationFromAds"),
+		"ownedSkuCount":             ownedSkuCountFromCustomer(c),
 	}
 	if len(c.ConversationTags) > 0 {
 		raw["conversationTags"] = c.ConversationTags
@@ -393,6 +398,18 @@ func GetInt64FromCustomer(c *crmmodels.CrmCustomer, key string) int64 {
 	return 0
 }
 
+// ownedSkuCountFromCustomer trả về số SKU đã mua — ưu tiên len(OwnedSkuQuantities), fallback raw.ownedSkuCount.
+// Dùng khi build raw để tránh vòng lặp (GetIntFromCustomer đọc từ raw).
+func ownedSkuCountFromCustomer(c *crmmodels.CrmCustomer) int {
+	if c != nil && c.OwnedSkuQuantities != nil {
+		return len(c.OwnedSkuQuantities)
+	}
+	if c != nil && c.CurrentMetrics != nil {
+		return GetIntFromNestedMetrics(c.CurrentMetrics, "ownedSkuCount")
+	}
+	return 0
+}
+
 // GetIntFromCustomer đọc int từ customer (cancelledOrderCount, ordersLast30d, ...).
 func GetIntFromCustomer(c *crmmodels.CrmCustomer, key string) int {
 	if c != nil && c.CurrentMetrics != nil {
@@ -442,6 +459,10 @@ func GetIntFromCustomer(c *crmmodels.CrmCustomer, key string) int {
 			case "totalMessages":
 				return c.TotalMessages
 			}
+		}
+	case "ownedSkuCount":
+		if c != nil && c.OwnedSkuQuantities != nil {
+			return len(c.OwnedSkuQuantities)
 		}
 	}
 	return 0
@@ -607,22 +628,22 @@ func getFromNestedMetrics(m map[string]interface{}, key string) interface{} {
 
 // buildEmptyMetricsSnapshot trả về metrics snapshot với tất cả giá trị = 0.
 // Dùng cho customer_created để timeline đúng: tại thời điểm khởi tạo, metrics = 0; tăng dần theo mỗi order/chat.
-func buildEmptyMetricsSnapshot() map[string]interface{} {
-	return buildMetricsSnapshot(&crmmodels.CrmCustomer{})
+func buildEmptyMetricsSnapshot(ctx context.Context) map[string]interface{} {
+	return buildMetricsSnapshot(ctx, &crmmodels.CrmCustomer{})
 }
 
 // BuildCurrentMetricsSnapshot trả về metrics map hiện tại từ customer — cùng cấu trúc với metricsSnapshot.
 // Dùng cho full profile response: góc nhìn now song song với lịch sử (metadata.metricsSnapshot trong activity).
-func BuildCurrentMetricsSnapshot(c *crmmodels.CrmCustomer) map[string]interface{} {
+func BuildCurrentMetricsSnapshot(ctx context.Context, c *crmmodels.CrmCustomer) map[string]interface{} {
 	if c == nil {
 		return nil
 	}
-	return buildMetricsSnapshot(c)
+	return buildMetricsSnapshot(ctx, c)
 }
 
 // BuildCurrentMetricsFromOrderAndConv tạo currentMetrics nested từ order + conversation metrics.
 // Dùng khi merge/refresh — chưa có CrmCustomer đầy đủ trong memory, cần build từ aggregate results.
-func BuildCurrentMetricsFromOrderAndConv(om orderMetrics, cm conversationMetrics, hasConv bool) map[string]interface{} {
+func BuildCurrentMetricsFromOrderAndConv(ctx context.Context, om orderMetrics, cm conversationMetrics, hasConv bool, unifiedId string, ownerOrgID primitive.ObjectID) map[string]interface{} {
 	avgOrderValue := 0.0
 	if om.OrderCount > 0 {
 		avgOrderValue = om.TotalSpent / float64(om.OrderCount)
@@ -658,8 +679,10 @@ func BuildCurrentMetricsFromOrderAndConv(om orderMetrics, cm conversationMetrics
 		ConversationFromAds:       cm.ConversationFromAds,
 		ConversationTags:          cm.ConversationTags,
 		OwnedSkuQuantities:        om.OwnedSkuQuantities,
+		UnifiedId:                 unifiedId,
+		OwnerOrganizationID:      ownerOrgID,
 	}
-	return buildMetricsSnapshot(c)
+	return buildMetricsSnapshot(ctx, c)
 }
 
 // diffSnapshot so sánh profile và metrics mới với cũ, trả về danh sách thay đổi.

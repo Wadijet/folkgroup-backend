@@ -1,5 +1,9 @@
 package models
 
+import (
+	"go.mongodb.org/mongo-driver/bson/primitive"
+)
+
 // EntityRef tham chiếu entity trong context.
 type EntityRef struct {
 	Domain               string `json:"domain" bson:"domain"`
@@ -11,6 +15,7 @@ type EntityRef struct {
 // RuleExecutionTrace document lưu trong collection rule_execution_logs.
 // Full rule execution trace cho mỗi lần chạy — phục vụ debugging, audit, observability.
 type RuleExecutionTrace struct {
+	ID                 primitive.ObjectID     `json:"id,omitempty" bson:"_id,omitempty"`
 	TraceID            string                 `json:"trace_id" bson:"trace_id" index:"unique:1"`
 	RuleID             string                 `json:"rule_id" bson:"rule_id" index:"single:1"`
 	RuleVersion        int                    `json:"rule_version" bson:"rule_version"`

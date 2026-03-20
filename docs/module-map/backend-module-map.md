@@ -11,8 +11,9 @@
 | Module | Router | Mô tả | Docs chính |
 |--------|--------|-------|------------|
 | **auth** | `auth/router/routes.go` | Đăng nhập, JWT, user, role, organization | [api/api-overview](../api/api-overview.md), [02-architecture/core/tong-quan](../02-architecture/core/tong-quan.md) |
-| **approval** | `approval/router/routes.go` | Approval workflow (propose, approve, reject, execute) | [02-architecture/core/tong-quan](../02-architecture/core/tong-quan.md) |
-| **decision** | `decision/router/routes.go` | Decision Brain — learning memory, decision cases | [02-architecture/core/decision-brain](../02-architecture/core/decision-brain.md) |
+| **executor** | `executor/router/routes.go` | Executor — Approval Gate + Execution (actions, send, execute, history) | [02-architecture/core/tong-quan](../02-architecture/core/tong-quan.md) |
+| **ai-decision** | `aidecision/router/routes.go` | AI Decision — tầng ra quyết định, Execute, ReceiveCixPayload | [PHUONG_AN_TRIEN_KHAI_AI_DECISION_VA_LEARNING](../05-development/PHUONG_AN_TRIEN_KHAI_AI_DECISION_VA_LEARNING.md) |
+| **learning** | `learning/router/routes.go` | Learning engine — bộ nhớ học tập (learning cases) | [02-architecture/core/learning-engine](../02-architecture/core/learning-engine.md) |
 | **ads** | `ads/router/routes.go` | Meta Ads, action evaluation, auto propose | [docs-shared/ai-context/folkform/design/ads-intelligence/](../../docs-shared/ai-context/folkform/design/ads-intelligence/) |
 | **fb** | `fb/router/routes.go` | Facebook Pages, posts, conversations, messages | [api/api-overview](../api/api-overview.md) |
 | **meta** | `meta/router/routes.go` | Meta Ads (ad-account, campaign, ad-set, ad, ad-insight, activity-history) | [api/api-overview](../api/api-overview.md) |
@@ -22,10 +23,13 @@
 | **crm** | `crm/router/routes.go` | Customers, CRM pending ingest, bulk jobs, rebuild, recalculate | [docs-shared/ai-context/folkform/design/CRM_MODULE_DESIGN.md](../../docs-shared/ai-context/folkform/design/CRM_MODULE_DESIGN.md) |
 | **notification** | `notification/router/routes.go` | Channels, templates, routing, trigger | [docs-shared/ai-context/folkform/notification-system.md](../../docs-shared/ai-context/folkform/notification-system.md) |
 | **cta** | `cta/router/routes.go` | CTA Library | — |
-| **delivery** | `delivery/router/routes.go` | Delivery send, history | — |
+| **delivery** | (nội bộ executor) | Handler send/execute dùng bởi executor | — |
 | **agent** | `agent/router/routes.go` | Agent configs, commands, registry, check-in | [api/api-overview](../api/api-overview.md) |
 | **content** | `content/router/routes.go` | Content drafts, publications, videos | [docs-shared/ai-context/folkform/design/](../../docs-shared/ai-context/folkform/design/) |
 | **ai** | `ai/router/routes.go` | AI workflows, steps, prompts, provider profiles | — |
+| **ruleintel** | `ruleintel/router/routes.go` | Rule Intelligence — Rule Engine, run, logs (trace_id), definition, logic, param-set, output-contract | [02-architecture/core/rule-intelligence](../02-architecture/core/rule-intelligence.md) |
+| **cio** | `cio/router/routes.go` | Customer Interaction Orchestrator — hub điều phối đa kênh, routing AI vs Human | [05-development/THIET_KE_MODULE_CIO](../05-development/THIET_KE_MODULE_CIO.md) |
+| **cix** | `cix/router/routes.go` | Contextual Conversation Intelligence — Raw→L1→L2→L3→Flag→Action, CIO→CIX→Decision→Executor | [PHUONG_AN_TRIEN_KHAI_CIX](../05-development/PHUONG_AN_TRIEN_KHAI_CIX.md) |
 
 ---
 
@@ -38,8 +42,9 @@ api/
 │   ├── api/             # API layer (handler, service, router theo module)
 │   │   ├── auth/
 │   │   ├── ads/
-│   │   ├── approval/
-│   │   ├── decision/
+│   │   ├── aidecision/
+│   │   ├── learning/
+│   │   ├── executor/
 │   │   ├── crm/
 │   │   ├── cta/
 │   │   ├── delivery/
@@ -52,6 +57,9 @@ api/
 │   │   ├── agent/
 │   │   ├── content/
 │   │   ├── ai/
+│   │   ├── ruleintel/
+│   │   ├── cio/
+│   │   ├── cix/
 │   │   ├── handler/    # Shared handlers
 │   │   ├── middleware/
 │   │   ├── router/     # routes.go, CRUD config
@@ -74,7 +82,7 @@ api/
 
 | Tình huống | Đọc |
 |------------|-----|
-| Vision, concept | `docs-shared/architecture/ai-commerce-os-overview.md` |
+| Vision, concept | `docs-shared/architecture/vision/ai-commerce-os-platform-l1.md` |
 | API contract, endpoint spec | `docs-shared/ai-context/folkform/api-context.md` |
 | Module design cross-repo | `docs-shared/ai-context/folkform/design/` |
 | System map, repo boundary | `docs-shared/system-map/system-map.md` |
@@ -92,4 +100,6 @@ api/
 
 ## Changelog
 
+- 2026-03-19: Đổi tên module — decision→ai-decision+learning, approval+delivery→executor
+- 2026-03-18: Cập nhật decision (AI Decision Engine), cix (luồng đã khép vòng)
 - 2025-03-13: Sửa broken links (03-api, 02-architecture/systems không tồn tại) → trỏ api-overview, docs-shared

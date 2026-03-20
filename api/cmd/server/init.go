@@ -19,6 +19,9 @@ import (
 	pcmodels "meta_commerce/internal/api/pc/models"
 	reportmodels "meta_commerce/internal/api/report/models"
 	ruleintelmodels "meta_commerce/internal/api/ruleintel/models"
+	cixmodels "meta_commerce/internal/api/cix/models"
+	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
+	learningmodels "meta_commerce/internal/api/learning/models"
 	"meta_commerce/internal/database"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/utility"
@@ -126,6 +129,7 @@ func initColNames() {
 	global.MongoDB_ColNames.MetaAdInsights = "meta_ad_insights"
 	global.MongoDB_ColNames.MetaAdInsightsDailySnapshots = "meta_ad_insights_daily_snapshots"
 	global.MongoDB_ColNames.ActionPendingApproval = "action_pending_approval"
+	global.MongoDB_ColNames.ApprovalModeConfig = "approval_mode_config"
 	global.MongoDB_ColNames.AdsApprovalConfig = "ads_approval_config"
 	global.MongoDB_ColNames.AdsActivityHistory = "ads_activity_history"
 	global.MongoDB_ColNames.AdsMetaConfig = "ads_meta_config"
@@ -137,6 +141,9 @@ func initColNames() {
 	global.MongoDB_ColNames.AdsCampPeakProfiles = "ads_camp_peak_profiles"
 	global.MongoDB_ColNames.AdsThrottleState = "ads_throttle_state"
 	global.MongoDB_ColNames.DecisionCases = "decision_cases"
+	global.MongoDB_ColNames.LearningCases = "learning_cases"
+	global.MongoDB_ColNames.RuleSuggestions = "rule_suggestions"
+	global.MongoDB_ColNames.LearningInsightsAggregate = "learning_insights_aggregate"
 
 	// Module Rule Intelligence
 	global.MongoDB_ColNames.RuleDefinitions = "rule_definitions"
@@ -144,6 +151,15 @@ func initColNames() {
 	global.MongoDB_ColNames.RuleParamSets = "rule_param_sets"
 	global.MongoDB_ColNames.RuleOutputDefinitions = "rule_output_definitions"
 	global.MongoDB_ColNames.RuleExecutionLogs = "rule_execution_logs"
+
+	// Module CIX — Contextual Conversation Intelligence
+	global.MongoDB_ColNames.CixAnalysisResults = "cix_analysis_results"
+	global.MongoDB_ColNames.CixPendingAnalysis = "cix_pending_analysis"
+
+	// Module AI Decision — Event & Decision Case (PLATFORM_L1_EVENT_DECISION_SUPPLEMENT)
+	global.MongoDB_ColNames.DecisionEventsQueue = "decision_events_queue"
+	global.MongoDB_ColNames.DecisionCasesRuntime = "decision_cases_runtime"
+	global.MongoDB_ColNames.DecisionDebounceState = "decision_debounce_state"
 
 	logrus.Info("Initialized collection names") // Ghi log thông báo đã khởi tạo tên các collection
 }
@@ -261,6 +277,8 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.MetaAdInsights), metamodels.MetaAdInsight{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.MetaAdInsightsDailySnapshots), metamodels.MetaAdInsightDailySnapshot{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.ActionPendingApproval), pkgapproval.ActionPending{})
+	database.CreateActionPendingIdempotencyIndex(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.ActionPendingApproval))
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.ApprovalModeConfig), pkgapproval.ApprovalModeConfig{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsApprovalConfig), adsmodels.AdsApprovalConfig{})
 	database.CreateAdsActivityIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsActivityHistory))
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsMetricDefinitions), adsmodels.AdsMetricDefinition{})
@@ -271,6 +289,9 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsCampPeakProfiles), adsmodels.AdsCampPeakProfile{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsThrottleState), adsmodels.AdsThrottleState{})
 	database.CreateDecisionCaseIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DecisionCases))
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.LearningCases), learningmodels.LearningCase{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.RuleSuggestions), learningmodels.RuleSuggestion{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.LearningInsightsAggregate), learningmodels.LearningInsightAggregate{})
 
 	// Module Rule Intelligence
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.RuleDefinitions), ruleintelmodels.RuleDefinition{})
@@ -278,6 +299,15 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.RuleParamSets), ruleintelmodels.ParamSet{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.RuleOutputDefinitions), ruleintelmodels.OutputContract{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.RuleExecutionLogs), ruleintelmodels.RuleExecutionTrace{})
+
+	// Module CIX — Contextual Conversation Intelligence
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CixAnalysisResults), cixmodels.CixAnalysisResult{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CixPendingAnalysis), cixmodels.CixPendingAnalysis{})
+
+	// Module AI Decision — Event & Decision Case
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DecisionEventsQueue), aidecisionmodels.DecisionEvent{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DecisionCasesRuntime), aidecisionmodels.DecisionCase{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DecisionDebounceState), aidecisionmodels.DebounceState{})
 }
 
 // initFirebase khởi tạo Firebase Admin SDK

@@ -6,8 +6,16 @@ Test suite cho Folkform Backend API.
 
 ### 1. Setup Environment
 
+**Cách 1: Đăng nhập bằng email/password (khuyến nghị)**
+
+Script `test.ps1` tự động load `api/config/env/development.env` và dùng email/password mặc định:
+- Mặc định: `daomanhdung86@gmail.com` / `12345678`
+- Có thể override: `$env:TEST_EMAIL="your@email.com"; $env:TEST_PASSWORD="yourpass"`
+- Cần `FIREBASE_API_KEY` trong development.env (đã có sẵn)
+
+**Cách 2: Firebase ID Token (thủ công)**
+
 ```bash
-# Set Firebase ID Token (bắt buộc)
 # Windows PowerShell
 $env:TEST_FIREBASE_ID_TOKEN="your-firebase-id-token"
 
@@ -29,12 +37,24 @@ go run cmd/server/main.go
 ### 3. Chạy Tests
 
 ```bash
-# Chạy tất cả tests
+# Chạy tất cả integration tests (cần server + Firebase token)
 go test -v ./cases/...
 
 # Chạy test cụ thể
 go test -v ./cases/admin_full_test.go
 go test -v ./cases/notification_test.go
+```
+
+**Chỉ chạy unit tests trong api** (không cần server, nhanh):
+
+```powershell
+.\api-tests\test.ps1 -UnitOnly
+```
+
+Hoặc trực tiếp:
+
+```bash
+go test ./api/... -short -count=1 -v
 ```
 
 ## 📝 Tạo User Có Quyền Để Test

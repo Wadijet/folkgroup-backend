@@ -35,6 +35,25 @@ func TestOrganizationOwnership(t *testing.T) {
 	client := utils.NewHTTPClient(baseURL, 10)
 	client.SetToken(token)
 
+	// Lấy roles và set active role trước (endpoint /organization/find yêu cầu X-Active-Role-ID)
+	resp, body, err := client.GET("/auth/roles")
+	if err != nil {
+		t.Fatalf("❌ Không thể lấy roles: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("❌ Lấy roles thất bại: %d", resp.StatusCode)
+	}
+	var rolesResult map[string]interface{}
+	json.Unmarshal(body, &rolesResult)
+	rolesData, _ := rolesResult["data"].([]interface{})
+	if len(rolesData) == 0 {
+		t.Fatalf("❌ Không có role nào")
+	}
+	firstRole, _ := rolesData[0].(map[string]interface{})
+	roleID, _ := firstRole["roleId"].(string)
+	client.SetActiveRoleID(roleID)
+	fixtures.SetActiveRoleIDForClient(roleID)
+
 	// Lấy Root Organization ID
 	rootOrgID, err := fixtures.GetRootOrganizationID(token)
 	if err != nil {
@@ -63,7 +82,8 @@ func TestOrganizationOwnership(t *testing.T) {
 		assert.True(t, ok, "Role phải là object")
 		assert.Contains(t, firstRole, "roleId", "Phải có roleId")
 		assert.Contains(t, firstRole, "roleName", "Phải có roleName")
-		assert.Contains(t, firstRole, "organizationId", "Phải có organizationId")
+		// API trả về ownerOrganizationId, không phải organizationId
+		assert.True(t, firstRole["organizationId"] != nil || firstRole["ownerOrganizationId"] != nil, "Phải có organizationId hoặc ownerOrganizationId")
 		assert.Contains(t, firstRole, "organizationName", "Phải có organizationName")
 
 		fmt.Printf("✅ Lấy danh sách roles thành công: %d roles\n", len(data))

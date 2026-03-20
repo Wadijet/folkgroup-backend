@@ -9,10 +9,10 @@
 //
 //   - FLAG: Điều kiện metrics + thresholds → set cờ. KHÔNG có action.
 //     Định nghĩa: FlagDefinitions() (conditionGroups).
-//     Thực thi: ads/rules EvaluateFlags + meta/service computeAlertFlags (gọi rules.BuildFactsContext, rules.EvaluateFlags).
+//     Thực thi: meta/service ComputeAlertFlags (Rule Engine RULE_ADS_FLAG_*).
 //
 //   - ACTION: Cờ → hành động. Định nghĩa: DefaultKillRuleSpecs, DefaultDecreaseRuleSpecs, ActionRuleDefinitions.
-//     Thực thi: ads/rules engine (EvaluateAlertFlagsWithConfig, EvaluateForDecreaseWithConfig).
+//     Thực thi: Rule Engine (ruleintel) — RULE_ADS_KILL_*, RULE_ADS_DECREASE_*, RULE_ADS_INCREASE_*.
 //     Khi config rỗng: getKillRules/getDecreaseRules dùng DefaultActionRuleConfig (từ specs).
 //
 // # Init config

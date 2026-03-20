@@ -11,7 +11,6 @@ import (
 	adsadaptive "meta_commerce/internal/api/ads/adaptive"
 	adsconfig "meta_commerce/internal/api/ads/config"
 	adsmodels "meta_commerce/internal/api/ads/models"
-	"meta_commerce/internal/approval"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/logger"
 
@@ -218,7 +217,7 @@ func RunThrottleCheck(ctx context.Context) (throttled int, err error) {
 		}
 		capCents := int64(capBudget)
 
-		pending, err := Propose(ctx, &ProposeInput{
+		eventID, err := Propose(ctx, &ProposeInput{
 			ActionType:   "SET_BUDGET",
 			AdAccountId:  camp.AdAccountId,
 			CampaignId:   camp.CampaignId,
@@ -226,12 +225,11 @@ func RunThrottleCheck(ctx context.Context) (throttled int, err error) {
 			Reason:       "Throttle — Ad Set tệ nhận >60% budget, cap 15%",
 			RuleCode:     "throttle",
 			Value:        capCents,
-		}, camp.OwnerOrganizationID, "")
+		}, camp.OwnerOrganizationID, getProposeBaseURL())
 		if err != nil {
 			continue
 		}
-		if pending != nil {
-			approval.Approve(ctx, pending.ID.Hex(), camp.OwnerOrganizationID)
+		if eventID != "" {
 			throttled++
 			saveThrottleState(ctx, camp.CampaignId, badId, camp.AdAccountId, camp.OwnerOrganizationID, campaignBudget)
 			log.WithFields(map[string]interface{}{
@@ -299,7 +297,7 @@ func runThrottleRemoveCheck(ctx context.Context) int {
 				if removeBudget < 100 {
 					removeBudget = 100
 				}
-				pending, err := Propose(ctx, &ProposeInput{
+				eventID, err := Propose(ctx, &ProposeInput{
 					ActionType:   "SET_BUDGET",
 					AdAccountId:  doc.AdAccountId,
 					CampaignId:   doc.CampaignId,
@@ -307,9 +305,8 @@ func runThrottleRemoveCheck(ctx context.Context) int {
 					Reason:       "Throttle gỡ cap — Ad Set cải thiện CPA_Mess < adaptive×0.75x 2 checkpoint",
 					RuleCode:     "throttle_remove",
 					Value:        int64(removeBudget),
-				}, doc.OwnerOrganizationID, "")
-				if err == nil && pending != nil {
-					approval.Approve(ctx, pending.ID.Hex(), doc.OwnerOrganizationID)
+				}, doc.OwnerOrganizationID, getProposeBaseURL())
+				if err == nil && eventID != "" {
 					_, _ = coll.DeleteOne(ctx, bson.M{"_id": doc.ID})
 					removed++
 				}

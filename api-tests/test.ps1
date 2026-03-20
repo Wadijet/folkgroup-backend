@@ -1,9 +1,11 @@
 # Script tổng thể chạy test - Tất cả trong một
 # Sử dụng: .\api-tests\test.ps1
 # Hoặc: .\api-tests\test.ps1 -SkipServer (nếu server đã chạy sẵn)
+# Hoặc: .\api-tests\test.ps1 -UnitOnly (chỉ chạy unit tests trong api, không cần server)
 
 param(
-    [switch]$SkipServer = $false  # Bỏ qua khởi động server nếu đã chạy
+    [switch]$SkipServer = $false,   # Bỏ qua khởi động server nếu đã chạy
+    [switch]$UnitOnly = $false      # Chỉ chạy unit tests trong api (nhanh, không cần server/DB)
 )
 
 $ErrorActionPreference = "Continue"
@@ -18,11 +20,46 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Split-Path -Parent $scriptDir
 Set-Location $projectRoot
 
+# ============================================
+# CHẾ ĐỘ UNIT ONLY - Chạy unit tests trong api rồi thoát
+# ============================================
+if ($UnitOnly) {
+    Write-Host "[UNIT] Chay unit tests trong api (khong can server)..." -ForegroundColor Yellow
+    $unitOutput = go test ./api/... -short -count=1 -v 2>&1
+    $unitExit = $LASTEXITCODE
+    Write-Host $unitOutput
+    Write-Host ""
+    if ($unitExit -eq 0) {
+        Write-Host "[OK] Unit tests PASSED" -ForegroundColor Green
+    } else {
+        Write-Host "[FAIL] Unit tests FAILED" -ForegroundColor Red
+    }
+    exit $unitExit
+}
+
 # Kiểm tra file config
 if (-not (Test-Path "$projectRoot\api\config\env\development.env")) {
     Write-Host "[ERROR] Khong tim thay file config: $projectRoot\api\config\env\development.env" -ForegroundColor Red
     Write-Host "[INFO] Dam bao ban dang chay script tu thu muc goc cua project" -ForegroundColor Yellow
     exit 1
+}
+
+# Load env từ development.env (FIREBASE_API_KEY, v.v.) và set TEST_EMAIL/TEST_PASSWORD nếu chưa có
+$envPath = "$projectRoot\api\config\env\development.env"
+Get-Content $envPath | ForEach-Object {
+    if ($_ -match '^\s*([^#][^=]+)=(.*)$') {
+        $key = $matches[1].Trim()
+        $val = $matches[2].Trim()
+        if (-not [string]::IsNullOrEmpty($val) -and -not [Environment]::GetEnvironmentVariable($key, "Process")) {
+            [Environment]::SetEnvironmentVariable($key, $val, "Process")
+        }
+    }
+}
+# Nếu chưa có TEST_FIREBASE_ID_TOKEN, dùng email/password (ưu tiên env, fallback mặc định)
+if (-not $env:TEST_FIREBASE_ID_TOKEN) {
+    if (-not $env:TEST_EMAIL) { $env:TEST_EMAIL = "daomanhdung86@gmail.com" }
+    if (-not $env:TEST_PASSWORD) { $env:TEST_PASSWORD = "12345678" }
+    Write-Host "[INFO] Dung login email: $env:TEST_EMAIL (FIREBASE_API_KEY tu development.env)" -ForegroundColor Gray
 }
 
 # ============================================
@@ -33,14 +70,36 @@ Write-Host "[1/4] Kiem tra server..." -ForegroundColor Yellow
 $serverRunning = $false
 $serverProcess = $null
 
+# Base URL: ưu tiên TEST_BASE_URL, fallback từ ADDRESS trong env
+$baseURL = $env:TEST_BASE_URL
+if (-not $baseURL) {
+    $port = ($env:ADDRESS -replace '^:', '')  # bỏ dấu : nếu có
+    if (-not $port) { $port = "8080" }
+    $baseURL = "http://localhost:$port"
+}
+$healthURL = "$baseURL/api/v1/system/health"
+
 try {
-    $response = Invoke-WebRequest -Uri "http://localhost:8080/api/v1/system/health" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
+    $response = Invoke-WebRequest -Uri $healthURL -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
     if ($response.StatusCode -eq 200) {
         $serverRunning = $true
-        Write-Host "  [OK] Server dang chay" -ForegroundColor Green
+        Write-Host "  [OK] Server dang chay ($healthURL)" -ForegroundColor Green
     }
 } catch {
-    Write-Host "  [INFO] Server chua chay" -ForegroundColor Gray
+    # Thử /health nếu /api/v1/system/health fail
+    try {
+        $altURL = "$baseURL/health"
+        $response = Invoke-WebRequest -Uri $altURL -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+        if ($response.StatusCode -eq 200) {
+            $serverRunning = $true
+            Write-Host "  [OK] Server dang chay ($altURL)" -ForegroundColor Green
+        }
+    } catch {}
+    if (-not $serverRunning) {
+        Write-Host "  [INFO] Health check that bai: $healthURL" -ForegroundColor Gray
+        Write-Host "  [INFO] Loi: $($_.Exception.Message)" -ForegroundColor Gray
+        Write-Host "  [INFO] Kiem tra server co chay tren port dung khong (ADDRESS=$env:ADDRESS)" -ForegroundColor Gray
+    }
 }
 
 # Khởi động server nếu cần

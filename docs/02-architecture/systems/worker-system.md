@@ -1,6 +1,18 @@
-﻿# Hệ Thống Worker và Xử Lý Logic Định Kỳ
+# Hệ Thống Worker và Xử Lý Logic Định Kỳ
 
-## 📋 Tổng Quan
+## ⚡ Tình Trạng Thực Tế Hiện Tại
+
+**Workers chạy trong server** (cùng process với HTTP API). Không có worker service riêng.
+
+- **Vị trí:** `api/internal/worker/` — controller, config, schedule, retention, các worker cụ thể
+- **Cấu hình:** Env + **API runtime** (`GET/PUT /api/v1/system/worker-config`) — thay đổi interval, batch, pool size, retention, alert webhook mà không cần restart
+- **Throttle:** Controller theo dõi CPU/RAM; khi quá ngưỡng → Throttled (interval × multiplier, Lowest skip) hoặc Paused (chỉ Critical chạy)
+- **Report schedules:** ads, order, customer có interval/batch riêng; 3 worker độc lập (report_dirty_ads, report_dirty_order, report_dirty_customer) — config riêng từng worker
+- **Chi tiết:** [WORKER_CONFIG_ENV_VARS.md](../../05-development/WORKER_CONFIG_ENV_VARS.md)
+
+---
+
+## 📋 Tổng Quan (Thiết Kế Ban Đầu)
 
 Tài liệu này mô tả kiến trúc hệ thống worker để xử lý các logic định kỳ như:
 - Rà soát conversation chưa được trả lời để nhắc nhở sale

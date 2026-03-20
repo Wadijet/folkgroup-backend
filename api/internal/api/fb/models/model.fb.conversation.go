@@ -2,6 +2,8 @@ package models
 
 import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
+
+	"meta_commerce/internal/utility/identity"
 )
 
 // Permission đại diện cho quyền trong hệ thống,
@@ -15,6 +17,11 @@ type FbConversation struct {
 	CustomerId       string                 `json:"customerId" bson:"customerId" index:"text" extract:"PanCakeData\\.customer_id,optional"`                                                // ID của khách hàng (extract từ PanCakeData["customer_id"])
 	PanCakeData      map[string]interface{} `json:"panCakeData" bson:"panCakeData"`                                                                                                        // Dữ liệu API
 	PanCakeUpdatedAt int64                  `json:"panCakeUpdatedAt" bson:"panCakeUpdatedAt" extract:"PanCakeData\\.updated_at,converter=time,format=2006-01-02T15:04:05.000000,optional" index:"compound:idx_backfill_conversations"` // Thời gian cập nhật API (extract từ PanCakeData["updated_at"])
+
+	// ===== IDENTITY 4 LỚP =====
+	Uid   string                     `json:"uid" bson:"uid" index:"single:1"`                         // conv_xxx — ID chuẩn hệ thống
+	Links map[string]identity.LinkItem `json:"links,omitempty" bson:"links,omitempty"`                 // customer → cust_xxx
+	LinksCustomerUid string          `json:"-" bson:"links.customer.uid,omitempty" index:"single:1,sparse"` // Lookup theo link customer
 
 	// ===== SYNC FLAGS =====
 	NeedsPrioritySync bool `json:"needsPrioritySync" bson:"needsPrioritySync" index:"single:1"` // Đánh dấu hội thoại này cần ưu tiên đồng bộ lại ngay

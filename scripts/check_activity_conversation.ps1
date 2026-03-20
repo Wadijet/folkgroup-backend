@@ -19,15 +19,15 @@ try {
 
 Write-Host "`n=== Dashboard customers (lay unifiedId) ===" -ForegroundColor Cyan
 try {
-    $cust = Invoke-RestMethod -Uri "$baseUrl/dashboard/customers?period=month&limit=10" -Method GET -Headers $headers
+    $cust = Invoke-RestMethod -Uri "$baseUrl/dashboard/customers/period-movements-from-snapshots?period=month&limit=10&offset=0" -Method GET -Headers $headers
 } catch {
     Write-Host "Loi lay customers: $_" -ForegroundColor Red
     exit 1
 }
 
-# Dashboard tra ve: data.summary, data.customers, ...
-$customers = $cust.data.customers
-if (-not $customers) { $customers = @() }
+# Endpoint tra ve: data.currentSnapshot.customers, data.currentSnapshot.summary, data.trendData
+$snap = $cust.data.currentSnapshot
+$customers = if ($snap -and $snap.customers) { $snap.customers } else { @() }
 $custCount = if ($customers -is [array]) { $customers.Count } else { @($customers).Count }
 Write-Host "So customers: $custCount" -ForegroundColor Yellow
 if ($custCount -eq 0) {

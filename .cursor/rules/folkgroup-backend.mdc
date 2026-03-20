@@ -50,6 +50,7 @@ Tham chiếu: [docs/api/api-overview.md](../../docs/api/api-overview.md), [docs/
 - [ ] Response đúng format (`code`, `message`, `data`, `status`)?
 - [ ] OwnerOrganizationID / filter theo org?
 - [ ] Ưu tiên CRUD trước endpoint mới?
+- [ ] CRUD override: logic riêng → gọi BaseService/BaseServiceMongoImpl (không gọi collection trực tiếp)?
 - [ ] Public functions có comment Tiếng Việt?
 
 ## 📚 Docs

@@ -205,7 +205,7 @@ if ($channelID) {
         subject = "Test Delivery"
         content = "Test content"
     }
-    Test-Endpoint "POST" "/delivery/send" -Body $deliveryBody -Description "Send delivery voi channel ID that"
+    Test-Endpoint "POST" "/executor/send" -Body $deliveryBody -Description "Send delivery voi channel ID that"
 }
 
 # Test block/unblock user voi user ID that

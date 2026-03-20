@@ -46,13 +46,9 @@ func NewCommandCleanupWorker(interval time.Duration, timeoutSeconds int64) (*Com
 	}, nil
 }
 
-// Start bắt đầu background worker để release stuck commands
-// Worker sẽ chạy định kỳ theo interval và tự động giải phóng commands bị stuck
+// Start bắt đầu background worker để release stuck commands. Đọc config mỗi vòng (hỗ trợ thay đổi qua API).
 func (w *CommandCleanupWorker) Start(ctx context.Context) {
 	log := logger.GetAppLogger()
-	
-	ticker := time.NewTicker(w.interval)
-	defer ticker.Stop()
 
 	log.WithFields(map[string]interface{}{
 		"interval":       w.interval.String(),
@@ -60,48 +56,66 @@ func (w *CommandCleanupWorker) Start(ctx context.Context) {
 	}).Info("🔄 [COMMAND_CLEANUP] Starting Command Cleanup Worker...")
 
 	for {
+		interval, timeoutBatch := GetEffectiveWorkerSchedule(WorkerCommandCleanup, w.interval, int(w.timeoutSeconds))
+		timeoutSeconds := int64(timeoutBatch)
+		if timeoutSeconds < 60 {
+			timeoutSeconds = 300
+		}
+
+		if !IsWorkerActive(WorkerCommandCleanup) {
+			select {
+			case <-ctx.Done():
+				log.Info("🔄 [COMMAND_CLEANUP] Command Cleanup Worker stopped")
+				return
+			case <-time.After(1 * time.Minute):
+			}
+			continue
+		}
+		p := GetPriority(WorkerCommandCleanup, PriorityLow)
+		if ShouldThrottle(p) {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(interval):
+			}
+			continue
+		}
+		effInterval := GetEffectiveInterval(interval, p)
+		if effInterval > interval {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(effInterval - interval):
+			}
+		}
+
 		select {
 		case <-ctx.Done():
 			log.Info("🔄 [COMMAND_CLEANUP] Command Cleanup Worker stopped")
 			return
-		case <-ticker.C:
-			if !IsWorkerActive(WorkerCommandCleanup) {
-				time.Sleep(1 * time.Minute)
-				continue
-			}
-			p := GetPriority(WorkerCommandCleanup, PriorityLow)
-			if ShouldThrottle(p) {
-				continue
-			}
-			if effInterval := GetEffectiveInterval(w.interval, p); effInterval > w.interval {
-				time.Sleep(effInterval - w.interval)
-			}
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						log.WithFields(map[string]interface{}{
-							"panic": r,
-						}).Error("🔄 [COMMAND_CLEANUP] Panic khi release stuck commands, sẽ tiếp tục ở lần chạy tiếp theo")
-					}
-				}()
-
-				// Gọi service để release stuck commands
-				start := time.Now()
-				releasedCount, err := w.commandService.ReleaseStuckCommands(ctx, w.timeoutSeconds)
-				metrics.RecordDuration("command_cleanup", time.Since(start))
-				if err != nil {
-					log.WithError(err).Error("🔄 [COMMAND_CLEANUP] Failed to release stuck commands")
-					return
-				}
-
-				if releasedCount > 0 {
-					log.WithFields(map[string]interface{}{
-						"releasedCount":   releasedCount,
-						"timeoutSeconds":  w.timeoutSeconds,
-					}).Info("🔄 [COMMAND_CLEANUP] Released stuck commands")
-				}
-				// Nếu releasedCount = 0, không log (giảm log noise)
-			}()
+		case <-time.After(interval):
 		}
+
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.WithFields(map[string]interface{}{"panic": r}).Error("🔄 [COMMAND_CLEANUP] Panic khi release stuck commands, sẽ tiếp tục ở lần chạy tiếp theo")
+				}
+			}()
+
+			start := time.Now()
+			releasedCount, err := w.commandService.ReleaseStuckCommands(ctx, timeoutSeconds)
+			metrics.RecordDuration("command_cleanup", time.Since(start))
+			if err != nil {
+				log.WithError(err).Error("🔄 [COMMAND_CLEANUP] Failed to release stuck commands")
+				return
+			}
+			if releasedCount > 0 {
+				log.WithFields(map[string]interface{}{
+					"releasedCount":  releasedCount,
+					"timeoutSeconds": timeoutSeconds,
+				}).Info("🔄 [COMMAND_CLEANUP] Released stuck commands")
+			}
+		}()
 	}
 }

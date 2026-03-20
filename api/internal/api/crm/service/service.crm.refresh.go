@@ -11,8 +11,9 @@ import (
 )
 
 // ClassificationRefreshMode chế độ lấy danh sách khách cần refresh.
-// full: Tất cả khách có ít nhất 1 đơn (orderCount >= 1).
-// smart: Chỉ khách có lastOrderAt nằm gần ngưỡng lifecycle (28–33, 88–96, 178–186 ngày).
+// full: Khách có đơn (orderCount>=1) hoặc Engaged (orderCount=0). Engaged cần RefreshMetrics để bổ sung
+// lastConversationAt, totalMessages, conversationFromAds vào raw (cho Layer3 nhiệt độ hội thoại, độ sâu tương tác).
+// smart: Chỉ khách có đơn và lastOrderAt nằm gần ngưỡng lifecycle (28–33, 88–96, 178–186 ngày).
 const (
 	ClassificationRefreshModeFull  = "full"
 	ClassificationRefreshModeSmart = "smart"
@@ -83,26 +84,35 @@ func (s *CrmCustomerService) ListCustomerIdsForClassificationRefresh(ctx context
 
 // buildClassificationRefreshFilter tạo filter MongoDB theo mode.
 func (s *CrmCustomerService) buildClassificationRefreshFilter(mode string) bson.M {
-	// Chỉ xét khách có ít nhất 1 đơn — lifecycle/journey có nghĩa.
-	filter := bson.M{"orderCount": bson.M{"$gte": 1}}
+	// Base: khách có đơn (orderCount>=1) HOẶC Engaged (orderCount=0).
+	// Engaged cần RefreshMetrics để bổ sung lastConversationAt, totalMessages, conversationFromAds vào raw (cho Layer3).
+	baseOr := []bson.M{
+		{"orderCount": bson.M{"$gte": 1}},
+		{"journeyStage": "engaged"},
+	}
 
 	if mode == ClassificationRefreshModeSmart {
+		// Smart: chỉ khách có đơn gần ngưỡng lifecycle (lastOrderAt trong vùng 28–33, 88–96, 178–186 ngày).
 		now := time.Now().UnixMilli()
-		// Vùng ngưỡng (ngày): 28–33, 88–96, 178–186
-		zone1From := now - 33*msPerDayRefresh // 33 ngày trước
-		zone1To := now - 28*msPerDayRefresh   // 28 ngày trước
+		zone1From := now - 33*msPerDayRefresh
+		zone1To := now - 28*msPerDayRefresh
 		zone2From := now - 96*msPerDayRefresh
 		zone2To := now - 88*msPerDayRefresh
 		zone3From := now - 186*msPerDayRefresh
 		zone3To := now - 178*msPerDayRefresh
 
-		filter["lastOrderAt"] = bson.M{"$gte": int64(1)}
-		filter["$or"] = []bson.M{
-			{"lastOrderAt": bson.M{"$gte": zone1From, "$lte": zone1To}},
-			{"lastOrderAt": bson.M{"$gte": zone2From, "$lte": zone2To}},
-			{"lastOrderAt": bson.M{"$gte": zone3From, "$lte": zone3To}},
+		return bson.M{
+			"$and": []bson.M{
+				{"$or": baseOr},
+				{"lastOrderAt": bson.M{"$gte": int64(1)}},
+				{"$or": []bson.M{
+					{"lastOrderAt": bson.M{"$gte": zone1From, "$lte": zone1To}},
+					{"lastOrderAt": bson.M{"$gte": zone2From, "$lte": zone2To}},
+					{"lastOrderAt": bson.M{"$gte": zone3From, "$lte": zone3To}},
+				}},
+			},
 		}
 	}
 
-	return filter
+	return bson.M{"$or": baseOr}
 }

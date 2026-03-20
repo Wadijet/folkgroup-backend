@@ -1,4 +1,4 @@
-# Script kiểm tra duplicate pc_pos_orders và test sync-upsert-one
+# Script kiểm tra duplicate pc_pos_orders và test CIO ingest (POST /cio/ingest)
 # Dùng bearer token để gọi API
 
 $baseUrl = "http://localhost:8080/api/v1"
@@ -79,20 +79,22 @@ if ($duplicates) {
     Write-Host "`nKhông có duplicate theo (orderId, ownerOrganizationId)" -ForegroundColor Green
 }
 
-# Test sync-upsert-one (nếu có order mẫu)
+# Test CIO ingest (POST /cio/ingest) — thay thế sync-upsert-one đã gỡ (Version 4.00)
 if ($orders.Count -gt 0) {
     $sample = $orders[0]
     $orderId = $sample.orderId
     $orgId = $sample.ownerOrganizationId
-    $filter = @{ orderId = $orderId; ownerOrganizationId = $orgId } | ConvertTo-Json -Compress
-    $filterEncoded = [System.Uri]::EscapeDataString($filter)
     
-    Write-Host "`nTest sync-upsert-one với orderId=$orderId..." -ForegroundColor Cyan
-    $syncUrl = "$baseUrl/pancake-pos/order/sync-upsert-one?filter=$filterEncoded"
+    Write-Host "`nTest CIO ingest domain=order với orderId=$orderId..." -ForegroundColor Cyan
+    $ingestBody = @{
+        domain = "order"
+        filter = @{ orderId = $orderId; ownerOrganizationId = $orgId }
+        data   = $sample
+    } | ConvertTo-Json -Depth 25
     try {
-        $syncResp = Invoke-RestMethod -Uri $syncUrl -Method POST -Headers $headers -Body ($sample | ConvertTo-Json -Depth 20) -ErrorAction Stop
-        Write-Host "Kết quả: $($syncResp | ConvertTo-Json -Depth 2)" -ForegroundColor Green
+        $ingestResp = Invoke-RestMethod -Uri "$baseUrl/cio/ingest" -Method POST -Headers $headers -Body $ingestBody -ErrorAction Stop
+        Write-Host "Kết quả: $($ingestResp | ConvertTo-Json -Depth 2)" -ForegroundColor Green
     } catch {
-        Write-Host "Lỗi sync: $_" -ForegroundColor Red
+        Write-Host "Lỗi CIO ingest: $_" -ForegroundColor Red
     }
 }

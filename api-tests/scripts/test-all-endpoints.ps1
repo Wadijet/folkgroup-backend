@@ -154,8 +154,8 @@ Test-Endpoint "GET" "/cta/library/find" -Description "Find CTA libraries"
 
 # ===== DELIVERY ENDPOINTS =====
 Write-Host "`n--- Delivery Endpoints ---" -ForegroundColor Magenta
-# Lưu ý: Delivery queue không có endpoint riêng, delivery được quản lý qua /notification/sender và /delivery/history
-Test-Endpoint "GET" "/delivery/history/find" -Description "Find delivery history"
+# Lưu ý: Delivery queue không có endpoint riêng, delivery được quản lý qua /notification/sender và /executor/history
+Test-Endpoint "GET" "/executor/history/find" -Description "Find delivery history"
 
 # ===== AI ENDPOINTS =====
 Write-Host "`n--- AI Endpoints ---" -ForegroundColor Magenta
@@ -283,7 +283,7 @@ $deliveryBody = @{
     subject = "Test"
     content = "Test content"
 }
-Test-Endpoint "POST" "/delivery/send" -Body $deliveryBody -Description "Send delivery (sẽ skip nếu không có channel)"
+Test-Endpoint "POST" "/executor/send" -Body $deliveryBody -Description "Send delivery (sẽ skip nếu không có channel)"
 
 # Role Permission update
 Test-Endpoint "PUT" "/role-permission/update-role" -Body @{ roleId = "000000000000000000000000"; permissionIds = @() } -Description "Update role permissions (sẽ skip nếu không có data)"

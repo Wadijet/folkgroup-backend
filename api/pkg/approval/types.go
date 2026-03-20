@@ -11,6 +11,9 @@ type ActionPending struct {
 	Domain               string                 `json:"domain" bson:"domain" index:"single:1"`
 	ActionType           string                 `json:"actionType" bson:"actionType" index:"single:1"`
 	Reason               string                 `json:"reason" bson:"reason"`
+	TraceID              string                 `json:"traceId,omitempty" bson:"traceId,omitempty"`             // Explainability: link rule_execution_logs
+	DecisionID           string                 `json:"decisionId,omitempty" bson:"decisionId,omitempty"`       // dec_xxx — ID quyết định (AI Decision)
+	DecisionCaseID       string                 `json:"decisionCaseId,omitempty" bson:"decisionCaseId,omitempty"` // Explainability: link decision_case
 	Payload              map[string]interface{} `json:"payload" bson:"payload"`
 	ProposedAt           int64                  `json:"proposedAt" bson:"proposedAt" index:"single:-1"`
 	Status               string                 `json:"status" bson:"status" index:"single:1"`

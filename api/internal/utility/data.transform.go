@@ -150,6 +150,9 @@ func applyTransform(value interface{}, config *transformTagConfig, targetFieldTy
 	case "str_objectid_ptr":
 		// Convert string → *primitive.ObjectID
 		return transformToObjectIDPtr(value)
+	case "str_objectid_array":
+		// Convert []string → []primitive.ObjectID
+		return transformToStringArrayToObjectIDs(value)
 	case "str_time":
 		// Convert string → int64 timestamp
 		return transformToTime(value, config.Format)
@@ -218,6 +221,42 @@ func transformToObjectIDPtr(value interface{}) (*primitive.ObjectID, error) {
 	}
 
 	return &objID, nil
+}
+
+// transformToStringArrayToObjectIDs convert []string hoặc []interface{} → []primitive.ObjectID
+func transformToStringArrayToObjectIDs(value interface{}) ([]primitive.ObjectID, error) {
+	if value == nil {
+		return []primitive.ObjectID{}, nil
+	}
+	// default="[]" truyền vào là string "[]"
+	if s, ok := value.(string); ok && (s == "[]" || s == "") {
+		return []primitive.ObjectID{}, nil
+	}
+	var strs []string
+	switch v := value.(type) {
+	case []string:
+		strs = v
+	case []interface{}:
+		for _, elem := range v {
+			if s, ok := elem.(string); ok {
+				strs = append(strs, s)
+			}
+		}
+	default:
+		return nil, fmt.Errorf("không thể convert giá trị từ type %T sang type []primitive.ObjectID", value)
+	}
+	result := make([]primitive.ObjectID, 0, len(strs))
+	for _, s := range strs {
+		if s == "" {
+			continue
+		}
+		objID, err := primitive.ObjectIDFromHex(s)
+		if err != nil {
+			return nil, fmt.Errorf("element '%s' không phải ObjectID hợp lệ: %w", s, err)
+		}
+		result = append(result, objID)
+	}
+	return result, nil
 }
 
 // transformToTime convert string → int64 timestamp

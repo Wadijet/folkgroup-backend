@@ -8,6 +8,11 @@ import (
 type PcPosCustomer struct {
 	ID primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"` // ID của customer trong MongoDB
 
+	// ===== IDENTITY 4 LỚP =====
+	Uid            string           `json:"uid" bson:"uid" index:"single:1"`                      // cust_xxx — ID chuẩn hệ thống
+	SourceIds      map[string]string `json:"sourceIds,omitempty" bson:"sourceIds,omitempty"`       // pos → PosData.id
+	SourceIdsPos   string           `json:"-" bson:"sourceIds.pos,omitempty" index:"single:1,sparse"`
+
 	// ===== IDENTIFIERS =====
 	CustomerId string `json:"customerId" bson:"customerId" index:"text,unique" extract:"PosData\\.id,converter=string"` // UUID string - POS Customer ID (extract từ PosData["id"])
 	ShopId     int64  `json:"shopId" bson:"shopId" index:"text" extract:"PosData\\.shop_id,converter=int64,optional"`   // Shop ID (extract từ PosData["shop_id"])

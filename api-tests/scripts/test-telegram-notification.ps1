@@ -190,7 +190,7 @@ try {
     } | ConvertTo-Json -Depth 10
 
     Write-Info "Dang gui notification truc tiep..."
-    $deliveryResponse = Invoke-RestMethod -Uri "$BaseURL/delivery/send" -Method POST -Headers $headers -Body $deliveryPayload
+    $deliveryResponse = Invoke-RestMethod -Uri "$BaseURL/executor/send" -Method POST -Headers $headers -Body $deliveryPayload
     
     Write-Success "Da them vao queue thanh cong!"
     Write-Host "   Message ID: $($deliveryResponse.messageId)" -ForegroundColor Gray
@@ -368,7 +368,7 @@ Write-Host "`n" + ("=" * 70) -ForegroundColor Magenta
 Write-Host "[DONE] HOAN THANH TEST TELEGRAM NOTIFICATION" -ForegroundColor Magenta
 Write-Host ("=" * 70) -ForegroundColor Magenta
 Write-Info "Da test:"
-Write-Host "   1. [OK] Gui truc tiep qua Delivery System (POST /delivery/send)" -ForegroundColor Gray
+Write-Host "   1. [OK] Gui truc tiep qua Delivery System (POST /executor/send)" -ForegroundColor Gray
 if ($routingRuleID) {
     Write-Host "   2. [OK] Gui qua Notification System voi Routing (POST /notification/trigger)" -ForegroundColor Gray
 } else {

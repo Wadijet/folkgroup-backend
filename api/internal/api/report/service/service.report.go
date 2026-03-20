@@ -474,10 +474,19 @@ func (s *ReportService) FindSnapshotsForAdsTrendByDayRange(ctx context.Context, 
 
 // GetUnprocessedDirtyPeriods lấy tối đa limit bản ghi từ report_dirty_periods có processedAt = null.
 func (s *ReportService) GetUnprocessedDirtyPeriods(ctx context.Context, limit int) ([]reportmodels.ReportDirtyPeriod, error) {
+	return s.GetUnprocessedDirtyPeriodsByReportKeys(ctx, limit, nil)
+}
+
+// GetUnprocessedDirtyPeriodsByReportKeys lấy dirty periods chưa xử lý, filter theo reportKeys.
+// Nếu reportKeys = nil hoặc rỗng thì lấy tất cả (giống GetUnprocessedDirtyPeriods).
+func (s *ReportService) GetUnprocessedDirtyPeriodsByReportKeys(ctx context.Context, limit int, reportKeys []string) ([]reportmodels.ReportDirtyPeriod, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	filter := bson.M{"processedAt": nil}
+	if len(reportKeys) > 0 {
+		filter["reportKey"] = bson.M{"$in": reportKeys}
+	}
 	opts := options.Find().SetSort(bson.D{{Key: "markedAt", Value: 1}}).SetLimit(int64(limit))
 	cursor, err := s.dirtyColl.Find(ctx, filter, opts)
 	if err != nil {

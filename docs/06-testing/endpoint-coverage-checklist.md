@@ -254,6 +254,15 @@ Tài liệu này liệt kê tất cả các endpoints và trạng thái test cov
 
 ---
 
+## 📦 Unit Tests (trong api/)
+
+| Package | File | Nội dung |
+|---------|------|----------|
+| crm/service | `service.crm.snapshot_test.go` | BuildCurrentMetricsSnapshot, BuildSnapshotForNewCustomer |
+| report/layer3 | `layer3_test.go` | DeriveFromNested, DeriveFromMap (First, Engaged, nil) |
+
+---
+
 ## 📝 Ghi Chú
 
 - ✅ = Đã có test

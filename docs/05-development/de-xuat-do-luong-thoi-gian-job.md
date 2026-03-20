@@ -19,11 +19,11 @@
 | | `crm_ingest:PcPosOrders` | Ingest order touchpoint |
 | | `crm_ingest:FbConvesations` | Ingest conversation touchpoint |
 | | `crm_ingest:CrmNotes` | Ingest note touchpoint |
-| **CrmBulkWorker** | `crm_bulk:sync` | Sync all customers |
-| | `crm_bulk:backfill` | Backfill activity |
-| | `crm_bulk:rebuild` | Rebuild CRM |
+| **CrmBulkWorker** | `crm_bulk:sync` | Sync profile (từ rebuild hoặc job sync) |
+| | `crm_bulk:backfill` | Backfill activity (từ rebuild hoặc job backfill) |
+| | `crm_bulk:rebuild` | Rebuild CRM (backward compat, 1 job) |
 | | `crm_bulk:recalculate_one` | Recalculate 1 customer |
-| | `crm_bulk:recalculate_all` | Recalculate all customers |
+| | `crm_bulk:recalculate_batch` | Recalculate 1 batch (từ recalculate-all) |
 | **ReportDirtyWorker** | `report_dirty:customer_daily`, `report_dirty:customer_weekly`, `report_dirty:customer_monthly`, `report_dirty:customer_yearly`, `report_dirty:order_daily`, ... | Compute report period theo từng loại (customer/order) và chu kỳ (daily/weekly/monthly/yearly) |
 | **ClassificationRefreshWorker** | `classification_refresh:full` | Refresh full |
 | | `classification_refresh:smart` | Refresh smart |

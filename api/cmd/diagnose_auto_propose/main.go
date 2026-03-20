@@ -1,5 +1,6 @@
 // Chẩn đoán chi tiết tại sao RunAutoPropose không tạo action.
 // Chạy: cd api && go run ./cmd/diagnose_auto_propose
+// Dùng Rule Engine (metasvc.ComputeFinalActions) — không dùng adsrules.
 package main
 
 import (
@@ -12,7 +13,6 @@ import (
 	"meta_commerce/config"
 	adsconfig "meta_commerce/internal/api/ads/config"
 	adssvc "meta_commerce/internal/api/ads/service"
-	adsrules "meta_commerce/internal/api/ads/rules"
 	adsmodels "meta_commerce/internal/api/ads/models"
 	"meta_commerce/internal/global"
 
@@ -35,12 +35,21 @@ func main() {
 	}
 	defer client.Disconnect(ctx)
 
-	// Init registry
+	// Init registry — cần Rule Engine collections cho computeSuggestedActions
 	global.MongoDB_ColNames.AdsMetaConfig = "ads_meta_config"
 	global.MongoDB_ColNames.MetaCampaigns = "meta_campaigns"
 	global.MongoDB_ColNames.ActionPendingApproval = "action_pending_approval"
+	global.MongoDB_ColNames.RuleDefinitions = "rule_definitions"
+	global.MongoDB_ColNames.RuleLogicDefinitions = "rule_logic_definitions"
+	global.MongoDB_ColNames.RuleParamSets = "rule_param_sets"
+	global.MongoDB_ColNames.RuleOutputDefinitions = "rule_output_definitions"
+	global.MongoDB_ColNames.RuleExecutionLogs = "rule_execution_logs"
 	db := client.Database(cfg.MongoDB_DBName_Auth)
-	for _, name := range []string{"ads_meta_config", "meta_campaigns", "action_pending_approval"} {
+	for _, name := range []string{
+		"ads_meta_config", "meta_campaigns", "action_pending_approval",
+		"rule_definitions", "rule_logic_definitions", "rule_param_sets",
+		"rule_output_definitions", "rule_execution_logs",
+	} {
 		_, _ = global.RegistryCollections.Register(name, db.Collection(name))
 	}
 
@@ -54,6 +63,11 @@ func main() {
 	if len(campaigns) == 0 {
 		fmt.Println("Không có campaign nào. Kiểm tra ads_meta_config (autoProposeEnabled) và meta_campaigns (ACTIVE, alertFlags).")
 		return
+	}
+
+	campaignsColl, _ := global.RegistryCollections.Get(global.MongoDB_ColNames.MetaCampaigns)
+	if campaignsColl == nil {
+		log.Fatal("Không tìm thấy collection meta_campaigns")
 	}
 
 	for i, c := range campaigns {
@@ -73,23 +87,22 @@ func main() {
 		}
 		fmt.Printf("  alertFlags: [%s]\n", strings.Join(flagStrs, ", "))
 
+		currentMetrics := adssvc.GetCampaignCurrentMetrics(ctx, campaignsColl, c.CampaignId, c.OwnerOrganizationID)
+		if currentMetrics == nil {
+			fmt.Printf("  ❌ Không lấy được currentMetrics\n\n")
+			continue
+		}
+
+		actions, report := adssvc.ComputeActionsFromMetrics(ctx, c.CampaignId, c.AdAccountId, c.OwnerOrganizationID, currentMetrics)
 		metaCfg, _ := adssvc.GetCampaignConfig(ctx, c.AdAccountId, c.OwnerOrganizationID)
-		killEnabled := adssvc.GetKillRulesEnabled(ctx, c.AdAccountId, c.OwnerOrganizationID)
-		opts := &adsrules.EvalOptions{KillRulesEnabled: killEnabled}
 
-		result := adsrules.EvaluateAlertFlagsWithConfig(flags, opts, metaCfg)
-		source := "Kill"
-		if result == nil {
-			result = adsrules.EvaluateForDecreaseWithConfig(flags, metaCfg)
-			source = "Decrease"
-		}
-		if result == nil {
-			result = adsrules.EvaluateForIncrease(flags, metaCfg)
-			source = "Increase"
-		}
-
-		if result == nil {
-			fmt.Printf("  ❌ Không có rule nào trigger\n")
+		if len(actions) == 0 {
+			fmt.Printf("  ❌ Không có rule nào trigger (Rule Engine)\n")
+			if report != nil {
+				if reason, ok := report["finalReason"].(string); ok && reason != "" {
+					fmt.Printf("  Lý do: %s\n", reason)
+				}
+			}
 			if metaCfg != nil && !metaCfg.AutomationConfig.EffectiveBudgetRulesEnabled() {
 				fmt.Printf("  ⚠️ BudgetRulesEnabled = false\n")
 			}
@@ -97,11 +110,14 @@ func main() {
 			continue
 		}
 
-		fmt.Printf("  ✅ Rule: %s (%s) → %s\n", result.RuleCode, source, result.ActionType)
+		action := actions[0]
+		ruleCode, _ := action["ruleCode"].(string)
+		actionType, _ := action["actionType"].(string)
+		fmt.Printf("  ✅ Rule: %s → %s\n", ruleCode, actionType)
 
 		shouldPropose := true
 		if metaCfg != nil {
-			shouldPropose = shouldAutoPropose(result.RuleCode, metaCfg)
+			shouldPropose = shouldAutoPropose(ruleCode, metaCfg)
 		}
 		if !shouldPropose {
 			fmt.Printf("  ❌ ShouldAutoPropose = false\n")

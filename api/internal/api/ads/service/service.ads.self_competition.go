@@ -8,7 +8,6 @@ import (
 
 	adsconfig "meta_commerce/internal/api/ads/config"
 	metasvc "meta_commerce/internal/api/meta/service"
-	"meta_commerce/internal/approval"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/logger"
 
@@ -256,7 +255,7 @@ func reduceWorstCampWhenSuspect(ctx context.Context, adAccountId string, ownerOr
 	if hasPending, _ := HasPendingProposalForCampaign(ctx, worst.CampaignId, ownerOrgID); hasPending {
 		return
 	}
-	pending, err := Propose(ctx, &ProposeInput{
+	_, err = Propose(ctx, &ProposeInput{
 		ActionType:   "DECREASE",
 		AdAccountId:  adAccountId,
 		CampaignId:   worst.CampaignId,
@@ -265,10 +264,9 @@ func reduceWorstCampWhenSuspect(ctx context.Context, adAccountId string, ownerOr
 		Reason:       "Anti Self-Competition — CPM spike, giảm 10% camp CPA Purchase cao nhất",
 		RuleCode:     "self_comp_reduce",
 	}, ownerOrgID, baseURL)
-	if err != nil || pending == nil {
+	if err != nil {
 		return
 	}
-	approval.Approve(ctx, pending.ID.Hex(), ownerOrgID)
 }
 
 func toFloat64SelfComp(m map[string]interface{}, k string) float64 {

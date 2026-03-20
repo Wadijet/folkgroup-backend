@@ -4,7 +4,9 @@ package adssvc
 import (
 	"context"
 	"fmt"
+	"os"
 
+	aidecisionsvc "meta_commerce/internal/api/aidecision/service"
 	"meta_commerce/internal/approval"
 	"meta_commerce/internal/global"
 
@@ -15,6 +17,14 @@ import (
 
 const domainAds = "ads"
 const eventTypeActionPendingApproval = "ads_action_pending_approval"
+
+// getProposeBaseURL trả về base URL cho approve/reject links. Dùng khi caller không truyền baseURL.
+func getProposeBaseURL() string {
+	if u := os.Getenv("BASE_URL"); u != "" {
+		return u
+	}
+	return "https://localhost"
+}
 
 // supportedActions — danh sách action Meta API hỗ trợ.
 var supportedActions = map[string]bool{
@@ -58,22 +68,21 @@ func GetMetricsPayloadForPropose(ctx context.Context, campaignId string, adAccou
 	return payload
 }
 
-// Propose thêm đề xuất ads vào queue (gọi approval package).
-// Hỗ trợ campaign, adset, ad — cần ít nhất một trong campaignId, adSetId, adId.
-// Budget actions (SET_BUDGET, SET_LIFETIME_BUDGET, INCREASE, DECREASE) bắt buộc có adSetId hoặc campaignId.
-func Propose(ctx context.Context, input *ProposeInput, ownerOrgID primitive.ObjectID, baseURL string) (*approval.ActionPending, error) {
+// Propose emit event ads.propose_requested — AI Decision consumer xử lý và gọi ProposeForAds (Vision 08 event-driven).
+// Trả về eventID khi thành công. Proposal sẽ xuất hiện trong vài giây khi worker xử lý.
+func Propose(ctx context.Context, input *ProposeInput, ownerOrgID primitive.ObjectID, baseURL string) (eventID string, err error) {
 	if input.Reason == "" {
-		return nil, fmt.Errorf("lý do (reason) không được để trống")
+		return "", fmt.Errorf("lý do (reason) không được để trống")
 	}
 	if !supportedActions[input.ActionType] {
-		return nil, fmt.Errorf("actionType không hỗ trợ: %s", input.ActionType)
+		return "", fmt.Errorf("actionType không hỗ trợ: %s", input.ActionType)
 	}
 	if input.CampaignId == "" && input.AdSetId == "" && input.AdId == "" {
-		return nil, fmt.Errorf("cần ít nhất một trong campaignId, adSetId, adId")
+		return "", fmt.Errorf("cần ít nhất một trong campaignId, adSetId, adId")
 	}
 	// Budget actions chỉ áp dụng cho campaign/adset — Meta API không hỗ trợ budget ở level Ad.
 	if budgetActions[input.ActionType] && input.AdSetId == "" && input.CampaignId == "" {
-		return nil, fmt.Errorf("action %s cần adSetId hoặc campaignId (Ad không có budget)", input.ActionType)
+		return "", fmt.Errorf("action %s cần adSetId hoặc campaignId (Ad không có budget)", input.ActionType)
 	}
 	payload := map[string]interface{}{
 		"adAccountId":  input.AdAccountId,
@@ -84,6 +93,14 @@ func Propose(ctx context.Context, input *ProposeInput, ownerOrgID primitive.Obje
 		"value":        input.Value,
 		"reason":       input.Reason,
 		"ruleCode":     input.RuleCode, // Mã rule (sl_a, mess_trap_suspect, ...) — dùng cho auto-approve
+	}
+	if input.TraceID != "" {
+		payload["traceId"] = input.TraceID // Link đến rule_execution_logs — xem log tạo đề xuất
+	}
+	// Vision 08: idempotencyKey cho dedup — format ads:adAccountId:campaignId:actionType:ruleCode (deterministic)
+	if payload["idempotencyKey"] == nil {
+		payload["idempotencyKey"] = fmt.Sprintf("ads:%s:%s:%s:%s",
+			input.AdAccountId, input.CampaignId, input.ActionType, input.RuleCode)
 	}
 	if input.Payload != nil {
 		for k, v := range input.Payload {
@@ -104,14 +121,72 @@ func Propose(ctx context.Context, input *ProposeInput, ownerOrgID primitive.Obje
 			payload[key] = ""
 		}
 	}
-	return approval.Propose(ctx, domainAds, approval.ProposeInput{
+	// Vision 08: decisionId, contextSnapshot do AI Decision worker inject — Ads chỉ gửi raw payload
+	// Vision 08 event-driven: emit event thay vì gọi ProposeForAds trực tiếp
+	return aidecisionsvc.EmitAdsProposeRequest(ctx, approval.ProposeInput{
 		ActionType:       input.ActionType,
 		Reason:           input.Reason,
 		Payload:          payload,
 		EventTypePending: eventTypeActionPendingApproval,
-		ApprovePath:      "/api/v1/approval/actions/approve",
-		RejectPath:       "/api/v1/approval/actions/reject",
+		ApprovePath:      "/api/v1/executor/actions/approve",
+		RejectPath:       "/api/v1/executor/actions/reject",
 	}, ownerOrgID, baseURL)
+}
+
+// ProposeAndApprove emit event — consumer gọi ProposeForAds, ResolveImmediate xử lý auto-approve theo config.
+func ProposeAndApprove(ctx context.Context, input *ProposeInput, ownerOrgID primitive.ObjectID) (eventID string, err error) {
+	if input.Reason == "" {
+		return "", fmt.Errorf("lý do (reason) không được để trống")
+	}
+	if !supportedActions[input.ActionType] {
+		return "", fmt.Errorf("actionType không hỗ trợ: %s", input.ActionType)
+	}
+	if input.CampaignId == "" && input.AdSetId == "" && input.AdId == "" {
+		return "", fmt.Errorf("cần ít nhất một trong campaignId, adSetId, adId")
+	}
+	if budgetActions[input.ActionType] && input.AdSetId == "" && input.CampaignId == "" {
+		return "", fmt.Errorf("action %s cần adSetId hoặc campaignId (Ad không có budget)", input.ActionType)
+	}
+	payload := map[string]interface{}{
+		"adAccountId":  input.AdAccountId,
+		"campaignId":   input.CampaignId,
+		"campaignName": input.CampaignName,
+		"adSetId":      input.AdSetId,
+		"adId":         input.AdId,
+		"value":        input.Value,
+		"reason":       input.Reason,
+		"ruleCode":     input.RuleCode,
+	}
+	if input.TraceID != "" {
+		payload["traceId"] = input.TraceID
+	}
+	if input.Payload != nil {
+		for k, v := range input.Payload {
+			payload[k] = v
+		}
+	}
+	if input.CampaignId != "" && payload["flagsSummary"] == nil {
+		if metrics := GetMetricsPayloadForPropose(ctx, input.CampaignId, input.AdAccountId, ownerOrgID); metrics != nil {
+			for k, v := range metrics {
+				payload[k] = v
+			}
+		}
+	}
+	for _, key := range []string{"flagsSummary", "rawSummary", "layer1Summary", "layer3Summary", "flagsDetail"} {
+		if payload[key] == nil {
+			payload[key] = ""
+		}
+	}
+	// Vision 08: decisionId, contextSnapshot do AI Decision worker inject — Ads chỉ gửi raw payload
+	// Vision 08 event-driven: cùng event với Propose — ResolveImmediate quyết định auto
+	return aidecisionsvc.EmitAdsProposeRequest(ctx, approval.ProposeInput{
+		ActionType:       input.ActionType,
+		Reason:           input.Reason,
+		Payload:          payload,
+		EventTypePending: eventTypeActionPendingApproval,
+		ApprovePath:      "/api/v1/executor/actions/approve",
+		RejectPath:       "/api/v1/executor/actions/reject",
+	}, ownerOrgID, getProposeBaseURL())
 }
 
 // ProposeInput input cho Propose (ads-specific).
@@ -125,5 +200,6 @@ type ProposeInput struct {
 	Value        interface{}
 	Reason       string
 	RuleCode     string            // Mã rule (sl_a, mess_trap_suspect, ...) — dùng cho automation config
+	TraceID      string            // ID trace trong rule_execution_logs — link xem log tạo đề xuất
 	Payload      map[string]interface{}
 }

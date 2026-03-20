@@ -11,7 +11,9 @@ import (
 
 // WorkerName tên worker đăng ký trong Registry (format module_suffix).
 const (
-	WorkerReportDirty          = "report_dirty"
+	WorkerReportDirtyAds     = "report_dirty_ads"
+	WorkerReportDirtyOrder   = "report_dirty_order"
+	WorkerReportDirtyCustomer = "report_dirty_customer"
 	WorkerDelivery             = "notification_delivery_processor"
 	WorkerDeliveryCleanup      = "notification_delivery_cleanup"
 	WorkerCommandCleanup       = "notification_command_cleanup"
@@ -27,32 +29,60 @@ const (
 	WorkerAdsCounterfactual    = "ads_counterfactual"
 	WorkerClassificationFull   = "crm_classification_full"
 	WorkerClassificationSmart  = "crm_classification_smart"
+	WorkerCixAnalysis          = "cix_analysis"
+	WorkerCixRequest           = "cix_request"
+	WorkerAIDecisionConsumer   = "ai_decision_consumer"
+	WorkerAIDecisionDebounce   = "ai_decision_debounce"
+	WorkerAIDecisionClosure    = "ai_decision_closure"
+	WorkerCrmContext            = "crm_context"
+	WorkerOrderContext          = "order_context"
+	WorkerAdsContext            = "ads_context"
+	WorkerLearningRuleSuggestion  = "learning_rule_suggestion"
+	WorkerLearningEvaluation     = "learning_evaluation"
+	WorkerLearningInsightAggregate = "learning_insight_aggregate"
+	WorkerIdentityBackfill     = "identity_backfill"
 )
 
-// WorkerMetadata mô tả worker (module, mô tả chức năng).
+// WorkerMetadata mô tả worker (module, domain, mô tả chức năng).
+// Domain: ads, order, customer, notification, system — để nhóm/filter theo domain nghiệp vụ.
 type WorkerMetadata struct {
 	Module      string `json:"module"`
+	Domain      string `json:"domain"` // Phân loại theo domain: ads, order, customer, notification, system
 	Description string `json:"description"`
 }
 
-// workerMetadataMap map tên worker → metadata (module + mô tả).
+// workerMetadataMap map tên worker → metadata (module + domain + mô tả).
 var workerMetadataMap = map[string]WorkerMetadata{
-	WorkerReportDirty:          {Module: "report", Description: "Tính toán lại báo cáo khi có dirty periods (order, customer, ads)"},
-	WorkerDelivery:             {Module: "notification", Description: "Xử lý hàng đợi gửi thông báo (email, Telegram, SMS...)"},
-	WorkerDeliveryCleanup:      {Module: "notification", Description: "Dọn các item bị kẹt trong hàng đợi delivery"},
-	WorkerCommandCleanup:       {Module: "notification", Description: "Dọn command cũ hết hạn"},
-	WorkerAgentCommandCleanup:  {Module: "notification", Description: "Dọn agent command cũ hết hạn"},
-	WorkerAgentActivityCleanup: {Module: "notification", Description: "Dọn agent activity log cũ"},
-	WorkerCrmIngest:           {Module: "crm", Description: "Đồng bộ dữ liệu customer từ agent vào hệ thống"},
-	WorkerCrmBulk:             {Module: "crm", Description: "Xử lý bulk job cập nhật customer hàng loạt"},
-	WorkerAdsExecution:        {Module: "ads", Description: "Thực thi các đề xuất quảng cáo đã được duyệt"},
-	WorkerAdsAutoPropose:      {Module: "ads", Description: "Tạo đề xuất quảng cáo tự động theo rule"},
-	WorkerAdsCircuitBreaker:   {Module: "ads", Description: "Giám sát và tạm dừng account khi lỗi Meta API liên tục"},
-	WorkerAdsDailyScheduler:   {Module: "ads", Description: "Lên lịch chạy mode detection và các task ads hàng ngày"},
-	WorkerAdsPancakeHeartbeat: {Module: "ads", Description: "Gửi heartbeat đến Pancake để đồng bộ trạng thái"},
-	WorkerAdsCounterfactual:   {Module: "ads", Description: "Đánh giá kill đã qua 4h → counterfactual outcomes (FolkForm v4.1)"},
-	WorkerClassificationFull:  {Module: "crm", Description: "Refresh toàn bộ phân loại khách hàng (lifecycle, journey, momentum) — 24h"},
-	WorkerClassificationSmart: {Module: "crm", Description: "Refresh phân loại thông minh — chỉ khách gần ngưỡng lifecycle — 6h"},
+	WorkerReportDirtyAds:     {Module: "report", Domain: "ads", Description: "Tính toán lại báo cáo ads_daily khi có dirty periods"},
+	WorkerReportDirtyOrder:   {Module: "report", Domain: "order", Description: "Tính toán lại báo cáo order_daily khi có dirty periods"},
+	WorkerReportDirtyCustomer: {Module: "report", Domain: "customer", Description: "Tính toán lại báo cáo customer_daily khi có dirty periods"},
+	WorkerDelivery:             {Module: "notification", Domain: "notification", Description: "Xử lý hàng đợi gửi thông báo (email, Telegram, SMS...)"},
+	WorkerDeliveryCleanup:      {Module: "notification", Domain: "notification", Description: "Dọn các item bị kẹt trong hàng đợi delivery"},
+	WorkerCommandCleanup:       {Module: "notification", Domain: "system", Description: "Dọn command cũ hết hạn"},
+	WorkerAgentCommandCleanup:  {Module: "notification", Domain: "system", Description: "Dọn agent command cũ hết hạn"},
+	WorkerAgentActivityCleanup: {Module: "notification", Domain: "system", Description: "Dọn agent activity log cũ"},
+	WorkerCrmIngest:           {Module: "crm", Domain: "customer", Description: "Đồng bộ dữ liệu customer từ agent vào hệ thống"},
+	WorkerCrmBulk:             {Module: "crm", Domain: "customer", Description: "Xử lý bulk job cập nhật customer hàng loạt"},
+	WorkerAdsExecution:        {Module: "ads", Domain: "ads", Description: "Thực thi các đề xuất quảng cáo đã được duyệt"},
+	WorkerAdsAutoPropose:      {Module: "ads", Domain: "ads", Description: "Tạo đề xuất quảng cáo tự động theo rule"},
+	WorkerAdsCircuitBreaker:   {Module: "ads", Domain: "ads", Description: "Giám sát và tạm dừng account khi lỗi Meta API liên tục"},
+	WorkerAdsDailyScheduler:   {Module: "ads", Domain: "ads", Description: "Lên lịch chạy mode detection và các task ads hàng ngày"},
+	WorkerAdsPancakeHeartbeat: {Module: "ads", Domain: "ads", Description: "Gửi heartbeat đến Pancake để đồng bộ trạng thái"},
+	WorkerAdsCounterfactual:   {Module: "ads", Domain: "ads", Description: "Đánh giá kill đã qua 4h → counterfactual outcomes (FolkForm v4.1)"},
+	WorkerClassificationFull:  {Module: "crm", Domain: "customer", Description: "Refresh toàn bộ phân loại khách hàng (lifecycle, journey, momentum) — 24h"},
+	WorkerClassificationSmart: {Module: "crm", Domain: "customer", Description: "Refresh phân loại thông minh — chỉ khách gần ngưỡng lifecycle — 6h"},
+	WorkerCixAnalysis:         {Module: "cix", Domain: "cix", Description: "Phân tích hội thoại từ cix_pending_analysis qua Rule Engine"},
+		WorkerCixRequest:          {Module: "cix", Domain: "cix", Description: "Consume cix.analysis_requested → EnqueueAnalysis (event-driven)"},
+	WorkerAIDecisionConsumer:   {Module: "aidecision", Domain: "aidecision", Description: "Consume decision_events_queue, ResolveOrCreate case, bridge CIX"},
+	WorkerAIDecisionDebounce:   {Module: "aidecision", Domain: "aidecision", Description: "Flush debounce state hết window → emit message.batch_ready"},
+	WorkerAIDecisionClosure:    {Module: "aidecision", Domain: "aidecision", Description: "Đóng case quá hạn với closed_timeout"},
+	WorkerCrmContext:           {Module: "crm", Domain: "customer", Description: "Consume customer.context_requested → load customer → emit customer.context_ready"},
+	WorkerOrderContext:         {Module: "pc", Domain: "order", Description: "Consume order.recompute_requested → tính flags → emit order.flags_emitted"},
+	WorkerAdsContext:           {Module: "ads", Domain: "ads", Description: "Consume ads.context_requested → load ads context → emit ads.context_ready"},
+	WorkerLearningRuleSuggestion: {Module: "learning", Domain: "learning", Description: "Phân tích learning_cases → tạo rule suggestions (Phase 3, LEARNING_RULE_SUGGESTION_ENABLED=true)"},
+	WorkerLearningEvaluation:     {Module: "learning", Domain: "learning", Description: "Batch tính evaluation (outcome_class, error_attribution) cho learning_cases"},
+	WorkerLearningInsightAggregate: {Module: "learning", Domain: "learning", Description: "Aggregate anonymized learning stats cross-merchant (Phase 3)"},
+	WorkerIdentityBackfill:    {Module: "identity", Domain: "system", Description: "Backfill uid, sourceIds, links cho document cũ (4 lớp identity)"},
 }
 
 // GetAllWorkerMetadata trả về metadata tất cả workers (để API GET).
@@ -62,7 +92,7 @@ func GetAllWorkerMetadata() map[string]WorkerMetadata {
 		if m, ok := workerMetadataMap[name]; ok {
 			out[name] = m
 		} else {
-			out[name] = WorkerMetadata{Module: "unknown", Description: "Chưa có mô tả"}
+			out[name] = WorkerMetadata{Module: "unknown", Domain: "system", Description: "Chưa có mô tả"}
 		}
 	}
 	return out
@@ -71,7 +101,9 @@ func GetAllWorkerMetadata() map[string]WorkerMetadata {
 // defaultWorkerPriorities mức ưu tiên mặc định cho từng worker.
 // Số nhỏ = ưu tiên cao hơn. 1=Critical, 2=High, 3=Normal, 4=Low, 5=Lowest.
 var defaultWorkerPriorities = map[string]Priority{
-	WorkerReportDirty:          PriorityCritical,
+	WorkerReportDirtyAds:     PriorityCritical,
+	WorkerReportDirtyOrder:   PriorityCritical,
+	WorkerReportDirtyCustomer: PriorityCritical,
 	WorkerDelivery:             PriorityHigh,
 	WorkerDeliveryCleanup:      PriorityLow,
 	WorkerCommandCleanup:       PriorityLow,
@@ -87,6 +119,18 @@ var defaultWorkerPriorities = map[string]Priority{
 	WorkerAdsCounterfactual:    PriorityLow,
 	WorkerClassificationFull:   PriorityLowest,
 	WorkerClassificationSmart:  PriorityLowest,
+	WorkerCixAnalysis:          PriorityNormal,
+	WorkerCixRequest:           PriorityHigh,
+	WorkerAIDecisionConsumer:   PriorityHigh,
+	WorkerAIDecisionDebounce:   PriorityNormal,
+	WorkerAIDecisionClosure:    PriorityLow,
+	WorkerCrmContext:           PriorityNormal,
+	WorkerOrderContext:         PriorityNormal,
+	WorkerAdsContext:           PriorityLow,
+	WorkerLearningRuleSuggestion: PriorityLowest,
+	WorkerLearningEvaluation:     PriorityLowest,
+	WorkerLearningInsightAggregate: PriorityLowest,
+	WorkerIdentityBackfill:    PriorityLowest,
 }
 
 // priorityOverrides override mức ưu tiên qua API (runtime). Ưu tiên cao hơn env.
@@ -119,12 +163,25 @@ func SetPriorityOverride(workerName string, priority Priority) {
 
 // AllWorkerNames danh sách tất cả worker (để trả effective priorities).
 var AllWorkerNames = []string{
-	WorkerReportDirty, WorkerDelivery, WorkerDeliveryCleanup,
+	WorkerReportDirtyAds, WorkerReportDirtyOrder, WorkerReportDirtyCustomer,
+	WorkerDelivery, WorkerDeliveryCleanup,
 	WorkerCommandCleanup, WorkerAgentCommandCleanup, WorkerAgentActivityCleanup,
 	WorkerCrmIngest, WorkerCrmBulk,
 	WorkerAdsExecution, WorkerAdsAutoPropose, WorkerAdsCircuitBreaker,
 	WorkerAdsDailyScheduler, WorkerAdsPancakeHeartbeat, WorkerAdsCounterfactual,
 	WorkerClassificationFull, WorkerClassificationSmart,
+	WorkerCixAnalysis,
+	WorkerCixRequest,
+	WorkerAIDecisionConsumer,
+	WorkerAIDecisionDebounce,
+	WorkerAIDecisionClosure,
+	WorkerCrmContext,
+	WorkerOrderContext,
+	WorkerAdsContext,
+	WorkerLearningRuleSuggestion,
+	WorkerLearningEvaluation,
+	WorkerLearningInsightAggregate,
+	WorkerIdentityBackfill,
 }
 
 // GetAllEffectivePriorities trả về map worker_name → priority hiệu dụng (1–5) cho tất cả workers.
@@ -202,18 +259,61 @@ func GetAllWorkerActive() map[string]bool {
 }
 
 // poolSizeEnvKeys map worker name -> env key cho pool size (để dùng tên ngắn hơn).
-// Nếu không có: dùng WORKER_POOL_SIZE_<UPPERCASE_NAME>.
 var poolSizeEnvKeys = map[string]string{
-	WorkerDelivery:     "WORKER_POOL_SIZE_DELIVERY", // short for notification_delivery_processor
-	WorkerReportDirty:  "WORKER_POOL_SIZE_REPORT_DIRTY",
-	WorkerAdsExecution: "WORKER_POOL_SIZE_ADS_EXECUTION",
+	WorkerDelivery:         "WORKER_POOL_SIZE_DELIVERY",
+	WorkerReportDirtyAds:   "WORKER_POOL_SIZE_REPORT_DIRTY_ADS",
+	WorkerReportDirtyOrder: "WORKER_POOL_SIZE_REPORT_DIRTY_ORDER",
+	WorkerReportDirtyCustomer: "WORKER_POOL_SIZE_REPORT_DIRTY_CUSTOMER",
+	WorkerAdsExecution:     "WORKER_POOL_SIZE_ADS_EXECUTION",
 }
 
-// GetPoolSize trả về pool size cơ bản cho worker từ env.
-// Env: WORKER_POOL_SIZE_<NAME> (vd: WORKER_POOL_SIZE_DELIVERY, WORKER_POOL_SIZE_REPORT_DIRTY).
-// Tham số: workerName, defaultSize (mặc định khi không có env).
+// poolSizeOverrides override pool size qua API runtime.
+var (
+	poolSizeOverrides   = make(map[string]int)
+	poolSizeOverridesMu sync.RWMutex
+)
+
+// SetPoolSizeOverride đặt override pool size cho worker (runtime, qua API).
+func SetPoolSizeOverride(workerName string, size int) {
+	name := strings.ToLower(strings.TrimSpace(workerName))
+	if name == "" {
+		return
+	}
+	poolSizeOverridesMu.Lock()
+	defer poolSizeOverridesMu.Unlock()
+	if size >= 1 {
+		poolSizeOverrides[name] = size
+	} else {
+		delete(poolSizeOverrides, name)
+	}
+}
+
+// ClearPoolSizeOverride xóa override pool size.
+func ClearPoolSizeOverride(workerName string) {
+	SetPoolSizeOverride(workerName, 0)
+}
+
+// GetPoolSizeOverrides trả về override hiện tại (để API GET).
+func GetPoolSizeOverrides() map[string]int {
+	poolSizeOverridesMu.RLock()
+	defer poolSizeOverridesMu.RUnlock()
+	out := make(map[string]int, len(poolSizeOverrides))
+	for k, v := range poolSizeOverrides {
+		out[k] = v
+	}
+	return out
+}
+
+// GetPoolSize trả về pool size cơ bản cho worker. Thứ tự: API override > env > default.
 func GetPoolSize(workerName string, defaultSize int) int {
 	canonical := strings.ToLower(strings.TrimSpace(workerName))
+	poolSizeOverridesMu.RLock()
+	if n, ok := poolSizeOverrides[canonical]; ok && n >= 1 {
+		poolSizeOverridesMu.RUnlock()
+		return n
+	}
+	poolSizeOverridesMu.RUnlock()
+
 	envKey := poolSizeEnvKeys[canonical]
 	if envKey == "" {
 		envKey = "WORKER_POOL_SIZE_" + strings.ToUpper(strings.ReplaceAll(canonical, "-", "_"))
@@ -225,6 +325,24 @@ func GetPoolSize(workerName string, defaultSize int) int {
 		}
 	}
 	return defaultSize
+}
+
+// defaultPoolSizes pool size mặc định cho workers dùng pool.
+var defaultPoolSizes = map[string]int{
+	WorkerDelivery:          6,
+	WorkerReportDirtyAds:    6,
+	WorkerReportDirtyOrder:  6,
+	WorkerReportDirtyCustomer: 6,
+	WorkerAdsExecution:     4,
+}
+
+// GetAllWorkerPoolSizes trả về pool size hiệu dụng cho workers có pool (để API GET).
+func GetAllWorkerPoolSizes() map[string]int {
+	out := make(map[string]int)
+	for name, def := range defaultPoolSizes {
+		out[name] = GetPoolSize(name, def)
+	}
+	return out
 }
 
 // GetPriority trả về mức ưu tiên cho worker. Ưu tiên: API override > env > mặc định.

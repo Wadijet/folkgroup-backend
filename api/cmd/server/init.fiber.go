@@ -6,29 +6,31 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
-	"meta_commerce/config"
 	"github.com/gofiber/fiber/v3/middleware/cors"
 	"github.com/gofiber/fiber/v3/middleware/limiter"
 	"github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/gofiber/fiber/v3/middleware/requestid"
+	"meta_commerce/config"
 
 	adsrouter "meta_commerce/internal/api/ads/router"
-	approvalrouter "meta_commerce/internal/api/approval/router"
 	agentrouter "meta_commerce/internal/api/agent/router"
 	airouter "meta_commerce/internal/api/ai/router"
+	aidecisionrouter "meta_commerce/internal/api/aidecision/router"
 	authrouter "meta_commerce/internal/api/auth/router"
+	ciorouter "meta_commerce/internal/api/cio/router"
+	cixrouter "meta_commerce/internal/api/cix/router"
 	contentrouter "meta_commerce/internal/api/content/router"
 	crmrouter "meta_commerce/internal/api/crm/router"
 	ctarouter "meta_commerce/internal/api/cta/router"
-	decisionrouter "meta_commerce/internal/api/decision/router"
-	deliveryrouter "meta_commerce/internal/api/delivery/router"
+	executorrouter "meta_commerce/internal/api/executor/router"
 	fbrouter "meta_commerce/internal/api/fb/router"
+	learningrouter "meta_commerce/internal/api/learning/router"
 	metarouter "meta_commerce/internal/api/meta/router"
 	notificationrouter "meta_commerce/internal/api/notification/router"
 	pcrouter "meta_commerce/internal/api/pc/router"
 	reportrouter "meta_commerce/internal/api/report/router"
-	ruleintelrouter "meta_commerce/internal/api/ruleintel/router"
 	"meta_commerce/internal/api/router"
+	ruleintelrouter "meta_commerce/internal/api/ruleintel/router"
 	webhookrouter "meta_commerce/internal/api/webhook/router"
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
@@ -61,15 +63,15 @@ func InitFiberApp() *fiber.App {
 		// 2. CẤU HÌNH PERFORMANCE
 		// =========================================
 		BodyLimit:       bodyLimitFromConfig(global.MongoDB_ServerConfig), // 10MB mặc định, 500MB nếu MONGODB_IMPORT_MAX_BODY_MB
-		Concurrency:     256 * 1024,       // Số lượng goroutines tối đa
-		ReadBufferSize:  4096,             // Buffer size cho request reading
-		WriteBufferSize: 4096,             // Buffer size cho response writing
+		Concurrency:     256 * 1024,                                       // Số lượng goroutines tối đa
+		ReadBufferSize:  4096,                                             // Buffer size cho request reading
+		WriteBufferSize: 4096,                                             // Buffer size cho response writing
 
 		// =========================================
 		// 3. CẤU HÌNH TIMEOUT
 		// =========================================
-		ReadTimeout:  15 * time.Second,   // Timeout đọc request
-		WriteTimeout: 120 * time.Second,  // Timeout ghi response (cho API report nặng: period-end-balance, period-movements-from-db)
+		ReadTimeout:  15 * time.Second,  // Timeout đọc request
+		WriteTimeout: 120 * time.Second, // Timeout ghi response (cho API report nặng: period-end-balance, period-movements-from-db)
 		IdleTimeout:  120 * time.Second, // Timeout cho idle connections
 
 		// =========================================
@@ -80,10 +82,14 @@ func InitFiberApp() *fiber.App {
 			message := "Internal Server Error"
 			errorCode := common.ErrCodeInternalServer.Code
 
-			if e, ok := err.(*fiber.Error); ok {
+			// common.Error (từ common.NewError) — dùng StatusCode và Message sẵn có
+			if ec, msg, statusCode := common.GetErrorResponseInfo(err, ""); statusCode != common.StatusInternalServerError {
+				code = statusCode
+				message = msg
+				errorCode = ec
+			} else if e, ok := err.(*fiber.Error); ok {
 				code = e.Code
 				message = e.Message
-				// Map HTTP status code to error code
 				switch code {
 				case fiber.StatusBadRequest:
 					errorCode = common.ErrCodeValidationInput.Code
@@ -301,10 +307,13 @@ func InitFiberApp() *fiber.App {
 	// Khởi tạo routes trước khi đăng ký response middleware (theo từng domain để tránh import cycle)
 	if err := router.SetupRoutes(app,
 		authrouter.Register,
-		approvalrouter.Register,
+		ciorouter.Register,
+		executorrouter.Register,
 		adsrouter.Register,
-		decisionrouter.Register,
+		learningrouter.Register,
+		aidecisionrouter.Register,
 		ruleintelrouter.Register,
+		cixrouter.Register,
 		fbrouter.Register,
 		metarouter.Register,
 		pcrouter.Register,
@@ -313,7 +322,6 @@ func InitFiberApp() *fiber.App {
 		crmrouter.Register,
 		notificationrouter.Register,
 		ctarouter.Register,
-		deliveryrouter.Register,
 		agentrouter.Register,
 		contentrouter.Register,
 		airouter.Register,

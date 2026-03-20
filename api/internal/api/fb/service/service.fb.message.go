@@ -1,7 +1,9 @@
 package fbsvc
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -10,9 +12,12 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
+	fbdto "meta_commerce/internal/api/fb/dto"
 	fbmodels "meta_commerce/internal/api/fb/models"
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
+	"meta_commerce/internal/utility"
+
 	basesvc "meta_commerce/internal/api/base/service"
 )
 
@@ -22,6 +27,16 @@ func getMapKeys(m map[string]interface{}) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// jsonCanonicalEqual dùng khi panCakeData không có updated_at (vd mẫu fb_messages-sample chỉ có conversation_id).
+func jsonCanonicalEqual(a, b interface{}) bool {
+	ja, e1 := json.Marshal(a)
+	jb, e2 := json.Marshal(b)
+	if e1 != nil || e2 != nil {
+		return false
+	}
+	return bytes.Equal(ja, jb)
 }
 
 // FbMessageService là cấu trúc chứa các phương thức liên quan đến tin nhắn Facebook
@@ -137,6 +152,32 @@ func (s *FbMessageService) UpsertMessages(ctx context.Context, conversationId st
 		}
 	}
 	delete(mergedPanCakeData, "messages")
+
+	// Không ghi metadata nếu batch không có message mới và phiên bản API không đổi.
+	// Ưu tiên panCakeData.updated_at (cùng cách parse với order/conversation — utility.ParseTimestampFromMap).
+	// Khi cả hai phía đều thiếu updated_at, so sánh JSON metadata (đúng mẫu fb_messages-sample: chỉ conversation_id).
+	if exists && len(messages) == 0 &&
+		existingDoc.PageId == pageId && existingDoc.PageUsername == pageUsername &&
+		existingDoc.CustomerId == customerId && existingDoc.HasMore == hasMore {
+		exTS := utility.ParseTimestampFromMap(existingDoc.PanCakeData, "updated_at")
+		inTS := utility.ParseTimestampFromMap(mergedPanCakeData, "updated_at")
+		if exTS > 0 && inTS > 0 {
+			if exTS == inTS {
+				logrus.WithFields(logrus.Fields{"conversationId": conversationId}).Debug("UpsertMessages: bỏ qua — panCakeData.updated_at không đổi")
+				return existingDoc, nil
+			}
+		} else {
+			exMeta := existingDoc.PanCakeData
+			if exMeta == nil {
+				exMeta = map[string]interface{}{}
+			}
+			if jsonCanonicalEqual(exMeta, mergedPanCakeData) {
+				logrus.WithFields(logrus.Fields{"conversationId": conversationId}).Debug("UpsertMessages: bỏ qua — metadata không đổi (không có updated_at trong mẫu)")
+				return existingDoc, nil
+			}
+		}
+	}
+
 	update := bson.M{
 		"$set": bson.M{
 			"pageId": pageId, "pageUsername": pageUsername, "customerId": customerId,
@@ -168,4 +209,17 @@ func (s *FbMessageService) UpsertMessages(ctx context.Context, conversationId st
 		return metadataResult, common.ConvertMongoError(err)
 	}
 	return updated, nil
+}
+
+// RunUpsertMessagesFromJSON parse JSON body + validate + UpsertMessages (dùng chung HTTP và CIO ingest).
+func (s *FbMessageService) RunUpsertMessagesFromJSON(ctx context.Context, body []byte) (fbmodels.FbMessage, error) {
+	var zero fbmodels.FbMessage
+	var input fbdto.FbMessageUpsertMessagesInput
+	if err := json.Unmarshal(body, &input); err != nil {
+		return zero, common.NewError(common.ErrCodeValidationFormat, fmt.Sprintf("Dữ liệu gửi lên không đúng định dạng JSON. Chi tiết: %v", err), common.StatusBadRequest, err)
+	}
+	if err := global.Validate.Struct(input); err != nil {
+		return zero, common.NewError(common.ErrCodeValidationFormat, fmt.Sprintf("Dữ liệu không hợp lệ: %v", err), common.StatusBadRequest, err)
+	}
+	return s.UpsertMessages(ctx, input.ConversationId, input.PageId, input.PageUsername, input.CustomerId, input.PanCakeData, input.HasMore)
 }

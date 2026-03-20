@@ -72,6 +72,7 @@ func (s *CrmCustomerService) aggregateOrderMetricsForCustomer(ctx context.Contex
 	if len(ids) > 0 {
 		orConditions = append(orConditions,
 			bson.M{"customerId": bson.M{"$in": ids}},
+			bson.M{"links.customer.uid": bson.M{"$in": ids}}, // Identity 4 lớp — pc_pos_orders
 			bson.M{"posData.customer.id": bson.M{"$in": ids}},
 			bson.M{"posData.customer_id": bson.M{"$in": ids}}, // fallback khi API trả customer_id dạng flat
 		)
@@ -185,15 +186,20 @@ func (s *CrmCustomerService) aggregateOrderMetricsForCustomer(ctx context.Contex
 		}
 	}
 
-	firstOnline := isOnlineChannel(result.FirstOrderPageId, result.FirstOrderPosPageId)
-	lastOnline := isOnlineChannel(result.LastOrderPageId, result.LastOrderPosPageId)
-	firstCh := "offline"
-	if firstOnline {
-		firstCh = "online"
-	}
-	lastCh := "offline"
-	if lastOnline {
-		lastCh = "online"
+	// Khi orderCount=0: không có đơn → firstOrderChannel, lastOrderChannel phải rỗng (không hiển thị "Offline" sai)
+	firstCh := ""
+	lastCh := ""
+	if result.OrderCount > 0 {
+		firstOnline := isOnlineChannel(result.FirstOrderPageId, result.FirstOrderPosPageId)
+		lastOnline := isOnlineChannel(result.LastOrderPageId, result.LastOrderPosPageId)
+		firstCh = "offline"
+		if firstOnline {
+			firstCh = "online"
+		}
+		lastCh = "offline"
+		if lastOnline {
+			lastCh = "online"
+		}
 	}
 
 	// Đếm đơn hủy (status 6) — cùng filter customer nhưng status = 6
@@ -588,8 +594,10 @@ func (s *CrmCustomerService) GetMetricsForSnapshotAt(ctx context.Context, c *crm
 		ConversationFromAds:        convMetrics.ConversationFromAds,
 		ConversationTags:            convMetrics.ConversationTags,
 		OwnedSkuQuantities:          om.OwnedSkuQuantities,
+		UnifiedId:                   c.UnifiedId,
+		OwnerOrganizationID:         c.OwnerOrganizationID,
 	}
-	return buildMetricsSnapshot(&tmp)
+	return buildMetricsSnapshot(ctx, &tmp)
 }
 
 // getAddressesFromFirstOrderAsOf lấy addresses từ đơn đầu tiên (theo orderDate) có địa chỉ, trong các đơn có orderDate <= asOf.
@@ -709,7 +717,7 @@ func (s *CrmCustomerService) RefreshMetrics(ctx context.Context, unifiedId strin
 		customer = *customerOptional[0]
 	} else {
 		var err error
-		customer, err = s.FindOne(ctx, bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}, nil)
+		customer, err = s.FindOne(ctx, buildCustomerFilterByIdOrUid(unifiedId, ownerOrgID), nil)
 		if err != nil {
 			return err
 		}
@@ -730,8 +738,8 @@ func (s *CrmCustomerService) RefreshMetrics(ctx context.Context, unifiedId strin
 	hasConv := convMetrics.ConversationCount > 0 || s.checkHasConversation(ctx, ids, ownerOrgID, convIds)
 
 	now := time.Now().UnixMilli()
-	cm := BuildCurrentMetricsFromOrderAndConv(metrics, convMetrics, hasConv)
-	class := ComputeClassificationFromMetrics(metrics.TotalSpent, metrics.OrderCount, metrics.LastOrderAt, metrics.RevenueLast30d, metrics.RevenueLast90d, metrics.OrderCountOnline, metrics.OrderCountOffline, hasConv, convMetrics.ConversationTags)
+	cm := BuildCurrentMetricsFromOrderAndConv(ctx, metrics, convMetrics, hasConv, unifiedId, ownerOrgID)
+	class := ComputeClassificationFromMetricsOrRuleEngine(ctx, metrics.TotalSpent, metrics.OrderCount, metrics.LastOrderAt, metrics.RevenueLast30d, metrics.RevenueLast90d, metrics.OrderCountOnline, metrics.OrderCountOffline, hasConv, convMetrics.ConversationTags, unifiedId, ownerOrgID)
 
 	setFields := bson.M{
 		"totalSpent":         metrics.TotalSpent,
@@ -751,7 +759,7 @@ func (s *CrmCustomerService) RefreshMetrics(ctx context.Context, unifiedId strin
 		"$set":   setFields,
 		"$unset": unsetRawFields,
 	}
-	_, err := s.Collection().UpdateOne(ctx, bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}, update)
+	_, err := s.Collection().UpdateOne(ctx, bson.M{"_id": customer.ID}, update)
 	if err != nil {
 		return err
 	}

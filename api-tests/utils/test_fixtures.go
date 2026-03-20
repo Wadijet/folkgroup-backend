@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,10 +11,65 @@ import (
 )
 
 // GetTestFirebaseIDToken lấy Firebase ID token từ environment variable
-// Lưu ý: Test cần có Firebase ID token hợp lệ từ Firebase test project
-// Có thể set qua environment variable: TEST_FIREBASE_ID_TOKEN
+// Ưu tiên: 1) TEST_FIREBASE_ID_TOKEN, 2) Đăng nhập bằng email/password (TEST_EMAIL, TEST_PASSWORD, FIREBASE_API_KEY)
 func GetTestFirebaseIDToken() string {
-	return os.Getenv("TEST_FIREBASE_ID_TOKEN")
+	token := os.Getenv("TEST_FIREBASE_ID_TOKEN")
+	if token != "" {
+		return token
+	}
+	// Fallback: đăng nhập bằng email/password qua Firebase REST API
+	email := os.Getenv("TEST_EMAIL")
+	password := os.Getenv("TEST_PASSWORD")
+	apiKey := os.Getenv("FIREBASE_API_KEY")
+	if email != "" && password != "" && apiKey != "" {
+		idToken, err := GetFirebaseIDTokenByEmailPassword(apiKey, email, password)
+		if err == nil {
+			return idToken
+		}
+	}
+	return ""
+}
+
+// GetFirebaseIDTokenByEmailPassword đăng nhập Firebase bằng email/password, trả về ID token
+// Sử dụng Firebase Identity Toolkit REST API
+func GetFirebaseIDTokenByEmailPassword(apiKey, email, password string) (string, error) {
+	apiURL := fmt.Sprintf("https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=%s", apiKey)
+	body := map[string]interface{}{
+		"email":             email,
+		"password":          password,
+		"returnSecureToken": true,
+	}
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return "", fmt.Errorf("marshal body: %w", err)
+	}
+	req, err := http.NewRequest("POST", apiURL, bytes.NewReader(jsonBody))
+	if err != nil {
+		return "", fmt.Errorf("tạo request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("gọi Firebase API: %w", err)
+	}
+	defer resp.Body.Close()
+	var result struct {
+		IDToken string `json:"idToken"`
+		Error   struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("parse response: %w", err)
+	}
+	if result.Error.Message != "" {
+		return "", fmt.Errorf("Firebase: %s", result.Error.Message)
+	}
+	if result.IDToken == "" {
+		return "", fmt.Errorf("không có idToken trong response")
+	}
+	return result.IDToken, nil
 }
 
 // TestFixtures chứa các helper để setup test data
@@ -86,7 +142,13 @@ func (tf *TestFixtures) CreateTestUserDirect(email, name string) (userID, token 
 	return "", "", fmt.Errorf("không thể tạo user trực tiếp - cần Firebase authentication. Sử dụng CreateTestUser() với Firebase ID token")
 }
 
+// SetActiveRoleIDForClient set active role trên client nội bộ của fixtures (dùng trước GetRootOrganizationID)
+func (tf *TestFixtures) SetActiveRoleIDForClient(roleID string) {
+	tf.client.SetActiveRoleID(roleID)
+}
+
 // GetRootOrganizationID lấy Organization Root ID
+// Lưu ý: Cần gọi SetActiveRoleIDForClient(roleID) trước nếu endpoint /organization/find yêu cầu X-Active-Role-ID
 func (tf *TestFixtures) GetRootOrganizationID(token string) (string, error) {
 	tf.client.SetToken(token)
 
@@ -243,11 +305,16 @@ func (tf *TestFixtures) CreateAdminUser(firebaseIDToken string) (email, firebase
 		return "", "", "", "", fmt.Errorf("không có id trong profile response")
 	}
 
-	// Set administrator - API này yêu cầu permission "Init.SetAdmin"
-	// Thử với token hiện tại (có thể thành công nếu là lần đầu init hoặc đã có quyền)
+	// Set administrator - /init/set-administrator chỉ tồn tại khi hệ thống chưa có admin
+	// Khi đã có admin, dùng /admin/user/set-administrator (cần token admin)
 	resp, body, err = tf.client.POST(fmt.Sprintf("/init/set-administrator/%s", userID), nil)
 	if err != nil {
 		return "", "", "", "", fmt.Errorf("lỗi set administrator: %v", err)
+	}
+
+	// 404 = init routes không đăng ký (hệ thống đã có admin) → user có thể đã là admin từ config
+	if resp.StatusCode == http.StatusNotFound {
+		return email, firebaseUID, token, userID, nil
 	}
 
 	// Nếu thành công, đăng nhập lại bằng Firebase để refresh token với permissions mới

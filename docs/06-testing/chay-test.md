@@ -8,6 +8,14 @@ Test suite được tổ chức trong module `api-tests` và sử dụng PowerSh
 
 ## 🚀 Cách Chạy
 
+### Cách 0: Chỉ Unit Tests (Nhanh, không cần server)
+
+```powershell
+.\api-tests\test.ps1 -UnitOnly
+```
+
+Chạy unit tests trong `api/` (crm/snapshot, report/layer3). Không cần server, MongoDB, Firebase token.
+
 ### Cách 1: Script Tự Động (Khuyến Nghị)
 
 ```powershell

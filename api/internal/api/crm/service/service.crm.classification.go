@@ -13,301 +13,107 @@
 package crmvc
 
 import (
-	"strings"
-	"time"
+	"context"
 
 	crmmodels "meta_commerce/internal/api/crm/models"
+	ruleintelmodels "meta_commerce/internal/api/ruleintel/models"
+	ruleintelsvc "meta_commerce/internal/api/ruleintel/service"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-const (
-	// Ngưỡng Value (VNĐ)
-	valueVip    = 50_000_000
-	valueHigh   = 20_000_000
-	valueMedium = 5_000_000
-	valueLow    = 1_000_000
-
-	// Ngưỡng Lifecycle (ngày)
-	lifecycleActive   = 30
-	lifecycleCooling  = 90
-	lifecycleInactive = 180
-
-	// Ngưỡng Loyalty (order_count)
-	loyaltyCore   = 5
-	loyaltyRepeat = 2
-
-	// Ngưỡng Momentum (tỷ lệ revenue_last_30d / revenue_last_90d)
-	momentumRising   = 0.5
-	momentumStableLo = 0.2
-	momentumStableHi = 0.5
-)
-
-// msPerDay milliseconds trong 1 ngày.
-const msPerDay = 24 * 60 * 60 * 1000
-
-// daysSinceLastOrder tính số ngày từ lastOrderAt (Unix ms) đến hiện tại.
-func daysSinceLastOrder(lastOrderAt int64) int64 {
-	if lastOrderAt <= 0 {
-		return -1
+// GetClassificationFromCustomer gọi Rule Engine RULE_CRM_CLASSIFICATION — vỏ duy nhất khi có customer.
+// Khi c.UnifiedId rỗng hoặc c.OwnerOrganizationID zero → trả map rỗng (không gọi Rule Engine).
+// Dùng trong toProfileResponse, buildMetricsSnapshot.
+func GetClassificationFromCustomer(ctx context.Context, c *crmmodels.CrmCustomer) map[string]interface{} {
+	if c == nil || c.UnifiedId == "" || c.OwnerOrganizationID.IsZero() {
+		return map[string]interface{}{}
 	}
-	return (time.Now().UnixMilli() - lastOrderAt) / msPerDay
+	raw := map[string]interface{}{
+		"totalSpent":        GetTotalSpentFromCustomer(c),
+		"orderCount":        GetOrderCountFromCustomer(c),
+		"lastOrderAt":       GetLastOrderAtFromCustomer(c),
+		"revenueLast30d":    GetFloatFromCustomer(c, "revenueLast30d"),
+		"revenueLast90d":    GetFloatFromCustomer(c, "revenueLast90d"),
+		"orderCountOnline":  GetIntFromCustomer(c, "orderCountOnline"),
+		"orderCountOffline": GetIntFromCustomer(c, "orderCountOffline"),
+		"hasConversation":   GetBoolFromCustomer(c, "hasConversation"),
+		"conversationTags":  c.ConversationTags,
+	}
+	if class := computeClassificationViaRuleEngine(ctx, raw, c.UnifiedId, c.OwnerOrganizationID); class != nil {
+		return class
+	}
+	return map[string]interface{}{}
 }
 
-// ComputeValueTier trả về tier theo total_spent (VNĐ).
-// new | low | medium | high | top (đổi vip → top cho đồng bộ với 4 tier còn lại)
-func ComputeValueTier(totalSpent float64) string {
-	if totalSpent >= valueVip {
-		return "top"
-	}
-	if totalSpent >= valueHigh {
-		return "high"
-	}
-	if totalSpent >= valueMedium {
-		return "medium"
-	}
-	if totalSpent >= valueLow {
-		return "low"
-	}
-	return "new"
-}
-
-// ComputeLifecycleStage trả về stage theo days_since_last_order (chỉ khách đã mua).
-// active | cooling | inactive | dead — never_purchased bỏ, khách chưa mua dùng Journey.
-func ComputeLifecycleStage(lastOrderAt int64) string {
-	daysSince := daysSinceLastOrder(lastOrderAt)
-	if daysSince < 0 {
-		return "" // Chưa mua — không thuộc lifecycle (recency), dùng Journey
-	}
-	if daysSince <= lifecycleActive {
-		return "active"
-	}
-	if daysSince <= lifecycleCooling {
-		return "cooling"
-	}
-	if daysSince <= lifecycleInactive {
-		return "inactive"
-	}
-	return "dead"
-}
-
-// HasSpamOrBlockTag kiểm tra tags có chứa Block, Spam, Chặn — dùng để nhóm blocked_spam.
-func HasSpamOrBlockTag(tags []string) bool {
-	for _, t := range tags {
-		lower := strings.ToLower(strings.TrimSpace(t))
-		if lower == "block" || lower == "spam" ||
-			strings.Contains(lower, "spam") || strings.Contains(lower, "block") || strings.Contains(lower, "chặn") {
-			return true
-		}
-	}
-	return false
-}
-
-// ComputeJourneyStage trả về stage Lớp 1 theo logic ưu tiên (design 4.1.2).
-// visitor | engaged | blocked_spam | first | repeat | promoter
-// blocked_spam: khách có conv tag Block/Spam/Chặn, chưa mua — nhóm riêng để quản lý.
-// inactive: bỏ khỏi journey — dùng lifecycleStage (Lớp 2). Khách đã mua, >90 ngày → first/repeat theo orderCount.
-// promoter: placeholder — TODO khi có referralCount/isPromoter trong customer.
-func ComputeJourneyStage(c *crmmodels.CrmCustomer) string {
-	orderCount := getOrderCount(c)
-	if orderCount == 0 {
-		if HasSpamOrBlockTag(c.ConversationTags) {
-			return "blocked_spam"
-		}
-		if getHasConversation(c) {
-			return "engaged"
-		}
-		return "visitor"
-	}
-	// TODO: khi có referralCount/isPromoter trong customer → return "promoter" (ưu tiên trước first/repeat)
-	if getReferralCount(c) > 0 {
-		return "promoter"
-	}
-	// inactive bỏ khỏi journey — khách >90 ngày vẫn là first/repeat theo độ sâu mua (lifecycleStage Lớp 2)
-	if orderCount >= 2 {
-		return "repeat"
-	}
-	return "first"
-}
-
-// getReferralCount trả về số referral — placeholder, chờ dữ liệu. Hiện luôn 0.
-func getReferralCount(c *crmmodels.CrmCustomer) int {
-	if c == nil {
-		return 0
-	}
-	// TODO: khi có field referralCount trong CurrentMetrics hoặc crm_customers → đọc và trả về
-	return 0
-}
-
-func getOrderCount(c *crmmodels.CrmCustomer) int {
-	if c == nil {
-		return 0
-	}
-	if c.CurrentMetrics != nil {
-		return GetIntFromNestedMetrics(c.CurrentMetrics, "orderCount")
-	}
-	return c.OrderCount
-}
-
-func getTotalSpent(c *crmmodels.CrmCustomer) float64 {
-	if c == nil {
-		return 0
-	}
-	if c.CurrentMetrics != nil {
-		return GetFloatFromNestedMetrics(c.CurrentMetrics, "totalSpent")
-	}
-	return c.TotalSpent
-}
-
-func getLastOrderAt(c *crmmodels.CrmCustomer) int64 {
-	if c == nil {
-		return 0
-	}
-	if c.CurrentMetrics != nil {
-		return GetInt64FromNestedMetrics(c.CurrentMetrics, "lastOrderAt")
-	}
-	return c.LastOrderAt
-}
-
-func getHasConversation(c *crmmodels.CrmCustomer) bool {
-	if c == nil {
-		return false
-	}
-	if c.CurrentMetrics != nil {
-		if v := getFromNestedMetrics(c.CurrentMetrics, "hasConversation"); v != nil {
-			if b, ok := v.(bool); ok {
-				return b
-			}
-		}
-		return false
-	}
-	return c.HasConversation
-}
-
-// ComputeChannel trả về kênh mua hàng — trục Lớp 2 (Customer Segmentation).
-// online | offline | omnichannel — rỗng nếu order_count = 0 (chưa mua).
-func ComputeChannel(c *crmmodels.CrmCustomer) string {
-	if getOrderCount(c) == 0 {
+// getStrFromMap trích string từ map — dùng cho classification map.
+func getStrFromMap(m map[string]interface{}, key string) string {
+	if m == nil {
 		return ""
 	}
-	ocOnline := getIntFromCustomer(c, "orderCountOnline")
-	ocOffline := getIntFromCustomer(c, "orderCountOffline")
-	if ocOnline > 0 && ocOffline > 0 {
-		return "omnichannel"
+	v, ok := m[key]
+	if !ok || v == nil {
+		return ""
 	}
-	if ocOnline > 0 {
-		return "online"
-	}
-	if ocOffline > 0 {
-		return "offline"
+	if s, ok := v.(string); ok {
+		return s
 	}
 	return ""
 }
 
-func getIntFromCustomer(c *crmmodels.CrmCustomer, key string) int {
-	if c == nil {
-		return 0
+// computeClassificationViaRuleEngine gọi Rule Engine RULE_CRM_CLASSIFICATION.
+// Trả về map classification hoặc nil khi lỗi (caller dùng fallback ComputeClassificationFromMetrics).
+func computeClassificationViaRuleEngine(ctx context.Context, raw map[string]interface{}, unifiedId string, ownerOrgID primitive.ObjectID) map[string]interface{} {
+	svc, err := ruleintelsvc.NewRuleEngineService()
+	if err != nil {
+		return nil
 	}
-	if c.CurrentMetrics != nil {
-		return GetIntFromNestedMetrics(c.CurrentMetrics, key)
+	if raw == nil {
+		raw = map[string]interface{}{}
 	}
-	switch key {
-	case "orderCountOnline":
-		return c.OrderCountOnline
-	case "orderCountOffline":
-		return c.OrderCountOffline
+	input := &ruleintelsvc.RunInput{
+		RuleID:    "RULE_CRM_CLASSIFICATION",
+		Domain:    "crm",
+		EntityRef: ruleintelmodels.EntityRef{Domain: "crm", ObjectType: "customer", ObjectID: unifiedId, OwnerOrganizationID: ownerOrgID.Hex()},
+		Layers:    map[string]interface{}{"raw": raw},
 	}
-	return 0
+	result, err := svc.Run(ctx, input)
+	if err != nil || result == nil || result.Result == nil {
+		return nil
+	}
+	m, ok := result.Result.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	// Đảm bảo có đủ 6 field để $set vào crm_customers
+	out := map[string]interface{}{
+		"valueTier":      m["valueTier"],
+		"lifecycleStage": m["lifecycleStage"],
+		"journeyStage":   m["journeyStage"],
+		"channel":        m["channel"],
+		"loyaltyStage":   m["loyaltyStage"],
+		"momentumStage":  m["momentumStage"],
+	}
+	return out
 }
 
-// ComputeLoyaltyStage trả về stage theo order_count.
-// core | repeat | one_time
-func ComputeLoyaltyStage(orderCount int) string {
-	if orderCount >= loyaltyCore {
-		return "core"
+// ComputeClassificationFromMetricsOrRuleEngine gọi Rule Engine RULE_CRM_CLASSIFICATION.
+// Không fallback — khi Rule Engine trả nil thì trả về map rỗng (không cập nhật classification).
+// Dùng trong Recalculate, Merge, RefreshMetrics khi có ctx và unifiedId.
+func ComputeClassificationFromMetricsOrRuleEngine(ctx context.Context, totalSpent float64, orderCount int, lastOrderAt int64, revenueLast30d, revenueLast90d float64, orderCountOnline, orderCountOffline int, hasConversation bool, conversationTags []string, unifiedId string, ownerOrgID primitive.ObjectID) map[string]interface{} {
+	raw := map[string]interface{}{
+		"totalSpent":        totalSpent,
+		"orderCount":        orderCount,
+		"lastOrderAt":       lastOrderAt,
+		"revenueLast30d":    revenueLast30d,
+		"revenueLast90d":    revenueLast90d,
+		"orderCountOnline":  orderCountOnline,
+		"orderCountOffline": orderCountOffline,
+		"hasConversation":   hasConversation,
+		"conversationTags":  conversationTags,
 	}
-	if orderCount >= loyaltyRepeat {
-		return "repeat"
+	if class := computeClassificationViaRuleEngine(ctx, raw, unifiedId, ownerOrgID); class != nil {
+		return class
 	}
-	if orderCount >= 1 {
-		return "one_time"
-	}
-	return ""
-}
-
-// ComputeMomentumStage trả về stage theo revenue_last_30d vs revenue_last_90d.
-// rising | stable | declining | lost
-func ComputeMomentumStage(c *crmmodels.CrmCustomer) string {
-	lastOrderAt := getLastOrderAt(c)
-	daysSince := daysSinceLastOrder(lastOrderAt)
-	rev30 := getFloatFromCustomer(c, "revenueLast30d")
-	rev90 := getFloatFromCustomer(c, "revenueLast90d")
-	totalSpent := getTotalSpent(c)
-
-	if daysSince > lifecycleCooling {
-		return "lost"
-	}
-	if rev90 <= 0 && totalSpent > 0 {
-		return "lost"
-	}
-	if rev90 > 0 && rev30 <= 0 && daysSince <= lifecycleCooling {
-		return "declining"
-	}
-	if rev30 <= 0 {
-		return "lost"
-	}
-	denom := rev90
-	if denom < 1 {
-		denom = 1
-	}
-	ratio := rev30 / denom
-	if ratio > momentumRising {
-		return "rising"
-	}
-	if ratio >= momentumStableLo && ratio <= momentumStableHi {
-		return "stable"
-	}
-	if ratio < momentumStableLo {
-		return "stable"
-	}
-	return "stable"
-}
-
-func getFloatFromCustomer(c *crmmodels.CrmCustomer, key string) float64 {
-	if c == nil {
-		return 0
-	}
-	if c.CurrentMetrics != nil {
-		return GetFloatFromNestedMetrics(c.CurrentMetrics, key)
-	}
-	switch key {
-	case "revenueLast30d":
-		return c.RevenueLast30d
-	case "revenueLast90d":
-		return c.RevenueLast90d
-	}
-	return 0
-}
-
-// ComputeClassificationFromMetrics trả về map các field phân loại để $set vào crm_customers.
-// Dùng khi đã có metrics từ aggregate (RefreshMetrics, Merge) — lưu classification hiện tại.
-// conversationTags: union từ panCakeData.tags — dùng để phát hiện blocked_spam.
-func ComputeClassificationFromMetrics(totalSpent float64, orderCount int, lastOrderAt int64, revenueLast30d, revenueLast90d float64, orderCountOnline, orderCountOffline int, hasConversation bool, conversationTags []string) map[string]interface{} {
-	c := &crmmodels.CrmCustomer{
-		TotalSpent:        totalSpent,
-		OrderCount:        orderCount,
-		LastOrderAt:       lastOrderAt,
-		RevenueLast30d:    revenueLast30d,
-		RevenueLast90d:    revenueLast90d,
-		OrderCountOnline:  orderCountOnline,
-		OrderCountOffline: orderCountOffline,
-		HasConversation:   hasConversation,
-		ConversationTags:  conversationTags,
-	}
-	return map[string]interface{}{
-		"valueTier":      ComputeValueTier(totalSpent),
-		"lifecycleStage": ComputeLifecycleStage(lastOrderAt),
-		"journeyStage":   ComputeJourneyStage(c),
-		"channel":        ComputeChannel(c),
-		"loyaltyStage":   ComputeLoyaltyStage(orderCount),
-		"momentumStage":  ComputeMomentumStage(c),
-	}
+	return map[string]interface{}{}
 }

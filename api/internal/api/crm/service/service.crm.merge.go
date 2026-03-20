@@ -95,9 +95,11 @@ func (s *CrmCustomerService) MergeFromPosCustomer(ctx context.Context, doc *pcmo
 	if fbId, ok := getStringFromMap(doc.PosData, "fb_id"); ok && fbId != "" {
 		parts := strings.SplitN(fbId, "_", 2)
 		if len(parts) == 2 {
-			fbCustomerId := s.findFbCustomerByPagePsid(ctx, parts[0], parts[1], ownerOrgID)
+			pageId := parts[0]
+			fbCustomerId := s.findFbCustomerByPagePsid(ctx, pageId, parts[1], ownerOrgID)
 			if fbCustomerId != "" {
-				sourceIds.Fb = fbCustomerId
+				isZaloPage := strings.HasPrefix(pageId, "pzl_")
+				setInboxByPage(&sourceIds, pageId, fbCustomerId, isZaloPage)
 				mergeMethod = "fb_id"
 			}
 		}
@@ -105,33 +107,44 @@ func (s *CrmCustomerService) MergeFromPosCustomer(ctx context.Context, doc *pcmo
 
 	// Thử merge qua phone nếu chưa có FB
 	if sourceIds.Fb == "" && len(phones) > 0 {
-		fbByPhone := s.findFbCustomerByPhone(ctx, phones[0], ownerOrgID)
-		if fbByPhone != "" {
+		fbCustId, fbPageId := s.findFbCustomerByPhoneWithPage(ctx, phones[0], ownerOrgID)
+		if fbCustId != "" {
+			setInboxByPage(&sourceIds, fbPageId, fbCustId, false)
 			if existing != nil && existing.UnifiedId != "" {
-				// Đã có crm_customer — cập nhật thêm fb
-				sourceIds.Fb = fbByPhone
 				sourceIds.Pos = customerId
 				mergeMethod = "phone"
 				unifiedId = existing.UnifiedId
 			} else {
-				sourceIds.Fb = fbByPhone
 				mergeMethod = "phone"
-				unifiedId = customerId // Ưu tiên POS làm unified
+				unifiedId = customerId
+			}
+		}
+	}
+	// Thử merge Zalo qua phone nếu chưa có
+	if sourceIds.Zalo == "" && len(phones) > 0 {
+		zaloCustId, zaloPageId := s.findZaloCustomerByPhoneWithPage(ctx, phones[0], ownerOrgID)
+		if zaloCustId != "" {
+			setInboxByPage(&sourceIds, zaloPageId, zaloCustId, true)
+			if mergeMethod == "single_source" {
+				mergeMethod = "phone"
+			}
+			if existing != nil && existing.UnifiedId != "" {
+				unifiedId = existing.UnifiedId
 			}
 		}
 	}
 
 	if existing != nil {
 		unifiedId = existing.UnifiedId
-		// Giữ sourceIds.fb nếu đã có
-		if existing.SourceIds.Fb != "" {
-			sourceIds.Fb = existing.SourceIds.Fb
-		}
+		mergeSourceIdsFromExisting(&sourceIds, &existing.SourceIds)
 	}
+	sourceIds.AllInboxIds = buildAllInboxIds(&sourceIds)
 
 	// Đồng nhất với Recalculate: expand ids để match đơn khi khách chưa merge hoặc link qua SĐT.
+	sourceIds.AllInboxIds = buildAllInboxIds(&sourceIds)
 	tmpCustomer := &crmmodels.CrmCustomer{SourceIds: sourceIds, UnifiedId: unifiedId}
-	ids := []string{customerId, sourceIds.Fb, unifiedId}
+	ids := []string{customerId, unifiedId}
+	ids = append(ids, sourceIds.AllInboxIds...)
 	ids = s.expandCustomerIdsForAggregation(ctx, tmpCustomer, ids, phones, ownerOrgID)
 	convIds := s.getConversationIdsFromPosCustomers(ctx, []string{sourceIds.Pos}, ownerOrgID)
 	for _, cid := range s.getConversationIdsFromFbMatch(ctx, ids, ownerOrgID) {
@@ -144,8 +157,8 @@ func (s *CrmCustomerService) MergeFromPosCustomer(ctx context.Context, doc *pcmo
 	hasConv := convMetrics.ConversationCount > 0 || s.checkHasConversation(ctx, ids, ownerOrgID, convIds)
 
 	// Raw metrics chỉ lưu trong currentMetrics; top-level chỉ giữ denormalized cho filter/sort.
-	cm := BuildCurrentMetricsFromOrderAndConv(metrics, convMetrics, hasConv)
-	class := ComputeClassificationFromMetrics(metrics.TotalSpent, metrics.OrderCount, metrics.LastOrderAt, metrics.RevenueLast30d, metrics.RevenueLast90d, metrics.OrderCountOnline, metrics.OrderCountOffline, hasConv, convMetrics.ConversationTags)
+	cm := BuildCurrentMetricsFromOrderAndConv(ctx, metrics, convMetrics, hasConv, unifiedId, ownerOrgID)
+	class := ComputeClassificationFromMetricsOrRuleEngine(ctx, metrics.TotalSpent, metrics.OrderCount, metrics.LastOrderAt, metrics.RevenueLast30d, metrics.RevenueLast90d, metrics.OrderCountOnline, metrics.OrderCountOffline, hasConv, convMetrics.ConversationTags, unifiedId, ownerOrgID)
 
 	profileObj := crmmodels.CrmCustomerProfile{
 		Name: name, PhoneNumbers: phones, Emails: emails,
@@ -200,7 +213,7 @@ func (s *CrmCustomerService) MergeFromPosCustomer(ctx context.Context, doc *pcmo
 			if cust, err := s.FindOne(ctx, bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}, nil); err == nil {
 				// Dùng metrics as-of activityAt (timeline đúng) thay vì empty — có Lớp 3, đồng nhất với order/conversation
 				metricsOverride := s.GetMetricsForSnapshotAt(ctx, &cust, activityAt)
-				MergeSnapshotIntoMetadata(metadata, BuildSnapshotForNewCustomer(&cust, activityAt, true, metricsOverride))
+				MergeSnapshotIntoMetadata(metadata, BuildSnapshotForNewCustomer(ctx, &cust, activityAt, true, metricsOverride))
 			}
 			errLog := actSvc.LogActivity(ctx, LogActivityInput{
 				UnifiedId:    unifiedId,
@@ -242,7 +255,8 @@ func (s *CrmCustomerService) MergeFromFbCustomer(ctx context.Context, doc *fbmod
 		return nil
 	}
 
-	existing, errExisting := s.findByFbId(ctx, fbCustomerId, ownerOrgID)
+	isZalo := strings.HasPrefix(doc.PageId, "pzl_")
+	existing, errExisting := s.findExistingInboxCustomer(ctx, fbCustomerId, isZalo, ownerOrgID)
 	if errExisting != nil && !errors.Is(errExisting, common.ErrNotFound) {
 		return errExisting
 	}
@@ -276,11 +290,14 @@ func (s *CrmCustomerService) MergeFromFbCustomer(ctx context.Context, doc *fbmod
 	fbAddresses := getAddressesFromMap(doc.PanCakeData, "addresses", "shop_customer_addresses", "shop_customer_address")
 
 	mergeMethod := "single_source"
-	sourceIds := crmmodels.CrmCustomerSourceIds{Fb: fbCustomerId}
+	sourceIds := crmmodels.CrmCustomerSourceIds{}
 	primarySource := "fb"
+	if isZalo {
+		primarySource = "zalo"
+	}
 	unifiedId := fbCustomerId
 
-	// Thử tìm POS qua pageId_psid (fb_id trong pos)
+	// Thử tìm POS qua pageId_psid (fb_id trong pos) — Messenger có posData.fb_id; Zalo có thể khác format
 	posId := s.findPosCustomerByFbPagePsid(ctx, doc.PageId, doc.Psid, ownerOrgID)
 	if posId != "" {
 		sourceIds.Pos = posId
@@ -301,14 +318,37 @@ func (s *CrmCustomerService) MergeFromFbCustomer(ctx context.Context, doc *fbmod
 
 	if existing != nil {
 		unifiedId = existing.UnifiedId
-		if existing.SourceIds.Pos != "" {
-			sourceIds.Pos = existing.SourceIds.Pos
+		mergeSourceIdsFromExisting(&sourceIds, &existing.SourceIds)
+	}
+	// Luôn thêm page hiện tại — đảm bảo biết trả lời qua kênh nào
+	setInboxByPage(&sourceIds, doc.PageId, fbCustomerId, isZalo)
+
+	// Thử merge thêm Zalo qua phone nếu đang xử lý Messenger và chưa có Zalo
+	if !isZalo && sourceIds.Zalo == "" && len(phones) > 0 {
+		zaloCustId, zaloPageId := s.findZaloCustomerByPhoneWithPage(ctx, phones[0], ownerOrgID)
+		if zaloCustId != "" {
+			setInboxByPage(&sourceIds, zaloPageId, zaloCustId, true)
+			if mergeMethod == "single_source" {
+				mergeMethod = "phone"
+			}
 		}
 	}
+	// Thử merge thêm Messenger qua phone nếu đang xử lý Zalo và chưa có FB
+	if isZalo && sourceIds.Fb == "" && len(phones) > 0 {
+		fbCustId, fbPageId := s.findFbCustomerByPhoneWithPage(ctx, phones[0], ownerOrgID)
+		if fbCustId != "" {
+			setInboxByPage(&sourceIds, fbPageId, fbCustId, false)
+			if mergeMethod == "single_source" {
+				mergeMethod = "phone"
+			}
+		}
+	}
+	sourceIds.AllInboxIds = buildAllInboxIds(&sourceIds)
 
 	// Đồng nhất với Recalculate: expand ids để match đơn khi khách chưa merge hoặc link qua SĐT.
 	tmpCustomer := &crmmodels.CrmCustomer{SourceIds: sourceIds, UnifiedId: unifiedId}
-	fbIds := []string{sourceIds.Pos, fbCustomerId, unifiedId}
+	fbIds := []string{sourceIds.Pos, unifiedId}
+	fbIds = append(fbIds, sourceIds.AllInboxIds...)
 	fbIds = s.expandCustomerIdsForAggregation(ctx, tmpCustomer, fbIds, phones, ownerOrgID)
 	convIds := s.getConversationIdsFromPosCustomers(ctx, []string{sourceIds.Pos}, ownerOrgID)
 	for _, cid := range s.getConversationIdsFromFbMatch(ctx, fbIds, ownerOrgID) {
@@ -321,8 +361,8 @@ func (s *CrmCustomerService) MergeFromFbCustomer(ctx context.Context, doc *fbmod
 	hasConv := convMetrics.ConversationCount > 0 || s.checkHasConversation(ctx, fbIds, ownerOrgID, convIds)
 
 	// Raw metrics chỉ lưu trong currentMetrics; top-level chỉ giữ denormalized.
-	fbCm := BuildCurrentMetricsFromOrderAndConv(metrics, convMetrics, hasConv)
-	fbClass := ComputeClassificationFromMetrics(metrics.TotalSpent, metrics.OrderCount, metrics.LastOrderAt, metrics.RevenueLast30d, metrics.RevenueLast90d, metrics.OrderCountOnline, metrics.OrderCountOffline, hasConv, convMetrics.ConversationTags)
+	fbCm := BuildCurrentMetricsFromOrderAndConv(ctx, metrics, convMetrics, hasConv, unifiedId, ownerOrgID)
+	fbClass := ComputeClassificationFromMetricsOrRuleEngine(ctx, metrics.TotalSpent, metrics.OrderCount, metrics.LastOrderAt, metrics.RevenueLast30d, metrics.RevenueLast90d, metrics.OrderCountOnline, metrics.OrderCountOffline, hasConv, convMetrics.ConversationTags, unifiedId, ownerOrgID)
 
 	fbProfile := crmmodels.CrmCustomerProfile{
 		Name: name, PhoneNumbers: phones, Emails: emails,
@@ -367,25 +407,37 @@ func (s *CrmCustomerService) MergeFromFbCustomer(ctx context.Context, doc *fbmod
 		}
 		actSvc, errAct := NewCrmActivityService()
 		if errAct != nil {
+			src := "fb"
+			if isZalo {
+				src = "zalo"
+			}
 			logger.GetAppLogger().WithError(errAct).WithFields(map[string]interface{}{
-				"unifiedId": unifiedId, "source": "fb", "fbCustomerId": fbCustomerId,
+				"unifiedId": unifiedId, "source": src, "fbCustomerId": fbCustomerId,
 			}).Warn("[CRM] MergeFromFbCustomer: không thể tạo CrmActivityService, bỏ qua ghi customer_created")
 		} else {
-			metadata := map[string]interface{}{"source": "fb", "name": name, "mergeMethod": mergeMethod}
+			src := "fb"
+			if isZalo {
+				src = "zalo"
+			}
+			metadata := map[string]interface{}{"source": src, "name": name, "mergeMethod": mergeMethod}
 			if cust, err := s.FindOne(ctx, bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}, nil); err == nil {
 				// Dùng metrics as-of activityAt (timeline đúng) thay vì empty — có Lớp 3, đồng nhất với order/conversation
 				metricsOverride := s.GetMetricsForSnapshotAt(ctx, &cust, activityAt)
-				MergeSnapshotIntoMetadata(metadata, BuildSnapshotForNewCustomer(&cust, activityAt, true, metricsOverride))
+				MergeSnapshotIntoMetadata(metadata, BuildSnapshotForNewCustomer(ctx, &cust, activityAt, true, metricsOverride))
+			}
+			displayLabel := "Khởi tạo khách từ Facebook - " + defaultName(name)
+			if isZalo {
+				displayLabel = "Khởi tạo khách từ Zalo - " + defaultName(name)
 			}
 			errLog := actSvc.LogActivity(ctx, LogActivityInput{
 				UnifiedId:    unifiedId,
 				OwnerOrgID:   ownerOrgID,
 				Domain:       crmmodels.ActivityDomainCustomer,
 				ActivityType: "customer_created",
-				Source:       "fb",
+				Source:       src,
 				SourceRef:    map[string]interface{}{"sourceCustomerId": fbCustomerId},
 				Metadata:     metadata,
-				DisplayLabel: "Khởi tạo khách từ Facebook - " + defaultName(name),
+				DisplayLabel: displayLabel,
 				DisplayIcon:  "person_add",
 				ActivityAt:   activityAt,
 			})
@@ -396,7 +448,15 @@ func (s *CrmCustomerService) MergeFromFbCustomer(ctx context.Context, doc *fbmod
 			}
 		}
 	} else if result.ModifiedCount > 0 {
-		s.logCustomerUpdatedIfThrottled(ctx, unifiedId, ownerOrgID, "fb", "Cập nhật thông tin từ Facebook - "+defaultName(name))
+		src := "fb"
+		if isZalo {
+			src = "zalo"
+		}
+		label := "Cập nhật thông tin từ Facebook - " + defaultName(name)
+		if isZalo {
+			label = "Cập nhật thông tin từ Zalo - " + defaultName(name)
+		}
+		s.logCustomerUpdatedIfThrottled(ctx, unifiedId, ownerOrgID, src, label)
 	}
 	return nil
 }
@@ -416,7 +476,7 @@ func (s *CrmCustomerService) UpsertMinimalFromPosId(ctx context.Context, custome
 	}
 	now := time.Now().UnixMilli()
 	filter := bson.M{"unifiedId": customerId, "ownerOrganizationId": ownerOrgID}
-	emptyMetrics := buildEmptyMetricsSnapshot()
+	emptyMetrics := buildEmptyMetricsSnapshot(ctx)
 	posProfile := crmmodels.CrmCustomerProfile{}
 	if custData != nil {
 		posProfile = crmmodels.CrmCustomerProfile{
@@ -468,18 +528,20 @@ func (s *CrmCustomerService) UpsertMinimalFromPosId(ctx context.Context, custome
 // Sync (MergeFromFbCustomer) sẽ cập nhật đầy đủ khi có dữ liệu từ fb_customers.
 // custData: thông tin trích từ panCakeData (customer, customers[0], page_customer); nil nếu không có.
 // activityAt: thời điểm từ nguồn conversation (0 = dùng now).
-func (s *CrmCustomerService) UpsertMinimalFromFbId(ctx context.Context, customerId string, ownerOrgID primitive.ObjectID, custData *convCustomerData, activityAt int64) (unifiedId string, created bool) {
+// isZalo: true nếu conversation từ Zalo (pageId pzl_), false nếu Messenger.
+// pageId: để lưu FbByPage/ZaloByPage — biết trả lời qua kênh nào.
+func (s *CrmCustomerService) UpsertMinimalFromFbId(ctx context.Context, customerId string, ownerOrgID primitive.ObjectID, custData *convCustomerData, activityAt int64, isZalo bool, pageId string) (unifiedId string, created bool) {
 	customerId = strings.TrimSpace(customerId)
 	if customerId == "" {
 		return "", false
 	}
-	existing, err := s.findByFbId(ctx, customerId, ownerOrgID)
+	existing, err := s.findExistingInboxCustomer(ctx, customerId, isZalo, ownerOrgID)
 	if err == nil && existing != nil {
 		return existing.UnifiedId, false
 	}
 	now := time.Now().UnixMilli()
 	filter := bson.M{"unifiedId": customerId, "ownerOrganizationId": ownerOrgID}
-	fbEmptyMetrics := buildEmptyMetricsSnapshot()
+	fbEmptyMetrics := buildEmptyMetricsSnapshot(ctx)
 	fbProfile := crmmodels.CrmCustomerProfile{}
 	if custData != nil {
 		fbProfile = crmmodels.CrmCustomerProfile{
@@ -488,10 +550,17 @@ func (s *CrmCustomerService) UpsertMinimalFromFbId(ctx context.Context, customer
 			Addresses: custData.Addresses, ReferralCode: custData.ReferralCode,
 		}
 	}
+	sourceIds := crmmodels.CrmCustomerSourceIds{}
+	setInboxByPage(&sourceIds, pageId, customerId, isZalo)
+	sourceIds.AllInboxIds = buildAllInboxIds(&sourceIds)
+	primSrc := "fb"
+	if isZalo {
+		primSrc = "zalo"
+	}
 	setOnInsert := bson.M{
 		"unifiedId":           customerId,
-		"sourceIds":           crmmodels.CrmCustomerSourceIds{Fb: customerId},
-		"primarySource":       "fb",
+		"sourceIds":           sourceIds,
+		"primarySource":       primSrc,
 		"mergeMethod":         "single_source",
 		"ownerOrganizationId": ownerOrgID,
 		"createdAt":           now,
@@ -678,7 +747,7 @@ func (s *CrmCustomerService) logCustomerCreatedFromSource(ctx context.Context, u
 	metadata := map[string]interface{}{"source": source}
 	if cust, err := s.FindOne(ctx, bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}, nil); err == nil {
 		metricsOverride := s.GetMetricsForSnapshotAt(ctx, &cust, activityAt)
-		MergeSnapshotIntoMetadata(metadata, BuildSnapshotForNewCustomer(&cust, activityAt, true, metricsOverride))
+		MergeSnapshotIntoMetadata(metadata, BuildSnapshotForNewCustomer(ctx, &cust, activityAt, true, metricsOverride))
 	}
 	sourceRef := map[string]interface{}{"sourceCustomerId": unifiedId}
 	_ = actSvc.LogActivity(ctx, LogActivityInput{
@@ -714,7 +783,7 @@ func (s *CrmCustomerService) logCustomerUpdatedIfThrottled(ctx context.Context, 
 		lastProfile, lastMetrics, _ := actSvc.GetLastSnapshotForCustomer(ctx, unifiedId, ownerOrgID, "", nil)
 		metricsOverride := s.GetMetricsForSnapshotAt(ctx, &cust, activityAt)
 		profileOverride := s.GetProfileForSnapshotAt(ctx, &cust, activityAt)
-		if snap := BuildSnapshotWithChanges(&cust, lastProfile, lastMetrics, activityAt, metricsOverride, profileOverride); snap != nil {
+		if snap := BuildSnapshotWithChanges(ctx, &cust, lastProfile, lastMetrics, activityAt, metricsOverride, profileOverride); snap != nil {
 			MergeSnapshotIntoMetadata(metadata, snap)
 		}
 	}
@@ -733,12 +802,13 @@ func (s *CrmCustomerService) logCustomerUpdatedIfThrottled(ctx context.Context, 
 	})
 }
 
-// findByPosId tìm crm_customer theo sourceIds.pos hoặc unifiedId.
+// findByPosId tìm crm_customer theo sourceIds.pos, uid hoặc unifiedId.
 func (s *CrmCustomerService) findByPosId(ctx context.Context, posId string, ownerOrgID primitive.ObjectID) (*crmmodels.CrmCustomer, error) {
 	filter := bson.M{
 		"ownerOrganizationId": ownerOrgID,
 		"$or": []bson.M{
 			{"sourceIds.pos": posId},
+			{"uid": posId},
 			{"unifiedId": posId},
 		},
 	}
@@ -749,12 +819,14 @@ func (s *CrmCustomerService) findByPosId(ctx context.Context, posId string, owne
 	return &c, nil
 }
 
-// findByFbId tìm crm_customer theo sourceIds.fb hoặc unifiedId.
+// findByFbId tìm crm_customer theo sourceIds.fb, allInboxIds, uid hoặc unifiedId.
 func (s *CrmCustomerService) findByFbId(ctx context.Context, fbId string, ownerOrgID primitive.ObjectID) (*crmmodels.CrmCustomer, error) {
 	filter := bson.M{
 		"ownerOrganizationId": ownerOrgID,
 		"$or": []bson.M{
 			{"sourceIds.fb": fbId},
+			{"sourceIds.allInboxIds": fbId},
+			{"uid": fbId},
 			{"unifiedId": fbId},
 		},
 	}
@@ -763,6 +835,32 @@ func (s *CrmCustomerService) findByFbId(ctx context.Context, fbId string, ownerO
 		return nil, err
 	}
 	return &c, nil
+}
+
+// findByZaloId tìm crm_customer theo sourceIds.zalo, allInboxIds, uid hoặc unifiedId.
+func (s *CrmCustomerService) findByZaloId(ctx context.Context, zaloId string, ownerOrgID primitive.ObjectID) (*crmmodels.CrmCustomer, error) {
+	filter := bson.M{
+		"ownerOrganizationId": ownerOrgID,
+		"$or": []bson.M{
+			{"sourceIds.zalo": zaloId},
+			{"sourceIds.allInboxIds": zaloId},
+			{"uid": zaloId},
+			{"unifiedId": zaloId},
+		},
+	}
+	c, err := s.FindOne(ctx, filter, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+// findExistingInboxCustomer tìm crm_customer theo fb/zalo id tùy nguồn.
+func (s *CrmCustomerService) findExistingInboxCustomer(ctx context.Context, customerId string, isZalo bool, ownerOrgID primitive.ObjectID) (*crmmodels.CrmCustomer, error) {
+	if isZalo {
+		return s.findByZaloId(ctx, customerId, ownerOrgID)
+	}
+	return s.findByFbId(ctx, customerId, ownerOrgID)
 }
 
 func (s *CrmCustomerService) findFbCustomerByPagePsid(ctx context.Context, pageId, psid string, ownerOrgID primitive.ObjectID) string {
@@ -782,30 +880,81 @@ func (s *CrmCustomerService) findFbCustomerByPagePsid(ctx context.Context, pageI
 	return doc.CustomerId
 }
 
-func (s *CrmCustomerService) findFbCustomerByPhone(ctx context.Context, normalizedPhone string, ownerOrgID primitive.ObjectID) string {
+// findFbCustomerByPhoneWithPage trả về (customerId, pageId) — Messenger (pageId không pzl_).
+func (s *CrmCustomerService) findFbCustomerByPhoneWithPage(ctx context.Context, normalizedPhone string, ownerOrgID primitive.ObjectID) (customerId, pageId string) {
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.FbCustomers)
 	if !ok {
-		return ""
+		return "", ""
 	}
-	// Tạo các biến thể phone để match (84xxx, 0xxx)
 	variants := []string{normalizedPhone}
 	if len(normalizedPhone) >= 3 && normalizedPhone[:2] == "84" {
 		variants = append(variants, "0"+normalizedPhone[2:])
 	}
-	cursor, err := coll.Find(ctx, bson.M{"ownerOrganizationId": ownerOrgID, "phoneNumbers": bson.M{"$in": variants}}, nil)
+	filter := bson.M{
+		"ownerOrganizationId": ownerOrgID,
+		"phoneNumbers":        bson.M{"$in": variants},
+		"$or": []bson.M{
+			{"pageId": bson.M{"$exists": false}},
+			{"pageId": ""},
+			{"pageId": bson.M{"$not": bson.M{"$regex": "^pzl_"}}},
+		},
+	}
+	cursor, err := coll.Find(ctx, filter, nil)
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	defer cursor.Close(ctx)
 	if cursor.Next(ctx) {
 		var doc struct {
 			CustomerId string `bson:"customerId"`
+			PageId     string `bson:"pageId"`
 		}
 		if cursor.Decode(&doc) == nil {
-			return doc.CustomerId
+			return doc.CustomerId, doc.PageId
 		}
 	}
-	return ""
+	return "", ""
+}
+
+func (s *CrmCustomerService) findFbCustomerByPhone(ctx context.Context, normalizedPhone string, ownerOrgID primitive.ObjectID) string {
+	id, _ := s.findFbCustomerByPhoneWithPage(ctx, normalizedPhone, ownerOrgID)
+	return id
+}
+
+// findZaloCustomerByPhoneWithPage trả về (customerId, pageId) — Zalo (pageId pzl_).
+func (s *CrmCustomerService) findZaloCustomerByPhoneWithPage(ctx context.Context, normalizedPhone string, ownerOrgID primitive.ObjectID) (customerId, pageId string) {
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.FbCustomers)
+	if !ok {
+		return "", ""
+	}
+	variants := []string{normalizedPhone}
+	if len(normalizedPhone) >= 3 && normalizedPhone[:2] == "84" {
+		variants = append(variants, "0"+normalizedPhone[2:])
+	}
+	cursor, err := coll.Find(ctx, bson.M{
+		"ownerOrganizationId": ownerOrgID,
+		"phoneNumbers":        bson.M{"$in": variants},
+		"pageId":              bson.M{"$regex": "^pzl_"},
+	}, nil)
+	if err != nil {
+		return "", ""
+	}
+	defer cursor.Close(ctx)
+	if cursor.Next(ctx) {
+		var doc struct {
+			CustomerId string `bson:"customerId"`
+			PageId     string `bson:"pageId"`
+		}
+		if cursor.Decode(&doc) == nil {
+			return doc.CustomerId, doc.PageId
+		}
+	}
+	return "", ""
+}
+
+func (s *CrmCustomerService) findZaloCustomerByPhone(ctx context.Context, normalizedPhone string, ownerOrgID primitive.ObjectID) string {
+	id, _ := s.findZaloCustomerByPhoneWithPage(ctx, normalizedPhone, ownerOrgID)
+	return id
 }
 
 func (s *CrmCustomerService) findPosCustomerByFbPagePsid(ctx context.Context, pageId, psid string, ownerOrgID primitive.ObjectID) string {
@@ -853,6 +1002,79 @@ func (s *CrmCustomerService) findPosCustomerByPhone(ctx context.Context, normali
 		}
 	}
 	return ""
+}
+
+// buildAllInboxIds gộp tất cả customerId từ fb, zalo, FbByPage, ZaloByPage — dùng cho lookup và aggregation.
+func buildAllInboxIds(s *crmmodels.CrmCustomerSourceIds) []string {
+	seen := make(map[string]bool)
+	add := func(id string) {
+		if id != "" && !seen[id] {
+			seen[id] = true
+		}
+	}
+	add(s.Fb)
+	add(s.Zalo)
+	for _, v := range s.FbByPage {
+		add(v)
+	}
+	for _, v := range s.ZaloByPage {
+		add(v)
+	}
+	var out []string
+	for id := range seen {
+		out = append(out, id)
+	}
+	return out
+}
+
+// mergeSourceIdsFromExisting gộp sourceIds từ existing — giữ FbByPage, ZaloByPage, Fb, Zalo từ existing.
+// Pos: giữ dest (caller đang merge từ nguồn hiện tại).
+func mergeSourceIdsFromExisting(dest, src *crmmodels.CrmCustomerSourceIds) {
+	if src.Pos != "" && dest.Pos == "" {
+		dest.Pos = src.Pos
+	}
+	if src.Fb != "" {
+		dest.Fb = src.Fb
+	}
+	if src.Zalo != "" {
+		dest.Zalo = src.Zalo
+	}
+	if len(src.FbByPage) > 0 {
+		if dest.FbByPage == nil {
+			dest.FbByPage = make(map[string]string)
+		}
+		for k, v := range src.FbByPage {
+			dest.FbByPage[k] = v
+		}
+	}
+	if len(src.ZaloByPage) > 0 {
+		if dest.ZaloByPage == nil {
+			dest.ZaloByPage = make(map[string]string)
+		}
+		for k, v := range src.ZaloByPage {
+			dest.ZaloByPage[k] = v
+		}
+	}
+}
+
+// setInboxByPage thêm pageId -> customerId vào FbByPage hoặc ZaloByPage, cập nhật Fb/Zalo primary.
+func setInboxByPage(s *crmmodels.CrmCustomerSourceIds, pageId, customerId string, isZalo bool) {
+	if pageId == "" || customerId == "" {
+		return
+	}
+	if isZalo {
+		if s.ZaloByPage == nil {
+			s.ZaloByPage = make(map[string]string)
+		}
+		s.ZaloByPage[pageId] = customerId
+		s.Zalo = customerId // primary = mới nhất
+	} else {
+		if s.FbByPage == nil {
+			s.FbByPage = make(map[string]string)
+		}
+		s.FbByPage[pageId] = customerId
+		s.Fb = customerId
+	}
 }
 
 func normalizePhones(phones []string) []string {

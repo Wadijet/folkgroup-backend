@@ -199,8 +199,8 @@ $collections = @(
     @{ Endpoint = "facebook/message-item"; OutputFile = "fb-message-items-sample.json"; UsePagination = $false },
     @{ Endpoint = "fb-customer"; OutputFile = "fb-customers-sample.json"; UsePagination = $false },
     
-    # Customers (dashboard/customers trả về snapshot CRM; pc-pos-customer là CRUD)
-    @{ Endpoint = "dashboard/customers"; OutputFile = "dashboard-customers-sample.json"; UsePagination = $false; IsDashboard = $true },
+    # Customers (period-movements-from-snapshots trả về currentSnapshot + trendData; pc-pos-customer là CRUD)
+    @{ Endpoint = "dashboard/customers/period-movements-from-snapshots"; OutputFile = "dashboard-customers-sample.json"; UsePagination = $false; IsDashboard = $true },
     @{ Endpoint = "pc-pos-customer"; OutputFile = "pc-pos-customers-sample.json"; UsePagination = $false },
     
     # Pancake POS

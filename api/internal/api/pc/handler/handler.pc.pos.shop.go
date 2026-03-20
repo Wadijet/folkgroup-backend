@@ -1,7 +1,6 @@
 package pchdl
 
 import (
-	"encoding/json"
 	"fmt"
 
 	basehdl "meta_commerce/internal/api/base/handler"
@@ -9,7 +8,6 @@ import (
 	pcmodels "meta_commerce/internal/api/pc/models"
 	pcsvc "meta_commerce/internal/api/pc/service"
 	"meta_commerce/internal/common"
-	"meta_commerce/internal/utility"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -31,24 +29,9 @@ func NewPcPosShopHandler() (*PcPosShopHandler, error) {
 	return hdl, nil
 }
 
-// HandleSyncUpsertOne xử lý sync-upsert-one: chỉ ghi khi dữ liệu mới hơn (giảm tải backend).
-// Unmarshal vào PcPosShop struct để extract chạy (flatten panCakeData → shopId, name, ...).
-func (h *PcPosShopHandler) HandleSyncUpsertOne(c fiber.Ctx) error {
-	filter, err := h.ProcessFilter(c)
-	if err != nil {
-		return err
-	}
-	var shop pcmodels.PcPosShop
-	if err := json.Unmarshal(c.Body(), &shop); err != nil {
-		return common.NewError(common.ErrCodeValidationFormat, "Body không đúng định dạng JSON", common.StatusBadRequest, err)
-	}
-	if orgID := h.GetActiveOrganizationID(c); orgID != nil && !orgID.IsZero() && shop.OwnerOrganizationID.IsZero() {
-		shop.OwnerOrganizationID = *orgID
-	}
-	if err := utility.ExtractDataIfExists(&shop); err != nil {
-		return common.NewError(common.ErrCodeValidationFormat, "Dữ liệu panCakeData không hợp lệ: "+err.Error(), common.StatusBadRequest, err)
-	}
-	result, skipped, err := h.PcPosShopService.SyncUpsertOne(c.Context(), filter, &shop)
+// SyncUpsertOneFromParts filter + body — logic ở PcPosShopService.RunSyncUpsertOneFromJSON.
+func (h *PcPosShopHandler) SyncUpsertOneFromParts(c fiber.Ctx, filter map[string]interface{}, body []byte) error {
+	result, skipped, err := h.PcPosShopService.RunSyncUpsertOneFromJSON(c.Context(), filter, body, h.GetActiveOrganizationID(c))
 	if err != nil {
 		h.HandleResponse(c, nil, err)
 		return nil

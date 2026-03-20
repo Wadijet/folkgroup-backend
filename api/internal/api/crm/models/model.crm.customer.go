@@ -6,10 +6,16 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// CrmCustomerSourceIds chứa customerId từ từng nguồn (pos, fb).
+// CrmCustomerSourceIds chứa customerId từ từng nguồn (pos, fb, zalo).
+// FbByPage, ZaloByPage: map pageId -> customerId — phân biệt nhiều page để biết trả lời qua kênh nào.
+// AllInboxIds: gộp tất cả customerId từ fb, zalo, fbByPage, zaloByPage — dùng cho ResolveUnifiedId.
 type CrmCustomerSourceIds struct {
-	Pos string `json:"pos,omitempty" bson:"pos,omitempty"` // UUID từ pc_pos_customers
-	Fb  string `json:"fb,omitempty" bson:"fb,omitempty"`   // UUID từ fb_customers
+	Pos         string            `json:"pos,omitempty" bson:"pos,omitempty"`                   // UUID từ pc_pos_customers
+	Fb          string            `json:"fb,omitempty" bson:"fb,omitempty"`                     // UUID primary (Messenger)
+	Zalo        string            `json:"zalo,omitempty" bson:"zalo,omitempty"`                 // UUID primary (Zalo)
+	FbByPage    map[string]string  `json:"fbByPage,omitempty" bson:"fbByPage,omitempty"`         // pageId -> customerId (Messenger, nhiều page)
+	ZaloByPage  map[string]string  `json:"zaloByPage,omitempty" bson:"zaloByPage,omitempty"`     // pageId -> customerId (Zalo, nhiều page)
+	AllInboxIds []string          `json:"allInboxIds,omitempty" bson:"allInboxIds,omitempty"`   // Gộp fb+zalo+values(FbByPage,ZaloByPage) — cho lookup
 }
 
 // CrmCustomerProfile thông tin profile khách — gộp trong 1 field cho gọn, đồng nhất với profileSnapshot trong activity.
@@ -29,9 +35,13 @@ type CrmCustomer struct {
 	ID primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"`
 
 	// Identity
-	UnifiedId     string               `json:"unifiedId" bson:"unifiedId" index:"single:1,compound:crm_customer_org_unified_unique"`
-	SourceIds     CrmCustomerSourceIds `json:"sourceIds" bson:"sourceIds"`
-	PrimarySource string               `json:"primarySource" bson:"primarySource"` // pos | fb
+	Uid               string               `json:"uid" bson:"uid" index:"single:1,compound:crm_customer_org_uid"`
+	UnifiedId         string               `json:"unifiedId" bson:"unifiedId" index:"single:1,compound:crm_customer_org_unified_unique"`
+	SourceIds         CrmCustomerSourceIds `json:"sourceIds" bson:"sourceIds"`
+	SourceIdsPos      string               `json:"-" bson:"sourceIds.pos,omitempty" index:"single:1,sparse"`
+	SourceIdsFb       string               `json:"-" bson:"sourceIds.fb,omitempty" index:"single:1,sparse"`
+	SourceIdsZalo     string               `json:"-" bson:"sourceIds.zalo,omitempty" index:"single:1,sparse"`
+	PrimarySource string                 `json:"primarySource" bson:"primarySource"` // pos | fb | zalo
 
 	// Profile — thông tin cá nhân gộp trong 1 field; đồng nhất với profileSnapshot trong crm_activity_history.
 	Profile CrmCustomerProfile `json:"profile" bson:"profile"`
@@ -102,7 +112,7 @@ type CrmCustomer struct {
 	MergedAt    int64  `json:"mergedAt" bson:"mergedAt"`
 
 	// Phân quyền
-	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:crm_customer_org_unified_unique,compound:crm_customer_org_lastorder,compound:crm_customer_org_totalspent,compound:crm_customer_org_value,compound:crm_customer_org_journey,compound:crm_customer_org_lifecycle,compound:crm_customer_org_channel,compound:crm_customer_org_loyalty,compound:crm_customer_org_momentum"`
+	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:crm_customer_org_unified_unique,compound:crm_customer_org_uid,compound:crm_customer_org_lastorder,compound:crm_customer_org_totalspent,compound:crm_customer_org_value,compound:crm_customer_org_journey,compound:crm_customer_org_lifecycle,compound:crm_customer_org_channel,compound:crm_customer_org_loyalty,compound:crm_customer_org_momentum"`
 
 	// Metadata
 	CreatedAt int64 `json:"createdAt" bson:"createdAt" index:"single:1"`

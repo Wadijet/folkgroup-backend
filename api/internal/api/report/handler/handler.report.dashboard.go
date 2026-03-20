@@ -287,7 +287,7 @@ func buildCustomersDashboardDataFromCrm(items []crmvc.CrmDashboardCustomerItem, 
 	repeatRD, repeatRF, repeatSM, repeatPE, repeatEE, repeatUP := make(map[string]int64), make(map[string]int64), make(map[string]int64), make(map[string]int64), make(map[string]int64), make(map[string]int64)
 	vipVD, vipST, vipPD, vipEL, vipRS := make(map[string]int64), make(map[string]int64), make(map[string]int64), make(map[string]int64), make(map[string]int64)
 	inactiveED, inactiveRP := make(map[string]int64), make(map[string]int64)
-	engagedTemp, engagedDepth, engagedSource := make(map[string]int64), make(map[string]int64), make(map[string]int64)
+	engagedTemp, engagedDepth, engagedSource, engagedPurchasePotential := make(map[string]int64), make(map[string]int64), make(map[string]int64), make(map[string]int64)
 	inc := func(m map[string]int64, k string) { m[k]++ }
 	endMs := time.Now().UnixMilli()
 
@@ -353,6 +353,7 @@ func buildCustomersDashboardDataFromCrm(items []crmvc.CrmDashboardCustomerItem, 
 				inc(engagedTemp, agg.Engaged.ConversationTemperature)
 				inc(engagedDepth, agg.Engaged.EngagementDepth)
 				inc(engagedSource, agg.Engaged.SourceType)
+				inc(engagedPurchasePotential, agg.Engaged.PurchasePotential)
 			}
 		}
 	}
@@ -396,7 +397,7 @@ func buildCustomersDashboardDataFromCrm(items []crmvc.CrmDashboardCustomerItem, 
 		RepeatLayer3:          reportdto.RepeatLayer3Distribution{RepeatDepth: repeatRD, RepeatFrequency: repeatRF, SpendMomentum: repeatSM, ProductExpansion: repeatPE, EmotionalEngagement: repeatEE, UpgradePotential: repeatUP},
 		VipLayer3:             reportdto.VipLayer3Distribution{VipDepth: vipVD, SpendTrend: vipST, ProductDiversity: vipPD, EngagementLevel: vipEL, RiskScore: vipRS},
 		InactiveLayer3:       reportdto.InactiveLayer3Distribution{EngagementDrop: inactiveED, ReactivationPotential: inactiveRP},
-		EngagedLayer3:        reportdto.EngagedLayer3Distribution{ConversationTemperature: engagedTemp, EngagementDepth: engagedDepth, SourceType: engagedSource},
+		EngagedLayer3:        reportdto.EngagedLayer3Distribution{ConversationTemperature: engagedTemp, EngagementDepth: engagedDepth, SourceType: engagedSource, PurchasePotential: engagedPurchasePotential},
 	}
 }
 

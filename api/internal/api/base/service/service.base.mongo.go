@@ -20,6 +20,7 @@ import (
 	"meta_commerce/internal/api/events"
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/utility"
+	"meta_commerce/internal/utility/identity"
 )
 
 // isAdminFromContextFunc được gán từ auth domain (initsvc) để tránh import cycle services -> auth.
@@ -214,6 +215,13 @@ func (s *BaseServiceMongoImpl[T]) InsertOne(ctx context.Context, data T) (T, err
 	dataMap["createdAt"] = now
 	dataMap["updatedAt"] = now
 
+	// Enrich identity 4 lớp (uid, sourceIds, links) cho doc mới
+	if identity.ShouldEnrich(s.collection.Name()) {
+		if err := identity.EnrichIdentity4Layers(ctx, s.collection.Name(), dataMap, nil); err != nil {
+			return zero, common.NewError(common.ErrCodeValidationFormat, "Lỗi enrich identity: "+err.Error(), common.StatusBadRequest, err)
+		}
+	}
+
 	result, err := s.collection.InsertOne(ctx, dataMap)
 	if err != nil {
 		return zero, common.ConvertMongoError(err)
@@ -256,6 +264,12 @@ func (s *BaseServiceMongoImpl[T]) InsertMany(ctx context.Context, data []T) ([]T
 		}
 		dataMap["createdAt"] = now
 		dataMap["updatedAt"] = now
+		// Enrich identity 4 lớp cho từng doc
+		if identity.ShouldEnrich(s.collection.Name()) {
+			if err := identity.EnrichIdentity4Layers(ctx, s.collection.Name(), dataMap, nil); err != nil {
+				return nil, common.NewError(common.ErrCodeValidationFormat, "Lỗi enrich identity: "+err.Error(), common.StatusBadRequest, err)
+			}
+		}
 		documents = append(documents, dataMap)
 	}
 
@@ -405,6 +419,27 @@ func (s *BaseServiceMongoImpl[T]) UpdateOne(ctx context.Context, filter interfac
 		updateData.Set = make(map[string]interface{})
 	}
 	updateData.Set["updatedAt"] = time.Now().UnixMilli()
+
+	// Enrich identity 4 lớp khi update — merge existing + update rồi enrich, ghi lại vào $set
+	if identity.ShouldEnrich(s.collection.Name()) {
+		existingMap, errMap := utility.ToMap(existing)
+		if errMap == nil {
+			for k, v := range updateData.Set {
+				existingMap[k] = v
+			}
+			if err := identity.EnrichIdentity4Layers(ctx, s.collection.Name(), existingMap, nil); err == nil {
+				if v := existingMap["uid"]; v != nil {
+					updateData.Set["uid"] = v
+				}
+				if v := existingMap["sourceIds"]; v != nil {
+					updateData.Set["sourceIds"] = v
+				}
+				if v := existingMap["links"]; v != nil {
+					updateData.Set["links"] = v
+				}
+			}
+		}
+	}
 
 	result, err := s.collection.UpdateOne(ctx, filter, updateData, opts)
 	if err != nil {
@@ -1042,6 +1077,45 @@ func prepareUpsertUpdateData[T any](ctx context.Context, zero T, updateData *Upd
 	return nil
 }
 
+// enrichUpsertInsertIdentity bổ sung uid, sourceIds, links vào updateData khi upsert tạo document mới.
+// Chỉ gọi khi !isExisting và ShouldEnrich(collectionName).
+func enrichUpsertInsertIdentity(ctx context.Context, collectionName string, updateData *UpdateData) error {
+	if !identity.ShouldEnrich(collectionName) {
+		return nil
+	}
+	// Đảm bảo _id cho doc mới — cần để EnrichIdentity4Layers tạo uid
+	if updateData.SetOnInsert == nil {
+		updateData.SetOnInsert = make(map[string]interface{})
+	}
+	_, hasIdInSet := updateData.Set["_id"]
+	_, hasIdInSetOnInsert := updateData.SetOnInsert["_id"]
+	if !hasIdInSet && !hasIdInSetOnInsert {
+		updateData.SetOnInsert["_id"] = primitive.NewObjectID()
+	}
+	// Merge Set + SetOnInsert thành docMap để enrich
+	docMap := make(map[string]interface{})
+	for k, v := range updateData.Set {
+		docMap[k] = v
+	}
+	for k, v := range updateData.SetOnInsert {
+		docMap[k] = v
+	}
+	if err := identity.EnrichIdentity4Layers(ctx, collectionName, docMap, nil); err != nil {
+		return err
+	}
+	// Ghi identity fields vào SetOnInsert (chỉ set khi insert)
+	if v := docMap["uid"]; v != nil {
+		updateData.SetOnInsert["uid"] = v
+	}
+	if v := docMap["sourceIds"]; v != nil {
+		updateData.SetOnInsert["sourceIds"] = v
+	}
+	if v := docMap["links"]; v != nil {
+		updateData.SetOnInsert["links"] = v
+	}
+	return nil
+}
+
 // Upsert thực hiện thao tác update nếu tồn tại, insert nếu chưa tồn tại
 func (s *BaseServiceMongoImpl[T]) Upsert(ctx context.Context, filter interface{}, data interface{}) (T, error) {
 	var zero T
@@ -1066,6 +1140,13 @@ func (s *BaseServiceMongoImpl[T]) Upsert(ctx context.Context, filter interface{}
 
 	if err := prepareUpsertUpdateData(ctx, zero, updateData, existing, isExisting); err != nil {
 		return zero, err
+	}
+
+	// Enrich identity 4 lớp khi upsert tạo document mới
+	if !isExisting {
+		if err := enrichUpsertInsertIdentity(ctx, s.collection.Name(), updateData); err != nil {
+			return zero, common.NewError(common.ErrCodeValidationFormat, "Lỗi enrich identity: "+err.Error(), common.StatusBadRequest, err)
+		}
 	}
 
 	logrus.WithFields(logrus.Fields{
@@ -1586,6 +1667,11 @@ func validateRelationshipsDelete(ctx context.Context, data interface{}) error {
 // Cho phép admin sửa một số field nhất định (IsActive, config fields)
 // Không cho phép sửa các field quan trọng (IsSystem, Name, EventType, ChannelType, etc.)
 func validateSystemDataUpdate(ctx context.Context, existingData interface{}, update *UpdateData) error {
+	// Nếu context cho phép insert/update system data (quá trình init/seed), bỏ qua validation
+	if isSystemDataInsertAllowed(ctx) {
+		return nil
+	}
+
 	isSystem, hasField := getIsSystemValue(existingData)
 	if !hasField {
 		// Model không có field IsSystem, nhưng vẫn cần check nếu user cố set IsSystem = true

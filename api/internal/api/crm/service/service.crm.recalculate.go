@@ -106,8 +106,8 @@ func (s *CrmCustomerService) RecalculateCustomerFromAllSources(ctx context.Conte
 	}
 
 	// 6. Compute classification
-	cm := BuildCurrentMetricsFromOrderAndConv(metrics, convMetrics, hasConv)
-	class := ComputeClassificationFromMetrics(metrics.TotalSpent, metrics.OrderCount, metrics.LastOrderAt, metrics.RevenueLast30d, metrics.RevenueLast90d, metrics.OrderCountOnline, metrics.OrderCountOffline, hasConv, convMetrics.ConversationTags)
+	cm := BuildCurrentMetricsFromOrderAndConv(ctx, metrics, convMetrics, hasConv, unifiedId, ownerOrgID)
+	class := ComputeClassificationFromMetricsOrRuleEngine(ctx, metrics.TotalSpent, metrics.OrderCount, metrics.LastOrderAt, metrics.RevenueLast30d, metrics.RevenueLast90d, metrics.OrderCountOnline, metrics.OrderCountOffline, hasConv, convMetrics.ConversationTags, unifiedId, ownerOrgID)
 
 	// 7. Update crm_customers
 	now := time.Now().UnixMilli()
@@ -404,6 +404,138 @@ func extractJourneyStageFromMetrics(m map[string]interface{}) string {
 	return ""
 }
 
+const recalcSubBatchSize = 50 // Kích thước sub-batch để lưu checkpoint trong recalculate_batch
+
+// RecalculateCustomersBatch tính toán lại 1 batch khách (offset, limit). Dùng cho job chunking.
+// poolSize <= 0: dùng default 12. progress/onProgress: checkpoint để resume (nil = không dùng).
+func (s *CrmCustomerService) RecalculateCustomersBatch(ctx context.Context, ownerOrgID primitive.ObjectID, offset, limit int, poolSize int, progress bson.M, onProgress func(bson.M)) (*crmdto.CrmRecalculateAllResult, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	filter := bson.M{"ownerOrganizationId": ownerOrgID}
+	opts := mongoopts.Find().
+		SetProjection(bson.M{"unifiedId": 1}).
+		SetSkip(int64(offset)).
+		SetLimit(int64(limit))
+	customers, err := s.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, common.ConvertMongoError(err)
+	}
+	processedStart := 0
+	if progress != nil {
+		if v, ok := progress["processed"]; ok && v != nil {
+			switch n := v.(type) {
+			case int:
+				processedStart = n
+			case int64:
+				processedStart = int(n)
+			case float64:
+				processedStart = int(n)
+			}
+		}
+	}
+	if onProgress != nil && processedStart < len(customers) {
+		return s.recalculateCustomerIdsWithProgress(ctx, ownerOrgID, customers, poolSize, processedStart, onProgress)
+	}
+	return s.recalculateCustomerIds(ctx, ownerOrgID, customers, poolSize)
+}
+
+// recalculateCustomerIdsWithProgress xử lý ids từ startIndex, lưu checkpoint sau mỗi sub-batch.
+func (s *CrmCustomerService) recalculateCustomerIdsWithProgress(ctx context.Context, ownerOrgID primitive.ObjectID, customers []crmmodels.CrmCustomer, poolSize int, startIndex int, onProgress func(bson.M)) (*crmdto.CrmRecalculateAllResult, error) {
+	ids := make([]string, 0, len(customers))
+	for _, c := range customers {
+		ids = append(ids, c.UnifiedId)
+	}
+	total := len(ids)
+	result := &crmdto.CrmRecalculateAllResult{}
+	if startIndex >= total {
+		return result, nil
+	}
+	subBatch := recalcSubBatchSize
+	if subBatch <= 0 {
+		subBatch = 50
+	}
+	for i := startIndex; i < total; i += subBatch {
+		end := i + subBatch
+		if end > total {
+			end = total
+		}
+		chunkResult, err := s.recalculateCustomerIds(ctx, ownerOrgID, customers[i:end], poolSize)
+		if err != nil {
+			return result, err
+		}
+		result.TotalProcessed += chunkResult.TotalProcessed
+		result.TotalFailed += chunkResult.TotalFailed
+		for _, fid := range chunkResult.FailedIds {
+			if len(result.FailedIds) < 10 {
+				result.FailedIds = append(result.FailedIds, fid)
+			}
+		}
+		if onProgress != nil {
+			onProgress(bson.M{"processed": end})
+		}
+	}
+	return result, nil
+}
+
+// recalculateCustomerIds xử lý danh sách customer theo worker pool. Dùng chung bởi RecalculateAllCustomers và RecalculateCustomersBatch.
+func (s *CrmCustomerService) recalculateCustomerIds(ctx context.Context, ownerOrgID primitive.ObjectID, customers []crmmodels.CrmCustomer, poolSize int) (*crmdto.CrmRecalculateAllResult, error) {
+	ids := make([]string, 0, len(customers))
+	for _, c := range customers {
+		ids = append(ids, c.UnifiedId)
+	}
+	result := &crmdto.CrmRecalculateAllResult{}
+	total := len(ids)
+	if total == 0 {
+		return result, nil
+	}
+	const basePool = 12
+	workers := basePool
+	if poolSize > 0 {
+		workers = poolSize
+	}
+	if total < workers {
+		workers = total
+	}
+	jobs := make(chan string, total)
+	for _, id := range ids {
+		jobs <- id
+	}
+	close(jobs)
+	var mu sync.Mutex
+	const maxFailedIds = 10
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Fprintf(os.Stderr, "[CRM] RecalcBatch: Worker panic recovered: %v\n", r)
+				}
+			}()
+			for unifiedId := range jobs {
+				_, err := s.RecalculateCustomerFromAllSources(ctx, unifiedId, ownerOrgID)
+				mu.Lock()
+				if err != nil {
+					result.TotalFailed++
+					if len(result.FailedIds) < maxFailedIds {
+						result.FailedIds = append(result.FailedIds, unifiedId)
+					}
+				} else {
+					result.TotalProcessed++
+					pct := float64(result.TotalProcessed) * 100 / float64(total)
+					logger.GetAppLogger().Infof("[CRM] RecalcBatch: unifiedId=%s processed=%d total=%d progressPct=%.1f%%",
+						unifiedId, result.TotalProcessed, total, pct)
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	return result, nil
+}
+
 // RecalculateAllCustomers tính toán lại tất cả khách hàng hiện có của org (ngược với backfill).
 // Dùng worker pool xử lý song song để tăng tốc, mỗi customer độc lập (unifiedId khác nhau).
 // limit <= 0: xử lý tất cả; limit > 0: giới hạn số khách.
@@ -419,64 +551,35 @@ func (s *CrmCustomerService) RecalculateAllCustomers(ctx context.Context, ownerO
 	if err != nil {
 		return nil, common.ConvertMongoError(err)
 	}
-	ids := make([]string, 0, len(customers))
-	for _, c := range customers {
-		ids = append(ids, c.UnifiedId)
-	}
+	return s.recalculateCustomerIds(ctx, ownerOrgID, customers, poolSize)
+}
 
-	result := &crmdto.CrmRecalculateAllResult{}
-	total := len(ids)
-	if total == 0 {
-		return result, nil
+// RecalculateAllCustomersForAllOrgs tính toán lại toàn bộ khách hàng của tất cả org có trong crm_customers.
+// Dùng worker pool để tăng tốc. Hàm tạm — chạy khi server khởi động.
+func (s *CrmCustomerService) RecalculateAllCustomersForAllOrgs(ctx context.Context, poolSize int) (totalProcessed, totalFailed int, orgCount int, err error) {
+	values, err := s.Distinct(ctx, "ownerOrganizationId", bson.M{})
+	if err != nil {
+		return 0, 0, 0, err
 	}
-
-	// Worker pool: xử lý song song để tăng tốc, mỗi customer độc lập (unifiedId khác nhau).
-	const basePool = 12
-	workers := basePool
-	if poolSize > 0 {
-		workers = poolSize
+	var orgIDs []primitive.ObjectID
+	for _, v := range values {
+		if oid, ok := v.(primitive.ObjectID); ok {
+			orgIDs = append(orgIDs, oid)
+		}
 	}
-	if total < workers {
-		workers = total
+	if len(orgIDs) == 0 {
+		return 0, 0, 0, nil
 	}
-	jobs := make(chan string, total)
-	for _, id := range ids {
-		jobs <- id
+	var totalP, totalF int
+	for _, orgID := range orgIDs {
+		res, e := s.RecalculateAllCustomers(ctx, orgID, 0, poolSize)
+		if e != nil {
+			return totalP, totalF, len(orgIDs), e
+		}
+		totalP += res.TotalProcessed
+		totalF += res.TotalFailed
 	}
-	close(jobs)
-
-	var mu sync.Mutex
-	const maxFailedIds = 10
-	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			defer func() {
-				if r := recover(); r != nil {
-					fmt.Fprintf(os.Stderr, "[CRM] RecalcAll: Worker panic recovered: %v\n", r)
-				}
-			}()
-			for unifiedId := range jobs {
-				_, err := s.RecalculateCustomerFromAllSources(ctx, unifiedId, ownerOrgID)
-				mu.Lock()
-				if err != nil {
-					result.TotalFailed++
-					if len(result.FailedIds) < maxFailedIds {
-						result.FailedIds = append(result.FailedIds, unifiedId)
-					}
-				} else {
-					result.TotalProcessed++
-					pct := float64(result.TotalProcessed) * 100 / float64(total)
-					logger.GetAppLogger().Infof("[CRM] RecalcAll: unifiedId=%s processed=%d total=%d progressPct=%.1f%%",
-						unifiedId, result.TotalProcessed, total, pct)
-				}
-				mu.Unlock()
-			}
-		}()
-	}
-	wg.Wait()
-	return result, nil
+	return totalP, totalF, len(orgIDs), nil
 }
 
 // rebuildProfileFromAllSources xây dựng profile từ POS + FB + orders + conversations.
@@ -639,7 +742,7 @@ func fillProfileGapsFromConvData(p crmmodels.CrmCustomerProfile, d convCustomerD
 	return p
 }
 
-// buildCustomerIdsForRecalculate tạo danh sách customerId để query (unifiedId + pos + fb).
+// buildCustomerIdsForRecalculate tạo danh sách customerId để query (uid ưu tiên, unifiedId + pos + fb fallback).
 func buildCustomerIdsForRecalculate(c *crmmodels.CrmCustomer) []string {
 	seen := make(map[string]bool)
 	var ids []string
@@ -649,9 +752,24 @@ func buildCustomerIdsForRecalculate(c *crmmodels.CrmCustomer) []string {
 			ids = append(ids, id)
 		}
 	}
+	add(c.Uid) // Ưu tiên uid (mới)
 	add(c.UnifiedId)
 	add(c.SourceIds.Pos)
 	add(c.SourceIds.Fb)
+	add(c.SourceIds.Zalo)
+	// Thu thập tất cả inbox ids (nhiều page FB, Zalo)
+	if len(c.SourceIds.AllInboxIds) > 0 {
+		for _, id := range c.SourceIds.AllInboxIds {
+			add(id)
+		}
+	} else {
+		for _, v := range c.SourceIds.FbByPage {
+			add(v)
+		}
+		for _, v := range c.SourceIds.ZaloByPage {
+			add(v)
+		}
+	}
 	return ids
 }
 
@@ -764,6 +882,12 @@ func (s *CrmCustomerService) expandCustomerIdsForAggregation(ctx context.Context
 			if fbId := s.findFbCustomerByPhone(ctx, norm[0], ownerOrgID); fbId != "" && !seen[fbId] {
 				seen[fbId] = true
 				ids = append(ids, fbId)
+			}
+		}
+		if c.SourceIds.Zalo == "" {
+			if zaloId := s.findZaloCustomerByPhone(ctx, norm[0], ownerOrgID); zaloId != "" && !seen[zaloId] {
+				seen[zaloId] = true
+				ids = append(ids, zaloId)
 			}
 		}
 		if c.SourceIds.Pos == "" {
@@ -916,6 +1040,7 @@ func (s *CrmCustomerService) backfillOrderActivitiesForCustomer(ctx context.Cont
 	if len(ids) > 0 {
 		orConditions = append(orConditions,
 			bson.M{"customerId": bson.M{"$in": ids}},
+			bson.M{"links.customer.uid": bson.M{"$in": ids}}, // Identity 4 lớp — pc_pos_orders
 			bson.M{"posData.customer.id": bson.M{"$in": ids}},
 			bson.M{"posData.customer_id": bson.M{"$in": ids}},
 		)
@@ -992,13 +1117,13 @@ func (s *CrmCustomerService) logRecalculateActivity(ctx context.Context, unified
 	if err != nil {
 		return
 	}
-	cust, err := s.FindOne(ctx, bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}, nil)
+	cust, err := s.FindOne(ctx, buildCustomerFilterByIdOrUid(unifiedId, ownerOrgID), nil)
 	if err != nil {
 		return
 	}
 	metadata := map[string]interface{}{"trigger": "recalculate"}
 	// Dùng metricsOverride (chính xác metrics vừa lưu) thay vì GetMetricsForSnapshotAt — tránh chênh lệch.
-	snap := BuildSnapshotForNewCustomer(&cust, activityAt, false, metricsOverride)
+		snap := BuildSnapshotForNewCustomer(ctx, &cust, activityAt, false, metricsOverride)
 	if snap != nil {
 		MergeSnapshotIntoMetadata(metadata, snap)
 	}

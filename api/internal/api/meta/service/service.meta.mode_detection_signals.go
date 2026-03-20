@@ -301,57 +301,45 @@ func GetOrdersForCampaignSlot(ctx context.Context, campaignId, adAccountId strin
 	return 0, false
 }
 
-// DetectWindowShoppingPattern PATCH 04: Mess_07-12h tăng >50% vs yesterday, CR_07-12h < 5%, CR_yesterday_12-22h > 10%.
-// Chỉ chạy trong Event Window. Trả về true → thêm flag window_shopping_pattern, suspend Mess Trap đến 14:00.
-func DetectWindowShoppingPattern(ctx context.Context, campaignId, adAccountId string, ownerOrgID primitive.ObjectID) bool {
+// GetWindowShoppingInputs PATCH 04: Thu thập dữ liệu cho Rule Engine (Interpretation Rule window_shopping_pattern).
+// Trả về params để truyền vào Rule; ok=false khi thiếu dữ liệu.
+func GetWindowShoppingInputs(ctx context.Context, campaignId, adAccountId string, ownerOrgID primitive.ObjectID) (params map[string]interface{}, ok bool) {
 	if campaignId == "" || adAccountId == "" {
-		return false
+		return nil, false
 	}
-	if inEvent, _, _ := adsconfig.IsEventWindow(time.Now()); !inEvent {
-		return false
+	inEvent, _, _ := adsconfig.IsEventWindow(time.Now())
+	params = map[string]interface{}{
+		"in_event_window": inEvent,
+	}
+	if !inEvent {
+		return params, false
 	}
 	loc, _ := time.LoadLocation("Asia/Ho_Chi_Minh")
 	now := time.Now().In(loc)
 	today := now
 	yesterday := now.AddDate(0, 0, -1)
 
-	// Mess_07-12h hôm nay
 	messToday0712, ok1 := GetMessForCampaignSlot(ctx, campaignId, adAccountId, ownerOrgID, today, 7, 12)
 	if !ok1 || messToday0712 == 0 {
-		return false
+		return params, false
 	}
-	// Mess_07-12h hôm qua
 	messYesterday0712, ok2 := GetMessForCampaignSlot(ctx, campaignId, adAccountId, ownerOrgID, yesterday, 7, 12)
 	if !ok2 || messYesterday0712 == 0 {
-		return false
+		return params, false
 	}
-	// Mess tăng > 50%
-	if float64(messToday0712) <= float64(messYesterday0712)*1.5 {
-		return false
-	}
-
-	// CR_07-12h hôm nay < 5%
 	ordersToday0712, _ := GetOrdersForCampaignSlot(ctx, campaignId, adAccountId, ownerOrgID, today, 7, 12)
-	cr0712 := 0.0
-	if messToday0712 > 0 {
-		cr0712 = float64(ordersToday0712) / float64(messToday0712) * 100
-	}
-	if cr0712 >= 5 {
-		return false
-	}
-
-	// CR_yesterday_12-22h > 10%
 	messYesterday1222, ok3 := GetMessForCampaignSlot(ctx, campaignId, adAccountId, ownerOrgID, yesterday, 12, 22)
 	if !ok3 || messYesterday1222 == 0 {
-		return false
+		return params, false
 	}
 	ordersYesterday1222, _ := GetOrdersForCampaignSlot(ctx, campaignId, adAccountId, ownerOrgID, yesterday, 12, 22)
-	crYesterday1222 := float64(ordersYesterday1222) / float64(messYesterday1222) * 100
-	if crYesterday1222 <= 10 {
-		return false
-	}
 
-	return true
+	params["mess_07_12_today"] = float64(messToday0712)
+	params["mess_07_12_yesterday"] = float64(messYesterday0712)
+	params["orders_07_12_today"] = float64(ordersToday0712)
+	params["mess_12_22_yesterday"] = float64(messYesterday1222)
+	params["orders_12_22_yesterday"] = float64(ordersYesterday1222)
+	return params, true
 }
 
 // GetMonthlyRevenuePace S4: Pace = revenue_so_far / (target × days_elapsed/total_days). target tính triệu VNĐ.

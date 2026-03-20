@@ -10,7 +10,6 @@ import (
 
 	adsconfig "meta_commerce/internal/api/ads/config"
 	adsmodels "meta_commerce/internal/api/ads/models"
-	"meta_commerce/internal/approval"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/logger"
 	metasvc "meta_commerce/internal/api/meta/service"
@@ -89,7 +88,7 @@ func RunPrePeakBoost(ctx context.Context, baseURL string) (boosted int, err erro
 		if hasPending, _ := HasPendingProposalForCampaign(ctx, profile.CampaignId, profile.OwnerOrganizationID); hasPending {
 			continue
 		}
-		pending, err := Propose(ctx, &ProposeInput{
+		eventID, err := Propose(ctx, &ProposeInput{
 			ActionType:   "INCREASE",
 			AdAccountId:  profile.AdAccountId,
 			CampaignId:   profile.CampaignId,
@@ -102,11 +101,7 @@ func RunPrePeakBoost(ctx context.Context, baseURL string) (boosted int, err erro
 			log.WithError(err).Warn("⏰ [PRE_PEAK] Lỗi propose")
 			continue
 		}
-		if pending != nil {
-			if _, errApprove := approval.Approve(ctx, pending.ID.Hex(), profile.OwnerOrganizationID); errApprove != nil {
-				log.WithError(errApprove).WithFields(map[string]interface{}{"campaignId": profile.CampaignId}).Warn("⏰ [PRE_PEAK] Lỗi approve")
-				continue
-			}
+		if eventID != "" {
 			boosted++
 		}
 	}
@@ -334,7 +329,7 @@ func RunPostPeakTrim(ctx context.Context, baseURL string) (trimmed int, err erro
 		if hasPending, _ := HasPendingProposalForCampaign(ctx, profile.CampaignId, profile.OwnerOrganizationID); hasPending {
 			continue
 		}
-		pending, err := Propose(ctx, &ProposeInput{
+		eventID, err := Propose(ctx, &ProposeInput{
 			ActionType:   "DECREASE",
 			AdAccountId:  profile.AdAccountId,
 			CampaignId:   profile.CampaignId,
@@ -347,10 +342,7 @@ func RunPostPeakTrim(ctx context.Context, baseURL string) (trimmed int, err erro
 			log.WithError(err).Warn("⏰ [POST_PEAK] Lỗi propose")
 			continue
 		}
-		if pending != nil {
-			if _, errApprove := approval.Approve(ctx, pending.ID.Hex(), profile.OwnerOrganizationID); errApprove != nil {
-				continue
-			}
+		if eventID != "" {
 			trimmed++
 		}
 	}

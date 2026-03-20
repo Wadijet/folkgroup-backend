@@ -2,15 +2,12 @@
 package service
 
 import (
-	"context"
 	"fmt"
 
 	basesvc "meta_commerce/internal/api/base/service"
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/api/ruleintel/models"
-
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // LogicScriptService CRUD cho Logic Script.
@@ -27,9 +24,4 @@ func NewLogicScriptService() (*LogicScriptService, error) {
 	return &LogicScriptService{
 		BaseServiceMongoImpl: basesvc.NewBaseServiceMongo[models.LogicScript](coll),
 	}, nil
-}
-
-// FindOne tìm Logic Script theo filter.
-func (s *LogicScriptService) FindOne(ctx context.Context, filter interface{}, opts *options.FindOneOptions) (models.LogicScript, error) {
-	return s.BaseServiceMongoImpl.FindOne(ctx, filter, opts)
 }

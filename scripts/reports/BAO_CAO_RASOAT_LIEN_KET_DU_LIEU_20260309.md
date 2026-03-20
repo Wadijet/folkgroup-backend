@@ -88,9 +88,20 @@ crm_customers được merge từ fb_customers và/hoặc pc_pos_customers qua s
 | customerId / posData.customer → pc_pos_customers | 198 | 198 | 100.0% |
 | customerId / posData.customer → fb_customers | 198 | 0 | 0.0% |
 
-### 6.2 fb_conversations.customerId → fb_customers
+### 6.2 fb_conversations ↔ fb_customers (đã rà soát lại 2026-03)
 
-Mẫu 100 conversations có customerId: 0 khớp fb_customers (0.0%)
+**Lưu ý:** Báo cáo cũ kiểm tra `conv.customerId = fb_customers.customerId` → 0% khớp (sai trường).
+
+**Liên kết thực tế (script audit_fb_conv_fb_customer_link.go):**
+
+| Đường link | Số conv match | Tỷ lệ |
+|------------|---------------|-------|
+| conv.customerId = **fb_customers.panCakeData.customer_id** | 46832 | 93.8% |
+| conv.customers[].id = fb_customers.customerId | 46832 | 93.8% |
+| conv.conversationId = fb.pageId_psid (thread_id) | 46832 | 93.8% |
+| conv.customerId = fb_customers.customerId | 0 | 0% |
+
+**Kết luận:** Liên kết TỒN TẠI qua `panCakeData.customer_id` và `customers[].id`. Báo cáo cũ so sánh sai trường.
 
 ### 6.3 fb_conversations.conversationId → fb_message_items
 
@@ -99,4 +110,24 @@ Mẫu 100 conversations: 100 có ≥1 message trong fb_message_items (100.0%)
 ### 6.4 fb_pages.shop_id → pc_pos_shops
 
 ✅ fb_pages.shop_id (860225178) khớp pc_pos_shops
+
+### 6.5 crm_customers (engaged) ↔ fb_conversations (verify_linkages check13)
+
+Kiểm tra theo filter `buildConversationFilterForCustomerIds`: engaged customer có ids (unifiedId, sourceIds.pos, sourceIds.fb) → match conv qua customerId, panCakeData.*.
+
+| Kết quả | Mô tả |
+|---------|-------|
+| ⚠️ MỘT PHẦN | ~88% engaged match fb_conversations trực tiếp; phần còn lại có thể match qua fb_messages/expandIds |
+
+---
+
+## 7. VẤN ĐỀ CÒN LẠI (cập nhật 2026-03)
+
+| # | Liên kết | Trạng thái | Ghi chú |
+|---|----------|------------|---------|
+| 1 | pc_pos_orders.ad_id ↔ meta_ads | ⚠️ MỘT PHẦN | Một số ad_id không có trong meta_ads (sync chưa đủ hoặc format khác) |
+| 2 | fb_conversations.ad_ids ↔ meta_ads | ⚠️ MỘT PHẦN | Tương tự |
+| 3 | meta_ads hierarchy | ⚠️ MỘT PHẦN | Một số ad mẫu không tìm thấy campaign/adset tương ứng |
+| 4 | Format ad_id (orders vs meta_ads) | ⚠️ Khác format | Cần chuẩn hóa khi so sánh |
+| 5 | crm ↔ conv (engaged) | ⚠️ MỘT PHẦN | ~88% match trực tiếp; ~12% match qua fb_messages/expandIds |
 

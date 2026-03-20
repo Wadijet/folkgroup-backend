@@ -12,7 +12,7 @@ Package **internal/approval** là bridge: delegate sang `pkg/approval` engine, i
 
 - **Queue:** `action_pending_approval` (collection chung)
 - **Domain:** Mỗi domain (ads, content, ...) đăng ký Executor và gọi Propose với domain tương ứng
-- **API:** `/approval/actions/*` — propose, approve, reject, pending
+- **API:** `/executor/actions/*` — propose, approve, reject, pending (executor router)
 - **Notification:** EventType theo domain (ví dụ ads → `ads_action_pending_approval`)
 
 ## Sử dụng

@@ -547,8 +547,8 @@ func DefaultKillRuleSpecs() []ActionRuleSpec {
 func DefaultDecreaseRuleSpecs() []ActionRuleSpec {
 	return []ActionRuleSpec{
 		{Flag: "sl_a_decrease", RuleCode: "sl_a_decrease", Action: "DECREASE", Value: 20, Reason: "Hệ thống đề xuất [SL-A]: CPA mess cao nhưng MQS >= 2 — giảm budget 20% thay vì kill", Priority: 1, Label: "SL-A: Decrease", AutoPropose: true, AutoApprove: false},
-		{Flag: "mess_trap_suspect", RuleCode: "mess_trap_suspect", Action: "DECREASE", Value: 30, Reason: "Hệ thống đề xuất [Mess Trap]: Nghi ngờ bẫy mess — giảm budget 30%", Priority: 2, Label: "Mess Trap Suspect", AutoPropose: true, AutoApprove: true},
-		{Flag: "trim_eligible_decrease", RuleCode: "trim_eligible_decrease", Action: "DECREASE", Value: 30, Reason: "Hệ thống đề xuất [Trim]: Frequency cao, có đơn — giảm budget 30% thay vì kill", Priority: 3, Label: "Trim: Decrease", AutoPropose: true, AutoApprove: true},
+		{Flag: "mess_trap_suspect", RuleCode: "mess_trap_suspect", Action: "DECREASE", Value: 30, Reason: "Hệ thống đề xuất [Mess Trap]: Nghi ngờ bẫy mess — giảm budget 30%", Priority: 2, Label: "Mess Trap Suspect", AutoPropose: true, AutoApprove: false},
+		{Flag: "trim_eligible_decrease", RuleCode: "trim_eligible_decrease", Action: "DECREASE", Value: 30, Reason: "Hệ thống đề xuất [Trim]: Frequency cao, có đơn — giảm budget 30% thay vì kill", Priority: 3, Label: "Trim: Decrease", AutoPropose: true, AutoApprove: false},
 		{RequireFlags: []string{"chs_warning", "cpa_mess_high"}, RuleCode: "chs_warning", Action: "DECREASE", Value: 15, Reason: "Hệ thống đề xuất [CHS Warning]: CPA mess cao, CHS warning — giảm budget 15%", Priority: 4, Label: "CHS Warning (compound)", AutoPropose: true, AutoApprove: false},
 	}
 }
@@ -578,8 +578,8 @@ func ActionRuleDefinitions() []RuleCodeMetadata {
 		{Code: "trim_eligible", Label: "Trim: Kill", ShortLabel: "Trim", Category: "trim", ActionType: "PAUSE", Description: "Frequency cao, CHS trung bình — Kill", Order: 10, AutoProposeDefault: true, AutoApproveDefault: false},
 		// Decrease rules
 		{Code: "sl_a_decrease", Label: "SL-A: Decrease", ShortLabel: "SL-A ↓", Category: "stop_loss", ActionType: "DECREASE", Description: "CPA mess cao nhưng MQS >= 2 — giảm 20% thay vì kill", Order: 11, AutoProposeDefault: true, AutoApproveDefault: false},
-		{Code: "mess_trap_suspect", Label: "Mess Trap Suspect", ShortLabel: "Mess Trap ↓", Category: "mess_trap", ActionType: "DECREASE", Description: "Nghi ngờ bẫy mess — giảm 30%", Order: 12, AutoProposeDefault: true, AutoApproveDefault: true},
-		{Code: "trim_eligible_decrease", Label: "Trim: Decrease", ShortLabel: "Trim ↓", Category: "trim", ActionType: "DECREASE", Description: "Frequency cao, có đơn — giảm 30% thay vì kill", Order: 13, AutoProposeDefault: true, AutoApproveDefault: true},
+		{Code: "mess_trap_suspect", Label: "Mess Trap Suspect", ShortLabel: "Mess Trap ↓", Category: "mess_trap", ActionType: "DECREASE", Description: "Nghi ngờ bẫy mess — giảm 30%", Order: 12, AutoProposeDefault: true, AutoApproveDefault: false},
+		{Code: "trim_eligible_decrease", Label: "Trim: Decrease", ShortLabel: "Trim ↓", Category: "trim", ActionType: "DECREASE", Description: "Frequency cao, có đơn — giảm 30% thay vì kill", Order: 13, AutoProposeDefault: true, AutoApproveDefault: false},
 		// Compound rule: chs_warning + cpa_mess_high
 		{Code: "chs_warning", Label: "CHS Warning (compound)", ShortLabel: "CHS ↓", Category: "chs", ActionType: "DECREASE", Description: "CPA mess cao + CHS warning — giảm 15%", Order: 14, AutoProposeDefault: true, AutoApproveDefault: false},
 	}

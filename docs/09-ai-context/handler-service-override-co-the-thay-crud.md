@@ -72,7 +72,32 @@ Tất cả override ở **service** (InsertOne, UpdateById, DeleteOne, DeleteByI
 
 ---
 
-## 5. Tài liệu liên quan
+## 5. Nguyên tắc: Override phải gọi CRUD chuẩn
+
+**Handler và Service override** nên xử lý logic riêng rồi **gọi hàm CRUD chuẩn** để áp dụng tất cả các điểm hook.
+
+### Các điểm hook trong BaseServiceMongoImpl
+
+| Hook | InsertOne | Mô tả |
+|------|-----------|-------|
+| validateSystemDataInsert | ✓ | Bảo vệ system data |
+| applyInsertDefaultsToModel | ✓ | Default từ struct tag |
+| identity.EnrichIdentity4Layers | ✓ | uid, sourceIds, links |
+| events.EmitDataChanged | ✓ | Event cho downstream |
+
+### Pattern đúng
+
+- **Handler override:** logic đặc thù → `h.BaseService.InsertOne(ctx, model)`
+- **Service override:** validation → `s.BaseServiceMongoImpl.InsertOne(ctx, data)`
+
+### Tránh
+
+- Gọi `collection.InsertOne` hoặc `coll.InsertOne` trực tiếp — bỏ qua toàn bộ hooks trên
+
+---
+
+## 6. Tài liệu liên quan
 
 - `docs/09-ai-context/handler-pattern-crud-vs-custom.md` — khi nào CRUD chuẩn, khi nào custom handler.
+- `.cursor/rules/api-structure.md` — CRUD Override Pattern.
 - `.cursor/rules/folkgroup-backend.mdc` — ưu tiên CRUD, hạn chế overdrive.

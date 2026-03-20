@@ -2,14 +2,16 @@
 package crmvc
 
 import (
+	"context"
 	"testing"
 
 	crmmodels "meta_commerce/internal/api/crm/models"
 )
 
 func TestBuildCurrentMetricsSnapshot_ReturnsNested(t *testing.T) {
+	ctx := context.Background()
 	c := &crmmodels.CrmCustomer{OrderCount: 0}
-	m := BuildCurrentMetricsSnapshot(c)
+	m := BuildCurrentMetricsSnapshot(ctx, c)
 	if m == nil {
 		t.Fatal("BuildCurrentMetricsSnapshot trả về nil")
 	}
@@ -31,8 +33,9 @@ func TestBuildCurrentMetricsSnapshot_ReturnsNested(t *testing.T) {
 }
 
 func TestBuildSnapshotForNewCustomer_MetricsSnapshotNested(t *testing.T) {
+	ctx := context.Background()
 	c := &crmmodels.CrmCustomer{Profile: crmmodels.CrmCustomerProfile{Name: "Test"}, OrderCount: 0}
-	snap := BuildSnapshotForNewCustomer(c, 0, true, nil)
+	snap := BuildSnapshotForNewCustomer(ctx, c, 0, true, nil)
 	if snap == nil {
 		t.Fatal("BuildSnapshotForNewCustomer trả về nil")
 	}

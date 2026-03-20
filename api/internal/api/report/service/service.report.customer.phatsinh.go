@@ -153,6 +153,7 @@ func computePhatSinhFromStateMaps(startState map[string]map[string]interface{}, 
 	engagedTempIn, engagedTempOut := make(map[string]int64), make(map[string]int64)
 	engagedDepthIn, engagedDepthOut := make(map[string]int64), make(map[string]int64)
 	engagedSourceIn, engagedSourceOut := make(map[string]int64), make(map[string]int64)
+	engagedPurchasePotentialIn, engagedPurchasePotentialOut := make(map[string]int64), make(map[string]int64)
 
 	var totalIn, totalOut, newInPeriod, activeInPeriod int64
 	var reactivationValueIn, reactivationValueOut float64
@@ -428,14 +429,20 @@ func computePhatSinhFromStateMaps(startState map[string]map[string]interface{}, 
 				incMap(engagedSourceOut, from.Engaged.SourceType)
 				incMap(engagedSourceIn, to.Engaged.SourceType)
 			}
+			if from.Engaged.PurchasePotential != to.Engaged.PurchasePotential {
+				incMap(engagedPurchasePotentialOut, from.Engaged.PurchasePotential)
+				incMap(engagedPurchasePotentialIn, to.Engaged.PurchasePotential)
+			}
 		} else if to.Engaged != nil {
 			incMap(engagedTempIn, to.Engaged.ConversationTemperature)
 			incMap(engagedDepthIn, to.Engaged.EngagementDepth)
 			incMap(engagedSourceIn, to.Engaged.SourceType)
+			incMap(engagedPurchasePotentialIn, to.Engaged.PurchasePotential)
 		} else if from.Engaged != nil {
 			incMap(engagedTempOut, from.Engaged.ConversationTemperature)
 			incMap(engagedDepthOut, from.Engaged.EngagementDepth)
 			incMap(engagedSourceOut, from.Engaged.SourceType)
+			incMap(engagedPurchasePotentialOut, from.Engaged.PurchasePotential)
 		}
 	}
 
@@ -452,6 +459,7 @@ func computePhatSinhFromStateMaps(startState map[string]map[string]interface{}, 
 		vipVDIn, vipVDOut, vipSTIn, vipSTOut, vipPDIn, vipPDOut, vipELIn, vipELOut, vipRSIn, vipRSOut,
 		inactiveEDIn, inactiveEDOut, inactiveRPIn, inactiveRPOut,
 		engagedTempIn, engagedTempOut, engagedDepthIn, engagedDepthOut, engagedSourceIn, engagedSourceOut,
+		engagedPurchasePotentialIn, engagedPurchasePotentialOut,
 	)
 }
 
@@ -470,6 +478,7 @@ func buildPhatSinhMetrics(
 	vipVDIn, vipVDOut, vipSTIn, vipSTOut, vipPDIn, vipPDOut, vipELIn, vipELOut, vipRSIn, vipRSOut map[string]int64,
 	inactiveEDIn, inactiveEDOut, inactiveRPIn, inactiveRPOut map[string]int64,
 	engagedTempIn, engagedTempOut, engagedDepthIn, engagedDepthOut, engagedSourceIn, engagedSourceOut map[string]int64,
+	engagedPurchasePotentialIn, engagedPurchasePotentialOut map[string]int64,
 ) map[string]interface{} {
 	sumFloat64Map := func(m map[string]float64) float64 {
 		var s float64
@@ -595,6 +604,7 @@ func buildPhatSinhMetrics(
 			"conversationTemperature": inOutMapInt64(engagedTempIn, engagedTempOut),
 			"engagementDepth":         inOutMapInt64(engagedDepthIn, engagedDepthOut),
 			"sourceType":              inOutMapInt64(engagedSourceIn, engagedSourceOut),
+			"purchasePotential":       inOutMapInt64(engagedPurchasePotentialIn, engagedPurchasePotentialOut),
 		},
 	}
 
@@ -667,7 +677,7 @@ func buildPeriodEndBalance(snapshotMap map[string]map[string]interface{}, endMs,
 	repeatRD, repeatRF, repeatSM, repeatPE, repeatEE, repeatUP := make(map[string]int64), make(map[string]int64), make(map[string]int64), make(map[string]int64), make(map[string]int64), make(map[string]int64)
 	vipVD, vipST, vipPD, vipEL, vipRS := make(map[string]int64), make(map[string]int64), make(map[string]int64), make(map[string]int64), make(map[string]int64)
 	inactiveED, inactiveRP := make(map[string]int64), make(map[string]int64)
-	engagedTemp, engagedDepth, engagedSource := make(map[string]int64), make(map[string]int64), make(map[string]int64)
+		engagedTemp, engagedDepth, engagedSource, engagedPurchasePotential := make(map[string]int64), make(map[string]int64), make(map[string]int64), make(map[string]int64)
 
 	var totalCustomers int64
 	var totalLTV float64
@@ -732,6 +742,7 @@ func buildPeriodEndBalance(snapshotMap map[string]map[string]interface{}, endMs,
 			incMap(engagedTemp, s.Engaged.ConversationTemperature)
 			incMap(engagedDepth, s.Engaged.EngagementDepth)
 			incMap(engagedSource, s.Engaged.SourceType)
+			incMap(engagedPurchasePotential, s.Engaged.PurchasePotential)
 		}
 	}
 
@@ -786,7 +797,7 @@ func buildPeriodEndBalance(snapshotMap map[string]map[string]interface{}, endMs,
 			"engagementDrop": inactiveED, "reactivationPotential": inactiveRP,
 		},
 		"engaged": map[string]interface{}{
-			"conversationTemperature": engagedTemp, "engagementDepth": engagedDepth, "sourceType": engagedSource,
+			"conversationTemperature": engagedTemp, "engagementDepth": engagedDepth, "sourceType": engagedSource, "purchasePotential": engagedPurchasePotential,
 		},
 	}
 

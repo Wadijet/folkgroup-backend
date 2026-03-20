@@ -21,6 +21,7 @@ alwaysApply: false
 
 ## Anti-patterns (Tránh)
 
+- ❌ `init()` cho services dùng `RegistryCollections` — tạo handler trong router `Register()` (xem api-structure.md)
 - ❌ `context.Background()` trong handler — dùng `c.Context()`
 - ❌ Query không filter theo `OwnerOrganizationID`
 - ❌ Business logic trong DTO/Handler — đặt trong Service

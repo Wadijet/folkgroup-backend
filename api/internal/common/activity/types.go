@@ -10,6 +10,7 @@ import (
 // Domain model embed với bson:",inline".
 type ActivityBase struct {
 	ID                  primitive.ObjectID     `json:"id,omitempty" bson:"_id,omitempty"`
+	Uid                 string                 `json:"uid" bson:"uid" index:"single:1"` // act_xxx — ID chuẩn 4 lớp
 	ActivityType        string                 `json:"activityType" bson:"activityType"`
 	Domain              string                 `json:"domain" bson:"domain"`
 	OwnerOrganizationID primitive.ObjectID     `json:"ownerOrganizationId" bson:"ownerOrganizationId"`

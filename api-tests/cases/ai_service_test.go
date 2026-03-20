@@ -15,24 +15,22 @@ import (
 // TestAIServiceModule kiểm tra tất cả các API của Module 2 (AI Service)
 func TestAIServiceModule(t *testing.T) {
 	baseURL := "http://localhost:8080/api/v1"
-	waitForHealth(baseURL, 10, 1*time.Second, t)
 
-	// Sử dụng bearer token của admin
-	adminToken := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI2OTVmN2IzOGNiZjYyZGJhMGZiMDk0Y2IiLCJ0aW1lIjoiNjk2MTk2M2MiLCJyYW5kb21OdW1iZXIiOiI0OSJ9.Y-__tpexbOJ-cg0v5PkOXUdfNLeVgvHazfjOn43bmuI"
-
-	client := utils.NewHTTPClient(baseURL, 10)
-	client.SetToken(adminToken)
-
-	fixtures := utils.NewTestFixtures(baseURL)
+	// Setup với admin user (token mới từ email/password hoặc Firebase)
+	fixtures, _, adminToken, client, err := utils.SetupTestWithAdminUser(t, baseURL)
+	if err != nil {
+		t.Fatalf("❌ Không thể setup test: %v", err)
+	}
+	_ = fixtures
 
 	// Lấy Root Organization ID để sử dụng trong test (nếu cần)
-	_, err := fixtures.GetRootOrganizationID(adminToken)
+	_, err = fixtures.GetRootOrganizationID(adminToken)
 	if err != nil {
 		t.Logf("⚠️ Không thể lấy Root Organization ID: %v", err)
 		// Vẫn tiếp tục test, có thể sẽ fail ở phần cần organizationId
 	}
 
-	// Lấy danh sách roles của user để set active role
+	// Lấy danh sách roles của user để set active role (cần cho GetRootOrganizationID và các API khác)
 	resp, body, err := client.GET("/auth/roles")
 	if err == nil && resp.StatusCode == http.StatusOK {
 		var result map[string]interface{}
@@ -43,6 +41,7 @@ func TestAIServiceModule(t *testing.T) {
 				roleID, ok := firstRole["roleId"].(string)
 				if ok {
 					client.SetActiveRoleID(roleID)
+					fixtures.SetActiveRoleIDForClient(roleID) // Cần cho GetRootOrganizationID
 					fmt.Printf("✅ Set active role ID: %s\n", roleID)
 				}
 			}
@@ -310,9 +309,9 @@ func TestAIServiceModule(t *testing.T) {
 				"type":        "generate",
 				"version":     "1.0.0",
 				"prompt":      "Generate content for {{pillar}}",
-				"provider":    "openai",
-				"model":       "gpt-4",
-				"status":      "active",
+				// provider phải là object {profileId, config} hoặc bỏ qua; không dùng string
+				"model":   "gpt-4",
+				"status":  "active",
 			}
 
 			resp, body, err := client.POST("/ai/prompt-templates/insert-one", payload)
@@ -415,13 +414,72 @@ func TestAIServiceModule(t *testing.T) {
 	// TEST AI WORKFLOW RUNS
 	// ============================================
 	t.Run("🔄 AIWorkflowRuns CRUD Operations", func(t *testing.T) {
-		var workflowRunID string
+		var workflowRunID, workflowIDForRun string
+
+		// Tạo workflow trước (workflowId bắt buộc và phải tồn tại)
+		t.Run("SETUP - Tạo workflow cho workflow run", func(t *testing.T) {
+			payload := map[string]interface{}{
+				"name":        fmt.Sprintf("Workflow for Run %d", time.Now().UnixNano()),
+				"description": "Workflow dùng cho workflow run test",
+				"version":     "1.0.0",
+				"rootRefType": "pillar",
+				"targetLevel": "L8",
+				"status":      "active",
+				"steps":       []map[string]interface{}{},
+			}
+			resp, body, err := client.POST("/ai/workflows/insert-one", payload)
+			if err != nil || (resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated) {
+				t.Skipf("Skipping: Không tạo được workflow (status: %d)", resp.StatusCode)
+				return
+			}
+			var result map[string]interface{}
+			json.Unmarshal(body, &result)
+			if data, ok := result["data"].(map[string]interface{}); ok {
+				if id, ok := data["id"].(string); ok {
+					workflowIDForRun = id
+				}
+			}
+		})
+
+		// SETUP: Tạo production content node pillar làm rootRef (ValidateRootRef yêu cầu rootRefId tồn tại trong production hoặc draft đã approve)
+		var rootRefPillarID string
+		t.Run("SETUP - Tạo production pillar cho rootRef", func(t *testing.T) {
+			payload := map[string]interface{}{
+				"type":   "pillar",
+				"text":   "Test pillar cho workflow run",
+				"name":   fmt.Sprintf("Pillar_%d", time.Now().UnixNano()),
+				"status": "active",
+			}
+			resp, body, err := client.POST("/content/nodes/insert-one", payload)
+			if err != nil || (resp != nil && resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated) {
+				t.Skipf("Skipping: Không tạo được production pillar (status: %v)", resp.StatusCode)
+				return
+			}
+			var result map[string]interface{}
+			json.Unmarshal(body, &result)
+			data, _ := result["data"].(map[string]interface{})
+			if data != nil {
+				if id, ok := data["id"].(string); ok {
+					rootRefPillarID = id
+				}
+			}
+			if rootRefPillarID == "" {
+				t.Skip("Skipping: Không lấy được pillar ID")
+				return
+			}
+		})
 
 		// CREATE: Tạo AI workflow run
 		t.Run("CREATE - Tạo AI workflow run", func(t *testing.T) {
+			if workflowIDForRun == "" {
+				t.Skip("Skipping: Chưa có workflow ID")
+			}
+			if rootRefPillarID == "" {
+				t.Skip("Skipping: Chưa có rootRef pillar ID")
+			}
 			payload := map[string]interface{}{
-				"workflowId":  "000000000000000000000000", // Cần workflowId hợp lệ
-				"rootRefId":   "000000000000000000000000",
+				"workflowId":  workflowIDForRun,
+				"rootRefId":   rootRefPillarID,
 				"rootRefType": "pillar",
 				"status":      "pending",
 			}
@@ -498,7 +556,7 @@ func TestAIServiceModule(t *testing.T) {
 			}
 		})
 
-		// DELETE: Xóa AI workflow run
+		// DELETE: Xóa AI workflow run và workflow setup
 		t.Run("DELETE - Xóa AI workflow run", func(t *testing.T) {
 			if workflowRunID == "" {
 				t.Skip("Skipping: Chưa có workflow run ID")
@@ -518,6 +576,10 @@ func TestAIServiceModule(t *testing.T) {
 			} else {
 				t.Errorf("❌ DELETE AI workflow run thất bại (status: %d, body: %s)", resp.StatusCode, string(body))
 			}
+			// Cleanup workflow setup
+			if workflowIDForRun != "" {
+				client.DELETE(fmt.Sprintf("/ai/workflows/delete-by-id/%s", workflowIDForRun))
+			}
 		})
 	})
 
@@ -525,13 +587,88 @@ func TestAIServiceModule(t *testing.T) {
 	// TEST AI STEP RUNS
 	// ============================================
 	t.Run("⚙️ AIStepRuns CRUD Operations", func(t *testing.T) {
-		var stepRunID string
+		var stepRunID, workflowRunIDForStep, stepIDForRun string
+
+		// SETUP: Tạo workflow, workflow run, step trước
+		t.Run("SETUP - Tạo workflow, workflow run, step", func(t *testing.T) {
+			// 1. Tạo workflow
+			wfPayload := map[string]interface{}{
+				"name":        fmt.Sprintf("WF for StepRun %d", time.Now().UnixNano()),
+				"description": "Workflow cho step run test",
+				"version":     "1.0.0",
+				"rootRefType": "pillar",
+				"targetLevel": "L8",
+				"status":      "active",
+				"steps":       []map[string]interface{}{},
+			}
+			resp, body, _ := client.POST("/ai/workflows/insert-one", wfPayload)
+			if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+				t.Skipf("Skipping: Không tạo được workflow")
+				return
+			}
+			var wfRes map[string]interface{}
+			json.Unmarshal(body, &wfRes)
+			wfID := ""
+			if d, ok := wfRes["data"].(map[string]interface{}); ok {
+				if id, ok := d["id"].(string); ok {
+					wfID = id
+				}
+			}
+			if wfID == "" {
+				t.Skip("Skipping: Không lấy được workflow ID")
+				return
+			}
+			// 2. Tạo workflow run
+			wfrPayload := map[string]interface{}{
+				"workflowId":  wfID,
+				"rootRefId":   "000000000000000000000000",
+				"rootRefType": "pillar",
+				"status":      "pending",
+			}
+			resp, body, _ = client.POST("/ai/workflow-runs/insert-one", wfrPayload)
+			if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+				t.Skip("Skipping: Không tạo được workflow run")
+				return
+			}
+			var wfrRes map[string]interface{}
+			json.Unmarshal(body, &wfrRes)
+			if d, ok := wfrRes["data"].(map[string]interface{}); ok {
+				if id, ok := d["id"].(string); ok {
+					workflowRunIDForStep = id
+				}
+			}
+			// 3. Tạo step
+			stepPayload := map[string]interface{}{
+				"name":        fmt.Sprintf("Step for Run %d", time.Now().UnixNano()),
+				"description": "Step cho step run test",
+				"type":        "GENERATE",
+				"inputSchema": map[string]interface{}{"type": "object"},
+				"outputSchema": map[string]interface{}{"type": "object"},
+				"targetLevel": "L2",
+				"status":      "active",
+			}
+			resp, body, _ = client.POST("/ai/steps/insert-one", stepPayload)
+			if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+				t.Skip("Skipping: Không tạo được step")
+				return
+			}
+			var stepRes map[string]interface{}
+			json.Unmarshal(body, &stepRes)
+			if d, ok := stepRes["data"].(map[string]interface{}); ok {
+				if id, ok := d["id"].(string); ok {
+					stepIDForRun = id
+				}
+			}
+		})
 
 		// CREATE: Tạo AI step run
 		t.Run("CREATE - Tạo AI step run", func(t *testing.T) {
+			if workflowRunIDForStep == "" || stepIDForRun == "" {
+				t.Skip("Skipping: Chưa có workflow run ID hoặc step ID")
+			}
 			payload := map[string]interface{}{
-				"workflowRunId": "000000000000000000000000", // Cần workflowRunId hợp lệ
-				"stepId":        "000000000000000000000000", // Cần stepId hợp lệ
+				"workflowRunId": workflowRunIDForStep,
+				"stepId":        stepIDForRun,
 				"order":         0,
 				"status":        "pending",
 			}
@@ -973,13 +1110,71 @@ func TestAIServiceModule(t *testing.T) {
 	// TEST AI WORKFLOW COMMANDS
 	// ============================================
 	t.Run("📨 AIWorkflowCommands CRUD Operations", func(t *testing.T) {
-		var commandID string
+		var commandID, workflowIDForCmd string
+
+		// SETUP: Tạo step và workflow có ít nhất 1 step (Workflow không có step nào → lỗi)
+		t.Run("SETUP - Tạo workflow cho command", func(t *testing.T) {
+			// 1. Tạo step L1 (Pillar) - không cần RootRefID/RootRefType
+			stepPayload := map[string]interface{}{
+				"name":        fmt.Sprintf("Step for Cmd %d", time.Now().UnixNano()),
+				"description": "Step L1 cho workflow command",
+				"type":        "GENERATE",
+				"inputSchema": map[string]interface{}{"type": "object"},
+				"outputSchema": map[string]interface{}{"type": "object"},
+				"targetLevel": "L1",
+				"status":      "active",
+			}
+			resp, body, _ := client.POST("/ai/steps/insert-one", stepPayload)
+			if resp == nil || (resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated) {
+				t.Skip("Skipping: Không tạo được step")
+				return
+			}
+			var stepRes map[string]interface{}
+			json.Unmarshal(body, &stepRes)
+			stepID := ""
+			if d, ok := stepRes["data"].(map[string]interface{}); ok {
+				if id, ok := d["id"].(string); ok {
+					stepID = id
+				}
+			}
+			if stepID == "" {
+				t.Skip("Skipping: Không lấy được step ID")
+				return
+			}
+			// 2. Tạo workflow với step
+			payload := map[string]interface{}{
+				"name":        fmt.Sprintf("WF for Command %d", time.Now().UnixNano()),
+				"description": "Workflow cho command test",
+				"version":     "1.0.0",
+				"rootRefType": "pillar",
+				"targetLevel": "L8",
+				"status":      "active",
+				"steps": []map[string]interface{}{
+					{"stepId": stepID, "order": 0},
+				},
+			}
+			resp, body, _ = client.POST("/ai/workflows/insert-one", payload)
+			if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+				t.Skip("Skipping: Không tạo được workflow")
+				return
+			}
+			var result map[string]interface{}
+			json.Unmarshal(body, &result)
+			if data, ok := result["data"].(map[string]interface{}); ok {
+				if id, ok := data["id"].(string); ok {
+					workflowIDForCmd = id
+				}
+			}
+		})
 
 		// CREATE: Tạo AI workflow command
 		t.Run("CREATE - Tạo AI workflow command", func(t *testing.T) {
+			if workflowIDForCmd == "" {
+				t.Skip("Skipping: Chưa có workflow ID")
+			}
 			payload := map[string]interface{}{
 				"commandType": "START_WORKFLOW",
-				"workflowId":  "000000000000000000000000", // Cần workflowId hợp lệ
+				"workflowId":  workflowIDForCmd,
 				"rootRefId":   "000000000000000000000000",
 				"rootRefType": "pillar",
 				"status":      "pending",
@@ -1057,7 +1252,7 @@ func TestAIServiceModule(t *testing.T) {
 			}
 		})
 
-		// DELETE: Xóa AI workflow command
+		// DELETE: Xóa AI workflow command và workflow setup
 		t.Run("DELETE - Xóa AI workflow command", func(t *testing.T) {
 			if commandID == "" {
 				t.Skip("Skipping: Chưa có command ID")
@@ -1076,6 +1271,9 @@ func TestAIServiceModule(t *testing.T) {
 				fmt.Printf("✅ DELETE AI workflow command thành công\n")
 			} else {
 				t.Errorf("❌ DELETE AI workflow command thất bại (status: %d, body: %s)", resp.StatusCode, string(body))
+			}
+			if workflowIDForCmd != "" {
+				client.DELETE(fmt.Sprintf("/ai/workflows/delete-by-id/%s", workflowIDForCmd))
 			}
 		})
 	})

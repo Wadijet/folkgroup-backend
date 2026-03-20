@@ -4,12 +4,9 @@ package adssvc
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	adsconfig "meta_commerce/internal/api/ads/config"
-	adsrules "meta_commerce/internal/api/ads/rules"
-	"meta_commerce/internal/approval"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/logger"
 	metasvc "meta_commerce/internal/api/meta/service"
@@ -296,19 +293,22 @@ func RunMorningOn(ctx context.Context, baseURL string) {
 			continue
 		}
 		cfg, _ := adsconfig.GetConfigForCampaign(ctx, doc.AdAccountId, doc.OwnerOrganizationID)
-		ctxFacts := adsrules.BuildFactsContext(getRaw7d(raw), layer1, layer2, layer3, cfg)
-		campCtx := &adsrules.EvalCampaignContext{CampaignId: doc.CampaignId, AdAccountId: doc.AdAccountId, OwnerOrgID: doc.OwnerOrganizationID}
-		flags := adsrules.EvaluateFlags(ctx, &ctxFacts, cfg, campCtx)
-		flagsIf := make([]interface{}, len(flags))
-		for i, f := range flags {
-			flagsIf[i] = f
+		flags := metasvc.ComputeAlertFlags(ctx, getRaw7d(raw), layer1, layer2, layer3, cfg, doc.CampaignId, doc.AdAccountId, doc.OwnerOrganizationID)
+		flagMap := make(map[string]interface{})
+		for _, f := range flags {
+			flagMap[f] = true
 		}
-		result := adsrules.EvaluateForResume(flagsIf, cfg)
+		r7d := getRaw7d(raw)
+		if r7d == nil {
+			r7d = map[string]interface{}{}
+		}
+		layers := map[string]interface{}{"layer1": layer1, "raw": r7d, "flag": flagMap}
+		result := metasvc.EvaluateRuleForScheduler(ctx, "RULE_ADS_RESUME_MORNING_ON", "morning_on", layers, nil, doc.CampaignId, doc.AdAccountId, doc.OwnerOrganizationID, "Morning On")
 		if result == nil || !result.ShouldPropose {
 			continue
 		}
-		pending, err := Propose(ctx, &ProposeInput{
-			ActionType:   "RESUME",
+		eventID, err := Propose(ctx, &ProposeInput{
+			ActionType:   result.ActionType,
 			AdAccountId:  doc.AdAccountId,
 			CampaignId:   doc.CampaignId,
 			Reason:       result.Reason,
@@ -317,8 +317,7 @@ func RunMorningOn(ctx context.Context, baseURL string) {
 		if err != nil {
 			continue
 		}
-		if pending != nil {
-			approval.Approve(ctx, pending.ID.Hex(), doc.OwnerOrganizationID)
+		if eventID != "" {
 			count++
 		}
 	}
@@ -380,41 +379,31 @@ func RunNoonCutOff(ctx context.Context) {
 			continue
 		}
 		cfg, _ := adsconfig.GetConfigForCampaign(ctx, doc.AdAccountId, doc.OwnerOrganizationID)
-		ctxFacts := adsrules.BuildFactsContext(getRaw7d(raw), layer1, layer2, layer3, cfg)
-		campCtx := &adsrules.EvalCampaignContext{CampaignId: doc.CampaignId, AdAccountId: doc.AdAccountId, OwnerOrgID: doc.OwnerOrganizationID}
-		flags := adsrules.EvaluateFlags(ctx, &ctxFacts, cfg, campCtx)
-		hasNoonCut := false
+		flags := metasvc.ComputeAlertFlags(ctx, getRaw7d(raw), layer1, layer2, layer3, cfg, doc.CampaignId, doc.AdAccountId, doc.OwnerOrganizationID)
+		flagMap := make(map[string]interface{})
 		for _, f := range flags {
-			if f == "noon_cut_eligible" {
-				hasNoonCut = true
-				break
-			}
+			flagMap[f] = true
 		}
-		if !hasNoonCut {
+		r7d := getRaw7d(raw)
+		if r7d == nil {
+			r7d = map[string]interface{}{}
+		}
+		layers := map[string]interface{}{"layer1": layer1, "raw": r7d, "flag": flagMap}
+		result := metasvc.EvaluateRuleForScheduler(ctx, "RULE_ADS_KILL_NOON_CUT", "noon_cut", layers, nil, doc.CampaignId, doc.AdAccountId, doc.OwnerOrganizationID, "Noon Cut")
+		if result == nil || !result.ShouldPropose {
 			continue
 		}
-		// Bỏ qua nếu có safety_net
-		for _, f := range flags {
-			if f == "safety_net" {
-				hasNoonCut = false
-				break
-			}
-		}
-		if !hasNoonCut {
-			continue
-		}
-		pending, err := Propose(ctx, &ProposeInput{
-			ActionType:   "PAUSE",
+		eventID, err := Propose(ctx, &ProposeInput{
+			ActionType:   result.ActionType,
 			AdAccountId:  doc.AdAccountId,
 			CampaignId:   doc.CampaignId,
-			Reason:       "Noon Cut — camp chết buổi trưa, bật lại 14:30",
-			RuleCode:     "noon_cut",
-		}, doc.OwnerOrganizationID, "")
+			Reason:       result.Reason,
+			RuleCode:     result.RuleCode,
+		}, doc.OwnerOrganizationID, getProposeBaseURL())
 		if err != nil {
 			continue
 		}
-		if pending != nil {
-			approval.Approve(ctx, pending.ID.Hex(), doc.OwnerOrganizationID)
+		if eventID != "" {
 			count++
 		}
 	}
@@ -483,19 +472,26 @@ func RunNoonCutResume(ctx context.Context) {
 	}
 
 	count := 0
+	layers := map[string]interface{}{
+		"flag": map[string]interface{}{"was_paused_by_noon_cut": true},
+		"layer1": map[string]interface{}{}, "raw": map[string]interface{}{},
+	}
 	for _, c := range toResume {
-		pending, err := Propose(ctx, &ProposeInput{
-			ActionType:   "RESUME",
+		result := metasvc.EvaluateRuleForScheduler(ctx, "RULE_ADS_RESUME_NOON_CUT", "noon_cut_resume", layers, nil, c.CampaignId, c.AdAccountId, c.OwnerOrganizationID, "Noon Cut Resume")
+		if result == nil || !result.ShouldPropose {
+			continue
+		}
+		eventID, err := Propose(ctx, &ProposeInput{
+			ActionType:   result.ActionType,
 			AdAccountId:  c.AdAccountId,
 			CampaignId:   c.CampaignId,
-			Reason:       "Noon Cut Resume 14:30 — bật lại camp đã tắt trưa",
-			RuleCode:     "noon_cut_resume",
-		}, c.OwnerOrganizationID, "")
+			Reason:       result.Reason,
+			RuleCode:     result.RuleCode,
+		}, c.OwnerOrganizationID, getProposeBaseURL())
 		if err != nil {
 			continue
 		}
-		if pending != nil {
-			approval.Approve(ctx, pending.ID.Hex(), c.OwnerOrganizationID)
+		if eventID != "" {
 			count++
 		}
 	}
@@ -557,20 +553,19 @@ func RunNightOff(ctx context.Context) {
 		if hb == 0 {
 			hb = 23
 		}
-		shouldOff := false
-		if accountMode == ModePROTECT && h == hp && m == 0 {
-			shouldOff = true
+		params := map[string]interface{}{
+			"account_mode":    accountMode,
+			"hour":            h,
+			"minute":          m,
+			"hour_protect":    hp,
+			"hour_efficiency": he,
+			"hour_normal":     hn,
+			"minute_normal":   mn,
+			"hour_blitz":      hb,
 		}
-		if accountMode == ModeEFFICIENCY && h == he && m == 0 {
-			shouldOff = true
-		}
-		if accountMode == ModeNORMAL && h == hn && m == mn {
-			shouldOff = true
-		}
-		if accountMode == ModeBLITZ && h == hb && m == 0 {
-			shouldOff = true
-		}
-		if !shouldOff {
+		layers := map[string]interface{}{"layer1": map[string]interface{}{}, "raw": map[string]interface{}{}, "flag": map[string]interface{}{}}
+		result := metasvc.EvaluateRuleForScheduler(ctx, "RULE_ADS_KILL_NIGHT_OFF", "night_off", layers, params, "", acc.AdAccountId, acc.OwnerOrganizationID, "Night Off")
+		if result == nil || !result.ShouldPropose {
 			continue
 		}
 
@@ -594,18 +589,17 @@ func RunNightOff(ctx context.Context) {
 			if err := cur.Decode(&camp); err != nil {
 				continue
 			}
-			pending, err := Propose(ctx, &ProposeInput{
-				ActionType:   "PAUSE",
+			eventID, err := Propose(ctx, &ProposeInput{
+				ActionType:   result.ActionType,
 				AdAccountId:  acc.AdAccountId,
 				CampaignId:   camp.CampaignId,
-				Reason:       fmt.Sprintf("Night Off — mode %s", accountMode),
-				RuleCode:     "night_off",
-			}, acc.OwnerOrganizationID, "")
+				Reason:       result.Reason,
+				RuleCode:     result.RuleCode,
+			}, acc.OwnerOrganizationID, getProposeBaseURL())
 			if err != nil {
 				continue
 			}
-			if pending != nil {
-				approval.Approve(ctx, pending.ID.Hex(), acc.OwnerOrganizationID)
+			if eventID != "" {
 				paused++
 			}
 		}

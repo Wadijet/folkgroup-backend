@@ -2,8 +2,12 @@
 package worker
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
 	"os"
+	"strings"
 	"strconv"
 	"sync"
 	"time"
@@ -28,7 +32,7 @@ type Priority int
 
 const (
 	// Order > Ads > Customer; trong từng nhóm Report ưu tiên hơn
-	PriorityCritical Priority = 1 // Report: ReportDirtyWorker (order + customer reports) — Report ưu tiên nhất
+	PriorityCritical Priority = 1 // Report: report_dirty_ads, report_dirty_order, report_dirty_customer — Report ưu tiên nhất
 	PriorityHigh     Priority = 2 // Order: CrmIngest, Delivery Processor
 	PriorityNormal   Priority = 3 // Ads: tất cả Ads workers
 	PriorityLow      Priority = 4 // Customer: CrmBulkWorker
@@ -48,7 +52,23 @@ type OverloadAlertCallback func(metrics ResourceMetrics, state string)
 var (
 	overloadAlertCallback OverloadAlertCallback
 	overloadCallbackMu    sync.RWMutex
+	alertWebhookURL      string
+	alertWebhookURLMu    sync.RWMutex
 )
+
+// SetAlertWebhookURL đặt URL webhook để POST khi CPU/RAM/disk quá tải. Rỗng = tắt.
+func SetAlertWebhookURL(url string) {
+	alertWebhookURLMu.Lock()
+	alertWebhookURL = strings.TrimSpace(url)
+	alertWebhookURLMu.Unlock()
+}
+
+// GetAlertWebhookURL trả về URL webhook hiện tại (để API GET).
+func GetAlertWebhookURL() string {
+	alertWebhookURLMu.RLock()
+	defer alertWebhookURLMu.RUnlock()
+	return alertWebhookURL
+}
 
 // RegisterOverloadAlertCallback đăng ký callback khi CPU/RAM/disk quá tải.
 func RegisterOverloadAlertCallback(fn OverloadAlertCallback) {
@@ -88,6 +108,9 @@ var (
 func DefaultController() *Controller {
 	controllerOnce.Do(func() {
 		controller = newController()
+		if v := strings.TrimSpace(os.Getenv("WORKER_ALERT_WEBHOOK_URL")); v != "" {
+			SetAlertWebhookURL(v)
+		}
 	})
 	return controller
 }
@@ -275,13 +298,55 @@ func (c *Controller) sampleCPU() {
 	}
 }
 
-// trySendOverloadAlert gọi callback nếu đã đăng ký.
+// trySendOverloadAlert gọi callback và POST webhook (nếu có) khi tài nguyên quá tải.
 func (c *Controller) trySendOverloadAlert(metrics ResourceMetrics, state string) {
 	overloadCallbackMu.RLock()
 	fn := overloadAlertCallback
 	overloadCallbackMu.RUnlock()
 	if fn != nil {
 		go fn(metrics, state)
+	}
+	alertWebhookURLMu.RLock()
+	url := alertWebhookURL
+	alertWebhookURLMu.RUnlock()
+	if url != "" {
+		go postAlertWebhook(url, metrics, state)
+	}
+}
+
+// postAlertWebhook POST payload đến webhook URL (chạy trong goroutine).
+func postAlertWebhook(url string, metrics ResourceMetrics, state string) {
+	payload := map[string]interface{}{
+		"timestamp":   time.Now().Format("2006-01-02 15:04:05"),
+		"state":       state,
+		"cpuPercent":  metrics.CPUPercent,
+		"ramPercent":  metrics.RAMPercent,
+		"diskPercent": metrics.DiskPercent,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		logger.GetAppLogger().WithError(err).Warn("⚙️ [WORKER] Lỗi marshal alert webhook payload")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		logger.GetAppLogger().WithError(err).Warn("⚙️ [WORKER] Lỗi tạo request alert webhook")
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		logger.GetAppLogger().WithError(err).WithField("url", url).Warn("⚙️ [WORKER] Lỗi POST alert webhook")
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		logger.GetAppLogger().WithFields(map[string]interface{}{
+			"url":        url,
+			"statusCode": resp.StatusCode,
+		}).Warn("⚙️ [WORKER] Alert webhook trả về lỗi")
 	}
 }
 

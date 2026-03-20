@@ -8,7 +8,7 @@ Chào mừng đến với tài liệu hệ thống FolkForm Backend. Tài liệu
 
 | Index | File | Mục đích |
 |-------|------|----------|
-| **AI Commerce OS** | [../docs-shared/architecture/ai-commerce-os-overview.md](../docs-shared/architecture/ai-commerce-os-overview.md) | Vision — chúng ta đang làm gì (đọc đầu) |
+| **AI Commerce OS** | [docs-shared/architecture/vision/ai-commerce-os-platform-l1.md](../docs-shared/architecture/vision/ai-commerce-os-platform-l1.md) | Vision Platform L1 — toàn bộ hệ (đọc đầu) |
 | **Architecture** | [architecture/overview.md](architecture/overview.md) | Layers, flow request |
 | **Module Map** | [module-map/backend-module-map.md](module-map/backend-module-map.md) | Module → code, router |
 | **Domain** | [domain/domain-overview.md](domain/domain-overview.md) | Domain logic |
@@ -22,7 +22,7 @@ Chào mừng đến với tài liệu hệ thống FolkForm Backend. Tài liệu
 Khi mở riêng repo backend, Cursor nên đọc theo thứ tự:
 
 1. **docs/README.md** (file này) — Entry point, biết repo làm gì
-2. **[docs-shared/architecture/ai-commerce-os-overview.md](../docs-shared/architecture/ai-commerce-os-overview.md)** — Vision — chúng ta đang làm gì
+2. **[docs-shared/architecture/vision/ai-commerce-os-platform-l1.md](../docs-shared/architecture/vision/ai-commerce-os-platform-l1.md)** — Vision Platform L1 — toàn bộ hệ AI Commerce OS
 3. **[architecture/overview.md](architecture/overview.md)** — Kiến trúc layers
 4. **[module-map/backend-module-map.md](module-map/backend-module-map.md)** — Map module → code, biết sửa ở đâu
 5. **[domain/domain-overview.md](domain/domain-overview.md)** — Domain logic
@@ -30,7 +30,7 @@ Khi mở riêng repo backend, Cursor nên đọc theo thứ tự:
 7. **docs theo task** — 05-development/, 02-architecture/core/, 01-getting-started/
 8. **docs-shared/** — Khi cần context hệ thống, API contract, module design cross-repo
 
-**Khi task chạm repo khác:** Đọc `docs-shared/architecture/ai-commerce-os-overview.md`, `docs-shared/system-map/system-map.md` và `docs-shared/modules/module-map.md` trước.
+**Khi task chạm repo khác:** Đọc `docs-shared/architecture/vision/ai-commerce-os-platform-l1.md`, `docs-shared/system-map/system-map.md` và `docs-shared/modules/module-map.md` trước.
 
 ---
 
@@ -58,8 +58,9 @@ Khi mở riêng repo backend, Cursor nên đọc theo thứ tự:
 - **[Tổng quan kiến trúc](architecture/overview.md)** — Entry point kiến trúc (layers, flow)
 - **[Bản đồ module backend](module-map/backend-module-map.md)** — Map module → code, router (⭐ bắt đầu khi implement feature)
 - [02-architecture/core/tong-quan.md](02-architecture/core/tong-quan.md) - Kiến trúc cốt lõi
+- [docs-shared/architecture/vision/](../docs-shared/architecture/vision/) - Vision Platform L1, Customer Intelligence & AI Commerce (Phần 1, 2, 3)
 - [02-architecture/core/activity-framework.md](02-architecture/core/activity-framework.md) - Activity framework (event backbone)
-- [02-architecture/core/decision-brain.md](02-architecture/core/decision-brain.md) - Decision Brain (learning memory)
+- [02-architecture/core/learning-engine.md](02-architecture/core/learning-engine.md) - Decision Brain (learning memory)
 
 ### 3. 🔌 API Reference
 
@@ -72,6 +73,7 @@ Khi mở riêng repo backend, Cursor nên đọc theo thứ tự:
 
 ### 5. 💻 Phát Triển (Development)
 
+- **[Hướng dẫn Identity & Links](05-development/HUONG_DAN_IDENTITY_LINKS.md)** — Cách dùng uid, sourceIds, links; ưu tiên cấu trúc mới, fallback logic cũ
 - [Quy Trình Refactor Docs](05-development/QUY_TRINH_REFACTOR_DOCS.md) - Quy trình AI refactor tài liệu
 - [Quy Trình Refactor .cursor](05-development/QUY_TRINH_REFACTOR_CURSOR.md) - Refactor .cursor sau khi docs xong
 - [Cấu Trúc Code](05-development/cau-truc-code.md) - Cấu trúc và tổ chức code
@@ -96,7 +98,10 @@ Khi mở riêng repo backend, Cursor nên đọc theo thứ tự:
 
 ## 🔍 Tìm Kiếm Nhanh
 
-- **Architecture**: [architecture/overview.md](architecture/overview.md), [02-architecture/core/tong-quan.md](02-architecture/core/tong-quan.md), [02-architecture/core/activity-framework.md](02-architecture/core/activity-framework.md), [02-architecture/core/decision-brain.md](02-architecture/core/decision-brain.md)
+- **Architecture**: [architecture/overview.md](architecture/overview.md), [02-architecture/core/tong-quan.md](02-architecture/core/tong-quan.md), [02-architecture/core/activity-framework.md](02-architecture/core/activity-framework.md), [02-architecture/core/learning-engine.md](02-architecture/core/learning-engine.md)
+- **AI Commerce OS Vision**: [docs-shared/architecture/ai-commerce-os-overview.md](../docs-shared/architecture/ai-commerce-os-overview.md) — Platform L1 tổng quan
+- **Rà soát triển khai**: [docs-shared/architecture/RA_SOAT_TRIEN_KHAI_VISION.md](../docs-shared/architecture/RA_SOAT_TRIEN_KHAI_VISION.md) — Đối chiếu vision với code
+- **Customer Intelligence**: [docs-shared/architecture/vision/](../docs-shared/architecture/vision/) — Phần 1 (Unified Profile), Phần 2 (AI Application), Phần 3 (CIO)
 - **Module map**: [module-map/backend-module-map.md](module-map/backend-module-map.md)
 - **API**: [api/api-overview.md](api/api-overview.md), [docs-shared/ai-context/folkform/api-context.md](../docs-shared/ai-context/folkform/api-context.md)
 - **Firebase**: [04-deployment/firebase.md](04-deployment/firebase.md)
@@ -109,6 +114,9 @@ Khi mở riêng repo backend, Cursor nên đọc theo thứ tự:
 
 ## 🔄 Cập Nhật Gần Đây
 
+- ✅ **2026-03-18**: Rà soát tài liệu — CIX, AI Decision Engine đã triển khai đầy đủ; luồng CIO→CIX→Decision→Executor→Delivery đã khép vòng. Cập nhật RASOAT_MODULE_KHUNG_XUONG, PHUONG_AN_CIX/CIO/DECISION_BRAIN, docs-shared/RA_SOAT_TRIEN_KHAI_VISION.
+- ✅ **2026-03-18**: Phase 0 Nền — trace_id/correlation_id trong CioEvent; Action schema chuẩn (ExecutionActionInput); BANG_QUY_TAC trỏ Foundational docs. Xem [BANG_QUY_TAC_THIET_KE_HE_THONG.md](09-ai-context/BANG_QUY_TAC_THIET_KE_HE_THONG.md)
+- ✅ **2026-03-17**: Identity + Links — Rà soát CRM: lookup customer theo uid/unifiedId, thêm links.customer.uid vào filter orders/conversations, response DTO có uid. Xem [HUONG_DAN_IDENTITY_LINKS.md](05-development/HUONG_DAN_IDENTITY_LINKS.md) mục 9.1
 - ✅ **2025-03-13**: Decision Brain — module learning memory (decision_cases), thiết kế + implement + docs
 - ✅ **2025-03-13**: Activity Framework — CRM và Ads đã migrate xong (ActivityBase, LogActivity, RecordActivityForEntity). Agent chưa migrate sang ActivityBase. Cập nhật docs/02-architecture/core/activity-framework.md với trạng thái triển khai
 - ✅ **2025-03-13**: Pipeline REPOSITORY-ONLY — sửa broken links (03-api, 02-architecture/systems); module map trỏ api-overview, docs-shared; architecture README cập nhật

@@ -20,6 +20,42 @@ import (
 	pkgapproval "meta_commerce/pkg/approval"
 )
 
+// parseResultCheckFromPayload trích result_check từ payload (từ Rule output) sang ResultCheckConfig.
+func parseResultCheckFromPayload(payload map[string]interface{}) *adsmodels.ResultCheckConfig {
+	if payload == nil {
+		return nil
+	}
+	rc, ok := payload["result_check"].(map[string]interface{})
+	if !ok || rc == nil {
+		return nil
+	}
+	cfg := &adsmodels.ResultCheckConfig{}
+	switch v := rc["afterHours"].(type) {
+	case float64:
+		cfg.AfterHours = v
+	case int:
+		cfg.AfterHours = float64(v)
+	case int64:
+		cfg.AfterHours = float64(v)
+	default:
+		return nil
+	}
+	if cfg.AfterHours <= 0 {
+		return nil
+	}
+	if s, ok := rc["source"].(string); ok {
+		cfg.Source = s
+	}
+	if arr, ok := rc["fields"].([]interface{}); ok {
+		for _, a := range arr {
+			if s, ok := a.(string); ok {
+				cfg.Fields = append(cfg.Fields, s)
+			}
+		}
+	}
+	return cfg
+}
+
 // Rule codes được coi là "kill" cho Counterfactual (Stop Loss, Kill Off, Trim, CHS).
 var killRuleCodesForCounterfactual = map[string]bool{
 	"sl_a": true, "sl_b": true, "sl_c": true, "sl_d": true, "sl_e": true,
@@ -103,6 +139,7 @@ func SaveKillSnapshotIfKill(ctx context.Context, doc *pkgapproval.ActionPending)
 		SpendPct:            spendPct,
 		SiblingCampIds:      []string{},
 		ActionPendingId:     doc.ID,
+		ResultCheckConfig:   parseResultCheckFromPayload(doc.Payload),
 		CreatedAt:           now,
 	}
 
@@ -189,7 +226,10 @@ func identifySiblingCamps(ctx context.Context, snap *adsmodels.AdsKillSnapshot) 
 	return siblings
 }
 
-// EvaluatePendingKills B3: Đánh giá các kill đã qua 4h, tạo counterfactual_outcome.
+// defaultResultCheckAfterHours mặc định khi snapshot không có resultCheckConfig (backward compatibility).
+const defaultResultCheckAfterHours = 4
+
+// EvaluatePendingKills B3: Đánh giá các kill đã qua N giờ (từ resultCheckConfig.afterHours hoặc mặc định 4h), tạo counterfactual_outcome.
 func EvaluatePendingKills(ctx context.Context) (evaluated int, err error) {
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.AdsKillSnapshots)
 	if !ok {
@@ -200,10 +240,10 @@ func EvaluatePendingKills(ctx context.Context) (evaluated int, err error) {
 		return 0, nil
 	}
 	now := time.Now().UnixMilli()
-	cutoff4h := now - 4*60*60*1000
+	cutoffDefault := now - int64(defaultResultCheckAfterHours*60*60*1000)
 
 	cursor, err := coll.Find(ctx, bson.M{
-		"killTime": bson.M{"$lte": cutoff4h},
+		"killTime": bson.M{"$lte": cutoffDefault},
 	}, nil)
 	if err != nil {
 		return 0, err
@@ -223,7 +263,16 @@ func EvaluatePendingKills(ctx context.Context) (evaluated int, err error) {
 		if existing.ID != primitive.NilObjectID {
 			continue
 		}
-		outcome := evaluateOutcome4h(ctx, &snap)
+		// Chỉ đánh giá khi đã qua afterHours (từ Rule) — snapshot cũ không có config dùng mặc định 4h
+		afterHours := float64(defaultResultCheckAfterHours)
+		if snap.ResultCheckConfig != nil && snap.ResultCheckConfig.AfterHours > 0 {
+			afterHours = snap.ResultCheckConfig.AfterHours
+		}
+		cutoff := now - int64(afterHours*60*60*1000)
+		if snap.KillTime > cutoff {
+			continue
+		}
+		outcome := evaluateOutcome(ctx, &snap, afterHours)
 		if outcome != nil {
 			_, _ = outcomeColl.InsertOne(ctx, outcome)
 			evaluated++
@@ -232,8 +281,12 @@ func EvaluatePendingKills(ctx context.Context) (evaluated int, err error) {
 	return evaluated, nil
 }
 
-// evaluateOutcome4h tạo AdsCounterfactualOutcome từ snapshot. Siblings tốt (CR>12%, có đơn) → false_positive.
-func evaluateOutcome4h(ctx context.Context, snap *adsmodels.AdsKillSnapshot) *adsmodels.AdsCounterfactualOutcome {
+// evaluateOutcome tạo AdsCounterfactualOutcome từ snapshot. Siblings tốt (CR>12%, có đơn) → false_positive.
+// afterHours: số giờ sau kill để lấy metrics (từ Rule resultCheckConfig).
+func evaluateOutcome(ctx context.Context, snap *adsmodels.AdsKillSnapshot, afterHours float64) *adsmodels.AdsCounterfactualOutcome {
+	if afterHours <= 0 {
+		afterHours = defaultResultCheckAfterHours
+	}
 	if len(snap.SiblingCampIds) == 0 {
 		return &adsmodels.AdsCounterfactualOutcome{
 			KillSnapshotId:      snap.ID,
@@ -247,9 +300,9 @@ func evaluateOutcome4h(ctx context.Context, snap *adsmodels.AdsKillSnapshot) *ad
 			CreatedAt:           time.Now().UnixMilli(),
 		}
 	}
-	// Lấy orders + mess của siblings trong 4h sau kill
+	// Lấy orders + mess của siblings trong afterHours sau kill
 	startMs := snap.KillTime
-	endMs := snap.KillTime + 4*60*60*1000
+	endMs := snap.KillTime + int64(afterHours*60*60*1000)
 	orders4h, mess4h, cr4h := getSiblingsMetrics4h(ctx, snap.AdAccountId, snap.OwnerOrganizationID, snap.SiblingCampIds, startMs, endMs)
 	revenue4h := getSiblingsRevenue4h(ctx, snap.OwnerOrganizationID, snap.SiblingCampIds, startMs, endMs)
 

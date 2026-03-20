@@ -2,6 +2,8 @@
 package handler
 
 import (
+	"fmt"
+
 	"github.com/gofiber/fiber/v3"
 
 	basehdl "meta_commerce/internal/api/base/handler"
@@ -11,14 +13,16 @@ import (
 	"meta_commerce/internal/common"
 )
 
-var ruleEngineSvc *ruleintelsvc.RuleEngineService
-
-func init() {
-	var err error
-	ruleEngineSvc, err = ruleintelsvc.NewRuleEngineService()
+// NewRunRuleHandler tạo handler cho POST /rule-intelligence/run.
+// Gọi trong router Register() sau khi InitRegistry() đã chạy (cùng luồng với NewRuleDefinitionHandler, ...).
+func NewRunRuleHandler() (fiber.Handler, error) {
+	svc, err := ruleintelsvc.NewRuleEngineService()
 	if err != nil {
-		panic("RuleEngineService: " + err.Error())
+		return nil, fmt.Errorf("tạo RuleEngineService: %w", err)
 	}
+	return func(c fiber.Ctx) error {
+		return handleRunRuleWithService(c, svc)
+	}, nil
 }
 
 func getActiveOrgID(c fiber.Ctx) string {
@@ -29,8 +33,8 @@ func getActiveOrgID(c fiber.Ctx) string {
 	return orgIDStr
 }
 
-// HandleRunRule POST /rule-intelligence/run — Chạy rule với context.
-func HandleRunRule(c fiber.Ctx) error {
+// handleRunRuleWithService POST /rule-intelligence/run — Chạy rule với context.
+func handleRunRuleWithService(c fiber.Ctx, svc *ruleintelsvc.RuleEngineService) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {
 		var req dto.RunRuleRequest
 		if err := c.Bind().JSON(&req); err != nil {
@@ -77,7 +81,7 @@ func HandleRunRule(c fiber.Ctx) error {
 			input.Layers = map[string]interface{}{}
 		}
 
-		result, err := ruleEngineSvc.Run(c.Context(), input)
+		result, err := svc.Run(c.Context(), input)
 		if err != nil {
 			errCode, msg, statusCode := common.GetErrorResponseInfo(err, "Chạy rule thất bại")
 			c.Status(statusCode).JSON(fiber.Map{"code": errCode, "message": msg, "status": "error"})

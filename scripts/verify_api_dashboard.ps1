@@ -52,34 +52,25 @@ if ($activeOrgId) {
     $headers["X-Active-Organization-ID"] = $activeOrgId
 }
 
-# 3. Gọi GET /dashboard/customers
-Write-Host "`n--- GET /dashboard/customers ---" -ForegroundColor Cyan
+# 3. Gọi GET /dashboard/customers/period-movements-from-snapshots (thay thế /customers + /customers/trend)
+Write-Host "`n--- GET /dashboard/customers/period-movements-from-snapshots ---" -ForegroundColor Cyan
 try {
-    $customersResp = Invoke-RestMethod -Uri "$baseUrl/dashboard/customers?source=crm" -Method GET -Headers $headers
+    $customersResp = Invoke-RestMethod -Uri "$baseUrl/dashboard/customers/period-movements-from-snapshots?period=month&limit=20&offset=0" -Method GET -Headers $headers
     if ($customersResp.status -eq "success") {
-        $d = $customersResp.data
-        Write-Host "OK KPI: totalCustomers=$($d.summary.totalCustomers), newInPeriod=$($d.summary.newCustomersInPeriod)" -ForegroundColor Green
-        Write-Host "  snapshotSource: $($d.snapshotSource), periodKey: $($d.snapshotPeriodKey)" -ForegroundColor Gray
-        if ($d.customers -and $d.customers.Count -gt 0) {
-            Write-Host "  Số khách trong bảng: $($d.customers.Count)" -ForegroundColor Green
+        $snap = $customersResp.data.currentSnapshot
+        if ($snap) {
+            Write-Host "OK KPI: totalCustomers=$($snap.summary.totalCustomers), newInPeriod=$($snap.summary.newCustomersInPeriod)" -ForegroundColor Green
+            Write-Host "  snapshotSource: $($snap.snapshotSource), periodKey: $($snap.snapshotPeriodKey)" -ForegroundColor Gray
+            if ($snap.customers -and $snap.customers.Count -gt 0) {
+                Write-Host "  Số khách trong bảng: $($snap.customers.Count)" -ForegroundColor Green
+            }
+        }
+        $trendData = $customersResp.data.trendData
+        if ($trendData -and $trendData.Count -gt 0) {
+            Write-Host "  trendData items: $($trendData.Count)" -ForegroundColor Gray
         }
     } else {
         Write-Host "WARN Response: $($customersResp | ConvertTo-Json -Depth 2)" -ForegroundColor Yellow
-    }
-} catch {
-    Write-Host "LỖI: $_" -ForegroundColor Red
-}
-
-# 4. Gọi GET /dashboard/customers/trend
-Write-Host "`n--- GET /dashboard/customers/trend ---" -ForegroundColor Cyan
-try {
-    $trendResp = Invoke-RestMethod -Uri "$baseUrl/dashboard/customers/trend?source=crm" -Method GET -Headers $headers
-    if ($trendResp.status -eq "success") {
-        $t = $trendResp.data
-        Write-Host "OK currentSnapshot: total=$($t.currentSnapshot.summary.totalCustomers)" -ForegroundColor Green
-        Write-Host "  trendData items: $($t.trendData.Count)" -ForegroundColor Gray
-    } else {
-        Write-Host "WARN Response: $($trendResp | ConvertTo-Json -Depth 2)" -ForegroundColor Yellow
     }
 } catch {
     Write-Host "LỖI: $_" -ForegroundColor Red

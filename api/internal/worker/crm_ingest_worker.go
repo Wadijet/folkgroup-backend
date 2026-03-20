@@ -35,114 +35,130 @@ func NewCrmIngestWorker(interval time.Duration, batchSize int) *CrmIngestWorker 
 	return &CrmIngestWorker{interval: interval, batchSize: batchSize}
 }
 
-// Start chạy worker trong vòng lặp.
+// Start chạy worker trong vòng lặp. Đọc config mỗi vòng (hỗ trợ thay đổi qua API).
 func (w *CrmIngestWorker) Start(ctx context.Context) {
 	log := logger.GetAppLogger()
-	ticker := time.NewTicker(w.interval)
-	defer ticker.Stop()
 
 	log.WithFields(map[string]interface{}{
-		"interval":   w.interval.String(),
-		"batchSize":  w.batchSize,
+		"interval":  w.interval.String(),
+		"batchSize": w.batchSize,
 	}).Info("📋 [CRM_INGEST] Starting CRM Ingest Worker...")
 
 	for {
+		interval, batchSize := GetEffectiveWorkerSchedule(WorkerCrmIngest, w.interval, w.batchSize)
+
+		if !IsWorkerActive(WorkerCrmIngest) {
+			select {
+			case <-ctx.Done():
+				log.Info("📋 [CRM_INGEST] CRM Ingest Worker stopped")
+				return
+			case <-time.After(1 * time.Minute):
+			}
+			continue
+		}
+		p := GetPriority(WorkerCrmIngest, PriorityHigh)
+		if ShouldThrottle(p) {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(interval):
+			}
+			continue
+		}
+		effInterval := GetEffectiveInterval(interval, p)
+		if effInterval > interval {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(effInterval - interval):
+			}
+		}
+
 		select {
 		case <-ctx.Done():
 			log.Info("📋 [CRM_INGEST] CRM Ingest Worker stopped")
 			return
-		case <-ticker.C:
-			if !IsWorkerActive(WorkerCrmIngest) {
-				time.Sleep(1 * time.Minute)
-				continue
-			}
-			p := GetPriority(WorkerCrmIngest, PriorityHigh)
-			if ShouldThrottle(p) {
-				continue
-			}
-			if effInterval := GetEffectiveInterval(w.interval, p); effInterval > w.interval {
-				time.Sleep(effInterval - w.interval)
-			}
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						log.WithFields(map[string]interface{}{"panic": r}).Error("📋 [CRM_INGEST] Panic khi xử lý, sẽ tiếp tục lần sau")
-					}
-				}()
+		case <-time.After(interval):
+		}
 
-				totalProcessed := 0
-				baseBatchSize := GetEffectiveBatchSize(w.batchSize, p)
-				// Adaptive batch: khi backlog lớn thì tăng batch size để xử lý nhanh hơn (giảm DB round-trips).
-				batchSize := baseBatchSize
-				if count, err := crmvc.CountUnprocessedCrmIngest(ctx); err == nil && count > int64(baseBatchSize*3) {
-					adaptive := int(count / 2)
-					if adaptive > 100 {
-						adaptive = 100
-					}
-					if adaptive > batchSize {
-						batchSize = adaptive
-						log.WithFields(map[string]interface{}{
-							"backlog":    count,
-							"batchSize":  batchSize,
-						}).Info("📋 [CRM_INGEST] Backlog cao, tăng batch size adaptive")
-					}
-				}
-				for {
-					// Kiểm tra throttle giữa mỗi batch — tránh xử lý hết hàng đợi khi CPU/RAM đã tăng trong lúc chạy.
-					if ShouldThrottle(p) {
-						break
-					}
-					list, err := crmvc.GetUnprocessedCrmIngest(ctx, batchSize)
-					if err != nil {
-						log.WithError(err).Error("📋 [CRM_INGEST] Lỗi lấy danh sách pending ingest")
-						return
-					}
-					if len(list) == 0 {
-						break
-					}
-
-					customerSvc, err := crmvc.NewCrmCustomerService()
-					if err != nil {
-						log.WithError(err).Error("📋 [CRM_INGEST] Không thể tạo CrmCustomerService")
-						return
-					}
-
-					for _, item := range list {
-						start := time.Now()
-						err := w.processItem(ctx, customerSvc, &item)
-						jobType := "crm_ingest:" + item.CollectionName
-						if item.CollectionName == "" {
-							jobType = "crm_ingest:unknown"
-						}
-						metrics.RecordDuration(jobType, time.Since(start))
-						errStr := ""
-						if err != nil {
-							errStr = err.Error()
-							log.WithError(err).WithFields(map[string]interface{}{
-								"collection": item.CollectionName,
-								"id":         item.ID.Hex(),
-							}).Warn("📋 [CRM_INGEST] Xử lý job lỗi")
-						}
-						if setErr := crmvc.SetCrmIngestProcessed(ctx, item.ID, errStr); setErr != nil {
-							log.WithError(setErr).Warn("📋 [CRM_INGEST] SetCrmIngestProcessed thất bại")
-						} else {
-							totalProcessed++
-						}
-					}
-				}
-
-				if totalProcessed > 0 {
-					remaining, _ := crmvc.CountUnprocessedCrmIngest(ctx)
-					log.WithFields(map[string]interface{}{
-						"processed": totalProcessed,
-						"remaining": remaining,
-					}).Info("📋 [CRM_INGEST] Đã xử lý xong batch")
-					if remaining > 50 {
-						log.WithFields(map[string]interface{}{"remaining": remaining}).Warn("📋 [CRM_INGEST] Backlog còn cao, agent có thể đang sync nhanh hơn worker xử lý")
-					}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.WithFields(map[string]interface{}{"panic": r}).Error("📋 [CRM_INGEST] Panic khi xử lý, sẽ tiếp tục lần sau")
 				}
 			}()
-		}
+
+			totalProcessed := 0
+			baseBatchSize := GetEffectiveBatchSize(batchSize, p)
+			// Adaptive batch: khi backlog lớn thì tăng batch size để xử lý nhanh hơn (giảm DB round-trips).
+			actualBatchSize := baseBatchSize
+			if count, err := crmvc.CountUnprocessedCrmIngest(ctx); err == nil && count > int64(baseBatchSize*3) {
+				adaptive := int(count / 2)
+				if adaptive > 100 {
+					adaptive = 100
+				}
+				if adaptive > actualBatchSize {
+					actualBatchSize = adaptive
+					log.WithFields(map[string]interface{}{
+						"backlog":   count,
+						"batchSize": actualBatchSize,
+					}).Info("📋 [CRM_INGEST] Backlog cao, tăng batch size adaptive")
+				}
+			}
+			for {
+				if ShouldThrottle(p) {
+					break
+				}
+				list, err := crmvc.GetUnprocessedCrmIngest(ctx, actualBatchSize)
+				if err != nil {
+					log.WithError(err).Error("📋 [CRM_INGEST] Lỗi lấy danh sách pending ingest")
+					return
+				}
+				if len(list) == 0 {
+					break
+				}
+
+				customerSvc, err := crmvc.NewCrmCustomerService()
+				if err != nil {
+					log.WithError(err).Error("📋 [CRM_INGEST] Không thể tạo CrmCustomerService")
+					return
+				}
+
+				for _, item := range list {
+					start := time.Now()
+					err := w.processItem(ctx, customerSvc, &item)
+					jobType := "crm_ingest:" + item.CollectionName
+					if item.CollectionName == "" {
+						jobType = "crm_ingest:unknown"
+					}
+					metrics.RecordDuration(jobType, time.Since(start))
+					errStr := ""
+					if err != nil {
+						errStr = err.Error()
+						log.WithError(err).WithFields(map[string]interface{}{
+							"collection": item.CollectionName,
+							"id":         item.ID.Hex(),
+						}).Warn("📋 [CRM_INGEST] Xử lý job lỗi")
+					}
+					if setErr := crmvc.SetCrmIngestProcessed(ctx, item.ID, errStr); setErr != nil {
+						log.WithError(setErr).Warn("📋 [CRM_INGEST] SetCrmIngestProcessed thất bại")
+					} else {
+						totalProcessed++
+					}
+				}
+			}
+
+			if totalProcessed > 0 {
+				remaining, _ := crmvc.CountUnprocessedCrmIngest(ctx)
+				log.WithFields(map[string]interface{}{
+					"processed": totalProcessed,
+					"remaining": remaining,
+				}).Info("📋 [CRM_INGEST] Đã xử lý xong batch")
+				if remaining > 50 {
+					log.WithFields(map[string]interface{}{"remaining": remaining}).Warn("📋 [CRM_INGEST] Backlog còn cao, agent có thể đang sync nhanh hơn worker xử lý")
+				}
+			}
+		}()
 	}
 }
 

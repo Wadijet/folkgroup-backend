@@ -4,7 +4,6 @@ package adssvc
 import (
 	"context"
 
-	"meta_commerce/internal/approval"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/logger"
 
@@ -57,19 +56,18 @@ func ResumeAds(ctx context.Context, adAccountId string, ownerOrgID primitive.Obj
 		if err := cursor.Decode(&doc); err != nil {
 			continue
 		}
-		pending, err := Propose(ctx, &ProposeInput{
+		eventID, err := Propose(ctx, &ProposeInput{
 			ActionType:   "RESUME",
 			AdAccountId:  adAccountId,
 			CampaignId:   doc.CampaignId,
 			Reason:       "Resume Ads — /resume_ads sau Circuit Breaker",
 			RuleCode:     "resume_ads",
-		}, ownerOrgID, "")
+		}, ownerOrgID, getProposeBaseURL())
 		if err != nil {
 			log.WithError(err).WithFields(map[string]interface{}{"campaignId": doc.CampaignId}).Warn("[RESUME_ADS] Lỗi propose")
 			continue
 		}
-		if pending != nil {
-			_, _ = approval.Approve(ctx, pending.ID.Hex(), ownerOrgID)
+		if eventID != "" {
 			resumed++
 		}
 	}

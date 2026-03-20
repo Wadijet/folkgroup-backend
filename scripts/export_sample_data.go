@@ -173,6 +173,7 @@ func writeLinkageReport(dir string, _ *mongo.Database, _ context.Context) {
 | auth_role_permissions | roleId, permissionId | auth_roles, auth_permissions |
 | auth_roles | ownerOrganizationId | auth_organizations |
 | fb_conversations | ownerOrganizationId, pageId | auth_organizations, fb_pages |
+| fb_conversations | customerId, panCakeData.customers[].id, conversationId | fb_customers (xem chi tiết bên dưới) |
 | fb_messages | conversationId | fb_conversations |
 | fb_message_items | messageId | fb_messages |
 | fb_customers | pageId, ownerOrganizationId | fb_pages, auth_organizations |
@@ -183,11 +184,19 @@ func writeLinkageReport(dir string, _ *mongo.Database, _ context.Context) {
 | crm_notes | unifiedId, ownerOrganizationId | crm_customers |
 | report_snapshots | ownerOrganizationId, reportKey | auth_organizations |
 
+## fb_conversations ↔ fb_customers (chi tiết)
+
+- conv.customerId = fb_customers.panCakeData.customer_id (không phải fb.customerId)
+- conv.customers[].id = fb_customers.customerId (= crm.sourceIds.fb)
+- conv.conversationId = fb.pageId_psid (thread_id)
+
+Rà soát: scripts/audit_fb_conv_fb_customer_link.go (~93.8% match)
+
 ## Luồng Merge Customer
 
 crm_customers = merge(pc_pos_customers, fb_customers) qua:
 - sourceIds.pos -> pc_pos_customers.id (Pancake UUID)
-- sourceIds.fb -> fb_customers.id
+- sourceIds.fb -> fb_customers.customerId (= conv.customers[].id)
 - unifiedId: định danh thống nhất
 `
 	path := filepath.Join(dir, "_LINKAGE_KEYS.md")

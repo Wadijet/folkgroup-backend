@@ -509,6 +509,14 @@ var InitialPermissions = []authmodels.Permission{
 	{Name: "CTALibrary.Update", Describe: "Quyền cập nhật CTA Library", Group: "CTA", Category: "CTALibrary"},
 	{Name: "CTALibrary.Delete", Describe: "Quyền xóa CTA Library", Group: "CTA", Category: "CTALibrary"},
 
+	// ==================================== CIO MODULE (Customer Interaction Orchestrator) ===========================================
+	{Name: "CIO.Read", Describe: "Quyền xem CIO (touchpoint plans, sessions, routing decisions)", Group: "CIO", Category: "CIO"},
+	{Name: "CIO.Write", Describe: "Quyền tạo và thực thi touchpoint CIO", Group: "CIO", Category: "CIO"},
+
+	// ==================================== CIX MODULE (Contextual Conversation Intelligence) ===========================================
+	{Name: "CIX.Read", Describe: "Quyền xem kết quả phân tích hội thoại CIX", Group: "CIX", Category: "CIX"},
+	{Name: "CIX.Analyze", Describe: "Quyền gọi phân tích hội thoại CIX", Group: "CIX", Category: "CIX"},
+
 	// ==================================== RULE INTELLIGENCE MODULE ===========================================
 	{Name: "RuleDefinition.Insert", Describe: "Quyền tạo Rule Definition", Group: "RuleIntelligence", Category: "RuleDefinition"},
 	{Name: "RuleDefinition.Read", Describe: "Quyền xem Rule Definition", Group: "RuleIntelligence", Category: "RuleDefinition"},

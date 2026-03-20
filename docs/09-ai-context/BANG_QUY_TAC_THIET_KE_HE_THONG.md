@@ -10,6 +10,7 @@ Cursor tự áp dụng rule đó cho mọi chat/agent trong project (`alwaysAppl
 
 | Khi cần | Đọc |
 |---------|-----|
+| **Quy tắc nền** (Data Contract, Event, Identity, Traceability, System Boundary) | `docs-shared/architecture/foundational/` — [README](../../docs-shared/architecture/foundational/README.md), [data-contract](../../docs-shared/architecture/foundational/data-contract.md), [event-system](../../docs-shared/architecture/foundational/event-system.md), [identity-unification](../../docs-shared/architecture/foundational/identity-unification.md), [traceability-system](../../docs-shared/architecture/foundational/traceability-system.md), [system-boundary](../../docs-shared/architecture/foundational/system-boundary.md) |
 | Tổng quan kiến trúc | `docs/02-architecture/core/tong-quan.md`, `02-architecture/README.md` |
 | Auth, RBAC, Firebase | `02-architecture/core/authentication.md`, `rbac.md`, `firebase-auth-voi-database.md` |
 | Thêm/sửa API, CRUD | `docs/05-development/them-api-moi.md`, `02-architecture/analysis/endpoint-workflow-general.md` |
@@ -23,4 +24,4 @@ Cursor tự áp dụng rule đó cho mọi chat/agent trong project (`alwaysAppl
 
 ---
 
-**Cập nhật:** 2025-01-30
+**Cập nhật:** 2026-03-18 — Thêm mục Quy tắc nền (Foundational docs)

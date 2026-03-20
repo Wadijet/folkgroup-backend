@@ -1,0 +1,275 @@
+// Package aidecisionsvc — AI Decision: tầng ra quyết định liên miền.
+//
+// Theo docs-shared/architecture/vision/07 - decision-engine.md
+package aidecisionsvc
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"strings"
+
+	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
+	deliverydto "meta_commerce/internal/api/delivery/dto"
+	"meta_commerce/internal/approval"
+	"meta_commerce/internal/utility"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
+)
+
+const (
+	domainCix             = "cix"
+	eventTypeCixPending   = "cix_action_pending_approval"
+	defaultApprovalActions = "escalate_to_senior,assign_to_human_sale"
+	executorApprovePath   = "/api/v1/executor/actions/approve"
+	executorRejectPath    = "/api/v1/executor/actions/reject"
+)
+
+// AIDecisionService tầng ra quyết định liên miền (AI Decision).
+type AIDecisionService struct{}
+
+// NewAIDecisionService tạo service mới.
+func NewAIDecisionService() *AIDecisionService {
+	return &AIDecisionService{}
+}
+
+// ExecuteRequest input cho Execute — CIX payload + context.
+type ExecuteRequest struct {
+	SessionUid    string                 `json:"sessionUid"`
+	CustomerUid   string                 `json:"customerUid"`
+	CIXPayload    map[string]interface{} `json:"cixPayload,omitempty"`
+	CustomerCtx   map[string]interface{} `json:"customerCtx,omitempty"`
+	TraceID       string                 `json:"traceId,omitempty"`
+	CorrelationID string                 `json:"correlationId,omitempty"`
+	BaseURL       string                 `json:"baseUrl,omitempty"`
+}
+
+// ExecuteResponse Execution Plan.
+type ExecuteResponse struct {
+	DecisionID string                           `json:"decisionId"`
+	TraceID    string                           `json:"traceId"`
+	Actions    []deliverydto.ExecutionActionInput `json:"actions"`
+}
+
+// Execute nhận context, ra quyết định, trả Execution Plan. Gọi từ API handler.
+func (s *AIDecisionService) Execute(ctx context.Context, req *ExecuteRequest, ownerOrgID primitive.ObjectID) (*ExecuteResponse, error) {
+	return s.ExecuteWithCase(ctx, req, ownerOrgID, nil)
+}
+
+// ExecuteWithCase giống Execute nhưng nhận case để dùng idempotency_key.
+// decisionCaseID:actionType:version (version = case.CreatedAt).
+func (s *AIDecisionService) ExecuteWithCase(ctx context.Context, req *ExecuteRequest, ownerOrgID primitive.ObjectID, caseDoc *aidecisionmodels.DecisionCase) (*ExecuteResponse, error) {
+	decisionID := utility.GenerateUID(utility.UIDPrefixDecision)
+	traceID := req.TraceID
+	if traceID == "" {
+		traceID = utility.GenerateUID(utility.UIDPrefixTrace)
+	}
+
+	if req.CIXPayload == nil {
+		return &ExecuteResponse{
+			DecisionID: decisionID,
+			TraceID:    traceID,
+			Actions:    []deliverydto.ExecutionActionInput{},
+		}, nil
+	}
+
+	actionSuggestions := parseActionSuggestions(req.CIXPayload)
+	if len(actionSuggestions) == 0 {
+		return &ExecuteResponse{
+			DecisionID: decisionID,
+			TraceID:    traceID,
+			Actions:    []deliverydto.ExecutionActionInput{},
+		}, nil
+	}
+
+	needApproval, autoActions := s.applyPolicy(actionSuggestions)
+	baseURL := req.BaseURL
+	if baseURL == "" {
+		baseURL = os.Getenv("BASE_URL")
+	}
+
+	var actionIDs []string
+	for _, a := range needApproval {
+		if doc, err := s.proposeCixAction(ctx, a, req, ownerOrgID, baseURL, caseDoc, decisionID, traceID); err == nil && doc != nil {
+			actionIDs = append(actionIDs, doc.ID.Hex())
+		}
+	}
+
+	for _, a := range autoActions {
+		if doc, err := s.proposeAndApproveAutoCixAction(ctx, a, req, ownerOrgID, decisionID, traceID, caseDoc); err == nil && doc != nil {
+			actionIDs = append(actionIDs, doc.ID.Hex())
+		}
+	}
+
+	if caseDoc != nil {
+		if len(actionIDs) > 0 {
+			_ = s.AppendActionIDsToCase(ctx, caseDoc.DecisionCaseID, actionIDs)
+		}
+		// Đóng case ngay — đã tạo xong proposals. Executor quản lý actions, case không chờ outcome.
+		_ = s.CloseCase(ctx, caseDoc.DecisionCaseID, aidecisionmodels.ClosureProposed)
+	}
+
+	return &ExecuteResponse{
+		DecisionID: decisionID,
+		TraceID:    traceID,
+		Actions:    []deliverydto.ExecutionActionInput{},
+	}, nil
+}
+
+func parseActionSuggestions(payload map[string]interface{}) []string {
+	v, ok := payload["actionSuggestions"]
+	if !ok || v == nil {
+		return nil
+	}
+	switch val := v.(type) {
+	case []string:
+		return val
+	case []interface{}:
+		var out []string
+		for _, e := range val {
+			if s, ok := e.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+func (s *AIDecisionService) applyPolicy(actions []string) (needApproval, auto []string) {
+	approvalList := os.Getenv("CIX_APPROVAL_ACTIONS")
+	if approvalList == "" {
+		approvalList = defaultApprovalActions
+	}
+	approvalSet := make(map[string]bool)
+	for _, a := range strings.Split(approvalList, ",") {
+		a = strings.TrimSpace(strings.ToLower(a))
+		if a != "" {
+			approvalSet[a] = true
+		}
+	}
+	for _, a := range actions {
+		key := strings.TrimSpace(strings.ToLower(a))
+		if approvalSet[key] {
+			needApproval = append(needApproval, a)
+		} else {
+			auto = append(auto, a)
+		}
+	}
+	return needApproval, auto
+}
+
+func (s *AIDecisionService) proposeCixAction(ctx context.Context, actionType string, req *ExecuteRequest, ownerOrgID primitive.ObjectID, baseURL string, caseDoc *aidecisionmodels.DecisionCase, decisionID, traceID string) (*approval.ActionPending, error) {
+	reason := buildReasonFromCixPayload(req.CIXPayload)
+	payload := map[string]interface{}{
+		"sessionUid":    req.SessionUid,
+		"customerUid":   req.CustomerUid,
+		"actionType":    actionType,
+		"traceId":       traceID,
+		"decisionId":    decisionID,
+		"correlationId": req.CorrelationID,
+	}
+	if req.CIXPayload != nil {
+		payload["cixPayload"] = req.CIXPayload
+	}
+	if req.CustomerCtx != nil {
+		payload["customerCtx"] = req.CustomerCtx
+	}
+	// contextSnapshot cho Learning Engine — CIX + Customer
+	payload["contextSnapshot"] = buildContextSnapshot(req)
+	if caseDoc != nil {
+		payload["idempotencyKey"] = buildIdempotencyKey(caseDoc, actionType)
+		payload["decisionCaseId"] = caseDoc.DecisionCaseID
+	}
+	doc, err := approval.Propose(ctx, domainCix, approval.ProposeInput{
+		ActionType:       actionType,
+		Reason:           reason,
+		Payload:          payload,
+		EventTypePending: eventTypeCixPending,
+		ApprovePath:      executorApprovePath,
+		RejectPath:       executorRejectPath,
+	}, ownerOrgID, baseURL)
+	return doc, err
+}
+
+func (s *AIDecisionService) proposeAndApproveAutoCixAction(ctx context.Context, actionType string, req *ExecuteRequest, ownerOrgID primitive.ObjectID, decisionID, traceID string, caseDoc *aidecisionmodels.DecisionCase) (*approval.ActionPending, error) {
+	reason := buildReasonFromCixPayload(req.CIXPayload)
+	payload := map[string]interface{}{
+		"sessionUid":    req.SessionUid,
+		"customerUid":   req.CustomerUid,
+		"channel":       "messenger",
+		"content":       "",
+		"traceId":       traceID,
+		"decisionId":    decisionID,
+		"correlationId": req.CorrelationID,
+	}
+	if req.CIXPayload != nil {
+		payload["cixPayload"] = req.CIXPayload
+	}
+	if req.CustomerCtx != nil {
+		payload["customerCtx"] = req.CustomerCtx
+	}
+	payload["contextSnapshot"] = buildContextSnapshot(req)
+	if caseDoc != nil {
+		payload["idempotencyKey"] = buildIdempotencyKey(caseDoc, actionType)
+		payload["decisionCaseId"] = caseDoc.DecisionCaseID
+	}
+	doc, err := approval.ProposeAndApproveAuto(ctx, domainCix, approval.ProposeInput{
+		ActionType: actionType,
+		Reason:     reason,
+		Payload:    payload,
+	}, ownerOrgID)
+	if err != nil {
+		return nil, err
+	}
+	// Learning case: tạo trong OnActionClosed khi case closed_complete (1 action = 1 learning case)
+	return doc, nil
+}
+
+// buildIdempotencyKey format {decision_case_id}:{action_type}:{version} — tránh duplicate action khi retry.
+func buildIdempotencyKey(c *aidecisionmodels.DecisionCase, actionType string) string {
+	if c == nil {
+		return ""
+	}
+	version := c.CreatedAt
+	if version == 0 {
+		version = c.UpdatedAt
+	}
+	return fmt.Sprintf("%s:%s:%d", c.DecisionCaseID, actionType, version)
+}
+
+// buildContextSnapshot tạo snapshot context cho Learning Engine — CIX + Customer.
+func buildContextSnapshot(req *ExecuteRequest) map[string]interface{} {
+	m := map[string]interface{}{
+		"sessionId":   req.SessionUid,
+		"customerId":  req.CustomerUid,
+	}
+	if req.CIXPayload != nil {
+		m["cix"] = req.CIXPayload
+	}
+	if req.CustomerCtx != nil {
+		m["customer"] = req.CustomerCtx
+	}
+	return m
+}
+
+func buildReasonFromCixPayload(payload map[string]interface{}) string {
+	if payload == nil {
+		return "CIX đề xuất"
+	}
+	parts := []string{}
+	if l1, ok := payload["layer1"].(map[string]interface{}); ok {
+		if s, ok := l1["stage"].(string); ok && s != "" {
+			parts = append(parts, "Stage: "+s)
+		}
+	}
+	if l3, ok := payload["layer3"].(map[string]interface{}); ok {
+		if s, ok := l3["sentiment"].(string); ok && s != "" {
+			parts = append(parts, "Sentiment: "+s)
+		}
+	}
+	if len(parts) > 0 {
+		return "CIX: " + strings.Join(parts, ", ")
+	}
+	return "CIX đề xuất"
+}

@@ -37,6 +37,8 @@ type Storage interface {
 	FindWithPagination(ctx context.Context, ownerOrgID primitive.ObjectID, filter FindWithPaginationFilter) ([]ActionPending, int64, error)
 	// Count đếm theo filter — phục vụ dashboard badges.
 	Count(ctx context.Context, ownerOrgID primitive.ObjectID, domain, status string, fromProposedAt, toProposedAt int64) (int64, error)
+	// FindByIdempotencyKey tìm action đã xử lý (executed/rejected/failed) theo idempotencyKey trong payload.
+	FindByIdempotencyKey(ctx context.Context, idempotencyKey string, ownerOrgID primitive.ObjectID) (*ActionPending, error)
 }
 
 // Notifier gửi thông báo. App cung cấp implementation (notifytrigger).
@@ -47,6 +49,19 @@ type Notifier interface {
 // Executor thực thi khi approve. Mỗi domain đăng ký.
 type Executor interface {
 	Execute(ctx context.Context, doc *ActionPending) (response map[string]interface{}, err error)
+}
+
+// Resolver quyết định có nên auto-approve ngay sau Propose không (Vision 08 ResolveImmediate).
+// App inject implementation (internal/approval) — đọc ApprovalModeConfig, fallback ads_meta_config, CIX_APPROVAL_ACTIONS.
+type Resolver interface {
+	ShouldApproveImmediately(ctx context.Context, doc *ActionPending) bool
+}
+
+// ResolverFunc adapter cho function.
+type ResolverFunc func(ctx context.Context, doc *ActionPending) bool
+
+func (f ResolverFunc) ShouldApproveImmediately(ctx context.Context, doc *ActionPending) bool {
+	return f(ctx, doc)
 }
 
 // ExecutorFunc adapter cho function.

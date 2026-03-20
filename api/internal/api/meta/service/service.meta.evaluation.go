@@ -257,10 +257,19 @@ func UpdateRawFromSource(ctx context.Context, objectType, objectId, adAccountId 
 	}
 	current["raw"] = raw
 
-	// Tính layer1, layer2, layer3. Theo FolkForm v4.1: 13 rules CHỈ apply cho campaign — Ad không có alertFlags.
-	layer1 := computeLayer1(raw)
-	layer2 := computeLayer2(raw, layer1)
-	layer3 := computeLayer3(layer1, layer2)
+	// Tính layer1, layer2, layer3 qua Rule Engine. Không fallback.
+	layer1 := computeLayer1ViaRuleEngine(ctx, raw, objectId, adAccountId, ownerOrgID)
+	if layer1 == nil {
+		layer1 = make(map[string]interface{})
+	}
+	layer2 := computeLayer2ViaRuleEngine(ctx, raw, layer1, objectId, adAccountId, ownerOrgID)
+	if layer2 == nil {
+		layer2 = make(map[string]interface{})
+	}
+	layer3 := computeLayer3ViaRuleEngine(ctx, layer1, layer2, objectId, adAccountId, ownerOrgID)
+	if layer3 == nil {
+		layer3 = make(map[string]interface{})
+	}
 	current["layer1"] = layer1
 	current["layer2"] = layer2
 	current["layer3"] = layer3
@@ -332,9 +341,18 @@ func updateRawAndLayersForAd(ctx context.Context, adId, adAccountId string, owne
 		"30p": raw30p,
 	}
 
-	layer1 := computeLayer1(raw)
-	layer2 := computeLayer2(raw, layer1)
-	layer3 := computeLayer3(layer1, layer2)
+	layer1 := computeLayer1ViaRuleEngine(ctx, raw, adId, adAccountId, ownerOrgID)
+	if layer1 == nil {
+		layer1 = make(map[string]interface{})
+	}
+	layer2 := computeLayer2ViaRuleEngine(ctx, raw, layer1, adId, adAccountId, ownerOrgID)
+	if layer2 == nil {
+		layer2 = make(map[string]interface{})
+	}
+	layer3 := computeLayer3ViaRuleEngine(ctx, layer1, layer2, adId, adAccountId, ownerOrgID)
+	if layer3 == nil {
+		layer3 = make(map[string]interface{})
+	}
 	// Theo FolkForm v4.1: 13 rules CHỈ apply cho campaign — Ad không có alertFlags.
 	current := map[string]interface{}{
 		"raw":         raw,
@@ -538,277 +556,6 @@ func getTimeFactorForMQS() float64 {
 		return 0.5
 	}
 	return 1.0
-}
-
-// computeLayer1 tính layer1 theo FolkForm 01. Nguồn: Pancake (orders) + FB (mess).
-// raw.7d: meta (meta_ad_insights) + pancake.pos (pc_pos_orders). raw.2h/1h/30p: orders (pc_pos_orders) + mess (fb_conversations).
-func computeLayer1(raw map[string]interface{}) map[string]interface{} {
-	r7d := getRaw7d(raw)
-	r2h := getRaw2h(raw)
-	r1h := getRaw1h(raw)
-	r30p := getRaw30p(raw)
-
-	meta, _ := r7d["meta"].(map[string]interface{})
-	pancake, _ := r7d["pancake"].(map[string]interface{})
-	pos, _ := mapOrNil(pancake, "pos").(map[string]interface{})
-
-	// FB_Mess_7d, Pancake_orders_7d từ meta_ad_insights + pc_pos_orders
-	spend := toFloat(meta, "spend")
-	mess := toInt64(meta, "mess")
-	inlineLinkClicks := toInt64(meta, "inlineLinkClicks")
-	orders := toInt64(pos, "orders")
-	revenue := toFloat(pos, "revenue")
-
-	msgRate := 0.0
-	if inlineLinkClicks > 0 && mess > 0 {
-		msgRate = float64(mess) / float64(inlineLinkClicks)
-	}
-	cpaMess := 0.0
-	if mess > 0 {
-		cpaMess = spend / float64(mess)
-	}
-	cpaPurchase := 0.0
-	if orders > 0 {
-		cpaPurchase = spend / float64(orders)
-	}
-	convRate := 0.0
-	if mess > 0 {
-		convRate = float64(orders) / float64(mess)
-	}
-	// convRate_2h, convRate_1h — từ raw.2h, raw.1h (orders/mess từ fb_conversations). Tỷ lệ 0-1.
-	convRate2h := 0.0
-	if r2h != nil {
-		o2 := toInt64(r2h, "orders")
-		m2 := toInt64(r2h, "mess")
-		if m2 > 0 {
-			convRate2h = float64(o2) / float64(m2)
-		}
-	}
-	convRate1h := 0.0
-	if r1h != nil {
-		o1 := toInt64(r1h, "orders")
-		m1 := toInt64(r1h, "mess")
-		if m1 > 0 {
-			convRate1h = float64(o1) / float64(m1)
-		}
-	}
-	roas := 0.0
-	if spend > 0 {
-		roas = revenue / spend
-	}
-
-	// Lifecycle: theo FolkForm v4.1 Section 2.2 Per-Camp Adaptive Threshold — time-based.
-	// Giai đoạn 0: < 7 ngày = NEW | 1: 7–14 ngày = WARMING | 2: 14–30 ngày = CALIBRATED | 3: 30+ ngày = MATURE
-	lifecycle := "NEW"
-	metaCreatedAt := toInt64(r7d, "metaCreatedAt")
-	if metaCreatedAt > 0 {
-		daysSinceCreated := (time.Now().UnixMilli() - metaCreatedAt) / (24 * 60 * 60 * 1000)
-		if daysSinceCreated < MetaLearningPhaseDays {
-			lifecycle = "NEW" // Giai đoạn 0: camp mới, chưa đủ data
-		} else if daysSinceCreated < 14 {
-			lifecycle = "WARMING" // Giai đoạn 1: 7–14 ngày
-		} else if daysSinceCreated < 30 {
-			lifecycle = "CALIBRATED" // Giai đoạn 2: 14–30 ngày
-		} else {
-			lifecycle = "MATURE" // Giai đoạn 3: 30+ ngày
-		}
-	} else {
-		// Fallback khi không có metaCreatedAt (dữ liệu cũ): dùng click-based
-		if inlineLinkClicks >= 100 {
-			lifecycle = "WARMING"
-		}
-		if inlineLinkClicks >= 500 {
-			lifecycle = "CALIBRATED"
-		}
-		if inlineLinkClicks >= 2000 {
-			lifecycle = "MATURE"
-		}
-	}
-
-	// MQS = Mess(lag-30p) × CR_7day_Pancake × Time_Factor. Theo FolkForm 01.
-	// Ưu tiên mess_30p từ fb_conversations; fallback mess_7d khi không có raw.30p.
-	timeFactor := getTimeFactorForMQS()
-	messForMQS := mess
-	if r30p != nil {
-		if m30 := toInt64(r30p, "mess"); m30 > 0 {
-			messForMQS = m30
-		}
-	}
-	mqs := float64(messForMQS) * convRate * timeFactor
-
-	// spend_pct = spend / daily_budget (từ meta.dailyBudget khi có — campaign level)
-	spendPct := 0.0
-	if dailyBudget := toFloat(meta, "dailyBudget"); dailyBudget > 0 && spend > 0 {
-		spendPct = spend / dailyBudget
-	}
-
-	// runtime_minutes = (now - metaCreatedAt) / 60000 — cho KO-A, BASE CONDITION
-	runtimeMinutes := 0.0
-	if metaCreatedAt := toInt64(r7d, "metaCreatedAt"); metaCreatedAt > 0 {
-		runtimeMinutes = float64(time.Now().UnixMilli()-metaCreatedAt) / 60000
-	}
-
-	// msgRate_30p = mess_30p / clicks_30p. Meta không có clicks 30p → ước lượng: clicks_30p ≈ clicks_7d/336 (7d=10080p, 30p/10080p=1/336).
-	msgRate30p := 0.0
-	if r30p != nil && inlineLinkClicks > 0 {
-		m30 := toInt64(r30p, "mess")
-		clicks30pEst := float64(inlineLinkClicks) / 336.0 // 7 ngày = 10080 phút; 30p/10080p ≈ 1/336
-		if clicks30pEst >= 1 && m30 > 0 {
-			msgRate30p = float64(m30) / clicks30pEst
-		}
-	}
-
-	// Tên metric thể hiện rõ chu kỳ theo FolkForm v4.1
-	return map[string]interface{}{
-		"lifecycle":        lifecycle,
-		"msgRate_7d":       msgRate,
-		"msgRate_30p":      msgRate30p,
-		"mess_30p":         toInt64(r30p, "mess"),
-		"cpaMess_7d":       cpaMess,
-		"cpaPurchase_7d":   cpaPurchase,
-		"convRate_7d":      convRate,
-		"convRate_2h":      convRate2h,
-		"convRate_1h":      convRate1h,
-		"roas_7d":          roas,
-		"mqs_7d":           mqs,
-		"spendPct_7d":      spendPct,
-		"runtimeMinutes":  runtimeMinutes,
-	}
-}
-
-func computeLayer2(raw map[string]interface{}, layer1 map[string]interface{}) map[string]interface{} {
-	r7d := getRaw7d(raw)
-	meta, _ := r7d["meta"].(map[string]interface{})
-	cpm := toFloat(meta, "cpm")
-	ctr := toFloat(meta, "ctr")
-	frequency := toFloat(meta, "frequency")
-
-	// Đơn giản hóa: 5 trục 0-100 dựa trên ngưỡng. Dùng metrics 7d.
-	efficiency := scoreFromRoas(toFloat(layer1, "roas_7d"))
-	demandQuality := scoreFromRate(toFloat(layer1, "msgRate_7d"), toFloat(layer1, "convRate_7d"))
-	auctionPressure := scoreFromCpmCtr(cpm, ctr)
-	saturation := scoreFromFrequency(frequency)
-	momentum := 50 // TODO: cần trend data
-
-	return map[string]interface{}{
-		"efficiency":      efficiency,
-		"demandQuality":   demandQuality,
-		"auctionPressure": auctionPressure,
-		"saturation":     saturation,
-		"momentum":       momentum,
-	}
-}
-
-func computeLayer3(layer1, layer2 map[string]interface{}) map[string]interface{} {
-	eff := toFloat(layer2, "efficiency")
-	demand := toFloat(layer2, "demandQuality")
-	auction := toFloat(layer2, "auctionPressure")
-	sat := toFloat(layer2, "saturation")
-	mom := toFloat(layer2, "momentum")
-	chs := (eff + demand + auction + sat + mom) / 5
-
-	healthState := "critical"
-	if chs >= 80 {
-		healthState = "strong"
-	} else if chs >= 60 {
-		healthState = "healthy"
-	} else if chs >= 40 {
-		healthState = "warning"
-	}
-
-	roas := toFloat(layer1, "roas_7d")
-	performanceTier := "low"
-	if roas >= 3 {
-		performanceTier = "high"
-	} else if roas >= 1.5 {
-		performanceTier = "medium"
-	}
-
-	lifecycle, _ := layer1["lifecycle"].(string)
-	portfolioCell := derivePortfolioCell(lifecycle, performanceTier)
-
-	return map[string]interface{}{
-		"chs":             chs,
-		"healthState":     healthState,
-		"performanceTier": performanceTier,
-		"stage":           "stable",
-		"portfolioCell":   portfolioCell,
-		"diagnoses":       []string{},
-	}
-}
-
-func derivePortfolioCell(lifecycle, performanceTier string) string {
-	switch lifecycle {
-	case "NEW":
-		return "test"
-	case "WARMING":
-		if performanceTier == "high" {
-			return "potential"
-		}
-		return "test"
-	case "CALIBRATED":
-		if performanceTier == "high" {
-			return "scale"
-		}
-		if performanceTier == "medium" {
-			return "maintain"
-		}
-		return "fix"
-	case "MATURE":
-		if performanceTier == "high" {
-			return "scale"
-		}
-		if performanceTier == "medium" {
-			return "maintain"
-		}
-		return "recover"
-	}
-	return "test"
-}
-
-func scoreFromRoas(roas float64) float64 {
-	if roas >= 3 {
-		return 100
-	}
-	if roas >= 2 {
-		return 80
-	}
-	if roas >= 1 {
-		return 60
-	}
-	if roas >= 0.5 {
-		return 40
-	}
-	return 20
-}
-
-func scoreFromRate(msgRate, convRate float64) float64 {
-	s := (msgRate*50 + convRate*50) / 2
-	if s > 100 {
-		return 100
-	}
-	return s
-}
-
-func scoreFromCpmCtr(cpm, ctr float64) float64 {
-	// CPM thấp + CTR cao = tốt
-	if cpm < 50000 && ctr > 1 {
-		return 80
-	}
-	if cpm < 100000 && ctr > 0.5 {
-		return 60
-	}
-	return 40
-}
-
-func scoreFromFrequency(f float64) float64 {
-	if f <= 2 {
-		return 80
-	}
-	if f <= 4 {
-		return 60
-	}
-	return 40
 }
 
 func mapOrNil(m map[string]interface{}, k string) interface{} {
@@ -1209,13 +956,22 @@ func rollupFromChildren(ctx context.Context, objectType, objectId, adAccountId s
 		enrichRawWithAdAccountData(ctx, adAccountId, ownerOrgID, raw)
 	}
 
-	layer1 := computeLayer1(raw)
-	layer2 := computeLayer2(raw, layer1)
+	layer1 := computeLayer1ViaRuleEngine(ctx, raw, objectId, adAccountId, ownerOrgID)
+	if layer1 == nil {
+		layer1 = make(map[string]interface{})
+	}
+	layer2 := computeLayer2ViaRuleEngine(ctx, raw, layer1, objectId, adAccountId, ownerOrgID)
+	if layer2 == nil {
+		layer2 = make(map[string]interface{})
+	}
 	// Bổ sung currentMode từ ad_account.accountMode — SL-B BLITZ/PROTECT dùng ngưỡng 0.20
 	if adAccountId != "" {
 		enrichLayer2WithAdAccountMode(ctx, adAccountId, ownerOrgID, layer2)
 	}
-	layer3 := computeLayer3(layer1, layer2)
+	layer3 := computeLayer3ViaRuleEngine(ctx, layer1, layer2, objectId, adAccountId, ownerOrgID)
+	if layer3 == nil {
+		layer3 = make(map[string]interface{})
+	}
 	// Theo FolkForm v4.1: toàn bộ 13 rules CHỈ apply cho campaign. AdSet/AdAccount không có FLAG_RULE.
 	// Server rollup CHỈ tạo flags — không tạo actions. Worker (ads module) sẽ tính actions và ghi activity riêng.
 	var alertFlags []string

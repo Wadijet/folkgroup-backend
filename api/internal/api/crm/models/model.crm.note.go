@@ -4,11 +4,16 @@ package models
 
 import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
+
+	"meta_commerce/internal/utility/identity"
 )
 
 // CrmNote lưu ghi chú khách (crm_notes).
 type CrmNote struct {
 	ID primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"`
+	Uid                string                     `json:"uid" bson:"uid" index:"single:1"` // note_xxx — ID chuẩn 4 lớp
+	Links              map[string]identity.LinkItem `json:"links,omitempty" bson:"links,omitempty"` // customer → cust_xxx
+	LinksCustomerUid   string                     `json:"-" bson:"links.customer.uid,omitempty" index:"single:1,sparse"`
 
 	CustomerId          string             `json:"customerId" bson:"customerId" index:"single:1,compound:crm_note_org_customer_created,compound:crm_note_org_customer_deleted_created"`
 	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:crm_note_org_customer_created,compound:crm_note_org_deleted,compound:crm_note_org_customer_deleted_created"`

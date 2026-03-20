@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	reportsvc "meta_commerce/internal/api/report/service"
 	"meta_commerce/internal/worker"
 	"meta_commerce/internal/worker/metrics"
 )
@@ -87,7 +88,7 @@ func (h *SystemHandler) HandleJobMetrics(c fiber.Ctx) error {
 	})
 }
 
-// HandleGetWorkerConfig trả về cấu hình worker hiện tại (ngưỡng throttle + priorities + active + state).
+// HandleGetWorkerConfig trả về cấu hình worker hiện tại (ngưỡng throttle + priorities + active + report schedules + state).
 // GET /api/v1/system/worker-config
 func (h *SystemHandler) HandleGetWorkerConfig(c fiber.Ctx) error {
 	ctrl := worker.DefaultController()
@@ -98,34 +99,74 @@ func (h *SystemHandler) HandleGetWorkerConfig(c fiber.Ctx) error {
 	workerActive := worker.GetAllWorkerActive()             // Trạng thái active/inactive từng worker
 	workerActiveOverrides := worker.GetWorkerActiveOverrides() // Override active (chỉ các worker đã chỉnh)
 	workerMetadata := worker.GetAllWorkerMetadata()         // Mô tả từng worker (module, description)
+	reportSchedules := buildReportSchedulesResponse()       // Lịch chạy report (ads, order, customer) — hiệu dụng
+	reportScheduleOverrides := reportsvc.GetReportScheduleOverrides() // Override lịch report (chỉ domain đã chỉnh qua API)
+	workerSchedules := worker.GetAllWorkerSchedules()
+	workerScheduleOverrides := worker.GetWorkerScheduleOverrides()
+	workerPoolSizes := worker.GetAllWorkerPoolSizes()
+	workerPoolSizeOverrides := worker.GetPoolSizeOverrides()
+	workerRetentions := worker.GetAllWorkerRetentions()
+	workerRetentionOverrides := worker.GetWorkerRetentionOverrides()
+	alertWebhookURL := worker.GetAlertWebhookURL()
 	metrics := ctrl.GetResourceMetrics()
 	return c.Status(common.StatusOK).JSON(fiber.Map{
 		"code":    common.StatusOK,
 		"message": "Thành công",
 		"data": fiber.Map{
-			"thresholds":           thresholds,
-			"priorities":           priorities,            // Override (rỗng nếu chưa chỉnh)
-			"workerPriorities":     workerPriorities,      // Mức ưu tiên hiệu dụng tất cả workers
-			"workerActive":         workerActive,          // Trạng thái active hiệu dụng tất cả workers
-			"workerActiveOverrides": workerActiveOverrides, // Override active (rỗng nếu chưa chỉnh)
-			"workerMetadata":       workerMetadata,        // Mô tả từng worker (module, description)
-			"state":                string(state),
-			"cpuPercent":           cpuPct,
-			"ramPercent":           metrics.RAMPercent,
-			"diskPercent":          metrics.DiskPercent,
+			"thresholds":              thresholds,
+			"priorities":              priorities,
+			"workerPriorities":        workerPriorities,
+			"workerActive":            workerActive,
+			"workerActiveOverrides":   workerActiveOverrides,
+			"workerMetadata":          workerMetadata,
+			"reportSchedules":         reportSchedules,
+			"reportScheduleOverrides": reportScheduleOverrides,
+			"workerSchedules":         workerSchedules,
+			"workerScheduleOverrides": workerScheduleOverrides,
+			"workerPoolSizes":         workerPoolSizes,
+			"workerPoolSizeOverrides": workerPoolSizeOverrides,
+			"workerRetentions":        workerRetentions,
+			"workerRetentionOverrides": workerRetentionOverrides,
+			"alertWebhookURL":         alertWebhookURL,
+			"state":                   string(state),
+			"cpuPercent":              cpuPct,
+			"ramPercent":               metrics.RAMPercent,
+			"diskPercent":              metrics.DiskPercent,
 		},
 		"status": "success",
 	})
 }
 
-// HandleUpdateWorkerConfig cập nhật cấu hình worker (ngưỡng + priority + active overrides).
+// buildReportSchedulesResponse trả về map domain → {interval, batchSize} hiệu dụng (để API GET).
+func buildReportSchedulesResponse() map[string]map[string]interface{} {
+	configs := reportsvc.GetReportScheduleConfigs()
+	out := make(map[string]map[string]interface{}, len(configs))
+	for _, c := range configs {
+		out[c.Name] = map[string]interface{}{
+			"interval":  c.Interval.String(),
+			"batchSize": c.BatchSize,
+		}
+	}
+	return out
+}
+
+// HandleUpdateWorkerConfig cập nhật cấu hình worker (ngưỡng + priority + active + report schedules).
 // PUT /api/v1/system/worker-config
-// Body: { "thresholds": {...}, "priorities": {"crm_bulk": 3}, "workerActive": {"crm_bulk": false} }
+// Body: { "thresholds": {...}, "priorities": {...}, "workerActive": {...}, "reportSchedules": {"ads": {"interval": "15m", "batchSize": 20}} }
 func (h *SystemHandler) HandleUpdateWorkerConfig(c fiber.Ctx) error {
 	var body struct {
-		Thresholds   *worker.WorkerThresholds `json:"thresholds"`
-		Priorities   map[string]int           `json:"priorities"`
-		WorkerActive map[string]bool          `json:"workerActive"`
+		Thresholds      *worker.WorkerThresholds       `json:"thresholds"`
+		Priorities      map[string]int                 `json:"priorities"`
+		WorkerActive    map[string]bool                `json:"workerActive"`
+		ReportSchedules      map[string]ReportScheduleInput `json:"reportSchedules"`
+		ReportSchedulesClear  []string                       `json:"reportSchedulesClear"`
+		WorkerSchedules        map[string]ReportScheduleInput `json:"workerSchedules"`
+		WorkerSchedulesClear   []string                       `json:"workerSchedulesClear"`
+		WorkerPoolSizes        map[string]int                 `json:"workerPoolSizes"`
+		WorkerPoolSizesClear  []string                       `json:"workerPoolSizesClear"`
+		WorkerRetentions       map[string]int64               `json:"workerRetentions"`
+		WorkerRetentionsClear  []string                       `json:"workerRetentionsClear"`
+		AlertWebhookURL        *string                        `json:"alertWebhookURL"`
 	}
 	if err := c.Bind().JSON(&body); err != nil {
 		return c.Status(common.StatusBadRequest).JSON(fiber.Map{
@@ -147,11 +188,73 @@ func (h *SystemHandler) HandleUpdateWorkerConfig(c fiber.Ctx) error {
 			worker.SetWorkerActiveOverride(name, active)
 		}
 	}
+	if len(body.ReportSchedules) > 0 {
+		for domain, s := range body.ReportSchedules {
+			if s.Interval != "" || s.BatchSize > 0 {
+				reportsvc.SetReportScheduleOverride(domain, s.Interval, s.BatchSize)
+			}
+		}
+	}
+	for _, domain := range body.ReportSchedulesClear {
+		reportsvc.ClearReportScheduleOverride(domain)
+	}
+	reportWorkerToDomain := map[string]string{
+		"report_dirty_ads":     "ads",
+		"report_dirty_order":   "order",
+		"report_dirty_customer": "customer",
+	}
+	if len(body.WorkerSchedules) > 0 {
+		for workerName, s := range body.WorkerSchedules {
+			if s.Interval != "" || s.BatchSize > 0 {
+				if domain, ok := reportWorkerToDomain[workerName]; ok {
+					reportsvc.SetReportScheduleOverride(domain, s.Interval, s.BatchSize)
+				} else {
+					worker.SetWorkerScheduleOverride(workerName, s.Interval, s.BatchSize)
+				}
+			}
+		}
+	}
+	for _, workerName := range body.WorkerSchedulesClear {
+		if domain, ok := reportWorkerToDomain[workerName]; ok {
+			reportsvc.ClearReportScheduleOverride(domain)
+		} else {
+			worker.ClearWorkerScheduleOverride(workerName)
+		}
+	}
+	if len(body.WorkerPoolSizes) > 0 {
+		for name, size := range body.WorkerPoolSizes {
+			if size >= 1 {
+				worker.SetPoolSizeOverride(name, size)
+			}
+		}
+	}
+	for _, name := range body.WorkerPoolSizesClear {
+		worker.ClearPoolSizeOverride(name)
+	}
+	if len(body.WorkerRetentions) > 0 {
+		for name, days := range body.WorkerRetentions {
+			if days >= 1 {
+				worker.SetWorkerRetentionOverride(name, days)
+			}
+		}
+	}
+	for _, name := range body.WorkerRetentionsClear {
+		worker.ClearWorkerRetentionOverride(name)
+	}
+	if body.AlertWebhookURL != nil {
+		worker.SetAlertWebhookURL(*body.AlertWebhookURL)
+	}
 	return c.Status(common.StatusOK).JSON(fiber.Map{
 		"code":    common.StatusOK,
 		"message": "Đã cập nhật cấu hình worker",
 		"data":    nil,
 		"status":  "success",
 	})
+}
+
+// ReportScheduleInput body cho cập nhật lịch report qua API.
+type ReportScheduleInput struct {
+	Interval  string `json:"interval"`  // duration: "2m", "15m", "24h"
+	BatchSize int    `json:"batchSize"` // 0 = không đổi
 }
 

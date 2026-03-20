@@ -25,33 +25,131 @@ const (
 	BackfillTypeNote         = "note"
 )
 
+// progressInt64 lấy int64 từ interface{} (BSON có thể trả về int32, int64, float64).
+func progressInt64(v interface{}) int64 {
+	if v == nil {
+		return 0
+	}
+	switch n := v.(type) {
+	case int:
+		return int64(n)
+	case int32:
+		return int64(n)
+	case int64:
+		return n
+	case float64:
+		return int64(n)
+	}
+	return 0
+}
+
 // BackfillActivity quét orders, conversations, notes và đẩy qua Ingest*Touchpoint.
 // Tạo crm_customer từ order/conv nếu chưa có (UpsertMinimalFromPosId/UpsertMinimalFromFbId), log activity.
 // types: []string{"order","conversation","note"} — rỗng/nil = chạy tất cả.
 // Xử lý theo thứ tự thời gian cũ trước, mới sau. limit <= 0: toàn bộ; limit > 0: giới hạn mỗi loại.
-func (s *CrmCustomerService) BackfillActivity(ctx context.Context, ownerOrgID primitive.ObjectID, limit int, types []string) (*crmdto.CrmBackfillActivityResult, error) {
+// progress: tiến độ để resume (nil = bắt đầu mới). onProgress: callback sau mỗi batch (nil = không checkpoint).
+func (s *CrmCustomerService) BackfillActivity(ctx context.Context, ownerOrgID primitive.ObjectID, limit int, types []string, progress bson.M, onProgress func(bson.M)) (*crmdto.CrmBackfillActivityResult, error) {
 	useLimit := limit > 0
 	if !useLimit {
-		limit = 0 // Không giới hạn
+		limit = 0
 	}
 	runOrder, runConv, runNote := parseBackfillTypes(types)
 	result := &crmdto.CrmBackfillActivityResult{}
 
+	ordersSkip, convSkip, notesSkip := int64(0), int64(0), int64(0)
+	if progress != nil {
+		// Hỗ trợ progress lồng nhau (từ RebuildCrm: progress.backfill)
+		p := progress
+		if bf, ok := progress["backfill"].(map[string]interface{}); ok {
+			p = bf
+		}
+		ordersSkip = progressInt64(p["ordersSkip"])
+		convSkip = progressInt64(p["conversationsSkip"])
+		notesSkip = progressInt64(p["notesSkip"])
+	}
+
+	ordersTotal, convTotal, notesTotal := int64(0), int64(0), int64(0)
+	if onProgress != nil && (runOrder || runConv || runNote) {
+		ordersTotal, convTotal, notesTotal = s.countBackfillSourceTotals(ctx, ownerOrgID, runOrder, runConv, runNote)
+	}
+
+	emitProgress := func(currentSrc string, nextSrcs []string) {
+		if onProgress != nil {
+			p := s.buildBackfillProgress(ordersSkip, convSkip, notesSkip, ordersTotal, convTotal, notesTotal, runOrder, runConv, runNote, currentSrc, nextSrcs)
+			onProgress(p)
+		}
+	}
+
 	if runOrder {
-		ordersProcessed := s.backfillOrders(ctx, ownerOrgID, limit, useLimit)
-		result.OrdersProcessed = ordersProcessed
+		var onBatch func(int64)
+		if onProgress != nil {
+			nextSrcs := []string{}
+			if runConv {
+				nextSrcs = append(nextSrcs, "conversation")
+			}
+			if runNote {
+				nextSrcs = append(nextSrcs, "note")
+			}
+			onBatch = func(skip int64) {
+				ordersSkip = skip
+				emitProgress("order", nextSrcs)
+			}
+		}
+		processed, newSkip := s.backfillOrdersWithProgress(ctx, ownerOrgID, limit, useLimit, ordersSkip, onBatch)
+		result.OrdersProcessed = processed
+		ordersSkip = newSkip
+		if onProgress != nil {
+			nextSrcs := []string{}
+			if runConv {
+				nextSrcs = append(nextSrcs, "conversation")
+			}
+			if runNote {
+				nextSrcs = append(nextSrcs, "note")
+			}
+			emitProgress("order", nextSrcs)
+		}
 	}
 
 	if runConv {
-		convProcessed, convLogged, convSkipped := s.backfillConversations(ctx, ownerOrgID, limit, useLimit)
-		result.ConversationsProcessed = convProcessed
-		result.ConversationsLogged = convLogged
-		result.ConversationsSkippedNoResolve = convSkipped
+		var onBatch func(int64)
+		if onProgress != nil {
+			nextSrcs := []string{}
+			if runNote {
+				nextSrcs = append(nextSrcs, "note")
+			}
+			onBatch = func(skip int64) {
+				convSkip = skip
+				emitProgress("conversation", nextSrcs)
+			}
+		}
+		processed, logged, skipped, newSkip := s.backfillConversationsWithProgress(ctx, ownerOrgID, limit, useLimit, convSkip, onBatch)
+		result.ConversationsProcessed = processed
+		result.ConversationsLogged = logged
+		result.ConversationsSkippedNoResolve = skipped
+		convSkip = newSkip
+		if onProgress != nil {
+			nextSrcs := []string{}
+			if runNote {
+				nextSrcs = append(nextSrcs, "note")
+			}
+			emitProgress("conversation", nextSrcs)
+		}
 	}
 
 	if runNote {
-		notesProcessed := s.backfillNotes(ctx, ownerOrgID, limit, useLimit)
-		result.NotesProcessed = notesProcessed
+		var onBatch func(int64)
+		if onProgress != nil {
+			onBatch = func(skip int64) {
+				notesSkip = skip
+				emitProgress("note", []string{})
+			}
+		}
+		processed, newSkip := s.backfillNotesWithProgress(ctx, ownerOrgID, limit, useLimit, notesSkip, onBatch)
+		result.NotesProcessed = processed
+		notesSkip = newSkip
+		if onProgress != nil {
+			emitProgress("note", []string{})
+		}
 	}
 
 	// Chẩn đoán khi tất cả = 0
@@ -60,6 +158,78 @@ func (s *CrmCustomerService) BackfillActivity(ctx context.Context, ownerOrgID pr
 	}
 
 	return result, nil
+}
+
+// countBackfillSourceTotals đếm tổng số bản ghi mỗi nguồn backfill (để tính % tiến độ).
+func (s *CrmCustomerService) countBackfillSourceTotals(ctx context.Context, ownerOrgID primitive.ObjectID, runOrder, runConv, runNote bool) (ordersTotal, convTotal, notesTotal int64) {
+	if runOrder {
+		if coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders); ok {
+			filter := bson.M{
+				"ownerOrganizationId": ownerOrgID,
+				"$and": []bson.M{
+					{"status": bson.M{"$nin": []int{6}}},
+					{"posData.status": bson.M{"$nin": []int{6}}},
+				},
+			}
+			ordersTotal, _ = coll.CountDocuments(ctx, filter)
+		}
+	}
+	if runConv {
+		if coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.FbConvesations); ok {
+			convTotal, _ = coll.CountDocuments(ctx, bson.M{"ownerOrganizationId": ownerOrgID})
+		}
+	}
+	if runNote {
+		if coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CrmNotes); ok {
+			notesTotal, _ = coll.CountDocuments(ctx, bson.M{"ownerOrganizationId": ownerOrgID, "isDeleted": false})
+		}
+	}
+	return ordersTotal, convTotal, notesTotal
+}
+
+// buildBackfillProgress tạo progress với currentSource, nextSources, percentBySource.
+func (s *CrmCustomerService) buildBackfillProgress(ordersSkip, convSkip, notesSkip, ordersTotal, convTotal, notesTotal int64, runOrder, runConv, runNote bool, currentSource string, nextSources []string) bson.M {
+	p := bson.M{
+		"ordersSkip":       ordersSkip,
+		"conversationsSkip": convSkip,
+		"notesSkip":        notesSkip,
+		"currentSource":    currentSource,
+		"nextSources":      nextSources,
+	}
+	percentBySource := bson.M{}
+	if runOrder {
+		orderPct := 0
+		if ordersTotal > 0 {
+			orderPct = int(float64(ordersSkip) / float64(ordersTotal) * 100)
+			if orderPct > 100 {
+				orderPct = 100
+			}
+		}
+		percentBySource["order"] = orderPct
+	}
+	if runConv {
+		convPct := 0
+		if convTotal > 0 {
+			convPct = int(float64(convSkip) / float64(convTotal) * 100)
+			if convPct > 100 {
+				convPct = 100
+			}
+		}
+		percentBySource["conversation"] = convPct
+	}
+	if runNote {
+		notePct := 0
+		if notesTotal > 0 {
+			notePct = int(float64(notesSkip) / float64(notesTotal) * 100)
+			if notePct > 100 {
+				notePct = 100
+			}
+		}
+		percentBySource["note"] = notePct
+	}
+	p["percentBySource"] = percentBySource
+	p["totals"] = bson.M{"order": ordersTotal, "conversation": convTotal, "note": notesTotal}
+	return p
 }
 
 // extractConversationCustomerId lấy customerId từ FbConversation.
@@ -148,13 +318,13 @@ func parseBackfillTypes(types []string) (runOrder, runConv, runNote bool) {
 
 const backfillBatchSize = 1000 // Phân trang CRUD, tránh vượt memory limit
 
-// backfillOrders backfill đơn hàng theo thứ tự thời gian: cũ trước, mới sau.
-// Dùng Find + Sort + Skip/Limit (phân trang CRUD) thay vì aggregation.
-func (s *CrmCustomerService) backfillOrders(ctx context.Context, ownerOrgID primitive.ObjectID, limit int, useLimit bool) int {
+// backfillOrdersWithProgress backfill đơn hàng theo thứ tự thời gian, hỗ trợ checkpoint.
+// Trả về (số đã xử lý, skip mới). onBatchDone gọi sau mỗi batch (nil = không dùng checkpoint).
+func (s *CrmCustomerService) backfillOrdersWithProgress(ctx context.Context, ownerOrgID primitive.ObjectID, limit int, useLimit bool, startSkip int64, onBatchDone func(int64)) (int, int64) {
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
 	if !ok {
 		logger.GetAppLogger().Warn("[CRM] Backfill orders: không tìm thấy collection pc_pos_orders")
-		return 0
+		return 0, startSkip
 	}
 	filter := bson.M{
 		"ownerOrganizationId": ownerOrgID,
@@ -163,11 +333,10 @@ func (s *CrmCustomerService) backfillOrders(ctx context.Context, ownerOrgID prim
 			{"posData.status": bson.M{"$nin": []int{6}}},
 		},
 	}
-	// Sort theo posData (thời gian gốc), cũ trước mới sau
 	sortOpt := mongoopts.Find().SetSort(bson.D{{Key: "posData.inserted_at", Value: 1}, {Key: "posData.updated_at", Value: 1}, {Key: "_id", Value: 1}})
 
 	count := 0
-	for skip := int64(0); ; skip += backfillBatchSize {
+	for skip := startSkip; ; skip += backfillBatchSize {
 		batchLimit := backfillBatchSize
 		if useLimit && limit > 0 && count+batchLimit > limit {
 			batchLimit = limit - count
@@ -210,20 +379,28 @@ func (s *CrmCustomerService) backfillOrders(ctx context.Context, ownerOrgID prim
 			}
 		}
 		cursor.Close(ctx)
+		if onBatchDone != nil {
+			onBatchDone(skip + int64(docsInBatch))
+		}
 		if docsInBatch < batchLimit {
-			break
+			return count, skip + int64(docsInBatch)
 		}
 	}
-	return count
+	return count, startSkip + int64(count)
 }
 
-// backfillConversations backfill hội thoại theo thứ tự thời gian: cũ trước, mới sau.
-// Dùng Find + Sort + Skip/Limit (phân trang CRUD) thay vì aggregation.
-func (s *CrmCustomerService) backfillConversations(ctx context.Context, ownerOrgID primitive.ObjectID, limit int, useLimit bool) (processed, logged, skipped int) {
+// backfillOrders backfill đơn hàng (không checkpoint). Gọi backfillOrdersWithProgress với startSkip=0, onBatchDone=nil.
+func (s *CrmCustomerService) backfillOrders(ctx context.Context, ownerOrgID primitive.ObjectID, limit int, useLimit bool) int {
+	n, _ := s.backfillOrdersWithProgress(ctx, ownerOrgID, limit, useLimit, 0, nil)
+	return n
+}
+
+// backfillConversationsWithProgress backfill hội thoại, hỗ trợ checkpoint.
+func (s *CrmCustomerService) backfillConversationsWithProgress(ctx context.Context, ownerOrgID primitive.ObjectID, limit int, useLimit bool, startSkip int64, onBatchDone func(int64)) (processed, logged, skipped int, newSkip int64) {
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.FbConvesations)
 	if !ok {
 		logger.GetAppLogger().Warn("[CRM] Backfill conversations: không tìm thấy collection fb_conversations")
-		return 0, 0, 0
+		return 0, 0, 0, startSkip
 	}
 	filter := bson.M{"ownerOrganizationId": ownerOrgID}
 	sortOpt := mongoopts.Find().SetSort(bson.D{
@@ -232,7 +409,8 @@ func (s *CrmCustomerService) backfillConversations(ctx context.Context, ownerOrg
 	})
 
 	decodeErrCount := 0
-	for skip := int64(0); ; skip += backfillBatchSize {
+	skip := startSkip
+	for {
 		batchLimit := backfillBatchSize
 		if useLimit && limit > 0 && processed+batchLimit > limit {
 			batchLimit = limit - processed
@@ -257,7 +435,6 @@ func (s *CrmCustomerService) backfillConversations(ctx context.Context, ownerOrg
 				}
 				continue
 			}
-			// Ưu tiên customers[0].id (match fb_customers.customerId) trước customer_id (Pancake format có thể khác)
 			customerId := extractConversationCustomerId(&doc)
 			if customerId != "" {
 				processed++
@@ -270,47 +447,77 @@ func (s *CrmCustomerService) backfillConversations(ctx context.Context, ownerOrg
 			}
 		}
 		cursor.Close(ctx)
-		if docsInBatch < batchLimit {
-			break
+		if onBatchDone != nil {
+			onBatchDone(skip + int64(docsInBatch))
 		}
+		if docsInBatch < batchLimit {
+			return processed, logged, skipped, skip + int64(docsInBatch)
+		}
+		skip += backfillBatchSize
 	}
-	return processed, logged, skipped
+	return processed, logged, skipped, skip
 }
 
-// backfillNotes backfill ghi chú theo thứ tự thời gian: cũ trước, mới sau (createdAt asc).
-func (s *CrmCustomerService) backfillNotes(ctx context.Context, ownerOrgID primitive.ObjectID, limit int, useLimit bool) int {
+// backfillConversations backfill hội thoại (không checkpoint).
+func (s *CrmCustomerService) backfillConversations(ctx context.Context, ownerOrgID primitive.ObjectID, limit int, useLimit bool) (processed, logged, skipped int) {
+	p, l, sk, _ := s.backfillConversationsWithProgress(ctx, ownerOrgID, limit, useLimit, 0, nil)
+	return p, l, sk
+}
+
+// backfillNotesWithProgress backfill ghi chú, hỗ trợ checkpoint.
+func (s *CrmCustomerService) backfillNotesWithProgress(ctx context.Context, ownerOrgID primitive.ObjectID, limit int, useLimit bool, startSkip int64, onBatchDone func(int64)) (int, int64) {
 	noteSvc, err := NewCrmNoteService()
 	if err != nil {
-		return 0
+		return 0, startSkip
 	}
 	coll := noteSvc.Collection()
 	filter := bson.M{
 		"ownerOrganizationId": ownerOrgID,
 		"isDeleted":           false,
 	}
-	opts := mongoopts.Find().SetSort(bson.D{{Key: "createdAt", Value: 1}}) // Cũ trước, mới sau
-	if useLimit && limit > 0 {
-		opts.SetLimit(int64(limit))
-	}
-	cursor, err := coll.Find(ctx, filter, opts)
-	if err != nil {
-		return 0
-	}
-	defer cursor.Close(ctx)
+	sortOpt := mongoopts.Find().SetSort(bson.D{{Key: "createdAt", Value: 1}, {Key: "_id", Value: 1}})
 
 	count := 0
-	for cursor.Next(ctx) {
-		var doc crmmodels.CrmNote
-		if err := cursor.Decode(&doc); err != nil {
-			continue
+	for skip := startSkip; ; skip += backfillBatchSize {
+		batchLimit := backfillBatchSize
+		if useLimit && limit > 0 && count+batchLimit > limit {
+			batchLimit = limit - count
 		}
-		if doc.CustomerId != "" {
-			// Truyền doc để lấy activityAt từ nguồn (CreatedAt)
-			_ = s.IngestNoteTouchpoint(ctx, doc.CustomerId, ownerOrgID, doc.ID.Hex(), true, &doc)
-			count++
+		if batchLimit <= 0 {
+			break
+		}
+		opts := sortOpt.SetSkip(skip).SetLimit(int64(batchLimit))
+		cursor, err := coll.Find(ctx, filter, opts)
+		if err != nil {
+			return count, skip
+		}
+		docsInBatch := 0
+		for cursor.Next(ctx) {
+			docsInBatch++
+			var doc crmmodels.CrmNote
+			if err := cursor.Decode(&doc); err != nil {
+				continue
+			}
+			if doc.CustomerId != "" {
+				_ = s.IngestNoteTouchpoint(ctx, doc.CustomerId, ownerOrgID, doc.ID.Hex(), true, &doc)
+				count++
+			}
+		}
+		cursor.Close(ctx)
+		if onBatchDone != nil {
+			onBatchDone(skip + int64(docsInBatch))
+		}
+		if docsInBatch < batchLimit {
+			return count, skip + int64(docsInBatch)
 		}
 	}
-	return count
+	return count, startSkip + int64(count)
+}
+
+// backfillNotes backfill ghi chú (không checkpoint).
+func (s *CrmCustomerService) backfillNotes(ctx context.Context, ownerOrgID primitive.ObjectID, limit int, useLimit bool) int {
+	n, _ := s.backfillNotesWithProgress(ctx, ownerOrgID, limit, useLimit, 0, nil)
+	return n
 }
 
 // backfillDiagnostic trả về thông tin chẩn đoán khi backfill trả về toàn 0.

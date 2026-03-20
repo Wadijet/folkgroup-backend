@@ -255,6 +255,7 @@ type EngagedLayer3Distribution struct {
 	ConversationTemperature map[string]int64 `json:"conversationTemperature"`
 	EngagementDepth         map[string]int64 `json:"engagementDepth"`
 	SourceType              map[string]int64 `json:"sourceType"`
+	PurchasePotential       map[string]int64 `json:"purchasePotential"` // Tiềm năng mua (chuyển nhóm) — high|medium|low
 }
 
 // ValueLTV LTV theo nhóm Value — client derive totalLTV, topLTV (top tier), avgLTV từ đây.

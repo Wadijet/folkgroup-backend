@@ -235,7 +235,8 @@ func ExtractDataIfExists(s interface{}) error {
 				}
 				// Nếu có default và không tìm thấy, dùng default
 				if configs[0].Default != "" && strings.Contains(err.Error(), "không tìm thấy") {
-					if err := setFieldValue(field, configs[0].Default, configs[0]); err != nil {
+					defaultVal := resolveDefaultValue(configs[0].Default)
+					if err := setFieldValue(field, defaultVal, configs[0]); err != nil {
 						return fmt.Errorf("set default value cho field %s: %w", fieldType.Name, err)
 					}
 					continue
@@ -342,7 +343,7 @@ func extractFieldValue(structVal reflect.Value, targetField reflect.Value, confi
 	// Nếu source map rỗng, kiểm tra default hoặc required
 	if len(sourceMap) == 0 {
 		if config.Default != "" {
-			return setFieldValue(targetField, config.Default, config)
+			return setFieldValue(targetField, resolveDefaultValue(config.Default), config)
 		}
 		if config.Required {
 			return fmt.Errorf("source field %s rỗng và field là required", sourceFieldName)
@@ -369,7 +370,7 @@ func extractFieldValue(structVal reflect.Value, targetField reflect.Value, confi
 		if !exists {
 			// Không tìm thấy, kiểm tra default hoặc required
 			if config.Default != "" {
-				return setFieldValue(targetField, config.Default, config)
+				return setFieldValue(targetField, resolveDefaultValue(config.Default), config)
 			}
 			if config.Required {
 				return fmt.Errorf("không tìm thấy path '%s' trong source và field là required", strings.Join(config.SourcePath, " -> "))
@@ -383,7 +384,7 @@ func extractFieldValue(structVal reflect.Value, targetField reflect.Value, confi
 	// Nếu value là nil và có default, dùng default
 	if value == nil {
 		if config.Default != "" {
-			return setFieldValue(targetField, config.Default, config)
+			return setFieldValue(targetField, resolveDefaultValue(config.Default), config)
 		}
 		if config.Required {
 			return fmt.Errorf("giá trị tại path '%s' là nil và field là required", strings.Join(config.SourcePath, " -> "))
@@ -561,11 +562,35 @@ func applyConverter(value interface{}, converter string, format string) (interfa
 			return value, nil
 		}
 		return nil, fmt.Errorf("converter array/slice chỉ áp dụng cho slice/array, nhận %T", value)
+	case "uid_prefix":
+		// Transform value nguồn sang format UID contract: {prefix}_{unique_part}
+		// format = prefix (vd: cust_, ord_). Deterministic — cùng input → cùng output.
+		return convertUIDPrefix(value, format)
 	case "string":
 		fallthrough
 	default:
 		return convertString(value)
 	}
+}
+
+// convertUIDPrefix transform value nguồn sang format UID: {prefix}_{unique_part}.
+// format = prefix (vd: cust_, ord_). Deterministic — idempotent upsert.
+func convertUIDPrefix(value interface{}, format string) (string, error) {
+	if value == nil {
+		return "", fmt.Errorf("giá trị là nil")
+	}
+	return UIDFromSource(format, value), nil
+}
+
+// resolveDefaultValue xử lý default: nếu bắt đầu "generate:" thì gọi GenerateUID(prefix).
+func resolveDefaultValue(defaultVal string) string {
+	if defaultVal == "" {
+		return ""
+	}
+	if strings.HasPrefix(defaultVal, "generate:") {
+		return GenerateUID(strings.TrimPrefix(defaultVal, "generate:"))
+	}
+	return defaultVal
 }
 
 // convertArrayFirst lấy phần tử đầu tiên từ array/slice
@@ -805,7 +830,7 @@ func extractFieldValueMultiSource(structVal reflect.Value, targetField reflect.V
 		// Không có nguồn nào có data, kiểm tra default
 		for _, config := range configs {
 			if config.Default != "" {
-				return setFieldValue(targetField, config.Default, config)
+				return setFieldValue(targetField, resolveDefaultValue(config.Default), config)
 			}
 		}
 		// Nếu tất cả đều optional, bỏ qua

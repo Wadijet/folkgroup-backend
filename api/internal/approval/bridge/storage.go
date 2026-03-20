@@ -66,6 +66,31 @@ func (s *MongoStorage) Update(ctx context.Context, doc *pkgapproval.ActionPendin
 	return err
 }
 
+// FindByIdempotencyKey tìm action đã xử lý theo payload.idempotencyKey (Vision 08 idempotency enforce).
+func (s *MongoStorage) FindByIdempotencyKey(ctx context.Context, idempotencyKey string, ownerOrgID primitive.ObjectID) (*pkgapproval.ActionPending, error) {
+	if idempotencyKey == "" {
+		return nil, nil
+	}
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.ActionPendingApproval)
+	if !ok {
+		return nil, nil
+	}
+	filter := bson.M{
+		"ownerOrganizationId": ownerOrgID,
+		"payload.idempotencyKey": idempotencyKey,
+		"status": bson.M{"$in": []string{pkgapproval.StatusExecuted, pkgapproval.StatusRejected, pkgapproval.StatusFailed}},
+	}
+	var doc pkgapproval.ActionPending
+	err := coll.FindOne(ctx, filter).Decode(&doc)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &doc, nil
+}
+
 // FindById tìm theo _id và ownerOrganizationId.
 func (s *MongoStorage) FindById(ctx context.Context, id primitive.ObjectID, ownerOrgID primitive.ObjectID) (*pkgapproval.ActionPending, error) {
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.ActionPendingApproval)

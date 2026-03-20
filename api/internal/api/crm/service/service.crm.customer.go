@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	crmdto "meta_commerce/internal/api/crm/dto"
 	crmmodels "meta_commerce/internal/api/crm/models"
@@ -35,13 +36,10 @@ func NewCrmCustomerService() (*CrmCustomerService, error) {
 	}, nil
 }
 
-// GetProfile trả về profile đầy đủ của khách theo unifiedId.
+// GetProfile trả về profile đầy đủ của khách theo unifiedId hoặc uid.
 // Nếu chưa có trong crm_customers, thử merge từ POS/FB rồi trả về.
 func (s *CrmCustomerService) GetProfile(ctx context.Context, unifiedId string, ownerOrgID primitive.ObjectID) (*crmdto.CrmCustomerProfileResponse, error) {
-	filter := bson.M{
-		"unifiedId":            unifiedId,
-		"ownerOrganizationId": ownerOrgID,
-	}
+	filter := buildCustomerFilterByIdOrUid(unifiedId, ownerOrgID)
 	customer, err := s.FindOne(ctx, filter, nil)
 	if err != nil {
 		// Thử merge từ nguồn (POS hoặc FB) nếu chưa có
@@ -54,7 +52,7 @@ func (s *CrmCustomerService) GetProfile(ctx context.Context, unifiedId string, o
 			return nil, err
 		}
 	}
-	return s.toProfileResponse(&customer), nil
+	return s.toProfileResponse(ctx, &customer), nil
 }
 
 // tryMergeFromSource thử merge từ POS hoặc FB customer. Trả về true nếu đã merge thành công.
@@ -76,10 +74,46 @@ func (s *CrmCustomerService) tryMergeFromSource(ctx context.Context, customerId 
 	return false
 }
 
+// OnCixSignalUpdate cập nhật Layer 3 signals (buyingIntent, sentiment) từ CIX vào crm_customers.
+// Làm giàu profile — psychographic tags, intent signals. Lưu trong currentMetrics.cix.
+func (s *CrmCustomerService) OnCixSignalUpdate(ctx context.Context, customerUid string, ownerOrgID primitive.ObjectID, buyingIntent, sentiment, objectionLevel string, traceID string) error {
+	if customerUid == "" {
+		return nil
+	}
+	now := time.Now().UnixMilli()
+	update := bson.M{
+		"$set": bson.M{
+			"currentMetrics.cix": bson.M{
+				"buyingIntent":   buyingIntent,
+				"sentiment":      sentiment,
+				"objectionLevel": objectionLevel,
+				"updatedAt":      now,
+				"traceId":        traceID,
+			},
+			"updatedAt": now,
+		},
+	}
+	filter := buildCustomerFilterByIdOrUid(customerUid, ownerOrgID)
+	_, err := s.Collection().UpdateOne(ctx, filter, update)
+	return err
+}
+
+// buildCustomerFilterByIdOrUid tạo filter lookup customer theo uid hoặc unifiedId (ưu tiên mới, fallback cũ).
+func buildCustomerFilterByIdOrUid(idOrUid string, ownerOrgID primitive.ObjectID) bson.M {
+	return bson.M{
+		"ownerOrganizationId": ownerOrgID,
+		"$or": []bson.M{
+			{"uid": idOrUid},
+			{"unifiedId": idOrUid},
+		},
+	}
+}
+
 // toProfileResponse chuyển CrmCustomer sang CrmCustomerProfileResponse.
-func (s *CrmCustomerService) toProfileResponse(c *crmmodels.CrmCustomer) *crmdto.CrmCustomerProfileResponse {
+func (s *CrmCustomerService) toProfileResponse(ctx context.Context, c *crmmodels.CrmCustomer) *crmdto.CrmCustomerProfileResponse {
 	resp := &crmdto.CrmCustomerProfileResponse{
 		UnifiedId:                 c.UnifiedId,
+		Uid:                       c.Uid,
 		Name:                      GetNameFromCustomer(c),
 		PhoneNumbers:              GetPhoneNumbersFromCustomer(c),
 		Emails:                    GetEmailsFromCustomer(c),
@@ -114,42 +148,28 @@ func (s *CrmCustomerService) toProfileResponse(c *crmmodels.CrmCustomer) *crmdto
 		LastMessageFromCustomer:   GetBoolFromCustomer(c, "lastMessageFromCustomer"),
 		ConversationFromAds:       GetBoolFromCustomer(c, "conversationFromAds"),
 		ConversationTags:          c.ConversationTags,
-		SourceIds: map[string]string{
-			"pos": c.SourceIds.Pos,
-			"fb":  c.SourceIds.Fb,
+		SourceIds: map[string]interface{}{
+			"pos":        c.SourceIds.Pos,
+			"fb":         c.SourceIds.Fb,
+			"zalo":       c.SourceIds.Zalo,
+			"fbByPage":   c.SourceIds.FbByPage,
+			"zaloByPage": c.SourceIds.ZaloByPage,
 		},
 		OwnerOrganizationId: c.OwnerOrganizationID,
 	}
-	// Phân loại — ưu tiên từ top-level (denormalized), fallback compute
-	if c.ValueTier != "" {
-		resp.ValueTier = c.ValueTier
-	} else {
-		resp.ValueTier = ComputeValueTier(GetTotalSpentFromCustomer(c))
+	// Phân loại — ưu tiên từ top-level (denormalized), else Rule Engine qua GetClassificationFromCustomer
+	class := GetClassificationFromCustomer(ctx, c)
+	setFromClass := func(top string, key string) string {
+		if top != "" {
+			return top
+		}
+		return getStrFromMap(class, key)
 	}
-	if c.LifecycleStage != "" {
-		resp.LifecycleStage = c.LifecycleStage
-	} else {
-		resp.LifecycleStage = ComputeLifecycleStage(GetLastOrderAtFromCustomer(c))
-	}
-	if c.JourneyStage != "" {
-		resp.JourneyStage = c.JourneyStage
-	} else {
-		resp.JourneyStage = ComputeJourneyStage(c)
-	}
-	if c.Channel != "" {
-		resp.Channel = c.Channel
-	} else {
-		resp.Channel = ComputeChannel(c)
-	}
-	if c.LoyaltyStage != "" {
-		resp.LoyaltyStage = c.LoyaltyStage
-	} else {
-		resp.LoyaltyStage = ComputeLoyaltyStage(GetOrderCountFromCustomer(c))
-	}
-	if c.MomentumStage != "" {
-		resp.MomentumStage = c.MomentumStage
-	} else {
-		resp.MomentumStage = ComputeMomentumStage(c)
-	}
+	resp.ValueTier = setFromClass(c.ValueTier, "valueTier")
+	resp.LifecycleStage = setFromClass(c.LifecycleStage, "lifecycleStage")
+	resp.JourneyStage = setFromClass(c.JourneyStage, "journeyStage")
+	resp.Channel = setFromClass(c.Channel, "channel")
+	resp.LoyaltyStage = setFromClass(c.LoyaltyStage, "loyaltyStage")
+	resp.MomentumStage = setFromClass(c.MomentumStage, "momentumStage")
 	return resp
 }

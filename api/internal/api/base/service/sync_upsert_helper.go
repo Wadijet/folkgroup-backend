@@ -12,6 +12,7 @@ import (
 	"meta_commerce/internal/api/events"
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/utility"
+	"meta_commerce/internal/utility/identity"
 )
 
 // getUpdatedAtFromStructSourceField lấy Unix ms từ struct theo sourceDataField (posData/panCakeData).updated_at.
@@ -67,8 +68,16 @@ func ParseUpdatedAtFromSet(set map[string]interface{}, sourceDataField string) i
 	return utility.ParseTimestampFromMap(m, "updated_at")
 }
 
-// DoSyncUpsert thực hiện upsert có điều kiện: chỉ ghi khi dữ liệu mới hơn (updatedAtField) hoặc document chưa tồn tại.
-// Sau khi xử lý phần đặc biệt (so sánh updated_at), gọi UpsertWithPreparedData để tránh lặp code.
+// DoSyncUpsert thực hiện upsert có điều kiện dựa trên updated_at trong payload nguồn (sync theo API Pancake).
+//
+// Chuẩn dữ liệu mẫu (docs/ai-context/folkform/sample-data):
+//   - pc_pos_orders: posData.updated_at — chuỗi ISO, vd "2026-01-08T09:56:40.458921"
+//   - fb_conversations: panCakeData.updated_at — tương tự
+//
+// Logic: ParseTimestampFromMap đọc Unix ms từ posData/panCakeData.updated_at; nếu document đã có và
+// updated_at đã lưu >= incoming → skip (không ghi DB). Khi incoming không có updated_at (==0),
+// không áp điều kiện thời gian — vẫn upsert (xem BuildSyncUpsertFilter).
+// Sau khi qua cổng thời gian, gọi UpsertWithPreparedData.
 func DoSyncUpsert[T any](ctx context.Context, svc *BaseServiceMongoImpl[T], filter interface{}, data interface{}, sourceDataField, updatedAtField string) (T, bool, error) {
 	var zero T
 	updateData, err := ToUpdateData(data)
@@ -94,6 +103,12 @@ func DoSyncUpsert[T any](ctx context.Context, svc *BaseServiceMongoImpl[T], filt
 
 	if err := prepareUpsertUpdateData(ctx, zero, updateData, existing, isExisting); err != nil {
 		return zero, false, err
+	}
+	// Enrich identity 4 lớp khi sync upsert tạo document mới
+	if !isExisting && identity.ShouldEnrich(svc.Collection().Name()) {
+		if err := enrichUpsertInsertIdentity(ctx, svc.Collection().Name(), updateData); err != nil {
+			return zero, false, common.NewError(common.ErrCodeValidationFormat, "Lỗi enrich identity: "+err.Error(), common.StatusBadRequest, err)
+		}
 	}
 	if newUpdatedAt > 0 {
 		updateData.Set[updatedAtField] = newUpdatedAt

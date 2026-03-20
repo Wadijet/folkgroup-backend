@@ -39,85 +39,104 @@ func NewCrmBulkWorker(interval time.Duration, batchSize int) (*CrmBulkWorker, er
 	}, nil
 }
 
-// Start chạy worker trong vòng lặp.
+// Start chạy worker trong vòng lặp. Đọc config mỗi vòng (hỗ trợ thay đổi qua API).
 func (w *CrmBulkWorker) Start(ctx context.Context) {
 	log := logger.GetAppLogger()
-	ticker := time.NewTicker(w.interval)
-	defer ticker.Stop()
 
 	log.WithFields(map[string]interface{}{
-		"interval":   w.interval.String(),
+		"interval":  w.interval.String(),
 		"batchSize": w.batchSize,
 	}).Info("📋 [CRM_BULK] Starting CRM Bulk Worker...")
 
 	for {
-		select {
-		case <-ctx.Done():
-			log.Info("📋 [CRM_BULK] CRM Bulk Worker stopped")
-			return
-		case <-ticker.C:
-			if !IsWorkerActive(WorkerCrmBulk) {
-				time.Sleep(1 * time.Minute)
-				continue
-			}
-			p := GetPriority(WorkerCrmBulk, PriorityLow)
-			// Lấy batch trước để kiểm tra có job ưu tiên không
-			batchSize := GetEffectiveBatchSize(w.batchSize, p)
-			list, err := w.bulkJobSvc.GetUnprocessed(ctx, batchSize)
-			if err != nil {
-				log.WithError(err).Error("📋 [CRM_BULK] Lỗi lấy danh sách bulk jobs")
-				continue
-			}
-			if len(list) == 0 {
-				continue
-			}
-			// Job ưu tiên: bắt buộc chạy, không bị throttle
-			hasPriority := false
-			for i := range list {
-				if list[i].IsPriority {
-					hasPriority = true
-					break
-				}
-			}
-			if !hasPriority && ShouldThrottle(p) {
-				continue
-			}
-			if !hasPriority {
-				if effInterval := GetEffectiveInterval(w.interval, p); effInterval > w.interval {
-					time.Sleep(effInterval - w.interval)
-				}
-			}
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						log.WithFields(map[string]interface{}{"panic": r}).Error("📋 [CRM_BULK] Panic khi xử lý, sẽ tiếp tục lần sau")
-					}
-				}()
+		interval, batchSize := GetEffectiveWorkerSchedule(WorkerCrmBulk, w.interval, w.batchSize)
 
-				customerSvc, err := crmvc.NewCrmCustomerService()
-				if err != nil {
-					log.WithError(err).Error("📋 [CRM_BULK] Không thể tạo CrmCustomerService")
+		if !IsWorkerActive(WorkerCrmBulk) {
+			select {
+			case <-ctx.Done():
+				log.Info("📋 [CRM_BULK] CRM Bulk Worker stopped")
+				return
+			case <-time.After(1 * time.Minute):
+			}
+			continue
+		}
+		p := GetPriority(WorkerCrmBulk, PriorityLow)
+		// Lấy batch trước để kiểm tra có job ưu tiên không
+		effBatchSize := GetEffectiveBatchSize(batchSize, p)
+		list, err := w.bulkJobSvc.GetUnprocessed(ctx, effBatchSize)
+		if err != nil {
+			log.WithError(err).Error("📋 [CRM_BULK] Lỗi lấy danh sách bulk jobs")
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(interval):
+			}
+			continue
+		}
+		if len(list) == 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(interval):
+			}
+			continue
+		}
+		hasPriority := false
+		for i := range list {
+			if list[i].IsPriority {
+				hasPriority = true
+				break
+			}
+		}
+		if !hasPriority && ShouldThrottle(p) {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(interval):
+			}
+			continue
+		}
+		if !hasPriority {
+			effInterval := GetEffectiveInterval(interval, p)
+			if effInterval > interval {
+				select {
+				case <-ctx.Done():
 					return
+				case <-time.After(effInterval - interval):
 				}
+			}
+		}
 
-				for _, item := range list {
-					start := time.Now()
-					result, err := w.processJob(ctx, customerSvc, &item)
-					metrics.RecordDuration("crm_bulk:"+item.JobType, time.Since(start))
-					errStr := ""
-					if err != nil {
-						errStr = err.Error()
-						log.WithError(err).WithFields(map[string]interface{}{
-							"jobType": item.JobType,
-							"jobId":   item.ID.Hex(),
-						}).Warn("📋 [CRM_BULK] Xử lý job lỗi")
-					}
-					if setErr := w.bulkJobSvc.SetProcessed(ctx, item.ID, errStr, result); setErr != nil {
-						log.WithError(setErr).Warn("📋 [CRM_BULK] SetCrmBulkJobProcessed thất bại")
-					}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.WithFields(map[string]interface{}{"panic": r}).Error("📋 [CRM_BULK] Panic khi xử lý, sẽ tiếp tục lần sau")
 				}
 			}()
-		}
+
+			customerSvc, err := crmvc.NewCrmCustomerService()
+			if err != nil {
+				log.WithError(err).Error("📋 [CRM_BULK] Không thể tạo CrmCustomerService")
+				return
+			}
+
+			for _, item := range list {
+				start := time.Now()
+				result, err := w.processJob(ctx, customerSvc, &item)
+				metrics.RecordDuration("crm_bulk:"+item.JobType, time.Since(start))
+				errStr := ""
+				if err != nil {
+					errStr = err.Error()
+					log.WithError(err).WithFields(map[string]interface{}{
+						"jobType": item.JobType,
+						"jobId":   item.ID.Hex(),
+					}).Warn("📋 [CRM_BULK] Xử lý job lỗi")
+				}
+				if setErr := w.bulkJobSvc.SetProcessed(ctx, item.ID, errStr, result); setErr != nil {
+					log.WithError(setErr).Warn("📋 [CRM_BULK] SetCrmBulkJobProcessed thất bại")
+				}
+			}
+		}()
 	}
 }
 
@@ -131,7 +150,11 @@ func (w *CrmBulkWorker) processJob(ctx context.Context, svc *crmvc.CrmCustomerSe
 	switch job.JobType {
 	case crmmodels.CrmBulkJobSync:
 		sources := parseStringSlice(params, "sources")
-		posCount, fbCount, err := svc.SyncAllCustomers(ctx, job.OwnerOrganizationID, sources)
+		jobID := job.ID
+		onProgress := func(p bson.M) {
+			_ = w.bulkJobSvc.UpdateProgress(ctx, jobID, p)
+		}
+		posCount, fbCount, err := svc.SyncAllCustomers(ctx, job.OwnerOrganizationID, sources, job.Progress, onProgress)
 		if err != nil {
 			return nil, err
 		}
@@ -140,7 +163,11 @@ func (w *CrmBulkWorker) processJob(ctx context.Context, svc *crmvc.CrmCustomerSe
 	case crmmodels.CrmBulkJobBackfill:
 		limit := parseInt(params, "limit", 0)
 		types := parseStringSlice(params, "types")
-		result, err := svc.BackfillActivity(ctx, job.OwnerOrganizationID, limit, types)
+		jobID := job.ID
+		onProgress := func(p bson.M) {
+			_ = w.bulkJobSvc.UpdateProgress(ctx, jobID, p)
+		}
+		result, err := svc.BackfillActivity(ctx, job.OwnerOrganizationID, limit, types, job.Progress, onProgress)
 		if err != nil {
 			return nil, err
 		}
@@ -154,7 +181,11 @@ func (w *CrmBulkWorker) processJob(ctx context.Context, svc *crmvc.CrmCustomerSe
 		limit := parseInt(params, "limit", 0)
 		sources := parseStringSlice(params, "sources")
 		types := parseStringSlice(params, "types")
-		result, err := svc.RebuildCrm(ctx, job.OwnerOrganizationID, limit, sources, types)
+		jobID := job.ID
+		onProgress := func(p bson.M) {
+			_ = w.bulkJobSvc.UpdateProgress(ctx, jobID, p)
+		}
+		result, err := svc.RebuildCrm(ctx, job.OwnerOrganizationID, limit, sources, types, job.Progress, onProgress)
 		if err != nil {
 			return nil, err
 		}
@@ -181,6 +212,20 @@ func (w *CrmBulkWorker) processJob(ctx context.Context, svc *crmvc.CrmCustomerSe
 		limit := parseInt(params, "limit", 0)
 		poolSize := GetEffectivePoolSize(12, PriorityLow)
 		result, err := svc.RecalculateAllCustomers(ctx, job.OwnerOrganizationID, limit, poolSize)
+		if err != nil {
+			return nil, err
+		}
+		return bson.M{"totalProcessed": result.TotalProcessed, "totalFailed": result.TotalFailed, "failedIds": result.FailedIds}, nil
+
+	case crmmodels.CrmBulkJobRecalculateBatch:
+		offset := parseInt(params, "offset", 0)
+		limit := parseInt(params, "limit", 200)
+		poolSize := GetEffectivePoolSize(12, PriorityLow)
+		jobID := job.ID
+		onProgress := func(p bson.M) {
+			_ = w.bulkJobSvc.UpdateProgress(ctx, jobID, p)
+		}
+		result, err := svc.RecalculateCustomersBatch(ctx, job.OwnerOrganizationID, offset, limit, poolSize, job.Progress, onProgress)
 		if err != nil {
 			return nil, err
 		}

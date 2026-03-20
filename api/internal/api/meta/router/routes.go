@@ -28,7 +28,7 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 		return fmt.Errorf("tạo meta ad account handler: %w", err)
 	}
 	r.RegisterCRUDRoutes(v1, "/meta/ad-account", adAccountHandler, apirouter.ReadWriteConfig, "MetaAdAccount")
-	apirouter.RegisterRouteWithMiddleware(v1, "/meta/ad-account", "POST", "/sync-upsert", []fiber.Handler{middleware.AuthMiddleware("MetaAdAccount.Update"), orgContextMiddleware}, adAccountHandler.HandleSyncUpsertOne)
+	// Đồng bộ Meta từ agent: POST /api/v1/cio/ingest (domain meta_*)
 
 	// Meta Campaign
 	campaignHandler, err := metahdl.NewMetaCampaignHandler()
@@ -36,7 +36,6 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 		return fmt.Errorf("tạo meta campaign handler: %w", err)
 	}
 	r.RegisterCRUDRoutes(v1, "/meta/campaign", campaignHandler, apirouter.ReadWriteConfig, "MetaCampaign")
-	apirouter.RegisterRouteWithMiddleware(v1, "/meta/campaign", "POST", "/sync-upsert", []fiber.Handler{middleware.AuthMiddleware("MetaCampaign.Update"), orgContextMiddleware}, campaignHandler.HandleSyncUpsertOne)
 
 	// Meta Ad Set
 	adSetHandler, err := metahdl.NewMetaAdSetHandler()
@@ -44,7 +43,6 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 		return fmt.Errorf("tạo meta ad set handler: %w", err)
 	}
 	r.RegisterCRUDRoutes(v1, "/meta/ad-set", adSetHandler, apirouter.ReadWriteConfig, "MetaAdSet")
-	apirouter.RegisterRouteWithMiddleware(v1, "/meta/ad-set", "POST", "/sync-upsert", []fiber.Handler{middleware.AuthMiddleware("MetaAdSet.Update"), orgContextMiddleware}, adSetHandler.HandleSyncUpsertOne)
 
 	// Meta Ad
 	adHandler, err := metahdl.NewMetaAdHandler()
@@ -52,7 +50,6 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 		return fmt.Errorf("tạo meta ad handler: %w", err)
 	}
 	r.RegisterCRUDRoutes(v1, "/meta/ad", adHandler, apirouter.ReadWriteConfig, "MetaAd")
-	apirouter.RegisterRouteWithMiddleware(v1, "/meta/ad", "POST", "/sync-upsert", []fiber.Handler{middleware.AuthMiddleware("MetaAd.Update"), orgContextMiddleware}, adHandler.HandleSyncUpsertOne)
 	apirouter.RegisterRouteWithMiddleware(v1, "/meta/ad", "POST", "/recalculate", []fiber.Handler{middleware.AuthMiddleware("MetaAd.Update"), orgContextMiddleware}, adHandler.HandleRecalculate)
 	apirouter.RegisterRouteWithMiddleware(v1, "/meta/ad", "POST", "/recalculate-all", []fiber.Handler{middleware.AuthMiddleware("MetaAd.Update"), orgContextMiddleware}, adHandler.HandleRecalculateAllMetaAds)
 
@@ -62,7 +59,6 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 		return fmt.Errorf("tạo meta ad insight handler: %w", err)
 	}
 	r.RegisterCRUDRoutes(v1, "/meta/ad-insight", adInsightHandler, apirouter.ReadWriteConfig, "MetaAdInsight")
-	apirouter.RegisterRouteWithMiddleware(v1, "/meta/ad-insight", "POST", "/sync-upsert", []fiber.Handler{middleware.AuthMiddleware("MetaAdInsight.Update"), orgContextMiddleware}, adInsightHandler.HandleSyncUpsertOne)
 
 	// Meta Activity History — lịch sử thay đổi metrics (Campaign/AdSet/Ad). Chỉ đọc.
 	activityHistoryHandler, err := metahdl.NewMetaAdsActivityHistoryHandler()

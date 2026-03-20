@@ -78,7 +78,7 @@ func (s *CrmCustomerService) IngestOrderTouchpoint(ctx context.Context, customer
 		lastProfile, lastMetrics, _ := actSvc.GetLastSnapshotForCustomer(ctx, unifiedId, ownerOrgID, "pos", sourceRef)
 		metricsOverride := s.GetMetricsForSnapshotAt(ctx, &cust, activityAt)
 		profileOverride := s.GetProfileForSnapshotAt(ctx, &cust, activityAt)
-		if snap := BuildSnapshotWithChanges(&cust, lastProfile, lastMetrics, activityAt, metricsOverride, profileOverride); snap != nil {
+		if snap := BuildSnapshotWithChanges(ctx, &cust, lastProfile, lastMetrics, activityAt, metricsOverride, profileOverride); snap != nil {
 			MergeSnapshotIntoMetadata(metadata, snap)
 		} else {
 			// Upsert: giữ snapshot cũ khi không có thay đổi (tránh mất snapshot khi order_created → order_completed)
@@ -223,9 +223,40 @@ func buildItemSkusFromOrder(orderDoc *pcmodels.PcPosOrder) map[string]int {
 	return out
 }
 
+// getPageDisplayNameForActivity lấy tên page từ fb_pages để hiển thị trong activity. Trả về pageName hoặc pageId.
+func getPageDisplayNameForActivity(ctx context.Context, pageId string, ownerOrgID primitive.ObjectID) string {
+	if pageId == "" {
+		return ""
+	}
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.FbPages)
+	if !ok {
+		return pageId
+	}
+	var doc struct {
+		PageName string `bson:"pageName"`
+	}
+	if err := coll.FindOne(ctx, bson.M{"pageId": pageId, "ownerOrganizationId": ownerOrgID}, nil).Decode(&doc); err != nil {
+		return pageId
+	}
+	if doc.PageName != "" {
+		return doc.PageName
+	}
+	return pageId
+}
+
 // getConversationTimestamp lấy thời điểm bắt đầu hội thoại từ conversation.
 // Ưu tiên inserted_at (thời điểm hội thoại bắt đầu), fallback updated_at, PanCakeUpdatedAt, CreatedAt.
 // Tránh trả về 0 vì LogActivity sẽ dùng "now" khi activityAt=0 — timeline sai.
+// cloneConvWithOrg tạo bản sao conv với OwnerOrganizationID (khi conv chưa có org từ nguồn cũ).
+func cloneConvWithOrg(conv *fbmodels.FbConversation, orgID primitive.ObjectID) *fbmodels.FbConversation {
+	if conv == nil {
+		return nil
+	}
+	c := *conv
+	c.OwnerOrganizationID = orgID
+	return &c
+}
+
 func getConversationTimestamp(convDoc *fbmodels.FbConversation) int64 {
 	if convDoc == nil {
 		return 0
@@ -348,9 +379,11 @@ func formatAmountVND(amount float64) string {
 	return fmt.Sprintf("%.0fđ", amount)
 }
 
-// IngestConversationTouchpoint xử lý conversation: resolve unifiedId, refresh metrics, log activity.
+// IngestConversationTouchpoint xử lý conversation: đồng bộ CIO + CRM (resolve unifiedId, refresh metrics, log activity).
+// Một điểm vào duy nhất cho backfill, worker, recalculate — đảm bảo cả CIO và Customer đều được cập nhật.
 // Trả về (logged bool, err error): logged=true nếu đã ghi activity; logged=false nếu không resolve được (bỏ qua).
 func (s *CrmCustomerService) IngestConversationTouchpoint(ctx context.Context, customerId string, ownerOrgID primitive.ObjectID, conversationId string, skipIfExists bool, convDoc *fbmodels.FbConversation) (bool, error) {
+	// AI Decision: thay đổi fb_conversations đã được OnDataChanged → queue.
 	if customerId == "" {
 		return false, nil
 	}
@@ -401,7 +434,12 @@ func (s *CrmCustomerService) IngestConversationTouchpoint(ctx context.Context, c
 		// Tạo crm_customer tối thiểu từ conversation — thông tin đến trước tạo trước, fb_customers đến sau sẽ MergeFromFbCustomer cập nhật thêm
 		custData := extractCustomerDataFromConv(convDoc)
 		activityAt := getConversationTimestamp(convDoc)
-		unifiedId, _ = s.UpsertMinimalFromFbId(ctx, customerId, ownerOrgID, &custData, activityAt)
+		isZalo := convDoc != nil && strings.HasPrefix(convDoc.PageId, "pzl_")
+		pageId := ""
+		if convDoc != nil {
+			pageId = convDoc.PageId
+		}
+		unifiedId, _ = s.UpsertMinimalFromFbId(ctx, customerId, ownerOrgID, &custData, activityAt, isZalo, pageId)
 		found = unifiedId != ""
 	}
 	if !found || unifiedId == "" {
@@ -415,7 +453,16 @@ func (s *CrmCustomerService) IngestConversationTouchpoint(ctx context.Context, c
 	s.MergeProfileFromConversation(ctx, unifiedId, ownerOrgID, convDoc, &cust)
 	_ = s.RefreshMetrics(ctx, unifiedId, ownerOrgID, &cust)
 
+	// sourceRef: conversationId (đủ cho deduplication; pageId lưu trong metadata để tách rõ theo kênh/page)
 	sourceRef := map[string]interface{}{"conversationId": conversationId}
+	pageId := ""
+	channel := "messenger"
+	if convDoc != nil {
+		pageId = convDoc.PageId
+		if strings.HasPrefix(pageId, "pzl_") {
+			channel = "zalo"
+		}
+	}
 	metadata := map[string]interface{}{}
 	activityAt := int64(0)
 	if convDoc != nil {
@@ -432,7 +479,7 @@ func (s *CrmCustomerService) IngestConversationTouchpoint(ctx context.Context, c
 		lastProfile, lastMetrics, _ := actSvc.GetLastSnapshotForCustomer(ctx, unifiedId, ownerOrgID, "fb", sourceRef)
 		metricsOverride := s.GetMetricsForSnapshotAt(ctx, &cust, activityAt)
 		profileOverride := s.GetProfileForSnapshotAt(ctx, &cust, activityAt)
-		if snap := BuildSnapshotWithChanges(&cust, lastProfile, lastMetrics, activityAt, metricsOverride, profileOverride); snap != nil {
+		if snap := BuildSnapshotWithChanges(ctx, &cust, lastProfile, lastMetrics, activityAt, metricsOverride, profileOverride); snap != nil {
 			MergeSnapshotIntoMetadata(metadata, snap)
 		} else {
 			// Upsert: giữ snapshot cũ khi không có thay đổi
@@ -448,12 +495,23 @@ func (s *CrmCustomerService) IngestConversationTouchpoint(ctx context.Context, c
 			}
 		}
 	}
+	// DisplayLabel tách rõ theo kênh (Messenger/Zalo) và page
 	displayLabel := "Bắt đầu hội thoại trên Facebook"
 	if convDoc != nil {
-		if convDoc.PageId != "" {
-			metadata["pageId"] = convDoc.PageId
+		metadata["channel"] = channel
+		if pageId != "" {
+			metadata["pageId"] = pageId
 		}
 		activityAt = getConversationTimestamp(convDoc)
+		if channel == "zalo" {
+			displayLabel = "Bắt đầu hội thoại trên Zalo"
+		} else {
+			displayLabel = "Bắt đầu hội thoại trên Messenger"
+		}
+		pageDisplay := getPageDisplayNameForActivity(ctx, pageId, ownerOrgID)
+		if pageDisplay != "" {
+			displayLabel = displayLabel + " - " + pageDisplay
+		}
 		if convDoc.PanCakeData != nil {
 			pd := convDoc.PanCakeData
 			if t, ok := getStringFromMap(pd, "type"); ok && t != "" {
@@ -535,7 +593,7 @@ func (s *CrmCustomerService) recomputeSnapshotsForNewerActivities(ctx context.Co
 		lastProfile, lastMetrics, _ := actSvc.GetLastSnapshotBeforeActivityAt(ctx, unifiedId, ownerOrgID, a.ActivityAt)
 		profileOverride := s.GetProfileForSnapshotAt(ctx, &cust, a.ActivityAt)
 		metricsOverride := s.GetMetricsForSnapshotAt(ctx, &cust, a.ActivityAt)
-		snap := BuildSnapshotWithChanges(&cust, lastProfile, lastMetrics, a.ActivityAt, metricsOverride, profileOverride)
+		snap := BuildSnapshotWithChanges(ctx, &cust, lastProfile, lastMetrics, a.ActivityAt, metricsOverride, profileOverride)
 		if snap != nil {
 			updates := map[string]interface{}{
 				"profileSnapshot": snap["profileSnapshot"],

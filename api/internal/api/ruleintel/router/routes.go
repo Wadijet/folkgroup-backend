@@ -15,9 +15,21 @@ import (
 func Register(v1 fiber.Router, r *apirouter.Router) error {
 	orgContextMiddleware := middleware.OrganizationContextMiddleware()
 	actionMiddleware := middleware.AuthMiddleware("MetaAdAccount.Update")
+	readMiddleware := middleware.AuthMiddleware("MetaAdAccount.Read")
 
-	// Run rule
-	apirouter.RegisterRouteWithMiddleware(v1, "/rule-intelligence/run", "POST", "", []fiber.Handler{actionMiddleware, orgContextMiddleware}, ruleintelhdl.HandleRunRule)
+	// Run rule — tạo handler trong Register (sau InitRegistry), cùng luồng với CRUD handlers
+	runHandler, err := ruleintelhdl.NewRunRuleHandler()
+	if err != nil {
+		return fmt.Errorf("tạo RunRuleHandler: %w", err)
+	}
+	apirouter.RegisterRouteWithMiddleware(v1, "/rule-intelligence/run", "POST", "", []fiber.Handler{actionMiddleware, orgContextMiddleware}, runHandler)
+
+	// Xem rule execution log theo trace_id — link từ proposal "Xem log tạo đề xuất"
+	logHandler, err := ruleintelhdl.NewGetTraceLogHandler()
+	if err != nil {
+		return fmt.Errorf("tạo GetTraceLogHandler: %w", err)
+	}
+	apirouter.RegisterRouteWithMiddleware(v1, "/rule-intelligence/logs", "GET", "/:traceId", []fiber.Handler{readMiddleware, orgContextMiddleware}, logHandler)
 
 	// CRUD
 	defHandler, err := ruleintelhdl.NewRuleDefinitionHandler()

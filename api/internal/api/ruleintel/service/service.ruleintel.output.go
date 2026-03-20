@@ -2,15 +2,12 @@
 package service
 
 import (
-	"context"
 	"fmt"
 
 	basesvc "meta_commerce/internal/api/base/service"
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/api/ruleintel/models"
-
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // OutputContractService CRUD cho Output Contract.
@@ -27,9 +24,4 @@ func NewOutputContractService() (*OutputContractService, error) {
 	return &OutputContractService{
 		BaseServiceMongoImpl: basesvc.NewBaseServiceMongo[models.OutputContract](coll),
 	}, nil
-}
-
-// FindOne tìm Output Contract theo filter.
-func (s *OutputContractService) FindOne(ctx context.Context, filter interface{}, opts *options.FindOneOptions) (models.OutputContract, error) {
-	return s.BaseServiceMongoImpl.FindOne(ctx, filter, opts)
 }

@@ -7,11 +7,11 @@ alwaysApply: false
 
 ## Khi Nào Đọc docs-shared
 
-- **Vision, concept** → `docs-shared/architecture/ai-commerce-os-overview.md` (đọc đầu để hiểu chúng ta đang làm gì)
+- **Vision, concept** → `docs-shared/architecture/vision/ai-commerce-os-platform-l1.md` (đọc đầu để hiểu chúng ta đang làm gì)
 - API contract, endpoint spec → `docs-shared/ai-context/folkform/api-context.md`
 - Module design cross-repo → `docs-shared/ai-context/folkform/design/`
 - System map, repo boundary → `docs-shared/system-map/system-map.md`
-- Task chạm repo khác → đọc ai-commerce-os-overview, system-map và module-map trước
+- Task chạm repo khác → đọc vision/ai-commerce-os-platform-l1, system-map và module-map trước
 
 ## Khi Nào Cập Nhật Docs
 

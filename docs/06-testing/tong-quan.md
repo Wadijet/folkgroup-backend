@@ -34,6 +34,14 @@ api-tests/
 
 ## 🚀 Chạy Test
 
+### Cách 0: Chỉ Unit Tests (Nhanh, không cần server)
+
+```powershell
+.\api-tests\test.ps1 -UnitOnly
+```
+
+Chạy unit tests trong `api/` (ví dụ: `service.crm.snapshot_test.go`). Không cần server, MongoDB, Firebase token.
+
 ### Cách 1: Script Tự Động (Khuyến Nghị)
 
 ```powershell
@@ -225,5 +233,6 @@ Get-ChildItem api-tests\reports\*.md | Sort-Object LastWriteTime -Descending | S
 - [Chạy Test Suite](chay-test.md)
 - [Viết Test Case](viet-test.md)
 - [Báo Cáo Test](bao-cao-test.md)
-- [README_TEST.md](../../README_TEST.md)
+- [Rà Soát Test Hiện Có](RA_SOAT_TEST_HIEN_CO.md)
+- [Đề Xuất Cơ Chế Test Tự Động](DE_XUAT_CO_CHE_TEST_TU_DONG.md)
 

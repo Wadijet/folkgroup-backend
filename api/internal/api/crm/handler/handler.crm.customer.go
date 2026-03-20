@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	basehdl "meta_commerce/internal/api/base/handler"
 	crmdto "meta_commerce/internal/api/crm/dto"
@@ -20,8 +21,8 @@ import (
 // CrmCustomerHandler xử lý API profile khách hàng và CRUD (find, find-one, find-by-id, find-with-pagination, count).
 type CrmCustomerHandler struct {
 	*basehdl.BaseHandler[crmmodels.CrmCustomer, crmdto.CrmCustomerCreateInput, crmdto.CrmCustomerUpdateInput]
-	CustomerService   *crmvc.CrmCustomerService
-	BulkJobService   *crmvc.CrmBulkJobService
+	CustomerService *crmvc.CrmCustomerService
+	BulkJobService  *crmvc.CrmBulkJobService
 }
 
 // NewCrmCustomerHandler tạo CrmCustomerHandler mới.
@@ -35,9 +36,9 @@ func NewCrmCustomerHandler() (*CrmCustomerHandler, error) {
 		return nil, fmt.Errorf("tạo CrmBulkJobService: %w", err)
 	}
 	hdl := &CrmCustomerHandler{
-		BaseHandler:     basehdl.NewBaseHandler[crmmodels.CrmCustomer, crmdto.CrmCustomerCreateInput, crmdto.CrmCustomerUpdateInput](svc.BaseServiceMongoImpl),
-		CustomerService: svc,
-		BulkJobService:  bulkJobSvc,
+		BaseHandler:      basehdl.NewBaseHandler[crmmodels.CrmCustomer, crmdto.CrmCustomerCreateInput, crmdto.CrmCustomerUpdateInput](svc.BaseServiceMongoImpl),
+		CustomerService:  svc,
+		BulkJobService:   bulkJobSvc,
 	}
 	// Filter cho CRUD: cho phép filter theo classification và unifiedId (dashboard, bảng khách).
 	hdl.SetFilterOptions(basehdl.FilterOptions{
@@ -48,7 +49,7 @@ func NewCrmCustomerHandler() (*CrmCustomerHandler, error) {
 	return hdl, nil
 }
 
-// HandleRebuildCrm xử lý POST /customers/rebuild — API hợp nhất sync + backfill, đưa job vào queue.
+// HandleRebuildCrm xử lý POST /customers/rebuild — tạo 2 job riêng: sync rồi backfill (đúng logic, dễ checkpoint).
 // Query hoặc Body: sources=pos,fb,order,conversation,note (rỗng = tất cả nguồn).
 //   - pos, fb: đồng bộ profile từ pc_pos_customers, fb_customers
 //   - order, conversation, note: backfill activity từ orders, conversations, notes
@@ -86,39 +87,70 @@ func (h *CrmCustomerHandler) HandleRebuildCrm(c fiber.Ctx) error {
 		}
 		sources := splitAndTrim(sourcesRaw, ",")
 		syncSources, backfillTypes := splitSourcesIntoSyncAndBackfill(sources)
-		params := bson.M{}
-		if input.Limit > 0 {
-			params["limit"] = input.Limit
+		limit := input.Limit
+		jobIDs := make([]string, 0, 2)
+
+		// Job 1: Sync (chạy trước) — tạo nếu cần sync
+		needSync := len(syncSources) > 0 || (len(sources) == 0)
+		if needSync {
+			syncParams := bson.M{}
+			if len(syncSources) > 0 {
+				syncParams["sources"] = syncSources
+			}
+			syncJobID, err := h.BulkJobService.Enqueue(c.Context(), crmmodels.CrmBulkJobSync, *orgID, syncParams, input.IsPriority)
+			if err != nil {
+				c.Status(common.StatusInternalServerError).JSON(fiber.Map{
+					"code": common.ErrCodeDatabase.Code, "message": "Lỗi đưa job sync vào queue: " + err.Error(), "status": "error",
+				})
+				return nil
+			}
+			jobIDs = append(jobIDs, syncJobID.Hex())
 		}
-		// Khi user chỉ định sources: truyền cả syncSources và backfillTypes. [] = bỏ qua phần đó.
-		if len(sources) > 0 {
-			params["sources"] = syncSources
-			params["types"] = backfillTypes
+
+		// Job 2: Backfill (chạy sau sync) — tạo nếu cần backfill
+		needBackfill := len(backfillTypes) > 0 || (len(sources) == 0)
+		if needSync && needBackfill {
+			time.Sleep(1 * time.Second) // Đảm bảo backfill có createdAt sau sync → chạy đúng thứ tự
 		}
-		jobID, err := h.BulkJobService.Enqueue(c.Context(), crmmodels.CrmBulkJobRebuild, *orgID, params, input.IsPriority)
-		if err != nil {
-			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
-				"code": common.ErrCodeDatabase.Code, "message": "Lỗi đưa job vào queue: " + err.Error(), "status": "error",
-			})
-			return nil
+		if needBackfill {
+			backfillParams := bson.M{}
+			if limit > 0 {
+				backfillParams["limit"] = limit
+			}
+			if len(backfillTypes) > 0 {
+				backfillParams["types"] = backfillTypes
+			}
+			backfillJobID, err := h.BulkJobService.Enqueue(c.Context(), crmmodels.CrmBulkJobBackfill, *orgID, backfillParams, input.IsPriority)
+			if err != nil {
+				c.Status(common.StatusInternalServerError).JSON(fiber.Map{
+					"code": common.ErrCodeDatabase.Code, "message": "Lỗi đưa job backfill vào queue: " + err.Error(), "status": "error",
+				})
+				return nil
+			}
+			jobIDs = append(jobIDs, backfillJobID.Hex())
+		}
+
+		msg := "Các job rebuild (sync + backfill) đã được đưa vào queue"
+		if len(jobIDs) == 1 {
+			msg = "Job đã được đưa vào queue"
 		}
 		c.Status(common.StatusAccepted).JSON(fiber.Map{
-			"code": common.StatusAccepted, "message": "Job rebuild đã được đưa vào queue, worker sẽ xử lý",
-			"data": fiber.Map{"jobId": jobID.Hex(), "status": "queued"},
+			"code": common.StatusAccepted, "message": msg,
+			"data": fiber.Map{"jobIds": jobIDs, "status": "queued"},
 			"status": "success",
 		})
 		return nil
 	})
 }
 
-// HandleRecalculateAllCustomers xử lý POST /customers/recalculate-all — đưa job tính toán lại tất cả khách vào queue.
-// Body: ownerOrganizationId, limit (0 = tất cả).
+// HandleRecalculateAllCustomers xử lý POST /customers/recalculate-all — đưa N job batch tính toán lại tất cả khách vào queue.
+// Body: ownerOrganizationId, batchSize (mặc định 200 — số khách mỗi batch, restart chỉ mất 1 batch).
 func (h *CrmCustomerHandler) HandleRecalculateAllCustomers(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {
 		var input struct {
 			OwnerOrganizationId string `json:"ownerOrganizationId"`
-			Limit               int    `json:"limit"`
-			IsPriority          bool   `json:"isPriority"` // Job ưu tiên: bắt buộc chạy ngay, không bị throttle
+			BatchSize           int    `json:"batchSize"`   // Số khách mỗi batch (mặc định 200)
+			IsPriority          bool   `json:"isPriority"`  // Job ưu tiên: bắt buộc chạy ngay, không bị throttle
 		}
 		_ = c.Bind().Body(&input)
 		orgID := getActiveOrganizationID(c)
@@ -138,20 +170,24 @@ func (h *CrmCustomerHandler) HandleRecalculateAllCustomers(c fiber.Ctx) error {
 			})
 			return nil
 		}
-		params := bson.M{}
-		if input.Limit > 0 {
-			params["limit"] = input.Limit
+		batchSize := input.BatchSize
+		if batchSize <= 0 {
+			batchSize = 200
 		}
-		jobID, err := h.BulkJobService.Enqueue(c.Context(), crmmodels.CrmBulkJobRecalculateAll, *orgID, params, input.IsPriority)
+		jobIDs, err := h.BulkJobService.EnqueueRecalculateAllBatches(c.Context(), *orgID, batchSize, input.IsPriority)
 		if err != nil {
 			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
 				"code": common.ErrCodeDatabase.Code, "message": "Lỗi đưa job vào queue: " + err.Error(), "status": "error",
 			})
 			return nil
 		}
+		jobIdStrs := make([]string, len(jobIDs))
+		for i, id := range jobIDs {
+			jobIdStrs[i] = id.Hex()
+		}
 		c.Status(common.StatusAccepted).JSON(fiber.Map{
-			"code": common.StatusAccepted, "message": "Job tính toán lại tất cả khách đã được đưa vào queue, worker sẽ xử lý",
-			"data": fiber.Map{"jobId": jobID.Hex(), "status": "queued"},
+			"code": common.StatusAccepted, "message": "Các job tính toán lại tất cả khách đã được đưa vào queue, worker sẽ xử lý từng batch",
+			"data": fiber.Map{"jobIds": jobIdStrs, "totalBatches": len(jobIDs), "status": "queued"},
 			"status": "success",
 		})
 		return nil

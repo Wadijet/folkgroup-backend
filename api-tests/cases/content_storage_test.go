@@ -15,18 +15,16 @@ import (
 // TestContentStorageModule kiểm tra tất cả các API của Module 1 (Content Storage)
 func TestContentStorageModule(t *testing.T) {
 	baseURL := "http://localhost:8080/api/v1"
-	waitForHealth(baseURL, 10, 1*time.Second, t)
 
-	// Sử dụng bearer token của admin
-	adminToken := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI2OTVmN2IzOGNiZjYyZGJhMGZiMDk0Y2IiLCJ0aW1lIjoiNjk2MTk2M2MiLCJyYW5kb21OdW1iZXIiOiI0OSJ9.Y-__tpexbOJ-cg0v5PkOXUdfNLeVgvHazfjOn43bmuI"
-
-	client := utils.NewHTTPClient(baseURL, 10)
-	client.SetToken(adminToken)
-
-	fixtures := utils.NewTestFixtures(baseURL)
+	// Setup với admin user (token mới từ email/password hoặc Firebase)
+	fixtures, _, adminToken, client, err := utils.SetupTestWithAdminUser(t, baseURL)
+	if err != nil {
+		t.Fatalf("❌ Không thể setup test: %v", err)
+	}
+	_ = fixtures
 
 	// Lấy Root Organization ID để sử dụng trong test (nếu cần)
-	_, err := fixtures.GetRootOrganizationID(adminToken)
+	_, err = fixtures.GetRootOrganizationID(adminToken)
 	if err != nil {
 		t.Logf("⚠️ Không thể lấy Root Organization ID: %v", err)
 		// Vẫn tiếp tục test, có thể sẽ fail ở phần cần organizationId

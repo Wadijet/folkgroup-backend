@@ -1,6 +1,6 @@
 // Package adaptive — Per-Camp Adaptive Threshold (FolkForm v4.1 Section 2.2).
 // Tính P25/P50/P75 từ dữ liệu lịch sử campaign 14 ngày, trả về ngưỡng adaptive theo giai đoạn.
-// Package độc lập để tránh import cycle (meta, ads/rules đều dùng).
+// Package độc lập để tránh import cycle (meta, ads/config đều dùng).
 package adaptive
 
 import (

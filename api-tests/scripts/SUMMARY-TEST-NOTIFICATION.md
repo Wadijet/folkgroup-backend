@@ -2,7 +2,7 @@
 
 ## ✅ Test Thành Công
 
-### 1. Endpoint `/delivery/send` (Hệ thống 1 - Gửi trực tiếp)
+### 1. Endpoint `/executor/send` (Hệ thống 1 - Gửi trực tiếp)
 - **Script**: `test-delivery-send.ps1`
 - **Kết quả**: ✅ Đã gửi thành công notification qua Telegram
 - **MessageID**: `695aab232814483fd558afdc`

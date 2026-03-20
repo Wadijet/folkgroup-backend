@@ -100,8 +100,9 @@ func main() {
 		fmt.Printf("  jobType:    %v\n", doc["jobType"])
 		fmt.Printf("  orgId:      %v\n", doc["ownerOrganizationId"])
 		fmt.Printf("  params:     %v\n", doc["params"])
+		fmt.Printf("  isPriority: %v (MongoDB field phải là 'isPriority' lowercase)\n", doc["isPriority"])
 		fmt.Printf("  createdAt:  %s\n", formatTs(doc["createdAt"]))
-		fmt.Printf("  processedAt: %s\n", formatTs(doc["processedAt"]))
+		fmt.Printf("  processedAt: %s (phải null để worker lấy job)\n", formatTs(doc["processedAt"]))
 		if errStr, ok := doc["processError"].(string); ok && errStr != "" {
 			fmt.Printf("  processError: %s\n", errStr)
 		}
@@ -143,10 +144,20 @@ func main() {
 	cursor.All(ctx, &pendingList)
 	cursor.Close(ctx)
 	if len(pendingList) > 0 {
-		fmt.Println("\n  Job đang chờ (mới nhất):")
-		for _, d := range pendingList {
-			fmt.Printf("    %s | %s | org=%v | created %s\n",
-				d["_id"], d["jobType"], d["ownerOrganizationId"], formatTs(d["createdAt"]))
+		fmt.Println("\n  Job đang chờ (mới nhất, sort theo GetUnprocessed: isPriority desc, createdAt asc):")
+		// Lấy theo thứ tự giống worker: isPriority desc, createdAt asc
+		optsWorker := options.Find().SetSort(bson.D{{Key: "isPriority", Value: -1}, {Key: "createdAt", Value: 1}}).SetLimit(10)
+		cursorWorker, _ := coll.Find(ctx, bson.M{"processedAt": nil}, optsWorker)
+		var workerOrderList []bson.M
+		cursorWorker.All(ctx, &workerOrderList)
+		cursorWorker.Close(ctx)
+		for _, d := range workerOrderList {
+			prio := d["isPriority"]
+			if prio == nil {
+				prio = false
+			}
+			fmt.Printf("    %s | %s | isPriority=%v | org=%v | created %s\n",
+				d["_id"], d["jobType"], prio, d["ownerOrganizationId"], formatTs(d["createdAt"]))
 		}
 	}
 
@@ -179,4 +190,9 @@ func main() {
 	fmt.Println("Recalculate 43k KH: mỗi KH ~100-500ms → ước tính 1-6 giờ.")
 	fmt.Println("Job chỉ có processedAt khi XONG hết. Không có progress trung gian.")
 	fmt.Println("Kiểm tra chi tiết: go run scripts/check_crm_job_status.go <jobId>")
+	fmt.Println("\n--- Job không chạy? Kiểm tra ---")
+	fmt.Println("1. processedAt phải null (job chưa xử lý)")
+	fmt.Println("2. isPriority: true = ưu tiên, bypass throttle. Field MongoDB phải là 'isPriority' (chữ i thường)")
+	fmt.Println("3. Worker crm_bulk: WORKER_ACTIVE_CRM_BULK=true (mặc định), batch=2, interval=2m")
+	fmt.Println("4. Retry job đã lỗi: MongoDB: db.crm_bulk_jobs.updateOne({_id: ObjectId(\"<id>\")}, {$unset: {processedAt:\"\", processError:\"\", result:\"\"}, $set: {isPriority: true}})")
 }

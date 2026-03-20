@@ -10,6 +10,7 @@ import (
 // CrmCustomerProfileResponse trả về profile đầy đủ của khách (metrics + classification).
 type CrmCustomerProfileResponse struct {
 	UnifiedId                 string             `json:"unifiedId"`
+	Uid                       string             `json:"uid,omitempty"` // Ưu tiên dùng khi có (Identity 4 lớp)
 	Name                      string             `json:"name"`
 	PhoneNumbers              []string           `json:"phoneNumbers"`
 	Emails                    []string           `json:"emails"`
@@ -50,7 +51,7 @@ type CrmCustomerProfileResponse struct {
 	Channel                   string             `json:"channel,omitempty"` // online | offline | omnichannel (rỗng nếu chưa mua)
 	LoyaltyStage              string             `json:"loyaltyStage,omitempty"`
 	MomentumStage             string             `json:"momentumStage,omitempty"`
-	SourceIds                 map[string]string  `json:"sourceIds,omitempty"`
+	SourceIds                 map[string]interface{} `json:"sourceIds,omitempty"` // pos, fb, zalo (string); fbByPage, zaloByPage (map[string]string)
 	OwnerOrganizationId      primitive.ObjectID `json:"ownerOrganizationId,omitempty"`
 }
 

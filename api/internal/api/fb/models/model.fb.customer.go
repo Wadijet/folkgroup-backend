@@ -8,6 +8,11 @@ import (
 type FbCustomer struct {
 	ID primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"` // ID của customer trong MongoDB
 
+	// ===== IDENTITY 4 LỚP =====
+	Uid            string           `json:"uid" bson:"uid" index:"single:1"`                      // cust_xxx — ID chuẩn hệ thống
+	SourceIds      map[string]string `json:"sourceIds,omitempty" bson:"sourceIds,omitempty"`        // facebook → PanCakeData.id
+	SourceIdsFb    string           `json:"-" bson:"sourceIds.facebook,omitempty" index:"single:1,sparse"`
+
 	// ===== IDENTIFIERS =====
 	CustomerId string `json:"customerId" bson:"customerId" index:"text,unique" extract:"PanCakeData\\.id,converter=string"`       // Pancake Customer ID (extract từ PanCakeData["id"])
 	Psid       string `json:"psid" bson:"psid" index:"text,unique,sparse" extract:"PanCakeData\\.psid,converter=string,optional"` // Page Scoped ID (Facebook) (extract từ PanCakeData["psid"])

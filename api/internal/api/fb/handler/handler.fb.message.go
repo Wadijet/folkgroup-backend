@@ -2,12 +2,11 @@ package fbhdl
 
 import (
 	"fmt"
+
+	basehdl "meta_commerce/internal/api/base/handler"
 	fbdto "meta_commerce/internal/api/fb/dto"
 	fbmodels "meta_commerce/internal/api/fb/models"
 	fbsvc "meta_commerce/internal/api/fb/service"
-	basehdl "meta_commerce/internal/api/base/handler"
-	"meta_commerce/internal/common"
-	"meta_commerce/internal/global"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -31,41 +30,9 @@ func NewFbMessageHandler() (*FbMessageHandler, error) {
 	return hdl, nil
 }
 
-// HandleUpsertMessages xử lý upsert messages từ Pancake API
-func (h *FbMessageHandler) HandleUpsertMessages(c fiber.Ctx) error {
-	return h.SafeHandler(c, func() error {
-		var input fbdto.FbMessageUpsertMessagesInput
-		if err := h.ParseRequestBody(c, &input); err != nil {
-			h.HandleResponse(c, nil, common.NewError(
-				common.ErrCodeValidationFormat,
-				fmt.Sprintf("Dữ liệu gửi lên không đúng định dạng JSON. Chi tiết: %v", err),
-				common.StatusBadRequest,
-				err,
-			))
-			return nil
-		}
-
-		if err := global.Validate.Struct(input); err != nil {
-			h.HandleResponse(c, nil, common.NewError(
-				common.ErrCodeValidationFormat,
-				fmt.Sprintf("Dữ liệu không hợp lệ: %v", err),
-				common.StatusBadRequest,
-				err,
-			))
-			return nil
-		}
-
-		result, err := h.FbMessageService.UpsertMessages(
-			c.Context(),
-			input.ConversationId,
-			input.PageId,
-			input.PageUsername,
-			input.CustomerId,
-			input.PanCakeData,
-			input.HasMore,
-		)
-
-		h.HandleResponse(c, result, err)
-		return nil
-	})
+// UpsertMessagesFromParts body JSON — logic ở FbMessageService.RunUpsertMessagesFromJSON (CIO ingest domain interaction_message).
+func (h *FbMessageHandler) UpsertMessagesFromParts(c fiber.Ctx, body []byte) error {
+	result, err := h.FbMessageService.RunUpsertMessagesFromJSON(c.Context(), body)
+	h.HandleResponse(c, result, err)
+	return nil
 }

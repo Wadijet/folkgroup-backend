@@ -2,11 +2,18 @@ package models
 
 import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
+
+	"meta_commerce/internal/utility/identity"
 )
 
 // PcPosOrder lưu thông tin đơn hàng từ Pancake POS API
 type PcPosOrder struct {
 	ID              primitive.ObjectID     `json:"id,omitempty" bson:"_id,omitempty"`                                                                                   // ID của order trong MongoDB
+	Uid                string                     `json:"uid" bson:"uid" index:"single:1"`                                                                                     // ord_xxx — ID chuẩn 4 lớp
+	SourceIds          map[string]string           `json:"sourceIds,omitempty" bson:"sourceIds,omitempty"`                                                                     // pos → PosData.id
+	SourceIdsPos       string                     `json:"-" bson:"sourceIds.pos,omitempty" index:"single:1,sparse"`
+	Links              map[string]identity.LinkItem `json:"links,omitempty" bson:"links,omitempty"`                                                                           // customer → cust_xxx
+	LinksCustomerUid   string                     `json:"-" bson:"links.customer.uid,omitempty" index:"single:1,sparse"`
 	OrderId         int64                  `json:"orderId" bson:"orderId" index:"text,compound:idx_pos_order_unique" extract:"PosData\\.id,converter=int64"`                                          // ID của order trên Pancake POS (extract từ PosData["id"], convert sang int64)
 	SystemId        int64                  `json:"systemId" bson:"systemId" extract:"PosData\\.system_id,converter=int64,optional"`                                     // System ID (extract từ PosData["system_id"])
 	ShopId          int64                  `json:"shopId" bson:"shopId" index:"text" extract:"PosData\\.shop_id,converter=int64,optional"`                              // ID của shop (extract từ PosData["shop_id"])

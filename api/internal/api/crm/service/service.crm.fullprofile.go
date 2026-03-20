@@ -40,8 +40,7 @@ func (s *CrmCustomerService) GetFullProfile(ctx context.Context, unifiedId strin
 	}
 
 	// 2. Lấy customer để có sourceIds cho query orders/conversations
-	filter := bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}
-	customer, err := s.FindOne(ctx, filter, nil)
+	customer, err := s.FindOne(ctx, buildCustomerFilterByIdOrUid(unifiedId, ownerOrgID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -60,11 +59,11 @@ func (s *CrmCustomerService) GetFullProfile(ctx context.Context, unifiedId strin
 	convIds := s.getConversationIdsFromPosCustomers(ctx, posIds, ownerOrgID)
 	conversations := s.fetchConversations(ctx, customerIds, convIds, ownerOrgID)
 
-	// 5. Lấy ghi chú
-	notes := s.fetchNotes(ctx, unifiedId, ownerOrgID)
+	// 5. Lấy ghi chú — dùng customer.UnifiedId (notes/activity lưu theo unifiedId)
+	notes := s.fetchNotes(ctx, customer.UnifiedId, ownerOrgID)
 
 	// 6. Lấy lịch sử hoạt động
-	activityHistory := s.fetchActivityHistory(ctx, unifiedId, ownerOrgID, opts)
+	activityHistory := s.fetchActivityHistory(ctx, customer.UnifiedId, ownerOrgID, opts)
 
 	// 7. Ghi lịch sử profile_viewed (không lưu snapshot — chỉ ghi sự kiện xem)
 	if actSvc, err := NewCrmActivityService(); err == nil {
@@ -74,7 +73,7 @@ func (s *CrmCustomerService) GetFullProfile(ctx context.Context, unifiedId strin
 		}
 		metadata := map[string]interface{}{}
 		_ = actSvc.LogActivity(ctx, LogActivityInput{
-			UnifiedId:    unifiedId,
+			UnifiedId:    customer.UnifiedId,
 			OwnerOrgID:   ownerOrgID,
 			Domain:       crmmodels.ActivityDomainProfile,
 			ActivityType: "profile_viewed",
@@ -93,7 +92,7 @@ func (s *CrmCustomerService) GetFullProfile(ctx context.Context, unifiedId strin
 	// Đảm bảo có layer3 (derive bổ sung khi thiếu — dữ liệu cũ hoặc recalculate chưa ghi đủ).
 	currentMetrics := customer.CurrentMetrics
 	if len(currentMetrics) == 0 {
-		currentMetrics = BuildCurrentMetricsSnapshot(&customer)
+		currentMetrics = BuildCurrentMetricsSnapshot(ctx, &customer)
 	} else {
 		currentMetrics = ensureLayer3InMetrics(currentMetrics)
 	}
@@ -118,12 +117,22 @@ func buildCustomerIdsForQuery(c *crmmodels.CrmCustomer) []string {
 			ids = append(ids, id)
 		}
 	}
+	add(c.Uid) // Ưu tiên uid (Identity 4 lớp)
 	add(c.UnifiedId)
 	if c.SourceIds.Pos != "" {
 		add(c.SourceIds.Pos)
 	}
 	if c.SourceIds.Fb != "" {
 		add(c.SourceIds.Fb)
+	}
+	if c.SourceIds.Zalo != "" {
+		add(c.SourceIds.Zalo)
+	}
+	for _, v := range c.SourceIds.FbByPage {
+		add(v)
+	}
+	for _, v := range c.SourceIds.ZaloByPage {
+		add(v)
 	}
 	return ids
 }
@@ -142,6 +151,7 @@ func (s *CrmCustomerService) fetchRecentOrders(ctx context.Context, customerIds 
 		"ownerOrganizationId": ownerOrgID,
 		"$or": []bson.M{
 			{"customerId": bson.M{"$in": customerIds}},
+			{"links.customer.uid": bson.M{"$in": customerIds}}, // Identity 4 lớp
 			{"posData.customer.id": bson.M{"$in": customerIds}},
 		},
 	}

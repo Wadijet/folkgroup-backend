@@ -50,6 +50,21 @@ func TestScopePermissions(t *testing.T) {
 	client := utils.NewHTTPClient(baseURL, 10)
 	client.SetToken(token)
 
+	// Set active role trước GetRootOrganizationID (endpoint /organization/find yêu cầu X-Active-Role-ID)
+	resp, body, _ := client.GET("/auth/roles")
+	if resp != nil && resp.StatusCode == http.StatusOK {
+		var rolesResult map[string]interface{}
+		json.Unmarshal(body, &rolesResult)
+		if rolesData, ok := rolesResult["data"].([]interface{}); ok && len(rolesData) > 0 {
+			if firstRole, ok := rolesData[0].(map[string]interface{}); ok {
+				if roleID, ok := firstRole["roleId"].(string); ok && roleID != "" {
+					client.SetActiveRoleID(roleID)
+					fixtures.SetActiveRoleIDForClient(roleID)
+				}
+			}
+		}
+	}
+
 	// Lấy Root Organization ID
 	rootOrgID, err := fixtures.GetRootOrganizationID(token)
 	if err != nil {

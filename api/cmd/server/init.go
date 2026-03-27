@@ -20,6 +20,7 @@ import (
 	reportmodels "meta_commerce/internal/api/report/models"
 	ruleintelmodels "meta_commerce/internal/api/ruleintel/models"
 	cixmodels "meta_commerce/internal/api/cix/models"
+	orderintelmodels "meta_commerce/internal/api/orderintel/models"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 	learningmodels "meta_commerce/internal/api/learning/models"
 	"meta_commerce/internal/database"
@@ -140,10 +141,8 @@ func initColNames() {
 	global.MongoDB_ColNames.AdsCampaignHourly = "ads_campaign_hourly"
 	global.MongoDB_ColNames.AdsCampPeakProfiles = "ads_camp_peak_profiles"
 	global.MongoDB_ColNames.AdsThrottleState = "ads_throttle_state"
-	global.MongoDB_ColNames.DecisionCases = "decision_cases"
 	global.MongoDB_ColNames.LearningCases = "learning_cases"
 	global.MongoDB_ColNames.RuleSuggestions = "rule_suggestions"
-	global.MongoDB_ColNames.LearningInsightsAggregate = "learning_insights_aggregate"
 
 	// Module Rule Intelligence
 	global.MongoDB_ColNames.RuleDefinitions = "rule_definitions"
@@ -156,10 +155,17 @@ func initColNames() {
 	global.MongoDB_ColNames.CixAnalysisResults = "cix_analysis_results"
 	global.MongoDB_ColNames.CixPendingAnalysis = "cix_pending_analysis"
 
+	// Module Order Intelligence — Vision 07
+	global.MongoDB_ColNames.OrderIntelligenceSnapshots = "order_intelligence_snapshots"
+	global.MongoDB_ColNames.OrderIntelligencePending = "order_intelligence_pending"
+
 	// Module AI Decision — Event & Decision Case (PLATFORM_L1_EVENT_DECISION_SUPPLEMENT)
 	global.MongoDB_ColNames.DecisionEventsQueue = "decision_events_queue"
 	global.MongoDB_ColNames.DecisionCasesRuntime = "decision_cases_runtime"
 	global.MongoDB_ColNames.DecisionDebounceState = "decision_debounce_state"
+	global.MongoDB_ColNames.DecisionRoutingRules = "decision_routing_rules"
+	global.MongoDB_ColNames.DecisionContextPolicyOverrides = "decision_context_policy_overrides"
+	global.MongoDB_ColNames.AIDecisionOrgLiveEvents = "decision_org_live_events"
 
 	logrus.Info("Initialized collection names") // Ghi log thông báo đã khởi tạo tên các collection
 }
@@ -288,10 +294,8 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsCampaignHourly), adsmodels.AdsCampaignHourly{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsCampPeakProfiles), adsmodels.AdsCampPeakProfile{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsThrottleState), adsmodels.AdsThrottleState{})
-	database.CreateDecisionCaseIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DecisionCases))
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.LearningCases), learningmodels.LearningCase{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.RuleSuggestions), learningmodels.RuleSuggestion{})
-	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.LearningInsightsAggregate), learningmodels.LearningInsightAggregate{})
 
 	// Module Rule Intelligence
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.RuleDefinitions), ruleintelmodels.RuleDefinition{})
@@ -304,10 +308,20 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CixAnalysisResults), cixmodels.CixAnalysisResult{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CixPendingAnalysis), cixmodels.CixPendingAnalysis{})
 
+	// Module Order Intelligence
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.OrderIntelligenceSnapshots), orderintelmodels.OrderIntelligenceSnapshot{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.OrderIntelligencePending), orderintelmodels.OrderIntelligencePendingJob{})
+
 	// Module AI Decision — Event & Decision Case
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DecisionEventsQueue), aidecisionmodels.DecisionEvent{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DecisionCasesRuntime), aidecisionmodels.DecisionCase{})
+	if err := database.EnsureDecisionCaseRuntimeExtraIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DecisionCasesRuntime)); err != nil {
+		logrus.Warnf("decision_cases_runtime extra indexes: %v", err)
+	}
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DecisionDebounceState), aidecisionmodels.DebounceState{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DecisionRoutingRules), aidecisionmodels.DecisionRoutingRule{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DecisionContextPolicyOverrides), aidecisionmodels.DecisionContextPolicyOverride{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AIDecisionOrgLiveEvents), aidecisionmodels.AIDecisionOrgLiveEvent{})
 }
 
 // initFirebase khởi tạo Firebase Admin SDK

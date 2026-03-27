@@ -420,7 +420,7 @@ Executor check `idempotency_key` trước khi tạo mới — retry không tạo
 | 17 | Learning: closed_complete | createLearningCasesForClosedCase (1 per action) | ✅ |
 | 18 | Action idempotency_key | decision_case_id:action_type:version | ✅ |
 
-**Env (tùy chọn):** `AI_DECISION_DEBOUNCE_ENABLED`, `AI_DECISION_REQUIRE_BOTH_CONTEXT`, `AI_DECISION_CLOSURE_MAX_AGE_HOURS`. *(Đã bỏ `AI_DECISION_EVENT_DRIVEN` / `AI_DECISION_USE_CIX_REQUEST` — luôn event-driven; CixRequest worker luôn bật.)*
+**Env (tùy chọn):** `AI_DECISION_DEBOUNCE_ENABLED`, `AI_DECISION_CLOSURE_MAX_AGE_HOURS`. *Context readiness theo **Context Policy Matrix** (code `contextpolicy`), không còn `AI_DECISION_REQUIRE_BOTH_CONTEXT`.* *(Đã bỏ `AI_DECISION_EVENT_DRIVEN` / `AI_DECISION_USE_CIX_REQUEST` — luôn event-driven; CixRequest worker luôn bật.)*
 
 **Phase 1 hoàn thành.**
 
@@ -429,7 +429,7 @@ Executor check `idempotency_key` trước khi tạo mới — retry không tạo
 | # | Thành phần | Vị trí | Trạng thái |
 |---|------------|--------|------------|
 | 1 | Order Context worker | pc/worker/worker.pc.order_context.go | ✅ |
-| 2 | Ads Context worker | ads/worker/worker.ads.context.go | ✅ |
+| 2 | ads.context_requested → ready | consumer AID (`service.aidecision.ads_context_payload` + dispatch) | ✅ |
 | 3 | UpdateCaseWithOrderContext, UpdateCaseWithAdsContext | service.aidecision.case.go | ✅ |
 | 4 | Consumer: order.flags_emitted, ads.context_ready | worker.aidecision.consumer.go | ✅ |
 | 5 | LearningCases collection | learning_cases, LearningCaseService dùng LearningCases | ✅ |

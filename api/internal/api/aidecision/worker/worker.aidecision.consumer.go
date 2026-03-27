@@ -5,14 +5,25 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"meta_commerce/internal/api/aidecision/adsautop"
+	crmqueue "meta_commerce/internal/api/aidecision/crmqueue"
+	"meta_commerce/internal/api/aidecision/decisionlive"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 	aidecisionsvc "meta_commerce/internal/api/aidecision/service"
 	cixsvc "meta_commerce/internal/api/cix/service"
+	crmvc "meta_commerce/internal/api/crm/service"
+	metasvc "meta_commerce/internal/api/meta/service"
+	"meta_commerce/internal/approval"
 	"meta_commerce/internal/logger"
+	"meta_commerce/internal/traceutil"
+	"meta_commerce/internal/utility"
 	"meta_commerce/internal/worker"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -25,24 +36,73 @@ type AIDecisionConsumerWorker struct {
 
 // NewAIDecisionConsumerWorker tạo mới.
 func NewAIDecisionConsumerWorker(interval time.Duration) *AIDecisionConsumerWorker {
-	if interval < 2*time.Second {
-		interval = 2 * time.Second
+	// Sàn thấp để WORKER_AI_DECISION_CONSUMER_INTERVAL / schedule có thể giảm (ví dụ 1s); luồng busy dùng busy-poll riêng.
+	if interval < 500*time.Millisecond {
+		interval = 500 * time.Millisecond
 	}
 	return &AIDecisionConsumerWorker{interval: interval}
+}
+
+// parseAIDecisionConsumerBusyPollInterval nghỉ ngắn sau khi đã xử lý batch (queue còn khả năng đầy — tránh chờ hết interval idle).
+func parseAIDecisionConsumerBusyPollInterval() time.Duration {
+	d := 200 * time.Millisecond
+	if v := strings.TrimSpace(os.Getenv("AI_DECISION_CONSUMER_BUSY_POLL_INTERVAL")); v != "" {
+		if x, err := time.ParseDuration(v); err == nil && x >= 50*time.Millisecond && x <= 30*time.Second {
+			d = x
+		}
+	}
+	return d
+}
+
+// parseAIDecisionConsumerBurstMaxRounds số vòng lease+process tối đa liên tiếp khi mỗi vòng đủ pool (xả hàng nhanh).
+func parseAIDecisionConsumerBurstMaxRounds() int {
+	n := 24
+	if v := strings.TrimSpace(os.Getenv("AI_DECISION_CONSUMER_BURST_MAX_ROUNDS")); v != "" {
+		if x, err := strconv.Atoi(v); err == nil && x >= 1 && x <= 500 {
+			n = x
+		}
+	}
+	return n
 }
 
 // Start chạy worker. Implement worker.Worker.
 func (w *AIDecisionConsumerWorker) Start(ctx context.Context) {
 	log := logger.GetAppLogger()
-	log.WithField("interval", w.interval.String()).Info("📋 [AI_DECISION] Starting AI Decision Consumer Worker...")
+	minPool := worker.MinPoolSizeAIDecisionConsumer()
+	defPool := worker.GetPoolSize(worker.WorkerAIDecisionConsumer, minPool)
+	log.WithFields(map[string]interface{}{
+		"interval":               w.interval.String(),
+		"consumerMinPool":        minPool,
+		"poolSizeDefault":        defPool,
+		"busyPollDefault":        parseAIDecisionConsumerBusyPollInterval().String(),
+		"burstMaxRoundsDefault":  parseAIDecisionConsumerBurstMaxRounds(),
+		"resourceThrottleBypass": worker.IsWorkerBypassingResourceThrottle(worker.WorkerAIDecisionConsumer),
+	}).Info("📋 [AI_DECISION] Starting AI Decision Consumer Worker (pool + burst + poll thích ứng)...")
 
 	svc := aidecisionsvc.NewAIDecisionService()
 
-	workerID := "aidecision-consumer-1"
 	leaseSec := 60
+	const maxFairOrgHistory = 5
+	var recentFairOrgs []primitive.ObjectID
+	var lastEscalate time.Time
+	var lastNoLeaseLog time.Time
+	var lastInactiveHintLog time.Time
+	var lastThrottleHintLog time.Time
+
+	busyPollBase := parseAIDecisionConsumerBusyPollInterval()
+	maxBurstRounds := parseAIDecisionConsumerBurstMaxRounds()
+	lanes := []string{aidecisionmodels.EventLaneFast, aidecisionmodels.EventLaneNormal, aidecisionmodels.EventLaneBatch}
+
+	// 0 = lần đầu chạy ngay; sau mỗi lần xử lý gán idle/busy cho lần chờ kế tiếp.
+	nextSleep := time.Duration(0)
 
 	for {
 		if !worker.IsWorkerActive(worker.WorkerAIDecisionConsumer) {
+			nextSleep = 0
+			if time.Since(lastInactiveHintLog) >= 2*time.Minute {
+				lastInactiveHintLog = time.Now()
+				log.Warn("📋 [AI_DECISION] Consumer đang TẮT (IsWorkerActive=false). Bật: API worker-config workerActive hoặc env WORKER_ACTIVE_AI_DECISION_CONSUMER=true")
+			}
 			select {
 			case <-ctx.Done():
 				log.Info("📋 [AI_DECISION] AI Decision Consumer Worker stopped")
@@ -51,25 +111,33 @@ func (w *AIDecisionConsumerWorker) Start(ctx context.Context) {
 			}
 			continue
 		}
-		p := worker.GetPriority(worker.WorkerAIDecisionConsumer, worker.PriorityHigh)
-		if worker.ShouldThrottle(p) {
+		p := worker.GetPriority(worker.WorkerAIDecisionConsumer, worker.PriorityCritical)
+		if worker.ShouldThrottleWorker(worker.WorkerAIDecisionConsumer, p) {
+			nextSleep = 0
+			if time.Since(lastThrottleHintLog) >= 1*time.Minute {
+				lastThrottleHintLog = time.Now()
+				log.WithField("priority", int(p)).Warn("📋 [AI_DECISION] Consumer bị bỏ qua chu kỳ do WorkerController (pause/throttle). Gợi ý: WORKER_AI_DECISION_CONSUMER_IGNORE_RESOURCE_THROTTLE=1 hoặc WORKER_PRIORITY_AI_DECISION_CONSUMER=1")
+			}
 			interval, _ := worker.GetEffectiveWorkerSchedule(worker.WorkerAIDecisionConsumer, w.interval, 1)
+			throttleSleep := worker.GetEffectiveIntervalForWorker(worker.WorkerAIDecisionConsumer, interval, p)
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(interval):
+			case <-time.After(throttleSleep):
 			}
 			continue
 		}
 
-		interval, _ := worker.GetEffectiveWorkerSchedule(worker.WorkerAIDecisionConsumer, w.interval, 1)
-		select {
-		case <-ctx.Done():
-			log.Info("📋 [AI_DECISION] AI Decision Consumer Worker stopped")
-			return
-		case <-time.After(interval):
+		if nextSleep > 0 {
+			select {
+			case <-ctx.Done():
+				log.Info("📋 [AI_DECISION] AI Decision Consumer Worker stopped")
+				return
+			case <-time.After(nextSleep):
+			}
 		}
 
+		hadWork := false
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -77,46 +145,371 @@ func (w *AIDecisionConsumerWorker) Start(ctx context.Context) {
 				}
 			}()
 
-			// Lane ưu tiên: fast → normal → batch
-			for _, lane := range []string{aidecisionmodels.EventLaneFast, aidecisionmodels.EventLaneNormal, aidecisionmodels.EventLaneBatch} {
-				evt, err := svc.LeaseOne(ctx, lane, workerID, leaseSec)
-				if err != nil || evt == nil {
-					continue
-				}
-				processErr := processEvent(ctx, svc, evt)
-				if processErr != nil {
-					retryable := true
-					_ = svc.FailEvent(ctx, evt.EventID, retryable, processErr.Error())
-					log.WithError(processErr).WithField("eventId", evt.EventID).Warn("📋 [AI_DECISION] Xử lý event thất bại")
-				} else {
-					_ = svc.CompleteEvent(ctx, evt.EventID)
-				}
-				// Chỉ xử lý 1 event mỗi tick
+			if ctx.Err() != nil {
 				return
 			}
+
+			escEvery := 5 * time.Minute
+			if v := strings.TrimSpace(os.Getenv("AI_DECISION_ESCALATE_INTERVAL_SEC")); v != "" {
+				if n, err := strconv.Atoi(v); err == nil && n > 0 {
+					escEvery = time.Duration(n) * time.Second
+				}
+			}
+			flushDeferredDatachangedSideEffects(ctx, svc)
+
+			if time.Since(lastEscalate) >= escEvery {
+				lastEscalate = time.Now()
+				if n, err := svc.EscalateStalePendingEvents(ctx); err != nil {
+					log.WithError(err).Debug("📋 [AI_DECISION] EscalateStalePendingEvents lỗi (bỏ qua)")
+				} else if n > 0 {
+					log.WithField("count", n).Debug("📋 [AI_DECISION] Đã nâng priority cho event pending quá lâu")
+				}
+			}
+
+			minP := worker.MinPoolSizeAIDecisionConsumer()
+			basePool := worker.GetPoolSize(worker.WorkerAIDecisionConsumer, minP)
+			if basePool < minP {
+				basePool = minP
+			}
+			poolSize := worker.GetEffectivePoolSizeForWorker(worker.WorkerAIDecisionConsumer, basePool, p)
+			if poolSize < minP {
+				poolSize = minP
+			}
+			if poolSize < 1 {
+				poolSize = 1
+			}
+
+			type leasedJob struct {
+				evt  *aidecisionmodels.DecisionEvent
+				lane string
+				slot int
+			}
+
+			leaseOneBatch := func() []leasedJob {
+				var jobs []leasedJob
+				for slot := 0; slot < poolSize; slot++ {
+					workerID := fmt.Sprintf("aidecision-consumer-%d", slot)
+					var got *aidecisionmodels.DecisionEvent
+					var gotLane string
+					for _, ln := range lanes {
+						e, err := svc.LeaseOneFair(ctx, ln, workerID, leaseSec, recentFairOrgs)
+						if err != nil || e == nil {
+							continue
+						}
+						recentFairOrgs = append(recentFairOrgs, e.OwnerOrganizationID)
+						if len(recentFairOrgs) > maxFairOrgHistory {
+							recentFairOrgs = recentFairOrgs[len(recentFairOrgs)-maxFairOrgHistory:]
+						}
+						got, gotLane = e, ln
+						break
+					}
+					if got == nil {
+						break
+					}
+					jobs = append(jobs, leasedJob{evt: got, lane: gotLane, slot: slot})
+				}
+				return jobs
+			}
+
+			for burst := 0; burst < maxBurstRounds; burst++ {
+				if ctx.Err() != nil {
+					return
+				}
+
+				jobs := leaseOneBatch()
+				if len(jobs) == 0 {
+					if burst == 0 && decisionlive.MetricsChangeLogEnabled() && time.Since(lastNoLeaseLog) >= 30*time.Second {
+						lastNoLeaseLog = time.Now()
+						log.Debug("📋 [AI_DECISION] 30s không lease được event nào — kiểm tra worker bật, CPU throttle, scheduledAt/deferred, hoặc toàn bộ queue không khớp lane fast|normal|batch")
+					}
+					return
+				}
+				hadWork = true
+
+				var wg sync.WaitGroup
+				for _, job := range jobs {
+					job := job
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						defer func() {
+							if r := recover(); r != nil {
+								log.WithFields(map[string]interface{}{"panic": r, "slot": job.slot}).Error("📋 [AI_DECISION] Panic goroutine consumer")
+							}
+						}()
+						evt, lane := job.evt, job.lane
+						ensureDecisionEventTraceIDs(evt)
+						if err := svc.PersistDecisionEventTraceFields(ctx, evt); err != nil {
+							log.WithError(err).WithField("eventId", evt.EventID).Warn("📋 [AI_DECISION] Không ghi lại traceId/w3cTraceId lên Mongo sau khi bù — tra cứu DB có thể thiếu")
+						}
+						if decisionlive.MetricsChangeLogEnabled() {
+							log.WithFields(map[string]interface{}{
+								"eventId":     evt.EventID,
+								"eventType":   evt.EventType,
+								"eventSource": evt.EventSource,
+								"lane":        lane,
+								"orgHex":      evt.OwnerOrganizationID.Hex(),
+								"traceId":     evt.TraceID,
+								"poolSlot":    job.slot,
+							}).Debug("📋 [AI_DECISION] Đã lease event — bắt đầu processEvent")
+						}
+						oid := ownerOrgIDFromDecisionEvent(evt)
+						decisionlive.RecordConsumerWorkBegin(oid, evt.EventType, evt.TraceID)
+						publishQueueConsumerLifecycleStart(oid, evt)
+						t0 := time.Now()
+						completionKind, processErr := processEvent(ctx, svc, evt)
+						publishQueueConsumerLifecycleEnd(oid, evt, processErr, completionKind)
+						durMs := time.Since(t0).Milliseconds()
+						decisionlive.RecordConsumerCompletion(oid, evt.EventType, evt.TraceID, processErr == nil, durMs, completionKind)
+						if processErr != nil {
+							retryable := true
+							_ = svc.FailEvent(ctx, evt.EventID, retryable, processErr.Error())
+							log.WithError(processErr).WithField("eventId", evt.EventID).Warn("📋 [AI_DECISION] Xử lý event thất bại")
+						} else {
+							switch completionKind {
+							case aidecisionmodels.ConsumerCompletionKindNoHandler:
+								_ = svc.CompleteEventWithStatus(ctx, evt.EventID, aidecisionmodels.EventStatusCompletedNoHandler)
+							case aidecisionmodels.ConsumerCompletionKindRoutingSkipped:
+								_ = svc.CompleteEventWithStatus(ctx, evt.EventID, aidecisionmodels.EventStatusCompletedRoutingSkipped)
+							default:
+								_ = svc.CompleteEvent(ctx, evt.EventID)
+							}
+						}
+					}()
+				}
+				wg.Wait()
+
+				// Hết hàng hoặc chưa đủ pool — dừng burst, chờ idle/busy.
+				if len(jobs) < poolSize {
+					return
+				}
+			}
 		}()
+
+		if ctx.Err() != nil {
+			log.Info("📋 [AI_DECISION] AI Decision Consumer Worker stopped")
+			return
+		}
+
+		idleInterval, _ := worker.GetEffectiveWorkerSchedule(worker.WorkerAIDecisionConsumer, w.interval, 1)
+		idleSleep := worker.GetEffectiveIntervalForWorker(worker.WorkerAIDecisionConsumer, idleInterval, p)
+		busySleep := worker.GetEffectiveIntervalForWorker(worker.WorkerAIDecisionConsumer, busyPollBase, p)
+		if busySleep > idleSleep {
+			busySleep = idleSleep
+		}
+		if hadWork {
+			nextSleep = busySleep
+		} else {
+			nextSleep = idleSleep
+		}
 	}
 }
 
-// processEvent xử lý theo event_type.
-func processEvent(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) error {
-	switch evt.EventType {
-	case "conversation.message_inserted", "message.batch_ready":
-		return processSourceEvent(ctx, svc, evt, false)
-	case "conversation.inserted", "conversation.updated", "message.inserted", "message.updated":
-		return processSyncedSourceWithDebounce(ctx, svc, evt)
-	case "order.inserted", "order.updated":
-		return processOrderEvent(ctx, svc, evt)
-	case "cix.analysis_completed":
-		return processCixAnalysisCompleted(ctx, svc, evt)
-	case "customer.context_ready":
-		return processCustomerContextReady(ctx, svc, evt)
-	case "order.flags_emitted":
-		return processOrderFlagsEmitted(ctx, svc, evt)
-	case "ads.context_ready":
-		return processAdsContextReady(ctx, svc, evt)
-	case aidecisionsvc.EventTypeAdsProposeRequested:
-		return processAdsProposeRequested(ctx, svc, evt)
+// ensureDecisionEventTraceIDs gán traceId/correlationId khi thiếu (bản ghi queue cũ hoặc emit không truyền).
+func ensureDecisionEventTraceIDs(evt *aidecisionmodels.DecisionEvent) {
+	if evt == nil {
+		return
+	}
+	if strings.TrimSpace(evt.TraceID) == "" {
+		evt.TraceID = utility.GenerateUID(utility.UIDPrefixTrace)
+	}
+	if strings.TrimSpace(evt.CorrelationID) == "" {
+		evt.CorrelationID = utility.GenerateUID(utility.UIDPrefixCorrelation)
+	}
+	if strings.TrimSpace(evt.W3CTraceID) == "" && strings.TrimSpace(evt.TraceID) != "" {
+		evt.W3CTraceID = traceutil.W3CTraceIDFromKey(strings.TrimSpace(evt.TraceID))
+	}
+}
+
+// processEvent xử lý theo event_type — đăng ký tại consumer_dispatch.go (EvaluateCaseStep/rule store sau này).
+func processEvent(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) (aidecisionmodels.ConsumerCompletionKind, error) {
+	if evt == nil {
+		return aidecisionmodels.ConsumerCompletionKindProcessed, nil
+	}
+	// Vision L1: side-effect từ CRUD (CRM pending ingest, Report MarkDirty, Ads debounce) chỉ chạy trong consumer sau event datachanged.
+	if evt.EventSource == "datachanged" {
+		_ = applyDatachangedSideEffects(ctx, svc, evt)
+		publishQueueDatachangedEffectsDone(ownerOrgIDFromDecisionEvent(evt), evt)
+	}
+	// decision_routing_rules: behavior noop → không gọi handler đã đăng ký (event vẫn complete).
+	if svc.ShouldSkipDispatchForRoutingRule(ctx, ownerOrgIDFromDecisionEvent(evt), evt.EventType) {
+		publishQueueRoutingSkipped(ownerOrgIDFromDecisionEvent(evt), evt)
+		return aidecisionmodels.ConsumerCompletionKindRoutingSkipped, nil
+	}
+	return dispatchConsumerEvent(ctx, svc, evt)
+}
+
+// ownerOrgIDFromDecisionEvent lấy OwnerOrganizationID từ envelope hoặc payload (ownerOrgIdHex).
+func ownerOrgIDFromDecisionEvent(evt *aidecisionmodels.DecisionEvent) primitive.ObjectID {
+	if evt == nil {
+		return primitive.NilObjectID
+	}
+	ownerOrgID := evt.OwnerOrganizationID
+	if ownerOrgID.IsZero() {
+		if hex, ok := evt.Payload["ownerOrgIdHex"].(string); ok && hex != "" {
+			if oid, err := primitive.ObjectIDFromHex(hex); err == nil {
+				ownerOrgID = oid
+			}
+		}
+	}
+	return ownerOrgID
+}
+
+// processAdsIntelligenceRecomputeRequested — consumer: source (hook) hoặc full (API một Ad).
+func processAdsIntelligenceRecomputeRequested(ctx context.Context, evt *aidecisionmodels.DecisionEvent) error {
+	objectType, _ := evt.Payload["objectType"].(string)
+	objectId, _ := evt.Payload["objectId"].(string)
+	adAccountId, _ := evt.Payload["adAccountId"].(string)
+	source, _ := evt.Payload["source"].(string)
+	recomputeMode, _ := evt.Payload["recomputeMode"].(string)
+	ownerOrgID := evt.OwnerOrganizationID
+	if ownerOrgID.IsZero() {
+		if hex, ok := evt.Payload["ownerOrgIdHex"].(string); ok && hex != "" {
+			oid, err := primitive.ObjectIDFromHex(hex)
+			if err == nil {
+				ownerOrgID = oid
+			}
+		}
+	}
+	if objectType == "" || objectId == "" || adAccountId == "" || ownerOrgID.IsZero() {
+		return nil
+	}
+	return metasvc.ApplyAdsIntelligenceRecomputeWithMode(ctx, objectType, objectId, adAccountId, ownerOrgID, source, recomputeMode)
+}
+
+// processAdsIntelligenceRecalculateAllRequested — batch RecalculateAllMetaAds trong worker (không chạy sync từ HTTP).
+func processAdsIntelligenceRecalculateAllRequested(ctx context.Context, evt *aidecisionmodels.DecisionEvent) error {
+	ownerOrgID := evt.OwnerOrganizationID
+	if ownerOrgID.IsZero() {
+		if hex, ok := evt.Payload["ownerOrgIdHex"].(string); ok && hex != "" {
+			oid, err := primitive.ObjectIDFromHex(hex)
+			if err == nil {
+				ownerOrgID = oid
+			}
+		}
+	}
+	if ownerOrgID.IsZero() {
+		return nil
+	}
+	limit := payloadIntFromDecisionPayload(evt.Payload, "limit")
+	_, err := metasvc.RecalculateAllMetaAds(ctx, ownerOrgID, limit)
+	return err
+}
+
+func payloadIntFromDecisionPayload(m map[string]interface{}, key string) int {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return 0
+	}
+	switch t := v.(type) {
+	case int:
+		return t
+	case int32:
+		return int(t)
+	case int64:
+		return int(t)
+	case float64:
+		return int(t)
+	default:
+		return 0
+	}
+}
+
+// processCrmIntelligenceComputeRequested — worker AI Decision thực thi RefreshMetrics / Recalculate (không gọi trực tiếp từ ingest/bulk).
+func processCrmIntelligenceComputeRequested(ctx context.Context, evt *aidecisionmodels.DecisionEvent) error {
+	op, _ := evt.Payload["operation"].(string)
+	if op == "" {
+		return nil
+	}
+	svc, err := crmvc.NewCrmCustomerService()
+	if err != nil {
+		return err
+	}
+	ownerOrgID := evt.OwnerOrganizationID
+	if ownerOrgID.IsZero() {
+		if hex, ok := evt.Payload["ownerOrgIdHex"].(string); ok && hex != "" {
+			oid, err := primitive.ObjectIDFromHex(hex)
+			if err == nil {
+				ownerOrgID = oid
+			}
+		}
+	}
+	log := logger.GetAppLogger()
+	switch op {
+	case crmqueue.CrmComputeOpRefresh:
+		uid, _ := evt.Payload["unifiedId"].(string)
+		if uid == "" || ownerOrgID.IsZero() {
+			return nil
+		}
+		return svc.RefreshMetrics(ctx, uid, ownerOrgID)
+	case crmqueue.CrmComputeOpRecalculateOne:
+		uid, _ := evt.Payload["unifiedId"].(string)
+		if uid == "" || ownerOrgID.IsZero() {
+			return nil
+		}
+		_, err := svc.RecalculateCustomerFromAllSources(ctx, uid, ownerOrgID)
+		return err
+	case crmqueue.CrmComputeOpRecalculateAll:
+		if ownerOrgID.IsZero() {
+			return nil
+		}
+		limit := payloadIntFromDecisionPayload(evt.Payload, "limit")
+		poolSize := payloadIntFromDecisionPayload(evt.Payload, "poolSize")
+		if poolSize <= 0 {
+			poolSize = 12
+		}
+		_, err := svc.RecalculateAllCustomers(ctx, ownerOrgID, limit, poolSize)
+		return err
+	case crmqueue.CrmComputeOpRecalculateBatch:
+		if ownerOrgID.IsZero() {
+			return nil
+		}
+		offset := payloadIntFromDecisionPayload(evt.Payload, "offset")
+		limit := payloadIntFromDecisionPayload(evt.Payload, "limit")
+		poolSize := payloadIntFromDecisionPayload(evt.Payload, "poolSize")
+		if poolSize <= 0 {
+			poolSize = 12
+		}
+		_, err := svc.RecalculateCustomersBatch(ctx, ownerOrgID, offset, limit, poolSize, nil, nil)
+		return err
+	case crmqueue.CrmComputeOpRecalculateMismatch:
+		if ownerOrgID.IsZero() {
+			return nil
+		}
+		limit := payloadIntFromDecisionPayload(evt.Payload, "limit")
+		poolSize := payloadIntFromDecisionPayload(evt.Payload, "poolSize")
+		if poolSize <= 0 {
+			poolSize = 10
+		}
+		_, err := svc.RecalculateMismatchCustomers(ctx, ownerOrgID, limit, poolSize)
+		return err
+	case crmqueue.CrmComputeOpRecalculateOrderCountMismatch:
+		if ownerOrgID.IsZero() {
+			return nil
+		}
+		limit := payloadIntFromDecisionPayload(evt.Payload, "limit")
+		poolSize := payloadIntFromDecisionPayload(evt.Payload, "poolSize")
+		if poolSize <= 0 {
+			poolSize = 12
+		}
+		_, err := svc.RecalculateOrderCountMismatchCustomers(ctx, ownerOrgID, limit, poolSize)
+		return err
+	case crmqueue.CrmComputeOpRecalculateAllOrgs:
+		poolSize := payloadIntFromDecisionPayload(evt.Payload, "poolSize")
+		if poolSize <= 0 {
+			poolSize = 12
+		}
+		_, _, _, err := svc.RecalculateAllCustomersForAllOrgs(ctx, poolSize)
+		return err
+	case crmqueue.CrmComputeOpClassificationRefresh:
+		mode, _ := evt.Payload["mode"].(string)
+		bs := payloadIntFromDecisionPayload(evt.Payload, "batchSize")
+		if bs <= 0 {
+			bs = 200
+		}
+		n := svc.RunClassificationRefreshBatch(ctx, log, mode, bs)
+		log.WithFields(map[string]interface{}{"processed": n, "mode": mode}).Debug("[CRM] Classification refresh (AI Decision consumer)")
+		return nil
 	default:
 		return nil
 	}
@@ -149,7 +542,7 @@ func processSyncedSourceWithDebounce(ctx context.Context, svc *aidecisionsvc.AID
 	}
 
 	if debounceEnabled {
-		shouldFlush, err := svc.UpsertDebounceState(ctx, evt.OrgID, ownerOrgID, convID, custID, channel, normalizedRecordUid, evt.Payload)
+		shouldFlush, err := svc.UpsertDebounceState(ctx, evt.OrgID, ownerOrgID, convID, custID, channel, normalizedRecordUid, evt.TraceID, evt.CorrelationID, evt.Payload)
 		if err != nil {
 			return err
 		}
@@ -164,138 +557,112 @@ func processSyncedSourceWithDebounce(ctx context.Context, svc *aidecisionsvc.AID
 	return processSourceEvent(ctx, svc, evt, true)
 }
 
-// processOrderEvent xử lý order.inserted, order.updated — từ bản ghi chuẩn hóa đơn hàng (UpsertNormalizedPosOrder).
-// Phase 1: no-op, event đã vào queue cho Order Intelligence / context aggregation sau.
+// processOrderEvent xử lý order.inserted, order.updated — hydrate + CRM + Decision case order_risk + enqueue Order Intelligence (domain worker).
 func processOrderEvent(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) error {
-	svc.HydrateDatachangedPayload(ctx, evt)
+	return OrchestrateOrderSourceEvent(ctx, svc, evt)
+}
+
+// processCommerceOrderCompleted — Learning Engine / pipeline sau đơn hoàn thành (Vision 07); hiện chỉ ghi log — Phase 2 gắn learning_cases.
+func processCommerceOrderCompleted(ctx context.Context, evt *aidecisionmodels.DecisionEvent) error {
+	log := logger.GetAppLogger()
+	orderUid := ""
+	if u, ok := evt.Payload["orderUid"].(string); ok {
+		orderUid = u
+	}
+	log.WithFields(map[string]interface{}{
+		"eventId": evt.EventID, "orderUid": orderUid, "eventType": evt.EventType,
+	}).Debug("📋 [ORDER_INTEL] commerce.order_completed — chờ Phase 2 Learning Engine")
+	_ = ctx
 	return nil
 }
 
 // skipHydrate: true khi processSyncedSourceWithDebounce đã gọi HydrateDatachangedPayload (tránh FindOne trùng).
 func processSourceEvent(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent, skipHydrate bool) error {
-	if !skipHydrate {
-		svc.HydrateDatachangedPayload(ctx, evt)
-	}
-	convID := ""
-	if conv, ok := evt.Payload["conversationId"].(string); ok {
-		convID = conv
-	}
-	custID := ""
-	if cust, ok := evt.Payload["customerId"].(string); ok {
-		custID = cust
-	}
-	channel := "messenger"
-	if ch, ok := evt.Payload["channel"].(string); ok {
-		channel = ch
-	}
-	normalizedRecordUid := evt.EntityID
-	if u, ok := evt.Payload["normalizedRecordUid"].(string); ok {
-		normalizedRecordUid = u
-	}
+	return OrchestrateConversationSourceEvent(ctx, svc, evt, skipHydrate)
+}
 
+// processConversationIntelligenceRequested — bridge fb_message_items (gom) → cix.analysis_requested (Conversation Intelligence / CIX).
+func processConversationIntelligenceRequested(ctx context.Context, _ *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) error {
+	if evt == nil || evt.Payload == nil {
+		return nil
+	}
 	ownerOrgID := evt.OwnerOrganizationID
 	if ownerOrgID.IsZero() {
 		return nil
 	}
-
-	// ResolveOrCreate case
-	_, _, err := svc.ResolveOrCreate(ctx, &aidecisionsvc.ResolveOrCreateInput{
-		EventID:    evt.EventID,
-		EventType:  evt.EventType,
-		OrgID:      evt.OrgID,
-		OwnerOrgID: ownerOrgID,
-		EntityRefs: aidecisionmodels.DecisionCaseEntityRefs{
-			ConversationID: convID,
-			CustomerID:     custID,
-		},
-		CaseType:      aidecisionmodels.CaseTypeConversationResponse,
-		RequiredCtx:   []string{"cix", "customer"},
-		Priority:      evt.Priority,
-		Urgency:       "realtime",
-		TraceID:       evt.TraceID,
-		CorrelationID: evt.CorrelationID,
-	})
-	if err != nil {
-		return err
+	convID := ""
+	if c, ok := evt.Payload["conversationId"].(string); ok {
+		convID = strings.TrimSpace(c)
 	}
-
-	// Emit customer.context_requested — CRM worker sẽ load customer và emit customer.context_ready
-	if custID != "" {
-		_, _ = svc.EmitEvent(ctx, &aidecisionsvc.EmitEventInput{
-			EventType:     "customer.context_requested",
-			EventSource:   "aidecision",
-			EntityType:    "customer",
-			EntityID:      custID,
-			OrgID:         evt.OrgID,
-			OwnerOrgID:    ownerOrgID,
-			Priority:      "high",
-			Lane:          aidecisionmodels.EventLaneFast,
-			TraceID:       evt.TraceID,
-			CorrelationID: evt.CorrelationID,
-			Payload: map[string]interface{}{
-				"conversationId": convID,
-				"customerId":     custID,
-				"channel":        channel,
-			},
-		})
-	}
-
-	// Bridge CIX: luôn emit cix.analysis_requested — CixRequestWorker consume → EnqueueAnalysis → cix_pending_analysis.
 	if convID == "" {
 		return nil
 	}
-	_, _ = svc.EmitEvent(ctx, &aidecisionsvc.EmitEventInput{
-		EventType:     "cix.analysis_requested",
-		EventSource:   "aidecision",
-		EntityType:    "conversation",
-		EntityID:      convID,
-		OrgID:         evt.OrgID,
-		OwnerOrgID:    ownerOrgID,
-		Priority:      "high",
-		Lane:          aidecisionmodels.EventLaneFast,
-		TraceID:       evt.TraceID,
-		CorrelationID: evt.CorrelationID,
-		Payload: map[string]interface{}{
-			"conversationId":      convID,
-			"customerId":          custID,
-			"channel":             channel,
-			"normalizedRecordUid": normalizedRecordUid,
-		},
-	})
-	return nil
+	custID := ""
+	if c, ok := evt.Payload["customerId"].(string); ok {
+		custID = strings.TrimSpace(c)
+	}
+	channel := "messenger"
+	if ch, ok := evt.Payload["channel"].(string); ok && strings.TrimSpace(ch) != "" {
+		channel = strings.TrimSpace(ch)
+	}
+	normalizedUID := ""
+	if u, ok := evt.Payload["normalizedRecordUid"].(string); ok {
+		normalizedUID = strings.TrimSpace(u)
+	}
+	_, err := aidecisionsvc.EmitCixAnalysisRequested(ctx, convID, custID, channel, ownerOrgID, normalizedUID, evt.TraceID, evt.CorrelationID)
+	return err
 }
 
-// processCixAnalysisCompleted xử lý cix.analysis_completed — fetch result, gọi ReceiveCixPayload.
-func processCixAnalysisCompleted(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) error {
-	analysisID := ""
-	if id, ok := evt.Payload["analysisResultId"].(string); ok {
-		analysisID = id
-	}
+// receiveCixAnalysisIntoAID đọc bản ghi cix_analysis_results theo _id hex → ReceiveCixPayload (merge case + TryExecuteIfReady).
+func receiveCixAnalysisIntoAID(ctx context.Context, svc *aidecisionsvc.AIDecisionService, analysisID string, ownerOrgID primitive.ObjectID) error {
+	analysisID = strings.TrimSpace(analysisID)
 	if analysisID == "" {
 		return nil
 	}
-
 	analysisSvc, err := cixsvc.NewCixAnalysisService()
 	if err != nil {
 		return err
 	}
-
 	oid, err := primitive.ObjectIDFromHex(analysisID)
 	if err != nil {
 		return err
 	}
-
 	result, err := analysisSvc.FindOneById(ctx, oid)
 	if err != nil {
 		return err
 	}
-
-	ownerOrgID := evt.OwnerOrganizationID
 	if ownerOrgID.IsZero() {
 		ownerOrgID = result.OwnerOrganizationID
 	}
-
 	return svc.ReceiveCixPayload(ctx, &result, ownerOrgID)
+}
+
+// processCixAnalysisResultDataChanged — hook datachanged: cix_analysis_result.inserted | .updated.
+func processCixAnalysisResultDataChanged(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) error {
+	if evt == nil {
+		return nil
+	}
+	analysisID := strings.TrimSpace(evt.EntityID)
+	if evt.Payload != nil {
+		if id, ok := evt.Payload["analysisResultId"].(string); ok && strings.TrimSpace(id) != "" {
+			analysisID = strings.TrimSpace(id)
+		} else if u, ok := evt.Payload["normalizedRecordUid"].(string); ok && strings.TrimSpace(u) != "" {
+			analysisID = strings.TrimSpace(u)
+		}
+	}
+	return receiveCixAnalysisIntoAID(ctx, svc, analysisID, evt.OwnerOrganizationID)
+}
+
+// processCixAnalysisCompleted xử lý cix.analysis_completed (legacy) — cùng receiveCixAnalysisIntoAID.
+func processCixAnalysisCompleted(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) error {
+	if evt == nil || evt.Payload == nil {
+		return nil
+	}
+	analysisID, _ := evt.Payload["analysisResultId"].(string)
+	if strings.TrimSpace(analysisID) == "" {
+		return nil
+	}
+	return receiveCixAnalysisIntoAID(ctx, svc, analysisID, evt.OwnerOrganizationID)
 }
 
 // processCustomerContextReady cập nhật case với customer context, gọi TryExecuteIfReady.
@@ -342,21 +709,88 @@ func processOrderFlagsEmitted(ctx context.Context, svc *aidecisionsvc.AIDecision
 	}
 	flags, _ := evt.Payload["flags"].([]interface{})
 	orderPayload := map[string]interface{}{"flags": flags}
+	if v, ok := evt.Payload["layer1"]; ok {
+		orderPayload["layer1"] = v
+	}
+	if v, ok := evt.Payload["layer2"]; ok {
+		orderPayload["layer2"] = v
+	}
+	if v, ok := evt.Payload["layer3"]; ok {
+		orderPayload["layer3"] = v
+	}
 	if err := svc.UpdateCaseWithOrderContext(ctx, orderID, custID, convID, evt.OrgID, ownerOrgID, orderPayload); err != nil {
 		return err
 	}
-	// Chỉ TryExecuteIfReady khi có conv/cust (case conversation_response)
+	emittedOrderRisk := false
+	if orderID != "" {
+		var err error
+		emittedOrderRisk, err = svc.TryExecuteOrderRiskIfReady(ctx, orderID, evt.OrgID, ownerOrgID)
+		if err != nil {
+			return err
+		}
+	}
+	// Tránh hai execute_requested (order_risk + conversation) trừ khi ORDER_FLAGS_ALLOW_DUAL_EXECUTE=true
 	if convID != "" && custID != "" {
+		if emittedOrderRisk && !aidecisionsvc.OrderFlagsAllowDualExecute() {
+			return nil
+		}
 		return svc.TryExecuteIfReady(ctx, convID, custID, evt.OrgID, ownerOrgID)
 	}
 	return nil
 }
 
-// processAdsContextReady cập nhật case với ads context, gọi TryExecuteIfReady nếu case cần ads context.
+// processAdsContextRequested — đọc snapshot Intelligence từ meta_campaigns, emit ads.context_ready (không stub).
+func processAdsContextRequested(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) error {
+	adAccountID := ""
+	if a, ok := evt.Payload["adAccountId"].(string); ok {
+		adAccountID = a
+	}
+	campaignID := ""
+	if c, ok := evt.Payload["campaignId"].(string); ok {
+		campaignID = c
+	}
+	ownerOrgID := evt.OwnerOrganizationID
+	if ownerOrgID.IsZero() || campaignID == "" {
+		return nil
+	}
+	adsPayload := aidecisionsvc.BuildAdsIntelligenceContextPayloadFromDB(ctx, campaignID, adAccountID, ownerOrgID)
+	return emitAdsContextReadyAfterRequested(ctx, svc, evt, adAccountID, campaignID, ownerOrgID, adsPayload)
+}
+
+func emitAdsContextReadyAfterRequested(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent, adAccountID, campaignID string, ownerOrgID primitive.ObjectID, adsPayload map[string]interface{}) error {
+	entityID := adAccountID
+	if entityID == "" {
+		entityID = campaignID
+	}
+	_, err := svc.EmitEvent(ctx, &aidecisionsvc.EmitEventInput{
+		EventType:     "ads.context_ready",
+		EventSource:   "aidecision",
+		EntityType:    "ad_account",
+		EntityID:      entityID,
+		OrgID:         evt.OrgID,
+		OwnerOrgID:    ownerOrgID,
+		Priority:      "normal",
+		Lane:          aidecisionmodels.EventLaneBatch,
+		TraceID:       evt.TraceID,
+		CorrelationID: evt.CorrelationID,
+		Payload: map[string]interface{}{
+			"adAccountId": adAccountID,
+			"campaignId":  campaignID,
+			"ads":         adsPayload,
+		},
+	})
+	return err
+}
+
+// processAdsContextReady cập nhật case ads_optimization; adsautop.RunAdsProposeFromContextReady → ads.propose_requested khi RULE khớp.
 func processAdsContextReady(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) error {
 	adAccountID := ""
 	if a, ok := evt.Payload["adAccountId"].(string); ok {
 		adAccountID = a
+	}
+	campaignID := ""
+	if c, ok := evt.Payload["campaignId"].(string); ok {
+		campaignID = c
 	}
 	ownerOrgID := evt.OwnerOrganizationID
 	if ownerOrgID.IsZero() {
@@ -366,15 +800,19 @@ func processAdsContextReady(ctx context.Context, svc *aidecisionsvc.AIDecisionSe
 	if adsPayload == nil {
 		adsPayload = evt.Payload
 	}
-	if err := svc.UpdateCaseWithAdsContext(ctx, adAccountID, evt.OrgID, ownerOrgID, adsPayload); err != nil {
+	if err := svc.UpdateCaseWithAdsContext(ctx, campaignID, evt.OrgID, ownerOrgID, adsPayload); err != nil {
 		return err
 	}
-	// Case ads_optimization không dùng TryExecuteIfReady (logic khác). Bỏ qua.
-	return nil
+	baseURL := os.Getenv("BASE_URL")
+	if baseURL == "" {
+		baseURL = "https://localhost"
+	}
+	return adsautop.RunAdsProposeFromContextReady(ctx, svc, ownerOrgID, evt.OrgID, campaignID, adAccountID, baseURL, evt)
 }
 
-// processAdsProposeRequested xử lý ads.propose_requested — gọi ProposeForAds (Vision 08 event-driven).
-func processAdsProposeRequested(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) error {
+// processExecutorProposeRequested xử lý executor.propose_requested (và ads.propose_requested cũ) — gọi ProposeForAds / approval.Propose (Vision 08: chỉ qua consumer).
+func processExecutorProposeRequested(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) error {
+	_ = svc
 	ownerOrgID := evt.OwnerOrganizationID
 	if ownerOrgID.IsZero() {
 		if hex, ok := evt.Payload["ownerOrgIdHex"].(string); ok && hex != "" {
@@ -387,13 +825,24 @@ func processAdsProposeRequested(ctx context.Context, svc *aidecisionsvc.AIDecisi
 	if ownerOrgID.IsZero() {
 		return nil
 	}
+	domain, _ := evt.Payload["domain"].(string)
+	if domain == "" && evt.EventType == aidecisionsvc.EventTypeAdsProposeRequested {
+		domain = "ads"
+	}
+	if domain == "" {
+		return nil
+	}
 	baseURL, _ := evt.Payload["baseURL"].(string)
 	proposeInput, err := aidecisionsvc.ParseProposeInputFromEventPayload(evt.Payload)
 	if err != nil {
 		return err
 	}
-	// Vision 08: chỉ AI Decision gán decisionId, contextSnapshot — Ads gửi raw payload
-	aidecisionsvc.EnrichProposeInputWithTrace("ads", &proposeInput)
-	_, err = aidecisionsvc.ProposeForAds(ctx, proposeInput, ownerOrgID, baseURL)
+	aidecisionsvc.MergeQueueEnvelopeIntoProposePayload(evt, &proposeInput)
+	aidecisionsvc.EnrichProposeInputWithTrace(domain, &proposeInput)
+	if domain == "ads" {
+		_, err = aidecisionsvc.ProposeForAds(ctx, proposeInput, ownerOrgID, baseURL)
+		return err
+	}
+	_, err = approval.Propose(ctx, domain, proposeInput, ownerOrgID, baseURL)
 	return err
 }

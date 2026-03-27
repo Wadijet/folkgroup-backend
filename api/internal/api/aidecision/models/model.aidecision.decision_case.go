@@ -33,6 +33,10 @@ type DecisionCase struct {
 	Priority string `json:"priority" bson:"priority"` // high | normal | low
 	Urgency  string `json:"urgency" bson:"urgency"`   // realtime | near_realtime | deferred
 
+	// TraceID / CorrelationID — neo case ↔ luồng queue / rule logs; merge chỉ ghi khi field đang trống.
+	TraceID       string `json:"traceId,omitempty" bson:"traceId,omitempty" index:"single:1,sparse"`
+	CorrelationID string `json:"correlationId,omitempty" bson:"correlationId,omitempty" index:"single:1,sparse"`
+
 	Status string `json:"status" bson:"status" index:"single:1"`
 
 	RequiredContexts []string               `json:"requiredContexts" bson:"requiredContexts"`
@@ -45,13 +49,16 @@ type DecisionCase struct {
 	ExecutionIDs []string `json:"executionIds" bson:"executionIds"`
 
 	OutcomeSummary interface{} `json:"outcomeSummary,omitempty" bson:"outcomeSummary,omitempty"`
-	ClosureType   string      `json:"closureType,omitempty" bson:"closureType,omitempty"` // closed_complete | closed_timeout | closed_manual
+	ClosureType   string      `json:"closureType,omitempty" bson:"closureType,omitempty"` // closed_* — xem hằng Closure*
 
 	OpenedAt int64  `json:"openedAt" bson:"openedAt" index:"single:1"`
 	ClosedAt *int64 `json:"closedAt,omitempty" bson:"closedAt,omitempty"`
 
 	CreatedAt int64 `json:"createdAt" bson:"createdAt"`
 	UpdatedAt int64 `json:"updatedAt" bson:"updatedAt"`
+
+	// LastAdsContextRequestedAt — ms, lần cuối emit ads.context_requested; dùng cooldown tránh nhân job queue khi meta_campaign.updated dồn dập.
+	LastAdsContextRequestedAt int64 `json:"lastAdsContextRequestedAt,omitempty" bson:"lastAdsContextRequestedAt,omitempty"`
 }
 
 // Case status constants
@@ -72,6 +79,12 @@ const (
 	ClosureComplete = "closed_complete"
 	ClosureTimeout  = "closed_timeout"
 	ClosureManual   = "closed_manual"
+	// ClosureIncomplete — thiếu dữ liệu đầu vào hoặc không đủ điều kiện đánh giá (không phải lỗi rule).
+	ClosureIncomplete = "closed_incomplete"
+	// ClosureNoAction — đã đánh giá rule nhưng không có hành động đề xuất (nghiệp vụ: không đạt ngưỡng / không có cờ).
+	ClosureNoAction = "closed_no_action"
+	// ClosureFailed — lỗi kỹ thuật hoặc pipeline không hoàn tất (persist/emit/đọc DB).
+	ClosureFailed = "closed_failed"
 )
 
 // Case type constants

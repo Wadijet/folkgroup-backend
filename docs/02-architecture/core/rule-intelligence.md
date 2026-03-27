@@ -1156,7 +1156,7 @@ Khi thêm rule mới, developer phải tuân thủ quy trình sau.
 ## Changelog
 
 - 2025-03-17: **Link đề xuất → rule log** — trace_id truyền từ Rule Engine qua action → ProposeInput → action_pending_approval.payload.traceId; thêm API GET `/rule-intelligence/logs/:traceId` để xem log; section 10.3 API Xem Log
-- 2025-03-16: **Bỏ toàn bộ fallback** — Layer1/2/3: dùng empty map khi Rule Engine nil; computeSuggestedActions: không fallback adsrules; window_shopping: bỏ DetectWindowShoppingPattern fallback; formatFlagsDetail: đơn giản hóa (LogicText từ FlagDefinitions); diagnose_auto_propose: dùng ComputeActionsFromMetrics (Rule Engine).
+- 2025-03-16: **Bỏ toàn bộ fallback** — Layer1/2/3: dùng empty map khi Rule Engine nil; computeSuggestedActions: không fallback adsrules; window_shopping: bỏ DetectWindowShoppingPattern fallback; formatFlagsDetail: đơn giản hóa (LogicText từ FlagDefinitions); diagnose_auto_propose: dùng metasvc.ComputeFinalActionsFromCurrentMetrics (Rule Engine).
 - 2025-03-16: **Migration Derivation Rule Layer1, Layer2** — RULE_ADS_LAYER1 (raw→layer1), RULE_ADS_LAYER2 (raw+layer1→layer2). Logic script trong seed_rule_ads_system.go.
 - 2025-03-16: **Migration Derivation Rule Layer3** — RULE_ADS_LAYER3 (layer1+layer2 → chs, healthState, portfolioCell).
 - 2025-03-16: **Migration Interpretation Rules** — 30 flags chuyển sang Rule Engine (RULE_ADS_FLAG_*). Scheduler dùng metasvc.ComputeAlertFlags thay EvaluateFlags. Export ComputeAlertFlags cho scheduler.

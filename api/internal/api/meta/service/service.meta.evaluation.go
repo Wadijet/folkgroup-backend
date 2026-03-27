@@ -1,6 +1,7 @@
 // Package metasvc - RecalculateForEntity: tính lại currentMetrics cho 1 entity (ad, adset, campaign, ad_account).
 // Bottom-up: Ad tính từ insight+order+conversation; AdSet/Campaign/Account aggregate từ con.
 // Hook: phát sinh từ nguồn nào thì chỉ update raw nguồn đó, rồi tính lại layer1→layer2→layer3.
+// Cập nhật currentMetrics qua BaseServiceMongoImpl.UpdateOne để EmitDataChanged (datachanged → AI Decision).
 package metasvc
 
 import (
@@ -13,6 +14,7 @@ import (
 
 	adsadaptive "meta_commerce/internal/api/ads/adaptive"
 	adsconfig "meta_commerce/internal/api/ads/config"
+	"meta_commerce/internal/api/events"
 	"meta_commerce/internal/api/meta/models"
 	"meta_commerce/internal/common/activity"
 	"meta_commerce/internal/global"
@@ -392,10 +394,6 @@ func getAdCurrentMetrics(ctx context.Context, adId, adAccountId string, ownerOrg
 }
 
 func updateAdCurrentMetrics(ctx context.Context, adId, adAccountId string, ownerOrgID primitive.ObjectID, current map[string]interface{}, trigger string) error {
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.MetaAds)
-	if !ok {
-		return fmt.Errorf("không tìm thấy collection meta_ads")
-	}
 	filter := bson.M{
 		"adId":                 adId,
 		"adAccountId":          adAccountIdFilterForMeta(adAccountId),
@@ -406,7 +404,12 @@ func updateAdCurrentMetrics(ctx context.Context, adId, adAccountId string, owner
 		trigger = "manual"
 	}
 	recordActivityIfChanged(ctx, adId, adAccountId, ownerOrgID, old, current, trigger)
-	_, err := coll.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"currentMetrics": current, "updatedAt": time.Now().UnixMilli()}})
+	svc, err := NewMetaAdService()
+	if err != nil {
+		return err
+	}
+	upd := bson.M{"$set": bson.M{"currentMetrics": current}}
+	_, err = svc.UpdateOne(ctx, filter, upd, mongoopts.Update().SetUpsert(false))
 	return err
 }
 
@@ -973,7 +976,7 @@ func rollupFromChildren(ctx context.Context, objectType, objectId, adAccountId s
 		layer3 = make(map[string]interface{})
 	}
 	// Theo FolkForm v4.1: toàn bộ 13 rules CHỈ apply cho campaign. AdSet/AdAccount không có FLAG_RULE.
-	// Server rollup CHỈ tạo flags — không tạo actions. Worker (ads module) sẽ tính actions và ghi activity riêng.
+	// Rollup Intelligence chỉ ghi alertFlags (không ACTION_RULE). ACTION_RULE do AI Decision (adsautop / metasvc) xử lý sau.
 	var alertFlags []string
 	if objectType == "campaign" {
 		cfg, _ := adsconfig.GetConfigForCampaign(ctx, adAccountId, ownerOrgID)
@@ -1246,23 +1249,16 @@ func aggregateRawFromChildren(ctx context.Context, objectType, objectId, adAccou
 // updateParentCurrentMetrics cập nhật currentMetrics cho AdSet, Campaign, hoặc AdAccount.
 // Ghi ads_activity_history khi có thay đổi. extraActivityMetadata (vd: actionDebugReport) được merge vào Metadata.
 func updateParentCurrentMetrics(ctx context.Context, objectType, objectId, adAccountId string, ownerOrgID primitive.ObjectID, current map[string]interface{}, extraActivityMetadata map[string]interface{}) error {
-	var coll *mongo.Collection
 	var idField string
 	switch objectType {
 	case "adset":
-		coll, _ = global.RegistryCollections.Get(global.MongoDB_ColNames.MetaAdSets)
 		idField = "adSetId"
 	case "campaign":
-		coll, _ = global.RegistryCollections.Get(global.MongoDB_ColNames.MetaCampaigns)
 		idField = "campaignId"
 	case "ad_account":
-		coll, _ = global.RegistryCollections.Get(global.MongoDB_ColNames.MetaAdAccounts)
 		idField = "adAccountId"
 	default:
 		return fmt.Errorf("objectType không hỗ trợ roll-up: %s", objectType)
-	}
-	if coll == nil {
-		return fmt.Errorf("không tìm thấy collection cho %s", objectType)
 	}
 	filter := bson.M{"ownerOrganizationId": ownerOrgID}
 	if objectType == "ad_account" {
@@ -1271,10 +1267,48 @@ func updateParentCurrentMetrics(ctx context.Context, objectType, objectId, adAcc
 		filter[idField] = objectId
 		filter["adAccountId"] = adAccountIdFilterForMeta(adAccountId)
 	}
+	var coll *mongo.Collection
+	switch objectType {
+	case "adset":
+		coll, _ = global.RegistryCollections.Get(global.MongoDB_ColNames.MetaAdSets)
+	case "campaign":
+		coll, _ = global.RegistryCollections.Get(global.MongoDB_ColNames.MetaCampaigns)
+	case "ad_account":
+		coll, _ = global.RegistryCollections.Get(global.MongoDB_ColNames.MetaAdAccounts)
+	}
+	if coll == nil {
+		return fmt.Errorf("không tìm thấy collection cho %s", objectType)
+	}
 	old := getParentCurrentMetrics(ctx, coll, filter)
 	RecordActivityForEntity(ctx, objectType, objectId, adAccountId, ownerOrgID, old, current, "rollup", extraActivityMetadata)
-	_, err := coll.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"currentMetrics": current, "updatedAt": time.Now().UnixMilli()}})
-	return err
+	upd := bson.M{"$set": bson.M{"currentMetrics": current}}
+	opts := mongoopts.Update().SetUpsert(false)
+	ctxUp := events.WithAdsIntelligenceRollupContext(ctx)
+	switch objectType {
+	case "adset":
+		svc, err := NewMetaAdSetService()
+		if err != nil {
+			return err
+		}
+		_, err = svc.UpdateOne(ctxUp, filter, upd, opts)
+		return err
+	case "campaign":
+		svc, err := NewMetaCampaignService()
+		if err != nil {
+			return err
+		}
+		_, err = svc.UpdateOne(ctxUp, filter, upd, opts)
+		return err
+	case "ad_account":
+		svc, err := NewMetaAdAccountService()
+		if err != nil {
+			return err
+		}
+		_, err = svc.UpdateOne(ctxUp, filter, upd, opts)
+		return err
+	default:
+		return fmt.Errorf("objectType không hỗ trợ roll-up: %s", objectType)
+	}
 }
 
 // getParentCurrentMetrics lấy currentMetrics từ document theo filter.

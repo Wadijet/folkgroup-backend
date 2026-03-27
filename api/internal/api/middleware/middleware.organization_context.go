@@ -33,8 +33,8 @@ func OrganizationContextMiddleware() fiber.Handler {
 			return c.Next()
 		}
 
-		// Lấy active role ID từ header
-		activeRoleIDStr := c.Get("X-Active-Role-ID")
+		// Header X-Active-Role-ID hoặc query role_id (WebSocket trình duyệt)
+		activeRoleIDStr := activeRoleIDFromRequest(c)
 		var activeRoleID primitive.ObjectID
 
 		if activeRoleIDStr != "" {

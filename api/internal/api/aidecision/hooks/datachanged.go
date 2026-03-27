@@ -1,7 +1,10 @@
 // Package hooks — Đăng ký events.OnDataChanged → emit queue AI Decision theo collection nguồn.
 //
-// Payload tối giản (contract): sourceCollection, normalizedRecordUid, dataChangeOperation.
-// AI Decision hydrate đầy đủ ref từ Mongo — xem aidecisionsvc.HydrateDatachangedPayload.
+// Hai lớp tách biệt:
+//   - Lớp 1 — DoSyncUpsert: so updated_at nguồn (posData/panCakeData) để giảm lượt ghi Mongo khi đồng bộ từ ngoài.
+//   - Lớp 2 — hook này: cổng enqueue (org, registry, bỏ delete) — không lặp lại so sánh updated_at nguồn (đã thuộc lớp 1).
+//
+// Payload queue tối giản: sourceCollection, normalizedRecordUid, dataChangeOperation — consumer hydrate từ Mongo.
 // event_type = <prefix>.inserted|.updated theo source_sync_registry.
 package hooks
 
@@ -10,6 +13,7 @@ import (
 
 	aidecisionsvc "meta_commerce/internal/api/aidecision/service"
 	"meta_commerce/internal/api/events"
+	"meta_commerce/internal/utility"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -92,16 +96,25 @@ func emitUnifiedSourceDataChanged(ctx context.Context, decSvc *aidecisionsvc.AID
 		"normalizedRecordUid": idHex,
 		"dataChangeOperation": e.Operation,
 	}
+	// Roll-up Ads Intelligence chỉ cập nhật currentMetrics — không kích hoạt lại pipeline campaign (xem ProcessMetaCampaignDataChanged).
+	if events.IsAdsIntelligenceRollupContext(ctx) {
+		payload["adsIntelligenceRollupOnly"] = true
+	}
 	eventType := eventTypeForSourceSync(entityPrefix, e.Operation)
+	// Một traceId / correlationId gốc cho toàn chuỗi queue → orchestrate → CIX / execute (không ghi đè khi caller đã set).
+	traceID := utility.GenerateUID(utility.UIDPrefixTrace)
+	correlationID := utility.GenerateUID(utility.UIDPrefixCorrelation)
 	_, _ = decSvc.EmitEvent(ctx, &aidecisionsvc.EmitEventInput{
-		EventType:   eventType,
-		EventSource: "datachanged",
-		EntityType:  entityPrefix,
-		EntityID:    idHex,
-		OrgID:       ownerOrgID.Hex(),
-		OwnerOrgID:  ownerOrgID,
-		Priority:    "high",
-		Lane:        "fast",
-		Payload:     payload,
+		EventType:     eventType,
+		EventSource:   "datachanged",
+		EntityType:    entityPrefix,
+		EntityID:      idHex,
+		OrgID:         ownerOrgID.Hex(),
+		OwnerOrgID:    ownerOrgID,
+		Priority:      "high",
+		Lane:          "fast",
+		TraceID:       traceID,
+		CorrelationID: correlationID,
+		Payload:       payload,
 	})
 }

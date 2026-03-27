@@ -129,10 +129,8 @@ type MongoDB_Auth_CollectionName struct {
 	AdsThrottleState string // ads_throttle_state: ad set đang bị cap, dùng cho logic remove
 
 	// Module Decision Brain — Learning memory cho AI Commerce
-	DecisionCases           string // decision_cases: (deprecated) dùng cho migration, chuyển sang learning_cases
-	LearningCases           string // learning_cases: ký ức học tập — 1 case per action, sau outcome (PLATFORM_L1)
-	RuleSuggestions         string // rule_suggestions: gợi ý điều chỉnh rule từ learning (Phase 3)
-	LearningInsightsAggregate string // learning_insights_aggregate: thống kê anonymized cross-merchant (Phase 3)
+	LearningCases   string // learning_cases: ký ức học tập — 1 case per action, sau outcome (PLATFORM_L1)
+	RuleSuggestions string // rule_suggestions: gợi ý điều chỉnh rule từ learning (Phase 3)
 
 	// Module Rule Intelligence — Script-Only Logic Architecture
 	RuleDefinitions      string // rule_definitions: Rule Definition
@@ -145,10 +143,17 @@ type MongoDB_Auth_CollectionName struct {
 	CixAnalysisResults  string // cix_analysis_results: kết quả phân tích hội thoại Raw→L1→L2→L3→Flag→Action
 	CixPendingAnalysis string // cix_pending_analysis: hàng đợi phân tích — CIO event → enqueue → worker
 
+	// Module Order Intelligence — Vision 07 (Raw→L1→L2→L3→Flags per order)
+	OrderIntelligenceSnapshots string // order_intelligence_snapshots: snapshot theo đơn (upsert theo orderUid + org)
+	OrderIntelligencePending   string // order_intelligence_pending: hàng đợi domain — worker tính Raw→L3→Flags, không tính trong consumer AI Decision
+
 	// Module AI Decision — Event & Decision Case (PLATFORM_L1_EVENT_DECISION_SUPPLEMENT)
 	DecisionEventsQueue   string // decision_events_queue: hàng đợi event chờ AI Decision xử lý
 	DecisionCasesRuntime string // decision_cases_runtime: case đang vận hành — từ trigger đến outcome
 	DecisionDebounceState string // decision_debounce_state: gom message trước message.batch_ready
+	DecisionRoutingRules  string // decision_routing_rules: override noop/pass_through theo org + eventType
+	DecisionContextPolicyOverrides string // decision_context_policy_overrides: matrix required/optional theo org + caseType
+	AIDecisionOrgLiveEvents        string // decision_org_live_events: mỗi Publish một dòng; trường phẳng ui/refs/phase (docSchemaVersion>=2) + payload JSON DecisionLiveEvent
 }
 
 // Các biến toàn cục

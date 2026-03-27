@@ -9,6 +9,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 
 	basehdl "meta_commerce/internal/api/base/handler"
+	aidecisionsvc "meta_commerce/internal/api/aidecision/service"
 	metadto "meta_commerce/internal/api/meta/dto"
 	metamodels "meta_commerce/internal/api/meta/models"
 	metasvc "meta_commerce/internal/api/meta/service"
@@ -87,7 +88,7 @@ type RecalculateAllInput struct {
 	Limit int `json:"limit"` // Giới hạn số Ad xử lý (0 = tất cả)
 }
 
-// HandleRecalculate tính lại currentMetrics cho Ad (raw + layer1 + layer2 + layer3).
+// HandleRecalculate đưa yêu cầu tính lại currentMetrics (full) vào queue AI Decision — HTTP 202, worker gọi RecalculateForEntity.
 // POST /meta/ad/recalculate với body { "adId": "xxx" }. OwnerOrgID lấy từ context.
 func (h *MetaAdHandler) HandleRecalculate(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {
@@ -111,7 +112,6 @@ func (h *MetaAdHandler) HandleRecalculate(c fiber.Ctx) error {
 			})
 			return nil
 		}
-		// Lấy adAccountId từ meta_ads
 		ad, err := h.MetaAdService.FindOne(c.Context(), bson.M{"adId": input.AdId, "ownerOrganizationId": *orgID}, nil)
 		if err != nil {
 			c.Status(common.StatusNotFound).JSON(fiber.Map{
@@ -119,28 +119,24 @@ func (h *MetaAdHandler) HandleRecalculate(c fiber.Ctx) error {
 			})
 			return nil
 		}
-		if err := metasvc.RecalculateForEntity(c.Context(), "ad", ad.AdId, ad.AdAccountId, *orgID); err != nil {
+		eventID, err := aidecisionsvc.EmitAdsIntelligenceRecomputeRequested(c.Context(), "ad", ad.AdId, ad.AdAccountId, *orgID, "meta", metasvc.RecomputeModeFull)
+		if err != nil {
 			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
-				"code": common.ErrCodeInternalServer.Code, "message": "Tính lại metrics thất bại: " + err.Error(), "status": "error",
+				"code": common.ErrCodeInternalServer.Code, "message": "Không thể đưa yêu cầu vào queue AI Decision: " + err.Error(), "status": "error",
 			})
 			return nil
 		}
-		// Lấy lại ad sau khi đã cập nhật currentMetrics
-		updated, _ := h.MetaAdService.FindOne(c.Context(), bson.M{"adId": input.AdId, "ownerOrganizationId": *orgID}, nil)
-		data := map[string]interface{}{}
-		if updated.CurrentMetrics != nil {
-			data = updated.CurrentMetrics
-		}
-		c.Status(common.StatusOK).JSON(fiber.Map{
-			"code": common.StatusOK, "message": "Đã tính lại currentMetrics thành công", "data": data, "status": "success",
+		c.Status(common.StatusAccepted).JSON(fiber.Map{
+			"code": common.StatusAccepted, "message": "Đã đưa yêu cầu tính lại metrics vào queue AI Decision (worker xử lý bất đồng bộ)",
+			"data": fiber.Map{"eventId": eventID, "status": "queued"},
+			"status": "success",
 		})
 		return nil
 	})
 }
 
-// HandleRecalculateAllMetaAds xử lý POST /meta/ad/recalculate-all — tính toán lại currentMetrics cho toàn bộ Meta ads của org.
+// HandleRecalculateAllMetaAds đưa batch RecalculateAllMetaAds vào queue AI Decision (lane batch) — HTTP 202.
 // Body: { "limit": 0 } — limit = 0 xử lý tất cả, limit > 0 giới hạn số Ad.
-// Luồng: Ad (raw + layers) → AdSet roll-up → Campaign roll-up → AdAccount roll-up.
 func (h *MetaAdHandler) HandleRecalculateAllMetaAds(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {
 		var input RecalculateAllInput
@@ -152,23 +148,20 @@ func (h *MetaAdHandler) HandleRecalculateAllMetaAds(c fiber.Ctx) error {
 			})
 			return nil
 		}
-		result, err := metasvc.RecalculateAllMetaAds(c.Context(), *orgID, input.Limit)
+		eventID, err := aidecisionsvc.EmitAdsIntelligenceRecalculateAllRequested(c.Context(), *orgID, input.Limit)
 		if err != nil {
 			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
-				"code": common.ErrCodeInternalServer.Code, "message": "Tính toán lại toàn bộ Meta ads thất bại: " + err.Error(), "status": "error",
+				"code": common.ErrCodeInternalServer.Code, "message": "Không thể đưa batch vào queue AI Decision: " + err.Error(), "status": "error",
 			})
 			return nil
 		}
-		c.Status(common.StatusOK).JSON(fiber.Map{
-			"code": common.StatusOK,
-			"message": "Đã tính toán lại toàn bộ Meta ads thành công",
+		c.Status(common.StatusAccepted).JSON(fiber.Map{
+			"code":    common.StatusAccepted,
+			"message": "Đã đưa batch tính lại Meta ads vào queue AI Decision (worker xử lý bất đồng bộ)",
 			"data": fiber.Map{
-				"totalAdsProcessed":     result.TotalAdsProcessed,
-				"totalAdsFailed":        result.TotalAdsFailed,
-				"failedAdIds":           result.FailedAdIds,
-				"totalAdSetsRolledUp":   result.TotalAdSetsRolledUp,
-				"totalCampaignsRolledUp": result.TotalCampaignsRolledUp,
-				"totalAccountsRolledUp": result.TotalAccountsRolledUp,
+				"eventId": eventID,
+				"limit":   input.Limit,
+				"status":  "queued",
 			},
 			"status": "success",
 		})

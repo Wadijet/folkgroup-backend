@@ -41,12 +41,12 @@ func loadEnv() {
 	}
 }
 
-// Expected counts từ seed_rule_ads_system.go + seed_rule_crm_system.go (FolkForm v4.1)
+// Expected counts từ seed_rule_ads_system + seed_rule_crm + seed_rule_cix + seed_rule_aidecision_dispatch (tối thiểu)
 const (
-	expectedRuleDefinitions   = 53 // Ads (Kill, Decrease, Increase, Flag, Layer) + CRM
-	expectedLogicScripts     = 36 // Ads logic scripts + CRM
-	expectedParamSets        = 53
-	expectedOutputContracts  = 6  // OUT_ACTION_CANDIDATE, OUT_FLAG_CANDIDATE, OUT_LAYER1/2/3, OUT_CRM_CLASSIFICATION
+	expectedRuleDefinitions  = 55 // + RULE_CONTEXT_POLICY_RESOLVE (aidecision)
+	expectedLogicScripts     = 38 // + LOGIC_CONTEXT_POLICY_MATRIX
+	expectedParamSets        = 55 // + PARAM_CONTEXT_POLICY_MATRIX
+	expectedOutputContracts  = 8  // + OUT_CONTEXT_POLICY
 )
 
 func main() {

@@ -5,6 +5,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 
 	aidecisiondto "meta_commerce/internal/api/aidecision/dto"
+	"meta_commerce/internal/api/aidecision/eventopstier"
 	aidecisionsvc "meta_commerce/internal/api/aidecision/service"
 	basehdl "meta_commerce/internal/api/base/handler"
 	"meta_commerce/internal/common"
@@ -58,10 +59,14 @@ func HandleIngestEvent(c fiber.Ctx) error {
 			return nil
 		}
 
+		tier, tierLbl := eventopstier.ClassifyEventType(req.EventType)
 		c.Status(common.StatusOK).JSON(fiber.Map{
 			"code": common.StatusOK, "message": "Đã nhận event", "data": aidecisiondto.IngestEventResponse{
-				EventID: resp.EventID,
-				Status:  resp.Status,
+				EventID:        resp.EventID,
+				Status:         resp.Status,
+				W3CTraceID:     resp.W3CTraceID,
+				OpsTier:        tier,
+				OpsTierLabelVi: tierLbl,
 			}, "status": "success",
 		})
 		return nil

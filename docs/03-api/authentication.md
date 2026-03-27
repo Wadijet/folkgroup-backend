@@ -158,6 +158,19 @@ Tất cả các endpoint (trừ login) yêu cầu header:
 Authorization: Bearer <jwt-token>
 ```
 
+Ngữ cảnh role (tổ chức) thường kèm:
+
+```
+X-Active-Role-ID: <role ObjectId hex>
+```
+
+**Fallback cho WebSocket trên trình duyệt (Chrome, Flutter Web):** handshake không gửi được header tùy ý. Middleware chấp nhận query (cùng ý nghĩa):
+
+- `access_token=<token>` hoặc `token=<token>` — tương đương `Authorization: Bearer <token>`
+- `role_id=<ObjectId hex>` — tương đương `X-Active-Role-ID`
+
+Ưu tiên vẫn là header khi client gửi được (native). Token trên URL dễ lộ trong log — hạn chế production hoặc chỉ dùng WSS.
+
 ## 📝 Response Format
 
 Tất cả responses đều theo format:

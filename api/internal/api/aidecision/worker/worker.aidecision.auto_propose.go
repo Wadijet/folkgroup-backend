@@ -1,24 +1,24 @@
-// Package worker — AdsAutoProposeWorker: poll campaigns có alertFlags, đánh giá rules, tự tạo đề xuất khi rule trigger.
-// Theo FolkForm n8n Workflow Architecture v4.1 (WF-03 Kill Engine, WF-04 Budget Engine).
+// Package worker — Auto propose Ads: do AI Decision điều phối (cùng package consumer).
+// Momentum / CPM spike / RunAutoPropose — chuẩn queue & propose qua aidecision/adsautop.
 package worker
 
 import (
 	"context"
 	"time"
 
+	"meta_commerce/internal/api/aidecision/adsautop"
 	adssvc "meta_commerce/internal/api/ads/service"
 	"meta_commerce/internal/logger"
 	coreworker "meta_commerce/internal/worker"
 )
 
-// AdsAutoProposeWorker worker poll campaigns, đánh giá alertFlags, gọi Propose khi rule trigger.
+// AdsAutoProposeWorker chạy chu kỳ: momentum, CPM spike, adsautop.RunAutoPropose (emit ads.propose_requested).
 type AdsAutoProposeWorker struct {
 	interval time.Duration
 	baseURL  string
 }
 
-// NewAdsAutoProposeWorker tạo mới AdsAutoProposeWorker.
-// interval: chu kỳ chạy (vd: 30 phút); baseURL: base URL cho approve/reject links trong notification.
+// NewAdsAutoProposeWorker tạo worker (đăng ký WorkerAdsAutoPropose — module aidecision trong metadata).
 func NewAdsAutoProposeWorker(interval time.Duration, baseURL string) *AdsAutoProposeWorker {
 	if interval < 5*time.Minute {
 		interval = 30 * time.Minute
@@ -29,7 +29,7 @@ func NewAdsAutoProposeWorker(interval time.Duration, baseURL string) *AdsAutoPro
 	return &AdsAutoProposeWorker{interval: interval, baseURL: baseURL}
 }
 
-// Start chạy worker trong vòng lặp. Chạy ngay lần đầu khi khởi động, sau đó mỗi interval.
+// Start vòng lặp định kỳ (giữ hành vi tương thích worker ads_auto_propose cũ).
 func (w *AdsAutoProposeWorker) Start(ctx context.Context) {
 	log := logger.GetAppLogger()
 	ticker := time.NewTicker(w.interval)
@@ -38,15 +38,13 @@ func (w *AdsAutoProposeWorker) Start(ctx context.Context) {
 	log.WithFields(map[string]interface{}{
 		"interval": w.interval.String(),
 		"baseURL":  w.baseURL,
-	}).Info("📢 [ADS_AUTO_PROPOSE] Starting Ads Auto Propose Worker...")
+	}).Info("📢 [AI_DECISION_ADS_AUTO] Starting Ads Auto Propose (AI Decision pipeline)...")
 
-	// Chạy ngay lần đầu khi khởi động server
 	w.process(ctx)
-
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("📢 [ADS_AUTO_PROPOSE] Ads Auto Propose Worker stopped")
+			log.Info("📢 [AI_DECISION_ADS_AUTO] Ads Auto Propose stopped")
 			return
 		case <-ticker.C:
 			if !coreworker.IsWorkerActive(coreworker.WorkerAdsAutoPropose) {
@@ -65,33 +63,26 @@ func (w *AdsAutoProposeWorker) Start(ctx context.Context) {
 	}
 }
 
-// process chạy một chu kỳ đánh giá và tạo đề xuất.
 func (w *AdsAutoProposeWorker) process(ctx context.Context) {
 	log := logger.GetAppLogger()
 	defer func() {
 		if r := recover(); r != nil {
-			log.WithFields(map[string]interface{}{"panic": r}).Error("📢 [ADS_AUTO_PROPOSE] Panic khi xử lý, sẽ tiếp tục lần sau")
+			log.WithFields(map[string]interface{}{"panic": r}).Error("📢 [AI_DECISION_ADS_AUTO] Panic khi xử lý")
 		}
 	}()
 
-	// Momentum Tracker — cập nhật momentumState cho từng account (ACCELERATING/SLOWING/DROPPING)
 	if n, err := adssvc.RunMomentumTracking(ctx); err == nil && n > 0 {
 		log.WithFields(map[string]interface{}{"updated": n}).Info("📊 [MOMENTUM] Đã cập nhật momentum state")
 	}
-
-	// Anti Self-Competition (FolkForm v4.1 Section 06): CPM Spike Detection mỗi 30p
 	if err := adssvc.RunCPMSpikeDetectionAndActions(ctx, w.baseURL); err != nil {
 		log.WithError(err).Warn("⚔️ [SELF_COMP] Lỗi CPM Spike Detection")
 	}
-
-	proposed, err := adssvc.RunAutoPropose(ctx, w.baseURL)
+	proposed, err := adsautop.RunAutoPropose(ctx, w.baseURL)
 	if err != nil {
-		log.WithError(err).Error("📢 [ADS_AUTO_PROPOSE] Lỗi chạy auto propose")
+		log.WithError(err).Error("📢 [AI_DECISION_ADS_AUTO] Lỗi RunAutoPropose")
 		return
 	}
 	if proposed > 0 {
-		log.WithFields(map[string]interface{}{
-			"proposed": proposed,
-		}).Info("📢 [ADS_AUTO_PROPOSE] Đã tạo đề xuất tự động")
+		log.WithField("proposed", proposed).Info("📢 [AI_DECISION_ADS_AUTO] Đã enqueue đề xuất tự động")
 	}
 }

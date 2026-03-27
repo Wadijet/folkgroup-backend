@@ -1,292 +1,183 @@
 # Learning Engine (Decision Brain) — Learning Memory Layer
 
-**Mục đích:** Module Decision Brain là **bộ nhớ học tập** cho hệ thống AI Commerce, lưu trữ các quyết định đã hoàn thành để AI học và tối ưu hóa.
+**Mục đích:** **Bộ nhớ học tập** (learning memory) cho AI Commerce: lưu **một dòng** telemetry đã đóng vòng đời — **context + quyết định + hành động + outcome** — để phân tích, gợi ý rule và audit **trace E2E**.
 
-> **Canonical reference:** [11 - learning-engine.md](../../../../docs/architecture/vision/11 - learning-engine.md) — Schema đầy đủ, Outcome model, Error attribution, Learning loop
+> **Vision (shared):** [08 - ai-decision.md](../../../../docs-shared/architecture/vision/08%20-%20ai-decision.md) §18 — luồng Executor → `learning_case`. Tài liệu vision chi tiết Learning (nếu có trong bộ shared): `11 - learning-engine.md`.
 
 ---
 
-## 1. Tổng Quan Kiến Trúc
+## 1. Tổng quan kiến trúc
 
 ```
 Activity Log     → Lưu sự kiện (event stream)
 State Objects    → Lưu trạng thái hiện tại
 Entities         → Xử lý vòng đời nghiệp vụ
-Decision Brain   → Lưu bộ nhớ quyết định đã hoàn thành (learning memory)
+Learning Engine  → Lưu case đã đóng (learning_cases) — không tham gia runtime quyết định
 ```
 
-**Decision Brain KHÔNG phải:**
-- Activity Log
-- Event stream
-- Lifecycle log
-- State database
+**Learning Engine KHÔNG phải:** Activity Log, event stream, lifecycle log thuần, hay nơi ra quyết định (việc đó thuộc **AI Decision**).
 
-**Decision Brain LÀ:**
-- Learning memory layer
-- Lưu trữ case study quyết định đã đóng
-- Chuẩn hóa tri thức quyết định
-- Hỗ trợ analytics và retrieval cho AI
+**Learning Engine LÀ:** lớp **learning memory** — case study sau outcome; hỗ trợ retrieval, evaluation batch, rule suggestion.
 
 ---
 
-## 2. Decision Case Là Gì
+## 2. Learning case là gì
 
-Một **decision case** là quyết định đã hoàn thành chứa tri thức học được.
+Một **learning case** là bản ghi **sau khi** nguồn (thường là **Action / Executor**) đã có **outcome** (thành công / từ chối / thất bại).
 
-Cấu trúc: **Context → Choice → Goal → Outcome → Lesson**
+Cấu trúc tư duy: **Context → Choice → Goal → Outcome → (Lesson / evaluation / rule candidate sau này)**
 
-| Thành phần | Mô tả |
-|------------|-------|
-| Context | Tình huống tại thời điểm quyết định |
-| Choice | Lựa chọn đã thực hiện |
-| Goal | Mục tiêu mong muốn |
-| Outcome | Kết quả thực tế |
-| Lesson | Bài học rút ra |
-
----
-
-## 3. Khi Nào Tạo Decision Case
-
-**Chỉ tạo khi entity nguồn đã đóng vòng đời.**
-
-Trạng thái đóng ví dụ:
-- `completed`
-- `reviewed`
-- `finalized`
-- `closed`
-- `executed` (ActionPending)
-- `rejected` (ActionPending)
-- `failed` (ActionPending)
-
-**Không tạo** nếu outcome chưa hoàn tất.
+| Thành phần | Trên `learning_cases` (tương ứng gần đúng) |
+|------------|---------------------------------------------|
+| Context | `contextSnapshot`, `inputSignals` |
+| Choice / Goal | `decision`, `actionType`, `goalCode`, `domain` |
+| Outcome | `outcome`, `result`, `actionExecuted` |
+| Lesson / học sâu | `evaluation`, `learning` (job sau); `rule_suggestions` (Phase 3) |
 
 ---
 
-## 4. Entity Nguồn Có Thể Tạo Case
+## 3. Khi nào tạo learning case
 
-| Loại | Ví dụ | Collection/Source |
-|------|-------|-------------------|
-| **Action** | pause campaign, reduce budget, send re-engagement | action_pending_approval (status=executed/rejected/failed) |
-| **CIO Choice** | chọn kênh (Zalo vs SMS), lên lịch touchpoint | (tương lai) |
-| **Content Choice** | chọn creative, chọn content line | (tương lai) |
-| **Governance** | human approval, rejection, manual override | action_pending_approval |
+**Chỉ khi `action_pending_approval` đóng vòng đời** với một trong các status:
 
----
+- `executed`
+- `rejected`
+- `failed`
 
-## 5. Mongo Collection
+**Không insert** trong các trường hợp: pending / approved chưa chạy xong / cancelled — trừ khi sau này mở rộng có chủ đích.
 
-**Tên:** `decision_cases`
+**Bỏ qua ghi (điều kiện decision case):** Nếu action gắn `decisionCaseId` và case runtime đóng với `closureType` thuộc nhóm **không đủ ngữ cảnh học đầy đủ** (timeout / manual / proposed), service **không** insert learning case — trừ khi set env **`AI_DECISION_LEARNING_SKIP_INCOMPLETE_CLOSURE=0`**. Chi tiết: `api/internal/api/learning/service/service.learning.vision_policy.go`.
 
 ---
 
-## 6. Mongo Schema
+## 4. Nguồn tạo case (hiện tại)
 
-```javascript
-{
-  _id: ObjectId,
-  caseId: String,           // Unique business ID (vd: dc_xxx)
-  caseType: String,          // action | cio_choice | content_choice | approval
-  caseCategory: String,       // ads | crm | content | notification | ...
-  domain: String,            // domain nghiệp vụ
-
-  targetType: String,        // campaign | customer | ad_set | ...
-  targetId: String,          // ID của đối tượng bị tác động
-
-  sourceRef: {
-    refType: String,         // action_pending | cio_choice | ...
-    refId: String            // ID document nguồn
-  },
-
-  goalCode: String,         // Mã mục tiêu (vd: reduce_waste, re_engage)
-  result: String,            // success | partial | failed | rejected
-
-  summary: {
-    primaryMetric: String,
-    baselineValue: Number,
-    finalValue: Number,
-    delta: Number
-  },
-
-  text: {
-    systemSummary: {
-      title: String,
-      shortSummary: String
-    },
-    aiText: {
-      situation: String,
-      decisionRationale: String,
-      intendedGoal: String,
-      expectedOutcome: String,
-      actualOutcome: String,
-      lesson: String,
-      nextSuggestion: String
-    },
-    humanNotes: {
-      decisionNote: String,
-      reviewNote: String,
-      overrideReason: String,
-      freeNote: String
-    }
-  },
-
-  tags: [String],
-
-  ownerOrganizationId: ObjectId,
-  sourceClosedAt: Number,    // Unix ms khi entity nguồn đóng
-  createdAt: Number,
-  updatedAt: Number
-}
-```
+| Loại | Collection / nguồn | Ghi chú |
+|------|-------------------|---------|
+| **Action (Executor)** | `action_pending_approval` | Luồng chính — `OnActionClosed` → `CreateLearningCaseFromAction` |
+| **CIO Choice** | (stub) `BuildLearningCaseFromCIOChoice` | Chưa nối production |
+| **Content Choice** | — | Tương lai |
 
 ---
 
-## 7. Indexes
+## 5. MongoDB — collection
 
-| Index | Keys | Mục đích |
-|-------|------|----------|
-| caseId | caseId | Lookup theo caseId |
-| org_domain_created | ownerOrganizationId + domain + createdAt | List theo org, domain |
-| org_target | ownerOrganizationId + targetType + targetId | Query theo target |
-| caseType | caseType | Filter theo loại |
-| caseCategory | caseCategory | Filter theo category |
-| goalCode | goalCode | Filter theo mục tiêu |
-| result | result | Filter theo kết quả |
-| sourceClosedAt | sourceClosedAt | Sort theo thời điểm đóng |
-| sourceRef | sourceRef.refType + sourceRef.refId | Lookup theo nguồn |
+**Tên collection:** `learning_cases`  
+(`decision_cases` cũ đã thay thế / migrate theo PLATFORM_L1 — code dùng `global.MongoDB_ColNames.LearningCases`.)
 
 ---
 
-## 8. Services
+## 6. Schema tài liệu (trường chính)
 
-- `CreateDecisionCase`
-- `FindDecisionCaseById`
-- `ListDecisionCases`
-- `QueryDecisionCasesByTarget`
-- `QueryDecisionCasesByCaseType`
-- `QueryDecisionCasesByCategory`
-- `QueryDecisionCasesByGoal`
-- `QueryDecisionCasesByResult`
+Bản ghi được build từ **`BuildLearningCaseFromAction`** (`service.learning.builder.go`). Dưới đây là các nhóm trường quan trọng (BSON camelCase như model Go):
 
----
+| Nhóm | Trường | Ý nghĩa |
+|------|--------|---------|
+| Định danh | `_id`, `caseId`, `ownerOrganizationId` | Org-scoped |
+| Trace E2E | `decisionCaseId` | Neo `decision_cases_runtime` |
+| | `decisionId` | ID quyết định trên payload action |
+| | `executionTraceId` | `action_pending.traceId` — rule logs / live trace |
+| | `correlationId`, `aidecisionProposeEventId`, `parentEventId`, `rootEventId` | Từ envelope queue / payload (xem §8) |
+| Nguồn | `sourceRefType` (= `action_pending`), `sourceRefId` (= hex `_id` action) | Từ action → learning |
+| Phân loại | `domain`, `actionType`, `caseType`, `caseCategory`, `goalCode`, `entityType`, `entityId`, `targetType`, `targetId` | Filter / analytics |
+| Nội dung học | `contextSnapshot`, `inputSignals`, `rulesApplied`, `paramVersion`, `decision`, `actionExecuted`, `outcome` | Snapshot + kết quả |
+| Policy | `decisionCaseClosureType` | Đồng bộ từ runtime khi có (hỗ trợ policy skip) |
+| Timeline action | `actionLifecycle` | `proposedAt`, `approvedAt`, `rejectedAt`, `executedAt`, `finalStatus`, `idempotencyKey`, `actionCreatedAt`, `actionUpdatedAt` (Unix **ms**) |
+| Sau xử lý | `evaluation`, `learning` | Worker evaluation / learning job |
+| Thời gian | `createdAt`, `closedAt` | Learning case (ms) |
 
-## 9. Builders
-
-| Builder | Nguồn | Trách nhiệm |
-|---------|-------|-------------|
-| BuildDecisionCaseFromAction | ActionPending (executed/rejected/failed) | Đọc entity, extract, tạo case |
-| BuildDecisionCaseFromCIOChoice | (tương lai) | Tương tự |
-| BuildDecisionCaseFromContentChoice | (tương lai) | Tương tự |
-| BuildDecisionCaseFromApproval | ActionPending (approved/rejected) | Tương tự |
-
----
-
-## 10. Khác Biệt Với Activity Log
-
-| | Activity Log | Decision Brain |
-|---|--------------|----------------|
-| Mục đích | Ghi sự kiện, timeline | Lưu case study học tập |
-| Thời điểm | Mỗi event xảy ra | Chỉ khi lifecycle đóng |
-| Nội dung | Event + snapshot | Context + Choice + Goal + Outcome + Lesson |
-| AI dùng | Timeline, audit | Learning, retrieval, clustering |
+**Lưu ý:** `actionExecuted` thường chứa cả `payload` gốc của action (kèm các khóa trace đã merge từ queue).
 
 ---
 
-## 11. Ví Dụ Decision Case
+## 7. Trace E2E: queue → action → learning
 
-### Action (pause campaign)
+Để tra được **từ đầu đến cuối** khi propose đi qua **`executor.propose_requested`**:
+
+1. Bản ghi **`decision_events_queue`** có `eventId`, `traceId`, `correlationId`, …
+2. Trước khi gọi `approval.Propose`, consumer chạy **`MergeQueueEnvelopeIntoProposePayload`** — đưa vào **payload** của đề xuất (chỉ nếu payload **chưa** có khóa đó): `traceId`, `correlationId`, `aidecisionProposeEventId` (= `eventId` của event queue vừa xử lý), `parentEventId`, `rootEventId`.
+3. `action_pending` lưu `traceId`, `decisionCaseId`, `decisionId` ở **top-level** và payload đầy đủ.
+4. Khi action đóng → **`learning_cases`** copy các trường trace + `actionLifecycle`.
+
+**Tra cứu nhanh:** `GET /api/v1/learning/cases?aidecisionProposeEventId=evt_...` hoặc `traceId=...` hoặc `decisionCaseId=...` (cùng org).
+
+**Bổ sung 2026-03-26:** Chuỗi **`traceId` / `correlationId`** trên envelope queue từ hook datachanged + consumer + debounce + **`decision_cases_runtime`**; CIX có **`pipelineRuleTraceIds`** (nhiều bước rule) — xem [NGUYEN_TAC §9](../../05-development/NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md), [unified-data-contract §2.5b](../../../docs-shared/architecture/data-contract/unified-data-contract.md#contract-25b-trace-queue).
+
+---
+
+## 8. Code tham chiếu (folkgroup-backend)
+
+| Việc | Vị trí |
+|------|--------|
+| Đăng ký hook đóng action | `api/cmd/server/init.registry.go` — `pkgapproval.OnActionClosed` |
+| Tạo + policy skip | `api/internal/api/learning/service/service.learning.case.go` — `CreateLearningCaseFromAction` |
+| Builder | `api/internal/api/learning/service/service.learning.builder.go` — `BuildLearningCaseFromAction` |
+| Merge trace queue → payload | `api/internal/api/aidecision/service/service.aidecision.propose_trace.go` — `MergeQueueEnvelopeIntoProposePayload` |
+| Gọi merge | `api/internal/api/aidecision/worker/worker.aidecision.consumer.go` — `processExecutorProposeRequested` |
+| Model | `api/internal/api/learning/models/model.learning.case.go` |
+| Rule execution theo trace | `service.learning.rules_applied.go` — `FetchRulesAppliedFromTraceID` |
+| Evaluation batch | `service.learning.evaluation.go` — `RunEvaluationBatch` |
+| Rule suggestion | `service.learning.rule_suggestion.go`, `worker.learning.rule_suggestion.go` |
+
+---
+
+## 9. API (HTTP)
+
+Đăng ký route: `api/internal/api/learning/router/routes.go`. Tóm tắt:
+
+| Method | Path | Mô tả |
+|--------|------|--------|
+| GET | `/learning/cases` | List (filter: `domain`, `caseType`, `goalCode`, `result`, `targetType`, `targetId`, `sourceRefId`, **`decisionCaseId`**, **`traceId`** → `executionTraceId`, **`correlationId`**, **`aidecisionProposeEventId`**, …) |
+| GET | `/learning/cases/:id` | Chi tiết theo `_id` |
+| POST | `/learning/cases` | Tạo thủ công (DTO riêng — không thay thế luồng tự động từ action) |
+| GET/PATCH | `/learning/rule-suggestions` | Phase 3 — gợi ý rule |
+
+Chi tiết endpoint: [docs/api/api-overview.md](../../api/api-overview.md).
+
+---
+
+## 10. Khác biệt với Activity Log
+
+| | Activity Log | Learning Engine |
+|---|--------------|-----------------|
+| Mục đích | Timeline sự kiện | Case học / audit quyết định đã đóng |
+| Thời điểm | Mỗi event | Khi action có outcome |
+| Trace | Tuỳ nguồn | Chuẩn hóa `decisionCaseId` + `executionTraceId` + queue `eventId` |
+
+---
+
+## 11. Ví dụ JSON (rút gọn — action ads)
 
 ```json
 {
-  "caseId": "dc_674a1b2c_1710316800",
+  "caseId": "lc_674a1b2c_1710316800",
   "caseType": "action",
-  "caseCategory": "ads",
   "domain": "ads",
-  "targetType": "campaign",
-  "targetId": "123456789",
-  "sourceRef": { "refType": "action_pending", "refId": "674a1b2c..." },
+  "decisionCaseId": "dc_xxx",
+  "decisionId": "dec_yyy",
+  "executionTraceId": "trace_zzz",
+  "aidecisionProposeEventId": "evt_aaa",
+  "correlationId": "corr_bbb",
+  "sourceRefType": "action_pending",
+  "sourceRefId": "674a1b2c3d4e5f6789012345",
   "goalCode": "pause_campaign",
   "result": "success",
-  "summary": { "primaryMetric": "spend", "baselineValue": 500, "finalValue": 0, "delta": -500 },
-  "text": {
-    "systemSummary": { "title": "pause_campaign - ads", "shortSummary": "CH cao, tạm dừng campaign" },
-    "aiText": {
-      "situation": "CH cao 3 ngày liên tiếp",
-      "decisionRationale": "Giảm lãng phí ngân sách",
-      "actualOutcome": "Đã tạm dừng thành công",
-      "lesson": "Pause sớm giúp tiết kiệm"
-    }
+  "actionLifecycle": {
+    "proposedAt": 1710316800000,
+    "approvedAt": 1710316810000,
+    "executedAt": 1710316820000,
+    "finalStatus": "executed"
+  },
+  "outcome": {
+    "technical": { "status": "success", "delivery": "delivered" },
+    "direct": true
   }
 }
 ```
-
-### CIO Choice (chọn kênh — tương lai)
-
-```json
-{
-  "caseType": "cio_choice",
-  "caseCategory": "crm",
-  "goalCode": "choose_channel",
-  "targetType": "customer",
-  "targetId": "crm_xxx",
-  "result": "success",
-  "text": {
-    "aiText": {
-      "situation": "Khách chưa mua 30 ngày",
-      "decisionRationale": "Zalo có tỷ lệ mở cao hơn SMS",
-      "intendedGoal": "Re-engage",
-      "actualOutcome": "Đã gửi Zalo, mở sau 2h"
-    }
-  }
-}
-```
-
-### Content Choice (chọn creative — tương lai)
-
-```json
-{
-  "caseType": "content_choice",
-  "caseCategory": "content",
-  "goalCode": "select_creative",
-  "targetType": "campaign",
-  "result": "success",
-  "text": {
-    "aiText": {
-      "situation": "3 creative A/B test",
-      "decisionRationale": "Creative B có CTR cao hơn 20%",
-      "actualOutcome": "Chọn B, CTR tăng"
-    }
-  }
-}
-```
-
-### Approval (human rejection)
-
-```json
-{
-  "caseType": "approval",
-  "caseCategory": "ads",
-  "goalCode": "reduce_budget",
-  "result": "rejected",
-  "text": {
-    "humanNotes": { "decisionNote": "Giữ budget để chạy thêm 2 ngày" },
-    "aiText": { "lesson": "Lý do từ chối: chờ đủ thời gian đánh giá" }
-  }
-}
-```
-
----
-
-## 12. Điểm Tích Hợp (Integration)
-
-Để tạo decision case khi ActionPending đóng:
-
-- **Trong `approval.NotifyExecuted`** (sau khi worker execute thành công): gọi `BuildDecisionCaseFromAction(doc)` → `CreateDecisionCase`
-- **Trong `approval.NotifyFailed`** (sau khi hết retry): gọi `BuildDecisionCaseFromAction(doc)` → `CreateDecisionCase`
-- **Trong `approval.Reject`** (khi user reject): gọi `BuildDecisionCaseFromAction(doc)` → `CreateDecisionCase`
 
 ---
 
 ## Changelog
 
-- 2025-03-13: Tạo tài liệu thiết kế ban đầu
-
+- **2026-03-25:** Đồng bộ với triển khai: collection **`learning_cases`**, schema + **trace E2E** (queue → payload → learning), hook **`OnActionClosed`**, policy skip closure, API filter, file code tham chiếu.
+- **2025-03-13:** Tài liệu thiết kế ban đầu (decision_cases / schema cũ — đã lỗi thời).

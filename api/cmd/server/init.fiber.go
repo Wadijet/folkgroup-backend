@@ -182,19 +182,14 @@ func InitFiberApp() *fiber.App {
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: allowOrigins,
 		AllowMethods: []string{"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"},
-		AllowHeaders: []string{
-			"Origin",
-			"Content-Type",
-			"Accept",
-			"Authorization",
-			"X-Request-ID",
-			"X-Requested-With",
-			"X-Active-Role-ID", // Header cho role context (quan trọng)
-		},
-		AllowCredentials: global.MongoDB_ServerConfig.CORS_AllowCredentials,
-		ExposeHeaders:    []string{"Content-Length", "Content-Range", "X-Request-ID"},
-		MaxAge:           24 * 60 * 60, // Thời gian cache preflight requests (24 giờ)
-		// Fiber v3 tự động trả về 204 No Content cho OPTIONS requests
+		// AllowHeaders để rỗng: Fiber echo lại Access-Control-Request-Headers từ preflight.
+		// Danh sách cố định trước đây thiếu header mà Flutter/web thêm (Sentry, client, …) → trình duyệt chặn, XMLHttpRequest báo lỗi mạng (status null).
+		AllowHeaders: []string{},
+		AllowCredentials:        global.MongoDB_ServerConfig.CORS_AllowCredentials,
+		AllowPrivateNetwork:     global.MongoDB_ServerConfig.CORS_AllowPrivateNetwork,
+		ExposeHeaders:           []string{"Content-Length", "Content-Range", "X-Request-ID"},
+		MaxAge:                  24 * 60 * 60, // Thời gian cache preflight requests (24 giờ)
+		// Fiber v3 trả 204 No Content cho OPTIONS preflight CORS
 	}))
 
 	// 4. Security Headers Middleware - Thêm các security headers

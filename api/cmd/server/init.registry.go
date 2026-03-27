@@ -6,10 +6,8 @@ import (
 	"meta_commerce/config"
 	aidecisionsvc "meta_commerce/internal/api/aidecision/service"
 	aidecisionhooks "meta_commerce/internal/api/aidecision/hooks"
-	basesvc "meta_commerce/internal/api/base/service"
 	crmvc "meta_commerce/internal/api/crm/service"
 	learningsvc "meta_commerce/internal/api/learning/service"
-	ruleintelmigration "meta_commerce/internal/api/ruleintel/migration"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/utility/identity"
 	pkgapproval "meta_commerce/pkg/approval"
@@ -37,38 +35,21 @@ func InitRegistry() {
 		logrus.Warnf("Identity resolver chưa đăng ký (CRM service: %v)", err)
 	}
 
-	// Seed Rule Intelligence — toàn bộ rules Ads (OwnerOrganizationID + IsSystem, chuẩn init)
-	initCtx := basesvc.WithSystemDataInsertAllowed(context.Background())
-	if err := ruleintelmigration.SeedRuleAdsSystem(initCtx); err != nil {
-		logrus.Warnf("Rule Intelligence seed Ads (optional): %v", err)
-	} else {
-		logrus.Info("Rule Intelligence seed Ads completed")
-	}
-	if err := ruleintelmigration.SeedRuleCrmSystem(initCtx); err != nil {
-		logrus.Warnf("Rule Intelligence seed CRM (optional): %v", err)
-	} else {
-		logrus.Info("Rule Intelligence seed CRM completed")
-	}
-	if err := ruleintelmigration.SeedRuleCixSystem(initCtx); err != nil {
-		logrus.Warnf("Rule Intelligence seed CIX (optional): %v", err)
-	} else {
-		logrus.Info("Rule Intelligence seed CIX completed")
-	}
+	// Rule Intelligence (seed system Ads/CRM/CIX/AI Decision dispatch) — InitDefaultData Step 1b, sau System Organization.
 
-	// CRUD trên collection nguồn (fb_conversations, fb_messages, pc_pos_orders, …)
-	// → OnDataChanged → decision_events_queue (event-driven duy nhất).
+	// Đồng bộ: L1 DoSyncUpsert giảm ghi DB. CRUD → OnDataChanged (L2 cổng enqueue) → decision_events_queue → consumer (CRM/Report/Ads).
 	decSvc := aidecisionsvc.NewAIDecisionService()
 	aidecisionhooks.RegisterAIDecisionOnDataChanged(decSvc)
-	logrus.Info("AI Decision: OnDataChanged → decision_events_queue (collection nguồn đã đăng ký)")
+	logrus.Info("AI Decision: OnDataChanged (L2 cổng queue) → decision_events_queue → consumer CRM/Report/Ads")
 
-	// Đăng ký OnActionClosed: khi action đóng (executed/rejected/failed) — closureType truyền sang Learning (Phase 4).
-	// 1 action = 1 learning case — không phân biệt domain. Action đã đủ dữ liệu, Executor chỉ thêm outcome.
+	// Đăng ký OnActionClosed: khi action đóng (executed/rejected/failed) — tham số closureType hiện là status cuối (engine), không dùng trực tiếp ở Learning.
+	// Learning đọc decisionCaseId + trace từ ActionPending / payload; bỏ qua ghi khi closure decision case không đủ (vision_policy).
 	pkgapproval.OnActionClosed = func(ctx context.Context, domain string, doc *pkgapproval.ActionPending, closureType string) {
+		_ = closureType
 		if doc == nil {
 			return
 		}
-		// Learning: luôn tạo (hành động trong context có kết quả gì?)
-		learningsvc.CreateLearningCaseFromAction(ctx, doc)
+		_, _ = learningsvc.CreateLearningCaseFromAction(ctx, doc)
 	}
 	logrus.Info("Approval OnActionClosed (Learning per action) registered")
 }
@@ -95,10 +76,12 @@ func InitCollections(client *mongo.Client, cfg *config.Configuration) error {
 		"action_pending_approval", "approval_mode_config", "ads_approval_config", "ads_activity_history", "ads_meta_config", "ads_metric_definitions", "ads_camp_thresholds",
 		"ads_kill_snapshots", "ads_counterfactual_outcomes", "ads_self_competition_state",
 		"ads_campaign_hourly", "ads_camp_peak_profiles", "ads_throttle_state",
-		"decision_cases", "learning_cases", "rule_suggestions", "learning_insights_aggregate",
+		"learning_cases", "rule_suggestions",
 		"rule_definitions", "rule_logic_definitions", "rule_param_sets", "rule_output_definitions", "rule_execution_logs",
 		"cix_analysis_results", "cix_pending_analysis",
-		"decision_events_queue", "decision_cases_runtime", "decision_debounce_state"}
+		"order_intelligence_snapshots", "order_intelligence_pending",
+		"decision_events_queue", "decision_cases_runtime", "decision_debounce_state", "decision_routing_rules", "decision_context_policy_overrides",
+		"decision_org_live_events"}
 
 	for _, name := range colNames {
 		registered, err := global.RegistryCollections.Register(name, db.Collection(name))

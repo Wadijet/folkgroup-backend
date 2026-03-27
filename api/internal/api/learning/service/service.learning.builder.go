@@ -6,12 +6,15 @@ package learningsvc
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	pkgapproval "meta_commerce/pkg/approval"
 
 	"meta_commerce/internal/api/learning/models"
+	"meta_commerce/internal/global"
 
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -88,9 +91,21 @@ func BuildLearningCaseFromAction(ctx context.Context, ap *pkgapproval.ActionPend
 	}
 
 	caseId := fmt.Sprintf("lc_%s_%d", ap.ID.Hex()[:8], closedAt)
+	decisionCaseClosure := lookupDecisionCaseClosureType(ctx, ap.DecisionCaseID, ap.OwnerOrganizationID)
+	corrID := extractPayloadString(ap.Payload, "correlationId", "correlation_id")
+	propEvt := extractPayloadString(ap.Payload, "aidecisionProposeEventId")
+	parentEvt := extractPayloadString(ap.Payload, "parentEventId", "parent_event_id")
+	rootEvt := extractPayloadString(ap.Payload, "rootEventId", "root_event_id")
+	idemKey := extractPayloadString(ap.Payload, "idempotencyKey", "idempotency_key")
 	lc := &models.LearningCase{
 		CaseId:              caseId,
 		DecisionID:          ap.DecisionID,
+		DecisionCaseID:      strings.TrimSpace(ap.DecisionCaseID),
+		CorrelationID:       corrID,
+		AIDecisionProposeEventID: propEvt,
+		ParentEventID:       parentEvt,
+		RootEventID:         rootEvt,
+		ActionLifecycle:     buildActionLifecycle(ap, idemKey),
 		EntityType:          entityType,
 		EntityID:            entityID,
 		ContextSnapshot:     contextSnapshot,
@@ -113,8 +128,26 @@ func BuildLearningCaseFromAction(ctx context.Context, ap *pkgapproval.ActionPend
 		GoalCode:            ap.ActionType,
 		TargetType:          targetType,
 		TargetId:            targetId,
+		DecisionCaseClosureType: decisionCaseClosure,
 	}
 	return lc, nil
+}
+
+// lookupDecisionCaseClosureType đọc closureType từ decision_cases_runtime (nếu case đã đóng).
+func lookupDecisionCaseClosureType(ctx context.Context, decisionCaseID string, ownerOrgID primitive.ObjectID) string {
+	decisionCaseID = strings.TrimSpace(decisionCaseID)
+	if decisionCaseID == "" || ownerOrgID.IsZero() {
+		return ""
+	}
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.DecisionCasesRuntime)
+	if !ok {
+		return ""
+	}
+	var doc struct {
+		ClosureType string `bson:"closureType"`
+	}
+	_ = coll.FindOne(ctx, bson.M{"decisionCaseId": decisionCaseID, "ownerOrganizationId": ownerOrgID}).Decode(&doc)
+	return strings.TrimSpace(doc.ClosureType)
 }
 
 func resolveEntityTypeAndID(ap *pkgapproval.ActionPending) (entityType, entityID string) {
@@ -222,6 +255,44 @@ func toInt64(v interface{}) (int64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+// extractPayloadString lấy chuỗi đầu tiên khác rỗng theo thứ tự khóa (hỗ trợ snake_case / camelCase).
+func extractPayloadString(m map[string]interface{}, keys ...string) string {
+	if m == nil {
+		return ""
+	}
+	for _, k := range keys {
+		v, ok := m[k]
+		if !ok || v == nil {
+			continue
+		}
+		switch s := v.(type) {
+		case string:
+			if t := strings.TrimSpace(s); t != "" {
+				return t
+			}
+		}
+	}
+	return ""
+}
+
+// buildActionLifecycle snapshot timeline action_pending khi đóng (trace E2E: propose → duyệt/từ chối → thực thi).
+func buildActionLifecycle(ap *pkgapproval.ActionPending, idempotencyKey string) models.LearningActionLifecycle {
+	if ap == nil {
+		return models.LearningActionLifecycle{}
+	}
+	lc := models.LearningActionLifecycle{
+		ProposedAt:      ap.ProposedAt,
+		ApprovedAt:      ap.ApprovedAt,
+		RejectedAt:      ap.RejectedAt,
+		ExecutedAt:      ap.ExecutedAt,
+		FinalStatus:     ap.Status,
+		IdempotencyKey:  strings.TrimSpace(idempotencyKey),
+		ActionCreatedAt: ap.CreatedAt,
+		ActionUpdatedAt: ap.UpdatedAt,
+	}
+	return lc
 }
 
 // BuildLearningCaseFromCIOChoice — CIO sẽ sửa và nối luồng sau. Giữ stub để không break.

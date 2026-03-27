@@ -8,7 +8,7 @@ Chào mừng đến với tài liệu hệ thống FolkForm Backend. Tài liệu
 
 | Index | File | Mục đích |
 |-------|------|----------|
-| **AI Commerce OS** | [docs-shared/architecture/vision/ai-commerce-os-platform-l1.md](../docs-shared/architecture/vision/ai-commerce-os-platform-l1.md) | Vision Platform L1 — toàn bộ hệ (đọc đầu) |
+| **AI Commerce OS** | [docs-shared/architecture/vision/00 - ai-commerce-os-platform-l1.md](../docs-shared/architecture/vision/00%20-%20ai-commerce-os-platform-l1.md) | Vision Platform L1 — toàn bộ hệ (đọc đầu) |
 | **Architecture** | [architecture/overview.md](architecture/overview.md) | Layers, flow request |
 | **Module Map** | [module-map/backend-module-map.md](module-map/backend-module-map.md) | Module → code, router |
 | **Domain** | [domain/domain-overview.md](domain/domain-overview.md) | Domain logic |
@@ -22,7 +22,7 @@ Chào mừng đến với tài liệu hệ thống FolkForm Backend. Tài liệu
 Khi mở riêng repo backend, Cursor nên đọc theo thứ tự:
 
 1. **docs/README.md** (file này) — Entry point, biết repo làm gì
-2. **[docs-shared/architecture/vision/ai-commerce-os-platform-l1.md](../docs-shared/architecture/vision/ai-commerce-os-platform-l1.md)** — Vision Platform L1 — toàn bộ hệ AI Commerce OS
+2. **[docs-shared/architecture/vision/00 - ai-commerce-os-platform-l1.md](../docs-shared/architecture/vision/00%20-%20ai-commerce-os-platform-l1.md)** — Vision Platform L1 — toàn bộ hệ AI Commerce OS
 3. **[architecture/overview.md](architecture/overview.md)** — Kiến trúc layers
 4. **[module-map/backend-module-map.md](module-map/backend-module-map.md)** — Map module → code, biết sửa ở đâu
 5. **[domain/domain-overview.md](domain/domain-overview.md)** — Domain logic
@@ -30,7 +30,7 @@ Khi mở riêng repo backend, Cursor nên đọc theo thứ tự:
 7. **docs theo task** — 05-development/, 02-architecture/core/, 01-getting-started/
 8. **docs-shared/** — Khi cần context hệ thống, API contract, module design cross-repo
 
-**Khi task chạm repo khác:** Đọc `docs-shared/architecture/vision/ai-commerce-os-platform-l1.md`, `docs-shared/system-map/system-map.md` và `docs-shared/modules/module-map.md` trước.
+**Khi task chạm repo khác:** Đọc `docs-shared/architecture/vision/00 - ai-commerce-os-platform-l1.md`, `docs-shared/system-map/system-map.md` và `docs-shared/modules/module-map.md` trước.
 
 ---
 
@@ -39,9 +39,9 @@ Khi mở riêng repo backend, Cursor nên đọc theo thứ tự:
 | Loại | Vị trí | Nội dung |
 |------|--------|----------|
 | **Backend local** | `docs/` (đây) | Kiến trúc nội bộ, handler/service pattern, conventions, development guide |
-| **Shared** | `docs-shared/` (junction → workspace docs) | API contract, system map, module design dùng chung, ai-context |
+| **Shared** | `docs-shared/` (**một nguồn** — junction trỏ tới cùng cây thư mục với front/agent trên workspace) | API contract, data contract, vision, system map, module design, ai-context, envelope live (`opsTier`, …) |
 
-**Quy tắc:** Tài liệu chỉ backend → `docs/`. Tài liệu cross-repo (API contract, design) → `docs-shared/`. Xem [doc-ownership](../docs-shared/doc-ownership.md) (khi junction đã thiết lập).
+**Quy tắc:** Tài liệu chỉ backend → `docs/`. Tài liệu **dùng chung nhiều repo** → chỉ sửa tại **`docs-shared`** (không copy nội dung shared vào `docs/`). Xem [doc-ownership](../docs-shared/doc-ownership.md) (khi junction đã thiết lập).
 
 ---
 
@@ -77,6 +77,8 @@ Khi mở riêng repo backend, Cursor nên đọc theo thứ tự:
 - [Quy Trình Refactor Docs](05-development/QUY_TRINH_REFACTOR_DOCS.md) - Quy trình AI refactor tài liệu
 - [Quy Trình Refactor .cursor](05-development/QUY_TRINH_REFACTOR_CURSOR.md) - Refactor .cursor sau khi docs xong
 - [Cấu Trúc Code](05-development/cau-truc-code.md) - Cấu trúc và tổ chức code
+- **[Nguyên tắc CRUD → DataChanged → AI Decision](05-development/NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md)** — Một hook, một cửa side-effect; **đọc trước khi sửa luồng queue / ingest / sync**
+- **[Trung tâm chỉ huy AI Decision — ý tưởng & backend data](05-development/THIET_KE_TRUNG_TAM_CHI_HUY_AI_DECISION.md)** — Màn vận hành (phễu/KPI/feed), `GET org-live/metrics`, hợp đồng JSON, **`opsTier` trên feed live** (v1.8)
 
 ### 6. 🤖 AI Context & API Contract (Shared)
 
@@ -100,7 +102,7 @@ Khi mở riêng repo backend, Cursor nên đọc theo thứ tự:
 
 - **Architecture**: [architecture/overview.md](architecture/overview.md), [02-architecture/core/tong-quan.md](02-architecture/core/tong-quan.md), [02-architecture/core/activity-framework.md](02-architecture/core/activity-framework.md), [02-architecture/core/learning-engine.md](02-architecture/core/learning-engine.md)
 - **AI Commerce OS Vision**: [docs-shared/architecture/ai-commerce-os-overview.md](../docs-shared/architecture/ai-commerce-os-overview.md) — Platform L1 tổng quan
-- **Rà soát triển khai**: [docs-shared/architecture/RA_SOAT_TRIEN_KHAI_VISION.md](../docs-shared/architecture/RA_SOAT_TRIEN_KHAI_VISION.md) — Đối chiếu vision với code
+- **Rà soát triển khai**: [docs-shared/architecture/reviews/RA_SOAT_TRIEN_KHAI_VISION.md](../docs-shared/architecture/reviews/RA_SOAT_TRIEN_KHAI_VISION.md) — Snapshot đối chiếu vision ↔ code (canonical reviews/)
 - **Customer Intelligence**: [docs-shared/architecture/vision/](../docs-shared/architecture/vision/) — Phần 1 (Unified Profile), Phần 2 (AI Application), Phần 3 (CIO)
 - **Module map**: [module-map/backend-module-map.md](module-map/backend-module-map.md)
 - **API**: [api/api-overview.md](api/api-overview.md), [docs-shared/ai-context/folkform/api-context.md](../docs-shared/ai-context/folkform/api-context.md)
@@ -108,13 +110,17 @@ Khi mở riêng repo backend, Cursor nên đọc theo thứ tự:
 
 ## 📝 Ghi Chú
 
+- Pipeline chỉnh **docs + `.cursor`** toàn hệ (workspace → backend → frontend → agent): `prompt-system/prompt_system_scripted/scripts/run-all.md` (workspace root).
 - Tất cả tài liệu được viết bằng **Tiếng Việt**
 - Tài liệu được cập nhật thường xuyên, vui lòng kiểm tra phiên bản mới nhất
 - Nếu có câu hỏi hoặc đề xuất, vui lòng tạo issue hoặc liên hệ team
 
 ## 🔄 Cập Nhật Gần Đây
 
-- ✅ **2026-03-18**: Rà soát tài liệu — CIX, AI Decision Engine đã triển khai đầy đủ; luồng CIO→CIX→Decision→Executor→Delivery đã khép vòng. Cập nhật RASOAT_MODULE_KHUNG_XUONG, PHUONG_AN_CIX/CIO/DECISION_BRAIN, docs-shared/RA_SOAT_TRIEN_KHAI_VISION.
+- ✅ **2026-03-25**: Thêm [THIET_KE_TRUNG_TAM_CHI_HUY_AI_DECISION.md](05-development/THIET_KE_TRUNG_TAM_CHI_HUY_AI_DECISION.md) — thiết kế màn command center AI Decision và API metrics / WS aggregate (đề xuất).
+- ✅ **2026-03-18**: Rà soát tài liệu — CIX, AI Decision Engine đã triển khai đầy đủ; luồng CIO→CIX→Decision→Executor→Delivery đã khép vòng. Cập nhật RASOAT_MODULE_KHUNG_XUONG, PHUONG_AN_CIX/CIO/DECISION_BRAIN, `docs-shared/architecture/reviews/RA_SOAT_TRIEN_KHAI_VISION.md`.
+- ✅ **2026-03-24**: Thêm [NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md](05-development/NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md) — nguyên tắc hook / queue / side-effect một cửa; cập nhật `.cursor/rules`, module-map.
+- ✅ **2026-03-23**: Pipeline `run-all.md` — reindex link RA_SOAT → `architecture/reviews/`; đồng bộ workspace module-map với `aidecision/` + `executor/`.
 - ✅ **2026-03-18**: Phase 0 Nền — trace_id/correlation_id trong CioEvent; Action schema chuẩn (ExecutionActionInput); BANG_QUY_TAC trỏ Foundational docs. Xem [BANG_QUY_TAC_THIET_KE_HE_THONG.md](09-ai-context/BANG_QUY_TAC_THIET_KE_HE_THONG.md)
 - ✅ **2026-03-17**: Identity + Links — Rà soát CRM: lookup customer theo uid/unifiedId, thêm links.customer.uid vào filter orders/conversations, response DTO có uid. Xem [HUONG_DAN_IDENTITY_LINKS.md](05-development/HUONG_DAN_IDENTITY_LINKS.md) mục 9.1
 - ✅ **2025-03-13**: Decision Brain — module learning memory (decision_cases), thiết kế + implement + docs

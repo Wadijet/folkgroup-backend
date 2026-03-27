@@ -56,6 +56,8 @@ func (s *AIDecisionService) HydrateDatachangedPayload(ctx context.Context, evt *
 		}
 	case global.MongoDB_ColNames.PcPosOrders:
 		hydratePcPosOrderFromRaw(p, raw)
+	case global.MongoDB_ColNames.CrmCustomers:
+		mergeStringIfEmpty(p, raw, "unifiedId", "unifiedId")
 	}
 	// Mọi collection: ref phẳng thường gặp (Meta/CRM/FB…) — chỉ điền khi payload chưa có.
 	hydrateGenericRefsFromRaw(p, raw)

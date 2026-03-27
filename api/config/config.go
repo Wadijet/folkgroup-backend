@@ -21,7 +21,9 @@ type Configuration struct {
 	MongoDB_DBName_Staging string `env:"MONGODB_DBNAME_STAGING,required"`           // Tên cơ sở dữ liệu staging
 	MongoDB_DBName_Data    string `env:"MONGODB_DBNAME_DATA,required"`              // Tên cơ sở dữ liệu data
 	CORS_Origins           string `env:"CORS_ORIGINS" envDefault:"*"`               // Các origins được phép (phân cách bởi dấu phẩy, * = tất cả)
-	CORS_AllowCredentials  bool   `env:"CORS_ALLOW_CREDENTIALS" envDefault:"false"` // Cho phép gửi credentials
+	CORS_AllowCredentials  bool   `env:"CORS_ALLOW_CREDENTIALS" envDefault:"false"` // Cho phép gửi credentials (không dùng chung * origin)
+	// CORS_AllowPrivateNetwork: trả Access-Control-Allow-Private-Network cho preflight (Chrome) khi web public/https gọi API localhost/LAN — Flutter web hay gặp XMLHttpRequest error nếu thiếu.
+	CORS_AllowPrivateNetwork bool `env:"CORS_ALLOW_PRIVATE_NETWORK" envDefault:"true"`
 	RateLimit_Max          int    `env:"RATE_LIMIT_MAX" envDefault:"100"`           // Số request tối đa trong window (0 = disable rate limit)
 	RateLimit_Window       int    `env:"RATE_LIMIT_WINDOW" envDefault:"60"`         // Thời gian window (giây)
 	RateLimit_Enabled      bool   `env:"RATE_LIMIT_ENABLED" envDefault:"true"`      // Bật/tắt rate limiting
@@ -42,6 +44,18 @@ type Configuration struct {
 	TelegramChatIDs     string `env:"TELEGRAM_CHAT_IDS"`     // Chat IDs phân cách bằng dấu phẩy. Format: "chatID" hoặc "chatID:topicID" (topic trong forum). VD: "-123456789" hoặc "-123456789:12345"
 	// MongoDB Import: Giới hạn body size cho upload file (MB). Mặc định 500MB cho file lớn.
 	MongoDBImportMaxBodyMB int `env:"MONGODB_IMPORT_MAX_BODY_MB" envDefault:"500"`
+	// Redis: không còn dùng trong code (touch báo cáo + metrics command center dùng RAM process). Giữ biến env để tương thích file .env cũ.
+	RedisAddr     string `env:"REDIS_ADDR"`
+	RedisPassword string `env:"REDIS_PASSWORD"`
+	RedisDB       int    `env:"REDIS_DB" envDefault:"0"`
+	// TTL key touch trên Redis (giây). Flush worker nên chạy nhỏ hơn TTL để kịp xử lý.
+	ReportRedisTouchTTLSec int `env:"REPORT_REDIS_TOUCH_TTL_SEC" envDefault:"7200"`
+	// Chu kỳ flush Redis → MarkDirty (giây). Mặc định cùng một nhịp cho ads/order/customer; override từng nhánh nếu cần.
+	ReportRedisTouchFlushIntervalAdsSec     int `env:"REPORT_REDIS_TOUCH_FLUSH_INTERVAL_ADS_SEC" envDefault:"30"`
+	ReportRedisTouchFlushIntervalOrderSec   int `env:"REPORT_REDIS_TOUCH_FLUSH_INTERVAL_ORDER_SEC" envDefault:"30"`
+	ReportRedisTouchFlushIntervalCustomerSec int `env:"REPORT_REDIS_TOUCH_FLUSH_INTERVAL_CUSTOMER_SEC" envDefault:"30"`
+	// Bước ngủ giữa các vòng quét trong worker (giây); nhỏ hơn interval flush để kịp nhịp.
+	ReportRedisTouchPollTickSec int `env:"REPORT_REDIS_TOUCH_POLL_TICK_SEC" envDefault:"3"`
 	// Meta Marketing API: Access token cho đồng bộ Ads (ads_read, ads_management). Có thể dùng User token hoặc System User token.
 	MetaAccessToken string `env:"META_ACCESS_TOKEN"` // Token để gọi Meta Graph API (Marketing/Ads)
 	// Meta App credentials (cho exchange short-lived → long-lived token)
@@ -49,6 +63,8 @@ type Configuration struct {
 	MetaAppSecret string `env:"META_APP_SECRET"` // App Secret (bảo mật, không commit)
 	// Đường dẫn file lưu token dài hạn (~60 ngày). Nếu có, server ưu tiên dùng token từ file khi khởi động.
 	MetaTokenFile string `env:"META_TOKEN_FILE" envDefault:"config/meta_token.json"` // File JSON lưu access_token, expires_in
+	// AIDecisionLiveOrgPersist: ghi timeline org-live vào Mongo (collection decision_org_live_events). Tắt: AI_DECISION_LIVE_ORG_PERSIST=false
+	AIDecisionLiveOrgPersist bool `env:"AI_DECISION_LIVE_ORG_PERSIST" envDefault:"true"`
 }
 
 // getEnvPath trả về đường dẫn đến file env
@@ -157,9 +173,11 @@ func NewConfig(files ...string) *Configuration {
 	fmt.Printf("[Config]   • MONGODB_DBNAME_DATA: %s\n", cfg.MongoDB_DBName_Data)
 	fmt.Printf("[Config]   • CORS_ORIGINS: %s\n", cfg.CORS_Origins)
 	fmt.Printf("[Config]   • CORS_ALLOW_CREDENTIALS: %v\n", cfg.CORS_AllowCredentials)
+	fmt.Printf("[Config]   • CORS_ALLOW_PRIVATE_NETWORK: %v\n", cfg.CORS_AllowPrivateNetwork)
 	fmt.Printf("[Config]   • FIREBASE_PROJECT_ID: %s\n", cfg.FirebaseProjectID)
 	fmt.Printf("[Config]   • FIREBASE_CREDENTIALS_PATH: %s\n", cfg.FirebaseCredentialsPath)
 	fmt.Printf("[Config]   • FRONTEND_URL: %s\n", cfg.FrontendURL)
+	fmt.Printf("[Config]   • AI_DECISION_LIVE_ORG_PERSIST (org-live → Mongo): %v\n", cfg.AIDecisionLiveOrgPersist)
 	fmt.Println("[Config] ========================================")
 
 	return &cfg

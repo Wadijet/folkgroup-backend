@@ -4,7 +4,8 @@ package dto
 // AnalyzeSessionRequest request phân tích session.
 type AnalyzeSessionRequest struct {
 	SessionUid  string `json:"sessionUid"`  // sess_xxx hoặc conversationId (Messenger: 1 conv = 1 session)
-	CustomerUid string `json:"customerUid"`  // cust_xxx — tùy chọn, dùng để lấy customer context
+	CustomerUid string `json:"customerUid"` // cust_xxx — tùy chọn, dùng để lấy customer context
+	Channel     string `json:"channel,omitempty"` // mặc định messenger — đồng bộ payload cix.analysis_requested
 }
 
 // CixAnalysisResponse response kết quả phân tích — theo schema vision.
@@ -12,8 +13,9 @@ type CixAnalysisResponse struct {
 	ID                 string       `json:"id,omitempty"`
 	SessionUid         string       `json:"sessionUid"`
 	CustomerUid        string       `json:"customerUid,omitempty"`
-	TraceID            string       `json:"traceId,omitempty"`
-	Layer1             CixLayer1DTO `json:"layer1"`
+	TraceID              string   `json:"traceId,omitempty"`
+	PipelineRuleTraceIDs []string `json:"pipelineRuleTraceIds,omitempty"`
+	Layer1               CixLayer1DTO `json:"layer1"`
 	Layer2             CixLayer2DTO `json:"layer2"`
 	Layer3             CixLayer3DTO `json:"layer3"`
 	Flags              []CixFlagDTO `json:"flags"`

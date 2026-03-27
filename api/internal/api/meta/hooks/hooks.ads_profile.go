@@ -1,26 +1,27 @@
-// Package metahooks - Hook tính ads profile (currentMetrics) cho 4 level: Account, Campaign, AdSet, Ad.
-// Hook: meta_ad_insights, pc_pos_orders, fb_conversations — nguồn dữ liệu metrics.
-// Khi thay đổi → UpdateRawFromSource (chỉ raw nguồn đó) → RecalculateForEntity → roll-up Ad→AdSet→Campaign→Account.
+// Package metahooks — Debounce + emit ads.intelligence.recompute_requested (currentMetrics 4 level).
+// meta_ad_insights: chỉ số bất thường (IsUrgentMetaInsightDataChange) → recompute ngay; không thì gom 15 phút.
+// Đơn/hội thoại: debounce ngắn (adsintel.DebounceMs). AI Decision consumer gọi ProcessDataChangeForAdsProfile sau datachanged.
 package metahooks
 
 import (
 	"context"
 
+	"meta_commerce/internal/adsintel"
+	aidecisionsvc "meta_commerce/internal/api/aidecision/service"
 	"meta_commerce/internal/api/events"
-	metasvc "meta_commerce/internal/api/meta/service"
 	"meta_commerce/internal/global"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-func init() {
-	events.OnDataChanged(handleAdsProfileDataChange)
+// emitAdsIntelligenceRecomputeQueued đưa yêu cầu tính lại (mode source) vào decision_events_queue.
+func emitAdsIntelligenceRecomputeQueued(bg context.Context, objectType, objectId, adAccountId string, ownerOrgID primitive.ObjectID, source string) {
+	_, _ = aidecisionsvc.EmitAdsIntelligenceRecomputeRequested(bg, objectType, objectId, adAccountId, ownerOrgID, source, "")
 }
 
-// handleAdsProfileDataChange xử lý event để tính lại currentMetrics (ads profile) cho 4 level.
-// Chỉ cập nhật raw từ nguồn phát sinh event, rồi tính lại layers.
-func handleAdsProfileDataChange(ctx context.Context, e events.DataChangeEvent) {
+// ProcessDataChangeForAdsProfile debounce rồi emit tính lại currentMetrics (meta_ad_insights, pc_pos_orders, fb_conversations).
+func ProcessDataChangeForAdsProfile(ctx context.Context, e events.DataChangeEvent) {
 	if e.Document == nil {
 		return
 	}
@@ -37,18 +38,22 @@ func handleAdsProfileDataChange(ctx context.Context, e events.DataChangeEvent) {
 		if objectType == "" || objectId == "" || adAccountId == "" {
 			return
 		}
+		// Gấp: chỉ số bất thường → recompute ngay; không gấp → gom 15 phút (trailing debounce).
+		debounceMs := adsintel.DebounceMsInsightBatch
+		if IsUrgentMetaInsightDataChange(e) {
+			debounceMs = 0
+		}
 		if objectType == "ad" {
 			key := entityKey("ad", objectId, adAccountId, ownerOrgID, "meta")
-			scheduleAdsRecompute(key, func() {
+			scheduleAdsRecompute(key, debounceMs, func() {
 				bg := context.Background()
-				_ = metasvc.UpdateRawFromSource(bg, objectType, objectId, adAccountId, ownerOrgID, "meta")
-				triggerRollUpForAd(bg, objectId, adAccountId, ownerOrgID)
+				emitAdsIntelligenceRecomputeQueued(bg, objectType, objectId, adAccountId, ownerOrgID, "meta")
 			})
 		} else {
 			key := entityKey(objectType, objectId, adAccountId, ownerOrgID, "meta")
-			scheduleAdsRecompute(key, func() {
+			scheduleAdsRecompute(key, debounceMs, func() {
 				bg := context.Background()
-				_ = metasvc.RecalculateForEntity(bg, objectType, objectId, adAccountId, ownerOrgID)
+				emitAdsIntelligenceRecomputeQueued(bg, objectType, objectId, adAccountId, ownerOrgID, "meta")
 			})
 		}
 		return
@@ -66,10 +71,9 @@ func handleAdsProfileDataChange(ctx context.Context, e events.DataChangeEvent) {
 			return
 		}
 		key := entityKey("ad", adId, adAccountId, ownerOrgID, "pancake.pos")
-		scheduleAdsRecompute(key, func() {
+		scheduleAdsRecompute(key, adsintel.DebounceMs, func() {
 			bg := context.Background()
-			_ = metasvc.UpdateRawFromSource(bg, "ad", adId, adAccountId, ownerOrgID, "pancake.pos")
-			triggerRollUpForAd(bg, adId, adAccountId, ownerOrgID)
+			emitAdsIntelligenceRecomputeQueued(bg, "ad", adId, adAccountId, ownerOrgID, "pancake.pos")
 		})
 		return
 
@@ -91,10 +95,9 @@ func handleAdsProfileDataChange(ctx context.Context, e events.DataChangeEvent) {
 			}
 			aid, acc := adId, adAccountId
 			key := entityKey("ad", aid, acc, ownerOrgID, "pancake.conversation")
-			scheduleAdsRecompute(key, func() {
+			scheduleAdsRecompute(key, adsintel.DebounceMs, func() {
 				bg := context.Background()
-				_ = metasvc.UpdateRawFromSource(bg, "ad", aid, acc, ownerOrgID, "pancake.conversation")
-				triggerRollUpForAd(bg, aid, acc, ownerOrgID)
+				emitAdsIntelligenceRecomputeQueued(bg, "ad", aid, acc, ownerOrgID, "pancake.conversation")
 			})
 		}
 		return
@@ -104,37 +107,6 @@ func handleAdsProfileDataChange(ctx context.Context, e events.DataChangeEvent) {
 	}
 }
 
-// triggerRollUpForAd sau khi Ad cập nhật, gọi roll-up cho AdSet → Campaign → Account.
-func triggerRollUpForAd(ctx context.Context, adId, adAccountId string, ownerOrgID primitive.ObjectID) {
-	adSetId, campaignId := getAdSetAndCampaignByAdId(ctx, adId, ownerOrgID)
-	if adSetId != "" {
-		_ = metasvc.RecalculateForEntity(ctx, "adset", adSetId, adAccountId, ownerOrgID)
-	}
-	if campaignId != "" {
-		_ = metasvc.RecalculateForEntity(ctx, "campaign", campaignId, adAccountId, ownerOrgID)
-	}
-	if adAccountId != "" {
-		_ = metasvc.RecalculateForEntity(ctx, "ad_account", adAccountId, adAccountId, ownerOrgID)
-	}
-}
-
-// getAdSetAndCampaignByAdId lấy adSetId, campaignId từ meta_ads theo adId.
-func getAdSetAndCampaignByAdId(ctx context.Context, adId string, ownerOrgID primitive.ObjectID) (adSetId, campaignId string) {
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.MetaAds)
-	if !ok {
-		return "", ""
-	}
-	filter := bson.M{"adId": adId, "ownerOrganizationId": ownerOrgID}
-	var doc struct {
-		AdSetId    string `bson:"adSetId"`
-		CampaignId string `bson:"campaignId"`
-	}
-	if err := coll.FindOne(ctx, filter).Decode(&doc); err != nil {
-		return "", ""
-	}
-	return doc.AdSetId, doc.CampaignId
-}
-
 // getAdAccountIdByAdId tìm adAccountId từ meta_ads theo adId.
 func getAdAccountIdByAdId(ctx context.Context, adId string, ownerOrgID primitive.ObjectID) string {
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.MetaAds)
@@ -142,7 +114,7 @@ func getAdAccountIdByAdId(ctx context.Context, adId string, ownerOrgID primitive
 		return ""
 	}
 	filter := bson.M{
-		"adId":                 adId,
+		"adId":                adId,
 		"ownerOrganizationId": ownerOrgID,
 	}
 	var doc struct {

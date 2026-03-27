@@ -2,6 +2,7 @@
 package basesvc
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -446,7 +447,8 @@ func (s *BaseServiceMongoImpl[T]) UpdateOne(ctx context.Context, filter interfac
 		return zero, common.ConvertMongoError(err)
 	}
 
-	if result.ModifiedCount == 0 && result.UpsertedCount == 0 {
+	// MatchedCount > 0: đã khớp bản ghi (kể cả Mongo không tăng ModifiedCount khi giá trị không đổi).
+	if result.UpsertedCount == 0 && result.MatchedCount == 0 {
 		return zero, common.ErrNotFound
 	}
 
@@ -515,6 +517,35 @@ func (s *BaseServiceMongoImpl[T]) UpdateMany(ctx context.Context, filter interfa
 	result, err := s.collection.UpdateMany(ctx, filter, updateData, opts)
 	if err != nil {
 		return 0, common.ConvertMongoError(err)
+	}
+
+	// Mọi bản ghi thực sự đổi sau UpdateMany → EmitDataChanged (đồng bộ với UpdateOne / Upsert).
+	if result.ModifiedCount > 0 && len(existingDocs) > 0 {
+		for i := range existingDocs {
+			prevDoc := existingDocs[i]
+			id, ok := objectIDFromBSONModel(prevDoc)
+			if !ok {
+				continue
+			}
+			var updated T
+			if err := s.collection.FindOne(ctx, bson.M{"_id": id}).Decode(&updated); err != nil {
+				continue
+			}
+			rawPrev, e1 := bson.Marshal(prevDoc)
+			rawNew, e2 := bson.Marshal(updated)
+			if e1 != nil || e2 != nil {
+				continue
+			}
+			if bytes.Equal(rawPrev, rawNew) {
+				continue
+			}
+			events.EmitDataChanged(ctx, events.DataChangeEvent{
+				CollectionName:   s.collection.Name(),
+				Operation:        events.OpUpdate,
+				Document:         updated,
+				PreviousDocument: prevDoc,
+			})
+		}
 	}
 
 	return result.ModifiedCount, nil
@@ -1748,4 +1779,25 @@ func getProtectedFieldsForModel(modelName string) []string {
 	default:
 		return commonProtected
 	}
+}
+
+// objectIDFromBSONModel trích _id từ model struct (UpdateMany → so sánh trước/sau).
+func objectIDFromBSONModel(doc interface{}) (primitive.ObjectID, bool) {
+	if doc == nil {
+		return primitive.NilObjectID, false
+	}
+	raw, err := bson.Marshal(doc)
+	if err != nil {
+		return primitive.NilObjectID, false
+	}
+	var m struct {
+		ID primitive.ObjectID `bson:"_id,omitempty"`
+	}
+	if err := bson.Unmarshal(raw, &m); err != nil {
+		return primitive.NilObjectID, false
+	}
+	if m.ID.IsZero() {
+		return primitive.NilObjectID, false
+	}
+	return m.ID, true
 }

@@ -12,6 +12,7 @@ import (
 
 	basesvc "meta_commerce/internal/api/base/service"
 	crmmodels "meta_commerce/internal/api/crm/models"
+	"meta_commerce/internal/api/events"
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
 )
@@ -51,10 +52,10 @@ func EnqueueCrmIngest(ctx context.Context, collectionName, operation string, doc
 	now := time.Now().Unix()
 
 	// Trích updated_at mới/cũ để debug và tính delta
-	updatedAtNew := extractUpdatedAtFromDoc(collectionName, document)
+	updatedAtNew := events.ExtractUpdatedAtFromDoc(collectionName, document)
 	updatedAtOld := int64(0)
 	if prevDoc != nil {
-		updatedAtOld = extractUpdatedAtFromDoc(collectionName, prevDoc)
+		updatedAtOld = events.ExtractUpdatedAtFromDoc(collectionName, prevDoc)
 	}
 	updatedAtDeltaMs := int64(-1)
 	if updatedAtNew > 0 && updatedAtOld > 0 {

@@ -4,6 +4,8 @@
 package models
 
 import (
+	"strings"
+
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -19,15 +21,19 @@ type DecisionEvent struct {
 	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1"`
 
 	Priority string `json:"priority" bson:"priority" index:"single:1"` // high | normal | low
+	// PriorityRank số để sort lease (1=ưu tiên cao nhất); tránh sort lexicographic trên chuỗi priority.
+	PriorityRank int `json:"priorityRank" bson:"priorityRank" index:"single:1"`
 	Lane     string `json:"lane" bson:"lane" index:"single:1"`         // fast | normal | batch
 
-	Status string `json:"status" bson:"status" index:"single:1"` // pending | leased | processing | completed | failed_retryable | failed_terminal | deferred
+	Status string `json:"status" bson:"status" index:"single:1"` // pending | leased | processing | completed | completed_no_handler | completed_routing_skipped | failed_retryable | failed_terminal | deferred
 
 	ParentEventID   string `json:"parentEventId,omitempty" bson:"parentEventId,omitempty"`
 	RootEventID     string `json:"rootEventId,omitempty" bson:"rootEventId,omitempty"`
 	CausationEventID string `json:"causationEventId,omitempty" bson:"causationEventId,omitempty"`
 
 	TraceID      string `json:"traceId,omitempty" bson:"traceId,omitempty"`
+	// W3CTraceID trace-id W3C (32 hex) — đồng bộ với decisionlive / traceutil; bù từ traceId nếu thiếu khi consume.
+	W3CTraceID    string `json:"w3cTraceId,omitempty" bson:"w3cTraceId,omitempty" index:"single:1,sparse"`
 	CorrelationID string `json:"correlationId,omitempty" bson:"correlationId,omitempty"`
 
 	Payload map[string]interface{} `json:"payload" bson:"payload"`
@@ -49,9 +55,22 @@ const (
 	EventStatusLeased          = "leased"
 	EventStatusProcessing      = "processing"
 	EventStatusCompleted       = "completed"
+	// EventStatusCompletedNoHandler — consumer đã đóng job nhưng chưa đăng ký handler cho event_type (chưa có logic xử lý).
+	EventStatusCompletedNoHandler = "completed_no_handler"
+	// EventStatusCompletedRoutingSkipped — rule routing noop: không dispatch handler đã đăng ký.
+	EventStatusCompletedRoutingSkipped = "completed_routing_skipped"
 	EventStatusFailedRetryable = "failed_retryable"
 	EventStatusFailedTerminal  = "failed_terminal"
 	EventStatusDeferred        = "deferred"
+)
+
+// ConsumerCompletionKind — chi tiết khi consumer đóng job thành công (metrics / phân tích).
+type ConsumerCompletionKind string
+
+const (
+	ConsumerCompletionKindProcessed      ConsumerCompletionKind = "processed"
+	ConsumerCompletionKindNoHandler      ConsumerCompletionKind = "no_handler"
+	ConsumerCompletionKindRoutingSkipped ConsumerCompletionKind = "routing_skipped"
 )
 
 // Event lane constants
@@ -60,3 +79,15 @@ const (
 	EventLaneNormal = "normal"
 	EventLaneBatch  = "batch"
 )
+
+// PriorityRankFromString map priority → rank cho sort Mongo (1 trước = xử lý trước).
+func PriorityRankFromString(p string) int {
+	switch strings.ToLower(strings.TrimSpace(p)) {
+	case "high", "urgent":
+		return 1
+	case "low":
+		return 3
+	default:
+		return 2 // normal, rỗng, hoặc không nhận diện
+	}
+}

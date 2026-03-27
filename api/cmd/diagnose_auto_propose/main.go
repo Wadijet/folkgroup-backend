@@ -15,6 +15,7 @@ import (
 	adssvc "meta_commerce/internal/api/ads/service"
 	adsmodels "meta_commerce/internal/api/ads/models"
 	"meta_commerce/internal/global"
+	metasvc "meta_commerce/internal/api/meta/service"
 
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -93,7 +94,7 @@ func main() {
 			continue
 		}
 
-		actions, report := adssvc.ComputeActionsFromMetrics(ctx, c.CampaignId, c.AdAccountId, c.OwnerOrganizationID, currentMetrics)
+		actions, report := metasvc.ComputeFinalActionsFromCurrentMetrics(ctx, c.CampaignId, c.AdAccountId, c.OwnerOrganizationID, currentMetrics)
 		metaCfg, _ := adssvc.GetCampaignConfig(ctx, c.AdAccountId, c.OwnerOrganizationID)
 
 		if len(actions) == 0 {

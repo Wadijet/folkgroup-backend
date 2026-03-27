@@ -80,7 +80,7 @@ func (h *CrmNoteHandler) HandleCreateNote(c fiber.Ctx) error {
 			})
 			return nil
 		}
-		// LogActivity được gọi tự động qua hook OnDataChanged khi insert crm_notes
+		// Sau insert, BaseService emit DataChange → queue AI Decision → consumer gọi crmingest (không hook CRM trực tiếp).
 		c.Status(common.StatusOK).JSON(fiber.Map{
 			"code": common.StatusOK, "message": "Thêm ghi chú thành công", "data": toNoteResponse(note), "status": "success",
 		})

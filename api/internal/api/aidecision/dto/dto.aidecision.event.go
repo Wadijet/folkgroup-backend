@@ -19,4 +19,9 @@ type IngestEventRequest struct {
 type IngestEventResponse struct {
 	EventID string `json:"eventId"`
 	Status  string `json:"status"`
+	// W3CTraceID trace-id W3C (32 hex) — đồng bộ với envelope queue khi có traceId.
+	W3CTraceID string `json:"w3cTraceId,omitempty"`
+	// OpsTier / OpsTierLabelVi — phân loại vận hành theo eventType (cùng logic org-live).
+	OpsTier        string `json:"opsTier"`
+	OpsTierLabelVi string `json:"opsTierLabelVi"`
 }

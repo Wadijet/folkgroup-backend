@@ -6,15 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"sort"
 	"strings"
 	"time"
 
 	adsconfig "meta_commerce/internal/api/ads/config"
-	adsmodels "meta_commerce/internal/api/ads/models"
-	"meta_commerce/internal/approval"
 	"meta_commerce/internal/global"
-	metasvc "meta_commerce/internal/api/meta/service"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -250,7 +246,7 @@ func GetChsFromYesterday(ctx context.Context, campaignId string, ownerOrgID prim
 	if layer3 == nil {
 		return 0, false
 	}
-	chs := toFloat64FromInterface(layer3["chs"])
+	chs := ToFloat64FromInterface(layer3["chs"])
 	return chs, true
 }
 
@@ -270,7 +266,7 @@ func getPancakeOrdersFromCurrentMetrics(currentMetrics map[string]interface{}) (
 	}
 	r2h, _ := raw["2h"].(map[string]interface{})
 	if r2h != nil {
-		orders2h = toFloat64FromInterface(r2h["orders"])
+		orders2h = ToFloat64FromInterface(r2h["orders"])
 	}
 	r7d, _ := raw["7d"].(map[string]interface{})
 	if r7d != nil {
@@ -278,14 +274,15 @@ func getPancakeOrdersFromCurrentMetrics(currentMetrics map[string]interface{}) (
 		if pancake != nil {
 			pos, _ := pancake["pos"].(map[string]interface{})
 			if pos != nil {
-				orders7d = toFloat64FromInterface(pos["orders"])
+				orders7d = ToFloat64FromInterface(pos["orders"])
 			}
 		}
 	}
 	return orders2h, orders7d
 }
 
-func toFloat64FromInterface(v interface{}) float64 {
+// ToFloat64FromInterface chuyển giá trị interface (BSON/JSON) sang float64 an toàn.
+func ToFloat64FromInterface(v interface{}) float64 {
 	if v == nil {
 		return 0
 	}
@@ -317,9 +314,9 @@ func GetCampaignCurrentMetrics(ctx context.Context, campaignsColl *mongo.Collect
 	return doc.CurrentMetrics
 }
 
-// buildMetricsPayloadForNotification format currentMetrics thành payload cho notification.
+// BuildMetricsPayloadForNotification format currentMetrics thành payload cho notification.
 // currentMetrics nil → fetch từ DB. Trả về map với keys: rawSummary, layer1Summary, flagsSummary, flagsDetail.
-func buildMetricsPayloadForNotification(ctx context.Context, campaignsColl *mongo.Collection, campaignId string, adAccountId string, ownerOrgID primitive.ObjectID, currentMetrics map[string]interface{}) map[string]interface{} {
+func BuildMetricsPayloadForNotification(ctx context.Context, campaignsColl *mongo.Collection, campaignId string, adAccountId string, ownerOrgID primitive.ObjectID, currentMetrics map[string]interface{}) map[string]interface{} {
 	if currentMetrics == nil {
 		currentMetrics = GetCampaignCurrentMetrics(ctx, campaignsColl, campaignId, ownerOrgID)
 	}
@@ -363,228 +360,3 @@ func GetPendingProposalForCampaign(ctx context.Context, campaignId string, owner
 	return &PendingProposalInfo{ID: doc.ID, ActionType: doc.ActionType, RuleCode: ruleCode}, nil
 }
 
-// increaseCandidate ứng viên tăng budget — dùng cho Anti Self-Competition (FolkForm v4.1 Section 06).
-type increaseCandidate struct {
-	c              CampaignForEval
-	action         map[string]interface{}
-	actions        []map[string]interface{}
-	report         map[string]interface{}
-	currentMetrics map[string]interface{}
-	metaCfg        *adsmodels.CampaignConfigView
-	cpaPurchase    float64
-	chs            float64
-	mqs            float64
-	frequency      float64
-}
-
-// RunAutoPropose đánh giá campaigns và tạo đề xuất khi rule trigger.
-// Dùng ComputeActionsFromMetrics (metasvc.ComputeFinalActions) — logic đầy đủ trong ads module.
-// Anti Self-Competition: Increase chỉ cho top N camp/account (PROTECT:1, EFFICIENCY:1, NORMAL:2, BLITZ:3).
-func RunAutoPropose(ctx context.Context, baseURL string) (proposed int, err error) {
-	campaigns, err := GetCampaignsForAutoPropose(ctx, 30)
-	if err != nil {
-		return 0, err
-	}
-	campaignsColl, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.MetaCampaigns)
-	if !ok {
-		return 0, fmt.Errorf("không tìm thấy collection meta_campaigns")
-	}
-	campaignConfigByAccount := make(map[string]*adsmodels.CampaignConfigView)
-	increaseCandidatesByAccount := make(map[string][]increaseCandidate)
-
-	for _, c := range campaigns {
-		cacheKey := c.AdAccountId + "|" + c.OwnerOrganizationID.Hex()
-		if _, ok := campaignConfigByAccount[cacheKey]; !ok {
-			cfg, _ := GetCampaignConfig(ctx, c.AdAccountId, c.OwnerOrganizationID)
-			campaignConfigByAccount[cacheKey] = cfg
-		}
-		metaCfg := campaignConfigByAccount[cacheKey]
-
-		pendingInfo, pendingErr := GetPendingProposalForCampaign(ctx, c.CampaignId, c.OwnerOrganizationID)
-		if pendingErr != nil {
-			continue
-		}
-		hasPending := pendingInfo != nil
-
-		// Recalculate nếu có pending (để lấy metrics mới nhất)
-		if hasPending {
-			if recalcErr := metasvc.RecalculateForEntity(ctx, "campaign", c.CampaignId, c.AdAccountId, c.OwnerOrganizationID); recalcErr != nil {
-				continue
-			}
-		}
-
-		currentMetrics := GetCampaignCurrentMetrics(ctx, campaignsColl, c.CampaignId, c.OwnerOrganizationID)
-		if currentMetrics == nil {
-			if hasPending {
-				_, _ = approval.Cancel(ctx, pendingInfo.ID.Hex(), c.OwnerOrganizationID)
-			}
-			continue
-		}
-
-		// Gọi logic tính action (metasvc.ComputeFinalActions) — lifecycle, rules, noon cut, dual-source, chs
-		actions, report := ComputeActionsFromMetrics(ctx, c.CampaignId, c.AdAccountId, c.OwnerOrganizationID, currentMetrics)
-
-		if len(actions) == 0 {
-			if hasPending {
-				_, _ = approval.Cancel(ctx, pendingInfo.ID.Hex(), c.OwnerOrganizationID)
-			}
-			continue
-		}
-		action := actions[0]
-		actionType, _ := action["actionType"].(string)
-		ruleCode, _ := action["ruleCode"].(string)
-
-		// Increase: thu thập ứng viên, xử lý sau (Anti Self-Competition — top N)
-		if actionType == "INCREASE" {
-			if IsSelfCompetitionSuspect(ctx, c.AdAccountId, c.OwnerOrganizationID) {
-				continue
-			}
-			layer1, _ := currentMetrics["layer1"].(map[string]interface{})
-			layer3, _ := currentMetrics["layer3"].(map[string]interface{})
-			raw, _ := currentMetrics["raw"].(map[string]interface{})
-			r7d, _ := raw["7d"].(map[string]interface{})
-			meta7d, _ := r7d["meta"].(map[string]interface{})
-			orders, spend := 0.0, 0.0
-			if p, _ := r7d["pancake"].(map[string]interface{}); p != nil {
-				if pos, _ := p["pos"].(map[string]interface{}); pos != nil {
-					orders = toFloat64FromInterface(pos["orders"])
-				}
-			}
-			if meta7d != nil {
-				spend = toFloat64FromInterface(meta7d["spend"])
-			}
-			cpaPurchase := 0.0
-			if orders > 0 {
-				cpaPurchase = spend / orders
-			}
-			cand := increaseCandidate{
-				c: c, action: action, actions: actions, report: report,
-				currentMetrics: currentMetrics, metaCfg: metaCfg,
-				cpaPurchase: cpaPurchase,
-				chs:        toFloat64FromInterface(layer3["chs"]),
-				mqs:        toFloat64FromInterface(layer1["mqs_7d"]),
-				frequency:  toFloat64FromInterface(meta7d["frequency"]),
-			}
-			increaseCandidatesByAccount[cacheKey] = append(increaseCandidatesByAccount[cacheKey], cand)
-			continue
-		}
-
-		// Kill/Decrease: cập nhật currentMetrics.actions, ghi activity, propose
-		if hasPending && pendingInfo.ActionType == actionType && pendingInfo.RuleCode == ruleCode {
-			continue
-		}
-		if hasPending {
-			_, _ = approval.Cancel(ctx, pendingInfo.ID.Hex(), c.OwnerOrganizationID)
-		}
-		if err := UpdateCampaignActionsAndRecordActivity(ctx, c.CampaignId, c.AdAccountId, c.OwnerOrganizationID, currentMetrics, actions, report); err != nil {
-			continue
-		}
-		metricsPayload := buildMetricsPayloadForNotification(ctx, campaignsColl, c.CampaignId, c.AdAccountId, c.OwnerOrganizationID, currentMetrics)
-		if metricsPayload == nil {
-			metricsPayload = make(map[string]interface{})
-		}
-		if rc := action["result_check"]; rc != nil {
-			metricsPayload["result_check"] = rc
-		}
-		if traceId, _ := action["traceId"].(string); traceId != "" {
-			metricsPayload["traceId"] = traceId
-		}
-		reason, _ := action["reason"].(string)
-		value := action["value"]
-		traceID, _ := action["traceId"].(string)
-		// Vision 08: Luôn gọi Propose; ResolveImmediate (Executor) quyết định auto-approve theo ApprovalModeConfig.
-		_, err = Propose(ctx, &ProposeInput{
-			ActionType:   actionType,
-			AdAccountId:  c.AdAccountId,
-			CampaignId:   c.CampaignId,
-			CampaignName: c.CampaignName,
-			Reason:       reason,
-			Value:        value,
-			RuleCode:     ruleCode,
-			TraceID:      traceID,
-			Payload:      metricsPayload,
-		}, c.OwnerOrganizationID, baseURL)
-		if err != nil {
-			return proposed, fmt.Errorf("emit propose campaign %s: %w", c.CampaignId, err)
-		}
-		proposed++
-	}
-
-	// Anti Self-Competition: xử lý Increase — chỉ top N camp/account
-	for cacheKey, candidates := range increaseCandidatesByAccount {
-		metaCfg := campaignConfigByAccount[cacheKey]
-		mode := ModeNORMAL
-		if metaCfg != nil && metaCfg.AccountMode != "" {
-			mode = metaCfg.AccountMode
-		}
-		limit := GetIncreaseLimit(mode)
-		if len(candidates) == 0 {
-			continue
-		}
-		sortIncreaseCandidates(candidates)
-		topN := candidates
-		if len(topN) > limit {
-			topN = topN[:limit]
-		}
-		for _, cand := range topN {
-			if hasPending, _ := HasPendingProposalForCampaign(ctx, cand.c.CampaignId, cand.c.OwnerOrganizationID); hasPending {
-				continue
-			}
-			if err := UpdateCampaignActionsAndRecordActivity(ctx, cand.c.CampaignId, cand.c.AdAccountId, cand.c.OwnerOrganizationID, cand.currentMetrics, cand.actions, cand.report); err != nil {
-				continue
-			}
-			metricsPayload := buildMetricsPayloadForNotification(ctx, campaignsColl, cand.c.CampaignId, cand.c.AdAccountId, cand.c.OwnerOrganizationID, cand.currentMetrics)
-			if metricsPayload == nil {
-				metricsPayload = make(map[string]interface{})
-			}
-			if rc := cand.action["result_check"]; rc != nil {
-				metricsPayload["result_check"] = rc
-			}
-			if traceId, _ := cand.action["traceId"].(string); traceId != "" {
-				metricsPayload["traceId"] = traceId
-			}
-			reason, _ := cand.action["reason"].(string)
-			ruleCode, _ := cand.action["ruleCode"].(string)
-			traceID, _ := cand.action["traceId"].(string)
-			// Vision 08: Luôn gọi Propose; ResolveImmediate (Executor) quyết định auto-approve theo ApprovalModeConfig.
-			_, err = Propose(ctx, &ProposeInput{
-				ActionType:   "INCREASE",
-				AdAccountId:  cand.c.AdAccountId,
-				CampaignId:   cand.c.CampaignId,
-				CampaignName: cand.c.CampaignName,
-				Reason:       reason,
-				Value:        cand.action["value"],
-				RuleCode:     ruleCode,
-				TraceID:      traceID,
-				Payload:      metricsPayload,
-			}, cand.c.OwnerOrganizationID, baseURL)
-			if err != nil {
-				return proposed, fmt.Errorf("emit propose campaign %s: %w", cand.c.CampaignId, err)
-			}
-			proposed++
-		}
-	}
-	return proposed, nil
-}
-
-// sortIncreaseCandidates sắp xếp theo priority: CPA_Purchase thấp, CHS healthy (>=60), MQS cao, Frequency thấp.
-func sortIncreaseCandidates(candidates []increaseCandidate) {
-	sort.Slice(candidates, func(i, j int) bool {
-		return increaseCandidateLess(candidates[i], candidates[j])
-	})
-}
-
-func increaseCandidateLess(a, b increaseCandidate) bool {
-	if a.cpaPurchase != b.cpaPurchase {
-		return a.cpaPurchase < b.cpaPurchase
-	}
-	aHealthy := a.chs >= 60
-	bHealthy := b.chs >= 60
-	if aHealthy != bHealthy {
-		return aHealthy
-	}
-	if a.mqs != b.mqs {
-		return a.mqs > b.mqs
-	}
-	return a.frequency < b.frequency
-}

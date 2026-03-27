@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"meta_commerce/internal/api/aidecision/decisionlive"
+	"meta_commerce/internal/api/aidecision/decisionlive/livecopy"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 	cixmodels "meta_commerce/internal/api/cix/models"
 	"meta_commerce/internal/global"
@@ -15,8 +17,8 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// ReceiveCixPayload nhận kết quả CIX, cập nhật decision case, gọi TryExecuteIfReady.
-// Fallback: nếu không có case (luồng cũ CIX gọi trực tiếp), Execute ngay với CIX payload.
+// ReceiveCixPayload nhận kết quả CIX, cập nhật decision case, enqueue aidecision.execute_requested khi đủ điều kiện.
+// Không gọi ExecuteWithCase đồng bộ — worker consume EventTypeExecuteRequested.
 func (s *AIDecisionService) ReceiveCixPayload(ctx context.Context, result *cixmodels.CixAnalysisResult, ownerOrgID primitive.ObjectID) error {
 	if result == nil || len(result.ActionSuggestions) == 0 {
 		return nil
@@ -27,24 +29,26 @@ func (s *AIDecisionService) ReceiveCixPayload(ctx context.Context, result *cixmo
 	// Cập nhật decision_cases_runtime: contextPackets.cix, receivedContexts (sessionUid = conversationId trong CIX)
 	_ = s.UpdateCaseWithCixContext(ctx, result.SessionUid, result.CustomerUid, ownerOrgID.Hex(), ownerOrgID, cixPayload)
 
-	err := s.TryExecuteIfReady(ctx, result.SessionUid, result.CustomerUid, ownerOrgID.Hex(), ownerOrgID)
-	if err != nil {
-		return err
+	caseDoc, _ := s.FindCaseByConversation(ctx, result.SessionUid, result.CustomerUid, ownerOrgID.Hex(), ownerOrgID)
+	traceForPublish := strings.TrimSpace(result.TraceID)
+	if caseDoc != nil && traceForPublish == "" {
+		traceForPublish = strings.TrimSpace(caseDoc.TraceID)
 	}
-	// Fallback: gọi CIX trực tiếp (POST /cix/analyze) không qua case — Execute ngay khi không tìm thấy case runtime.
-	caseDoc, findErr := s.FindCaseByConversation(ctx, result.SessionUid, result.CustomerUid, ownerOrgID.Hex(), ownerOrgID)
-	if findErr != nil || caseDoc == nil {
-		req := &ExecuteRequest{
-			SessionUid:    result.SessionUid,
-			CustomerUid:   result.CustomerUid,
-			TraceID:       result.TraceID,
-			CorrelationID: result.CorrelationID,
-			CIXPayload:    cixPayload,
-			BaseURL:       os.Getenv("BASE_URL"),
-		}
-		_, _ = s.ExecuteWithCase(ctx, req, ownerOrgID, nil)
+	if traceForPublish != "" {
+		publishCixIntegratedStep(ownerOrgID, traceForPublish, caseDoc, result)
 	}
-	return nil
+
+	// Chỉ luồng case-centric: phải có decision_cases_runtime + đủ Context Policy Matrix mới execute (TryExecuteIfReady).
+	return s.TryExecuteIfReady(ctx, result.SessionUid, result.CustomerUid, ownerOrgID.Hex(), ownerOrgID)
+}
+
+// publishCixIntegratedStep timeline/audit: đã ghi CIX vào case (gạch đầu dòng + section chi tiết).
+func publishCixIntegratedStep(ownerOrgID primitive.ObjectID, traceID string, caseDoc *aidecisionmodels.DecisionCase, result *cixmodels.CixAnalysisResult) {
+	if ownerOrgID.IsZero() || traceID == "" || result == nil {
+		return
+	}
+	ev := livecopy.BuildCixIntegratedEvent(traceID, caseDoc, result)
+	decisionlive.Publish(ownerOrgID, traceID, ev)
 }
 
 // TryExecuteIfReady kiểm tra case đủ context → cập nhật status → Execute.
@@ -63,9 +67,8 @@ func (s *AIDecisionService) TryExecuteIfReady(ctx context.Context, conversationI
 		return nil
 	}
 
-	// AI_DECISION_REQUIRE_BOTH_CONTEXT=true: chỉ Execute khi có cả cix và customer
-	requireBoth := strings.TrimSpace(strings.ToLower(os.Getenv("AI_DECISION_REQUIRE_BOTH_CONTEXT"))) == "true"
-	if requireBoth && !HasAllRequiredContexts(caseDoc) {
+	// Context Policy Matrix: đủ requiredContexts trên case (§3.4).
+	if !HasAllRequiredContexts(caseDoc) {
 		return nil
 	}
 
@@ -76,19 +79,25 @@ func (s *AIDecisionService) TryExecuteIfReady(ctx context.Context, conversationI
 	}
 
 	// Cập nhật status → ready_for_decision
-	_ = s.updateCaseStatus(ctx, caseDoc.DecisionCaseID, aidecisionmodels.CaseStatusReadyForDecision)
+	_ = s.UpdateCaseStatus(ctx, caseDoc.DecisionCaseID, aidecisionmodels.CaseStatusReadyForDecision)
 
 	// Lấy traceId từ cixPayload (toCixPayloadMap đã thêm traceId) — Learning Engine cần để query rule_execution_logs
 	traceID := ""
 	if t, ok := cixPayload["traceId"].(string); ok {
-		traceID = t
+		traceID = strings.TrimSpace(t)
 	}
+	if traceID == "" {
+		traceID = strings.TrimSpace(caseDoc.TraceID)
+	}
+	correlationID := strings.TrimSpace(caseDoc.CorrelationID)
+
+	publishExecuteReadyStep(ownerOrgID, traceID, correlationID, caseDoc)
 
 	req := &ExecuteRequest{
 		SessionUid:    conversationID,
 		CustomerUid:   customerID,
 		TraceID:       traceID,
-		CorrelationID: "",
+		CorrelationID: correlationID,
 		CIXPayload:    cixPayload,
 		CustomerCtx:   nil,
 		BaseURL:       os.Getenv("BASE_URL"),
@@ -97,16 +106,12 @@ func (s *AIDecisionService) TryExecuteIfReady(ctx context.Context, conversationI
 		req.CustomerCtx = custPayload
 	}
 
-	_, execErr := s.ExecuteWithCase(ctx, req, ownerOrgID, caseDoc)
-	if execErr != nil {
-		return execErr
-	}
-
-	return nil
+	_, execErr := s.EmitExecuteRequested(ctx, req, ownerOrgID, orgID, caseDoc.DecisionCaseID)
+	return execErr
 }
 
-// updateCaseStatus cập nhật status của case.
-func (s *AIDecisionService) updateCaseStatus(ctx context.Context, decisionCaseID, status string) error {
+// UpdateCaseStatus cập nhật status runtime trên decision_cases_runtime (conversation, order, Ads, …).
+func (s *AIDecisionService) UpdateCaseStatus(ctx context.Context, decisionCaseID, status string) error {
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.DecisionCasesRuntime)
 	if !ok {
 		return nil
@@ -116,6 +121,15 @@ func (s *AIDecisionService) updateCaseStatus(ctx context.Context, decisionCaseID
 		"$set": bson.M{"status": status, "updatedAt": now},
 	})
 	return nil
+}
+
+// publishExecuteReadyStep audit/UI: đủ điều kiện — sắp gửi execute_requested.
+func publishExecuteReadyStep(ownerOrgID primitive.ObjectID, traceID, correlationID string, caseDoc *aidecisionmodels.DecisionCase) {
+	if ownerOrgID.IsZero() || traceID == "" || caseDoc == nil {
+		return
+	}
+	ev := livecopy.BuildExecuteReadyEvent(traceID, correlationID, caseDoc)
+	decisionlive.Publish(ownerOrgID, traceID, ev)
 }
 
 func toCixPayloadMap(r *cixmodels.CixAnalysisResult) map[string]interface{} {
@@ -145,6 +159,9 @@ func toCixPayloadMap(r *cixmodels.CixAnalysisResult) map[string]interface{} {
 			})
 		}
 		m["flags"] = flags
+	}
+	if len(r.PipelineRuleTraceIDs) > 0 {
+		m["pipelineRuleTraceIds"] = r.PipelineRuleTraceIDs
 	}
 	return m
 }

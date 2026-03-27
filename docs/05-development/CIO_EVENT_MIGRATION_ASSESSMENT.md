@@ -14,8 +14,8 @@ pc_pos_orders Insert/Update (sync, webhook)
     │
     ├─► events.EmitDataChanged
     │       │
-    │       ├─► handleReportDataChange → MarkDirty (report)
-    │       └─► handleCrmDataChange → EnqueueCrmIngest → crm_pending_ingest
+    │       ├─► AI Decision queue (datachanged) → applyDatachangedSideEffects → RecordReportTouchFromDataChange → Redis `ff:rt:*` → worker report_redis_touch_flush → MarkDirty
+    │       └─► (cùng consumer) CRM ingest / … → EnqueueCrmIngest → crm_pending_ingest
     │                   │
     │                   └─► crm_ingest_worker → IngestOrderTouchpoint (CRM)
     │

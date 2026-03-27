@@ -4,7 +4,10 @@ import (
 	"context"
 
 	adsMigration "meta_commerce/internal/api/ads/migration"
+	basesvc "meta_commerce/internal/api/base/service"
+	aidecisionsvc "meta_commerce/internal/api/aidecision/service"
 	"meta_commerce/internal/api/initsvc"
+	ruleintelmigration "meta_commerce/internal/api/ruleintel/migration"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/logger"
 )
@@ -24,6 +27,51 @@ func InitDefaultData() {
 		log.Fatalf("Failed to initialize root organization: %v", err)
 	}
 	log.Info("✅ [INIT] Step 1: Root organization initialized")
+
+	// 1b. Rule Intelligence — seed system (Ads, CRM, CIX, AI Decision dispatch) sau System Organization.
+	// Trước đây chạy trong InitRegistry (trước Step 1) nên OwnerOrganizationID có thể Nil — chuyển vào đây.
+	log.Info("🔄 [INIT] Step 1b: Seeding Rule Intelligence (system rules)...")
+	seedCtx := basesvc.WithSystemDataInsertAllowed(context.Background())
+	if err := ruleintelmigration.SeedRuleAdsSystem(seedCtx); err != nil {
+		log.WithError(err).Warn("⚠️ [INIT] Step 1b: SeedRuleAdsSystem thất bại (optional)")
+	} else {
+		log.Info("✅ [INIT] Step 1b: Rule Ads seed completed")
+	}
+	if err := ruleintelmigration.SeedRuleCrmSystem(seedCtx); err != nil {
+		log.WithError(err).Warn("⚠️ [INIT] Step 1b: SeedRuleCrmSystem thất bại (optional)")
+	} else {
+		log.Info("✅ [INIT] Step 1b: Rule CRM seed completed")
+	}
+	if err := ruleintelmigration.SeedRuleCixSystem(seedCtx); err != nil {
+		log.WithError(err).Warn("⚠️ [INIT] Step 1b: SeedRuleCixSystem thất bại (optional)")
+	} else {
+		log.Info("✅ [INIT] Step 1b: Rule CIX seed completed")
+	}
+	if err := ruleintelmigration.SeedRuleAidecisionDispatch(seedCtx); err != nil {
+		log.WithError(err).Warn("⚠️ [INIT] Step 1b: SeedRuleAidecisionDispatch thất bại — consumer routing noop/dispatch fail-open cho đến khi seed thành công")
+	} else {
+		log.Info("✅ [INIT] Step 1b: RULE_DECISION_CONSUMER_DISPATCH (system) đã seed")
+	}
+	if err := ruleintelmigration.SeedRuleAidecisionContextPolicy(seedCtx); err != nil {
+		log.WithError(err).Warn("⚠️ [INIT] Step 1b: SeedRuleAidecisionContextPolicy thất bại — dùng matrix mặc định trong code")
+	} else {
+		log.Info("✅ [INIT] Step 1b: RULE_CONTEXT_POLICY_RESOLVE (Context Policy Matrix) đã seed")
+	}
+	if err := ruleintelmigration.SeedRuleAidecisionSideEffectPolicy(seedCtx); err != nil {
+		log.WithError(err).Warn("⚠️ [INIT] Step 1b: SeedRuleAidecisionSideEffectPolicy thất bại — side-effect datachanged dùng classify Go + env")
+	} else {
+		log.Info("✅ [INIT] Step 1b: RULE_DATACHANGED_SIDE_EFFECT_POLICY (trì hoãn ingest/report/refresh) đã seed")
+	}
+
+	// 1c. Backfill priorityRank cho decision_events_queue (bản ghi pending cũ không có trường số).
+	log.Info("🔄 [INIT] Step 1c: Backfill decision_events_queue.priorityRank...")
+	if n, err := aidecisionsvc.MigrateDecisionEventsPriorityRank(seedCtx); err != nil {
+		log.WithError(err).Warn("⚠️ [INIT] Step 1c: MigrateDecisionEventsPriorityRank thất bại (optional)")
+	} else if n > 0 {
+		log.Infof("✅ [INIT] Step 1c: Đã gán priorityRank cho %d bản ghi pending", n)
+	} else {
+		log.Info("✅ [INIT] Step 1c: Không có bản ghi nào cần backfill priorityRank")
+	}
 
 	// 2. Khởi tạo Permissions (tạo các quyền mới nếu chưa có, bao gồm Customer, FbMessageItem, ...)
 	log.Info("🔄 [INIT] Step 2: Initializing permissions...")

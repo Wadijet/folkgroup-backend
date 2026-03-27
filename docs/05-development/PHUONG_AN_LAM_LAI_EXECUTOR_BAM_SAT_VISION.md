@@ -225,8 +225,8 @@ Closure type         Guardrail Engine
 
 ### Phase 0 (song song hoặc trước)
 - [x] AI Decision facade: ProposeForAds, ProposeForCio (service.aidecision.propose_facade.go)
-- [x] **Event-driven:** Ads emit ads.propose_requested, CIO emit cio.propose_requested
-- [x] AI Decision consumer xử lý ads.propose_requested, cio.propose_requested → ProposeForAds/ProposeForCio
+- [x] **Event-driven:** Ads (và mọi domain) emit **`executor.propose_requested`** (`payload.domain`); tương thích `ads.propose_requested`
+- [x] AI Decision consumer xử lý `executor.propose_requested` → `processExecutorProposeRequested` → ProposeForAds / `approval.Propose`
 - [x] Ads Propose → EmitAdsProposeRequest (trả eventID)
 - [x] CIO CreateExecutionRequest, ExecuteTouchpoint → EmitCioProposeRequest
 - [x] Executor HandlePropose: domain=ads|cio emit event, trả 202 Accepted

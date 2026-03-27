@@ -13,14 +13,17 @@ import (
 	"github.com/sirupsen/logrus"
 
 	adsworker "meta_commerce/internal/api/ads/worker"
+	crmqueue "meta_commerce/internal/api/aidecision/crmqueue"
+	"meta_commerce/internal/api/aidecision/decisionlive"
 	aidecisionworker "meta_commerce/internal/api/aidecision/worker"
 	learningworker "meta_commerce/internal/api/learning/worker"
 	cixworker "meta_commerce/internal/api/cix/worker"
+	orderintelworker "meta_commerce/internal/api/orderintel/worker"
 	crmworker "meta_commerce/internal/api/crm/worker"
 	crmvc "meta_commerce/internal/api/crm/service"
-	pcworker "meta_commerce/internal/api/pc/worker"
 	ruleintelmigration "meta_commerce/internal/api/ruleintel/migration"
 	basesvc "meta_commerce/internal/api/base/service"
+	_ "meta_commerce/internal/api/ads"         // Đăng ký executor domain ads + deferred + event types (init executor.go)
 	_ "meta_commerce/internal/executors/cix" // Đăng ký cix executor với approval (init)
 	approval "meta_commerce/internal/approval"
 	"meta_commerce/internal/delivery"
@@ -89,7 +92,45 @@ func runSeedRuleIntelAndExit() {
 		os.Exit(1)
 	}
 	fmt.Println("✓ SeedRuleCrmSystem xong")
+	if err := ruleintelmigration.SeedRuleAidecisionDispatch(initCtx); err != nil {
+		fmt.Fprintf(os.Stderr, "SeedRuleAidecisionDispatch: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("✓ SeedRuleAidecisionDispatch xong")
+	if err := ruleintelmigration.SeedRuleAidecisionContextPolicy(initCtx); err != nil {
+		fmt.Fprintf(os.Stderr, "SeedRuleAidecisionContextPolicy: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("✓ SeedRuleAidecisionContextPolicy xong")
+	if err := ruleintelmigration.SeedRuleAidecisionSideEffectPolicy(initCtx); err != nil {
+		fmt.Fprintf(os.Stderr, "SeedRuleAidecisionSideEffectPolicy: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("✓ SeedRuleAidecisionSideEffectPolicy xong")
 	fmt.Println("Chạy go run scripts/check_ruleintel_db.go để kiểm tra.")
+	os.Exit(0)
+}
+
+// runSeedAidecisionDispatchAndExit chỉ seed RULE_DECISION_CONSUMER_DISPATCH (+ logic/param/output) rồi thoát.
+func runSeedAidecisionDispatchAndExit() {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	initCtx := basesvc.WithSystemDataInsertAllowed(ctx)
+	if err := ruleintelmigration.SeedRuleAidecisionDispatch(initCtx); err != nil {
+		fmt.Fprintf(os.Stderr, "SeedRuleAidecisionDispatch: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("✓ SeedRuleAidecisionDispatch xong")
+	if err := ruleintelmigration.SeedRuleAidecisionContextPolicy(initCtx); err != nil {
+		fmt.Fprintf(os.Stderr, "SeedRuleAidecisionContextPolicy: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("✓ SeedRuleAidecisionContextPolicy xong")
+	if err := ruleintelmigration.SeedRuleAidecisionSideEffectPolicy(initCtx); err != nil {
+		fmt.Fprintf(os.Stderr, "SeedRuleAidecisionSideEffectPolicy: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("✓ SeedRuleAidecisionSideEffectPolicy xong")
 	os.Exit(0)
 }
 
@@ -124,25 +165,18 @@ func runRecalcAllCustomersOnStart(ctx context.Context, log *logrus.Logger) {
 			log.WithField("panic", r).Error("[CRM] RecalcAll: Panic recovered")
 		}
 	}()
-	log.Info("[CRM] RecalcAll: Bắt đầu recalc toàn bộ khách hàng (worker pool)")
+	log.Info("[CRM] RecalcAll: enqueue recalc toàn bộ khách (AI Decision queue)")
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Minute)
 	defer cancel()
-	svc, err := crmvc.NewCrmCustomerService()
-	if err != nil {
-		log.WithError(err).Warn("[CRM] RecalcAll: NewCrmCustomerService thất bại, bỏ qua")
-		return
-	}
 	poolSize := worker.GetEffectivePoolSize(12, worker.PriorityLow)
-	processed, failed, orgCount, err := svc.RecalculateAllCustomersForAllOrgs(ctx, poolSize)
+	eventID, err := crmqueue.EmitCrmIntelligenceRecalculateAllOrgsRequested(ctx, poolSize)
 	if err != nil {
-		log.WithError(err).Warn("[CRM] RecalcAll: recalc thất bại")
+		log.WithError(err).Warn("[CRM] RecalcAll: ghi event thất bại")
 		return
 	}
 	log.WithFields(map[string]interface{}{
-		"processed": processed,
-		"failed":    failed,
-		"orgCount":  orgCount,
-	}).Info("[CRM] RecalcAll: Hoàn thành recalc toàn bộ khách hàng")
+		"eventId": eventID,
+	}).Info("[CRM] RecalcAll: Đã ghi event — consumer AI Decision sẽ chạy RecalculateAllCustomersForAllOrgs")
 }
 
 // runRecalcMismatchOnStart chạy RecalculateMismatchCustomers và RecalculateOrderCountMismatchCustomers trong goroutine khi khởi động.
@@ -156,39 +190,26 @@ func runRecalcMismatchOnStart(ctx context.Context, orgID primitive.ObjectID, lim
 	}()
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Minute)
 	defer cancel()
-	svc, err := crmvc.NewCrmCustomerService()
-	if err != nil {
-		log.WithError(err).Error("[CRM] RecalcMismatch: NewCrmCustomerService thất bại")
-		return
-	}
 	// 1. Engaged vs visitor mismatch
 	log.WithFields(map[string]interface{}{"orgId": orgID.Hex(), "limit": limit}).
-		Info("[CRM] RecalcMismatch: Bắt đầu recalc engaged/visitor mismatch")
+		Info("[CRM] RecalcMismatch: enqueue engaged/visitor mismatch (AI Decision)")
 	poolSize1 := worker.GetEffectivePoolSize(10, worker.PriorityLow)
-	result1, err := svc.RecalculateMismatchCustomers(ctx, orgID, limit, poolSize1)
+	ev1, err := crmqueue.EmitCrmIntelligenceRecalculateMismatchRequested(ctx, orgID, limit, poolSize1)
 	if err != nil {
-		log.WithError(err).Error("[CRM] RecalcMismatch: Engaged/visitor thất bại")
+		log.WithError(err).Error("[CRM] RecalcMismatch: ghi event engaged/visitor thất bại")
 		return
 	}
-	log.WithFields(map[string]interface{}{
-		"processed": result1.TotalProcessed,
-		"failed":    result1.TotalFailed,
-		"failedIds": result1.FailedIds,
-	}).Info("[CRM] RecalcMismatch: Engaged/visitor hoàn thành")
+	log.WithField("eventId", ev1).Info("[CRM] RecalcMismatch: Đã ghi event engaged/visitor")
 
 	// 2. Order count mismatch (first/repeat/vip/inactive)
-	log.Info("[CRM] RecalcMismatch: Bắt đầu recalc order count mismatch (first/repeat/vip/inactive)")
+	log.Info("[CRM] RecalcMismatch: enqueue order count mismatch (AI Decision)")
 	poolSize2 := worker.GetEffectivePoolSize(12, worker.PriorityLow)
-	result2, err := svc.RecalculateOrderCountMismatchCustomers(ctx, orgID, limit, poolSize2)
+	ev2, err := crmqueue.EmitCrmIntelligenceRecalculateOrderCountMismatchRequested(ctx, orgID, limit, poolSize2)
 	if err != nil {
-		log.WithError(err).Error("[CRM] RecalcMismatch: Order count thất bại")
+		log.WithError(err).Error("[CRM] RecalcMismatch: ghi event order count thất bại")
 		return
 	}
-	log.WithFields(map[string]interface{}{
-		"processed": result2.TotalProcessed,
-		"failed":    result2.TotalFailed,
-		"failedIds": result2.FailedIds,
-	}).Info("[CRM] RecalcMismatch: Order count hoàn thành")
+	log.WithField("eventId", ev2).Info("[CRM] RecalcMismatch: Đã ghi event order count")
 }
 
 // main_thread khởi tạo và chạy Fiber server
@@ -335,6 +356,9 @@ func main() {
 	// Khởi tạo registry
 	InitRegistry()
 
+	// Trung tâm chỉ huy AI Decision: queue depth trong RAM; đồng bộ Mongo lần đầu rồi mỗi ~5 phút (AI_DECISION_METRICS_RECONCILE_SEC)
+	decisionlive.StartCommandCenterReconciler(context.Background())
+
 	// Khởi tạo cơ chế duyệt (pkg/approval engine + bridge)
 	approval.Init()
 
@@ -352,6 +376,13 @@ func main() {
 	for _, arg := range os.Args {
 		if arg == "--seed-ruleintel" {
 			runSeedRuleIntelAndExit()
+		}
+	}
+
+	// Subcommand: --seed-aidecision-dispatch — chỉ seed rule routing consumer AI Decision (nhẹ hơn --seed-ruleintel)
+	for _, arg := range os.Args {
+		if arg == "--seed-aidecision-dispatch" {
+			runSeedAidecisionDispatchAndExit()
 		}
 	}
 
@@ -427,6 +458,9 @@ func main() {
 		}
 	}
 
+	// Report: flush touch trong RAM → MarkDirty (multi-rate ads/order/customer; poll REPORT_REDIS_TOUCH_POLL_TICK_SEC)
+	reg.Register(worker.WorkerReportRedisTouchFlush, worker.NewReportRedisTouchFlushWorker())
+
 	// CRM Ingest Worker
 	reg.Register(worker.WorkerCrmIngest, worker.NewCrmIngestWorker(30*time.Second, 50))
 
@@ -440,7 +474,7 @@ func main() {
 
 	// Ads Workers
 	reg.Register(worker.WorkerAdsExecution, adsworker.NewAdsExecutionWorker(30*time.Second, 10))
-	reg.Register(worker.WorkerAdsAutoPropose, adsworker.NewAdsAutoProposeWorker(30*time.Minute, baseURL))
+	reg.Register(worker.WorkerAdsAutoPropose, aidecisionworker.NewAdsAutoProposeWorker(30*time.Minute, baseURL))
 	reg.Register(worker.WorkerAdsCircuitBreaker, adsworker.NewAdsCircuitBreakerWorker(10*time.Minute))
 	reg.Register(worker.WorkerAdsDailyScheduler, adsworker.NewAdsDailySchedulerWorker(1*time.Minute, baseURL))
 	reg.Register(worker.WorkerAdsPancakeHeartbeat, adsworker.NewAdsPancakeHeartbeatWorker(15*time.Minute))
@@ -475,14 +509,13 @@ func main() {
 	// AI Decision Closure Worker — đóng case quá hạn với closed_timeout (AI_DECISION_CLOSURE_MAX_AGE_HOURS=24)
 	reg.Register(worker.WorkerAIDecisionClosure, aidecisionworker.NewAIDecisionClosureWorker(10*time.Minute))
 
+	// Order Intelligence Pending — poll order_intelligence_pending, tính Raw→L3→Flags tại domain
+	reg.Register(worker.WorkerOrderIntelligencePending, orderintelworker.NewOrderIntelligencePendingWorker(3*time.Second))
+
 	// CRM Context Worker — consume customer.context_requested → load customer → emit customer.context_ready
 	reg.Register(worker.WorkerCrmContext, crmworker.NewCrmContextWorker(5*time.Second))
 
-	// Order Context Worker — consume order.recompute_requested → emit order.flags_emitted
-	reg.Register(worker.WorkerOrderContext, pcworker.NewOrderContextWorker(10*time.Second))
-
-	// Ads Context Worker — consume ads.context_requested → emit ads.context_ready
-	reg.Register(worker.WorkerAdsContext, adsworker.NewAdsContextWorker(30*time.Second))
+	// ads.context_requested → ads.context_ready: xử lý bởi AI Decision Consumer (consumer_dispatch), snapshot từ meta_campaigns.
 
 	// Learning Rule Suggestion Worker — Phase 3: phân tích learning_cases → rule suggestions (LEARNING_RULE_SUGGESTION_ENABLED=true)
 	reg.Register(worker.WorkerLearningRuleSuggestion, learningworker.NewLearningRuleSuggestionWorker(1*time.Hour))

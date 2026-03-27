@@ -1,5 +1,6 @@
 // Package adssvc — Time-based scheduler jobs theo FolkForm v4.1 R02–R07, R10.
-// Reset Budget 05:30, Morning On 06:00, Noon Cut 12:30/14:00, Noon Cut Resume 14:30, Night Off theo mode, Volume Push 16h/18h.
+// Reset Budget 05:30, Morning On 06:00, Noon Cut 12:30/14:00, Noon Cut Resume 14:30, Night Off theo mode.
+// Volume Push 16h/18h: aidecision/adsautop.RunVolumePush (worker daily scheduler).
 package adssvc
 
 import (
@@ -659,56 +660,4 @@ func RunWeeklyFeedbackLoop(ctx context.Context) {
 		}
 	}
 	log.Info("📊 [WEEKLY] Đã chạy Weekly Feedback Loop")
-}
-
-// RunVolumePush chạy 16:00 (BLITZ) hoặc 18:00 (NORMAL). EFFICIENCY không có.
-func RunVolumePush(ctx context.Context, baseURL string) {
-	log := logger.GetAppLogger()
-	accColl, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.MetaAdAccounts)
-	if !ok {
-		return
-	}
-	loc, _ := time.LoadLocation("Asia/Ho_Chi_Minh")
-	now := time.Now().In(loc)
-	h := now.Hour()
-
-	cursor, err := accColl.Find(ctx, bson.M{}, nil)
-	if err != nil {
-		return
-	}
-	defer cursor.Close(ctx)
-
-	for cursor.Next(ctx) {
-		var acc struct {
-			AdAccountId         string              `bson:"adAccountId"`
-			OwnerOrganizationID primitive.ObjectID `bson:"ownerOrganizationId"`
-		}
-		if err := cursor.Decode(&acc); err != nil {
-			continue
-		}
-		// accountMode: chỉ đọc từ ads_meta_config. Fallback NORMAL.
-		cfg, _ := adsconfig.GetConfigForCampaign(ctx, acc.AdAccountId, acc.OwnerOrganizationID)
-		accountMode := ModeNORMAL
-		if cfg != nil && cfg.AccountMode != "" {
-			accountMode = cfg.AccountMode
-		}
-		// BLITZ: 16h, NORMAL: 18h, EFFICIENCY: skip
-		if accountMode == ModeEFFICIENCY {
-			continue
-		}
-		targetHour := 18
-		if accountMode == ModeBLITZ {
-			targetHour = 16
-		}
-		if h != targetHour {
-			continue
-		}
-
-		// Gọi RunAutoPropose — Increase rule sẽ chạy
-		_, err := RunAutoPropose(ctx, baseURL)
-		if err != nil {
-			log.WithError(err).WithFields(map[string]interface{}{"adAccountId": acc.AdAccountId}).Warn("[VOLUME_PUSH] Lỗi")
-		}
-	}
-	log.Info("📈 [VOLUME_PUSH] Đã chạy Volume Push")
 }

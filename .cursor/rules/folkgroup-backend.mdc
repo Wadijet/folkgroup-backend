@@ -18,9 +18,10 @@ alwaysApply: true
 | [domain-logic.md](domain-logic.md) | Layer responsibilities, OwnerOrganizationID, business rules |
 | [api-structure.md](api-structure.md) | Handler pattern, Response format, CRUD ưu tiên |
 | [safety-guardrails.md](safety-guardrails.md) | Error handling, bảo mật, anti-patterns |
-| [docs-protocol.md](docs-protocol.md) | Khi nào đọc docs-shared, cập nhật docs |
+| [docs-protocol.md](docs-protocol.md) | Một nguồn `docs-shared`, khi nào đọc, cập nhật docs |
 | [repo-boundaries.md](repo-boundaries.md) | Backend ownership, không sửa frontend/agent |
 | [read-docs-first.md](read-docs-first.md) | Thứ tự đọc docs trước khi sửa code |
+| [data-contract.md](data-contract.md) | Unified Data Contract — ID, event, action, decision, outcome, queue |
 
 ## 📁 Naming (tóm tắt)
 
@@ -41,10 +42,11 @@ alwaysApply: true
 | 5. Router | `api/internal/api/<module>/router/routes.go` |
 | 6. Collection | Đăng ký trong global |
 
-Tham chiếu: [docs/api/api-overview.md](../../docs/api/api-overview.md), [docs/05-development/cau-truc-code.md](../../docs/05-development/cau-truc-code.md)
+Tham chiếu: [docs/api/api-overview.md](../../docs/api/api-overview.md), [docs/05-development/cau-truc-code.md](../../docs/05-development/cau-truc-code.md), [unified-data-contract.md](../../docs-shared/architecture/data-contract/unified-data-contract.md)
 
 ## ✅ Checklist Nhanh
 
+- [ ] Sửa luồng đồng bộ / `EmitDataChanged` / `decision_events_queue` / CRM ingest sau CRUD? → Đọc [NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md](../../docs/05-development/NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md) — **cấm** thêm `OnDataChanged`, **cấm** side-effect ngoài `applyDatachangedSideEffects`.
 - [ ] Tiếng Việt cho comment và message?
 - [ ] Handler mỏng, logic trong Service?
 - [ ] Response đúng format (`code`, `message`, `data`, `status`)?
@@ -52,9 +54,12 @@ Tham chiếu: [docs/api/api-overview.md](../../docs/api/api-overview.md), [docs/
 - [ ] Ưu tiên CRUD trước endpoint mới?
 - [ ] CRUD override: logic riêng → gọi BaseService/BaseServiceMongoImpl (không gọi collection trực tiếp)?
 - [ ] Public functions có comment Tiếng Việt?
+- [ ] Chạm ID công khai / payload event / `decision_events_queue` / Action–Execution / Rule I/O / Decision packet / Outcome? → Tuân [data-contract.md](data-contract.md) (§1: **bốn lớp** `_id` | canonical `uid`/prefix | `sourceIds` | `links`/`entityRefs`) và [unified-data-contract.md](../../docs-shared/architecture/data-contract/unified-data-contract.md) — trace envelope / debounce / case / CIX: **§2.5b** + [NGUYEN_TAC §9](../../docs/05-development/NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md).
 
 ## 📚 Docs
 
 - [docs/README.md](../../docs/README.md) — Entry point
 - [docs/module-map/backend-module-map.md](../../docs/module-map/backend-module-map.md) — Map module
 - [docs/09-ai-context/README.md](../../docs/09-ai-context/README.md) — Quy tắc thiết kế
+- [docs/05-development/NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md](../../docs/05-development/NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md) — CRUD → hook → AI Decision (bắt buộc khi chạm luồng này)
+- [docs-shared/architecture/data-contract/unified-data-contract.md](../../docs-shared/architecture/data-contract/unified-data-contract.md) — Hợp đồng dữ liệu toàn hệ (bắt buộc khi thiết kế identifier / event / action / decision / outcome)

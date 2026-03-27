@@ -8,6 +8,7 @@
 - **Cấu hình:** Env + **API runtime** (`GET/PUT /api/v1/system/worker-config`) — thay đổi interval, batch, pool size, retention, alert webhook mà không cần restart
 - **Throttle:** Controller theo dõi CPU/RAM; khi quá ngưỡng → Throttled (interval × multiplier, Lowest skip) hoặc Paused (chỉ Critical chạy)
 - **Report schedules:** ads, order, customer có interval/batch riêng; 3 worker độc lập (report_dirty_ads, report_dirty_order, report_dirty_customer) — config riêng từng worker
+- **Báo cáo từ CRUD:** `datachanged` → consumer ghi **touch Redis** (`ff:rt:*`); worker **report_redis_touch_flush** định kỳ quét Redis → **MarkDirty** vào `report_dirty_periods` → các `report_dirty_*` Compute như cũ. Cần **REDIS_ADDR**; endpoint API `MarkDirty`/recompute vẫn dùng được độc lập
 - **Chi tiết:** [WORKER_CONFIG_ENV_VARS.md](../../05-development/WORKER_CONFIG_ENV_VARS.md)
 
 ---

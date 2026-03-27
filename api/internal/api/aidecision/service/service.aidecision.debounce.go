@@ -24,8 +24,9 @@ const eventGroupMessageBurst = "message_burst"
 var criticalPatterns = []string{"huỷ đơn", "hủy đơn", "cancel", "tôi muốn huỷ"}
 
 // UpsertDebounceState cập nhật debounce state khi có event mới.
+// traceID/correlationID chỉ ghi lần đầu ($setOnInsert) — giữ cùng chuỗi với datachanged gốc.
 // Trả về shouldFlushImmediate=true nếu match critical pattern.
-func (s *AIDecisionService) UpsertDebounceState(ctx context.Context, orgID string, ownerOrgID primitive.ObjectID, conversationID, customerID, channel, eventID string, payload map[string]interface{}) (shouldFlushImmediate bool, err error) {
+func (s *AIDecisionService) UpsertDebounceState(ctx context.Context, orgID string, ownerOrgID primitive.ObjectID, conversationID, customerID, channel, eventID, traceID, correlationID string, payload map[string]interface{}) (shouldFlushImmediate bool, err error) {
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.DecisionDebounceState)
 	if !ok {
 		return false, nil
@@ -57,7 +58,11 @@ func (s *AIDecisionService) UpsertDebounceState(ctx context.Context, orgID strin
 			"channel":        channel,
 			"lastEventId":    eventID,
 			"lastMessageAt":  now,
-			"createdAt":      now,
+		},
+		"$setOnInsert": bson.M{
+			"traceId":       strings.TrimSpace(traceID),
+			"correlationId": strings.TrimSpace(correlationID),
+			"createdAt":     now,
 		},
 	}
 	opts := options.Update().SetUpsert(true)
@@ -89,14 +94,16 @@ func (s *AIDecisionService) FlushExpired(ctx context.Context) (int, error) {
 	emitted := 0
 	for _, st := range states {
 		_, err = s.EmitEvent(ctx, &EmitEventInput{
-			EventType:   "message.batch_ready",
-			EventSource: "debounce",
-			EntityType:  "conversation",
-			EntityID:    st.ConversationID,
-			OrgID:       st.OrgID,
-			OwnerOrgID:  st.OwnerOrgID,
-			Priority:    "high",
-			Lane:        "fast",
+			EventType:     "message.batch_ready",
+			EventSource:   "debounce",
+			EntityType:    "conversation",
+			EntityID:      st.ConversationID,
+			OrgID:         st.OrgID,
+			OwnerOrgID:    st.OwnerOrgID,
+			Priority:      "high",
+			Lane:          "fast",
+			TraceID:       strings.TrimSpace(st.TraceID),
+			CorrelationID: strings.TrimSpace(st.CorrelationID),
 			Payload: map[string]interface{}{
 				"conversationId":      st.ConversationID,
 				"customerId":          st.CustomerID,

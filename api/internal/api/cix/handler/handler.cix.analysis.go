@@ -6,6 +6,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
+	aidecisionsvc "meta_commerce/internal/api/aidecision/service"
 	cixdto "meta_commerce/internal/api/cix/dto"
 	cixsvc "meta_commerce/internal/api/cix/service"
 	"meta_commerce/internal/common"
@@ -59,7 +60,8 @@ func toResponseMap(r *cixdto.CixAnalysisResponse) fiber.Map {
 	}
 }
 
-// HandleAnalyzeSession POST /cix/analyze — Phân tích session (sessionUid, customerUid).
+// HandleAnalyzeSession POST /cix/analyze — Ghi cix.analysis_requested vào queue AI Decision (không gọi AnalyzeSession đồng bộ).
+// Kết quả: CixRequestWorker → cix_pending_analysis → CixAnalysisWorker; dùng GET /cix/analysis/:sessionUid để poll.
 func (h *CixAnalysisHandler) HandleAnalyzeSession(c fiber.Ctx) error {
 	ctx := c.Context()
 	orgID := getActiveOrganizationID(c)
@@ -82,15 +84,21 @@ func (h *CixAnalysisHandler) HandleAnalyzeSession(c fiber.Ctx) error {
 		})
 		return nil
 	}
-	result, err := h.svc.AnalyzeSession(ctx, req.SessionUid, req.CustomerUid, *orgID)
+	eventID, err := aidecisionsvc.EmitCixAnalysisRequested(ctx, req.SessionUid, req.CustomerUid, req.Channel, *orgID, "", "", "")
 	if err != nil {
-		errCode, msg, statusCode := common.GetErrorResponseInfo(err, "Phân tích session thất bại")
+		errCode, msg, statusCode := common.GetErrorResponseInfo(err, "Không thể đưa yêu cầu phân tích vào queue AI Decision")
 		c.Status(statusCode).JSON(fiber.Map{"code": errCode, "message": msg, "status": "error"})
 		return nil
 	}
-	resp := cixsvc.ToCixAnalysisResponse(result)
-	c.Status(common.StatusOK).JSON(fiber.Map{
-		"code": "0", "message": "OK", "data": toResponseMap(resp), "status": "success",
+	c.Status(common.StatusAccepted).JSON(fiber.Map{
+		"code":    common.StatusAccepted,
+		"message": "Đã đưa yêu cầu phân tích CIX vào queue AI Decision (CixRequestWorker → cix_pending_analysis)",
+		"data": fiber.Map{
+			"eventId":   eventID,
+			"sessionUid": req.SessionUid,
+			"status":    "queued",
+		},
+		"status": "success",
 	})
 	return nil
 }

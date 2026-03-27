@@ -21,7 +21,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// LearningCaseService service CRUD cho decision_cases.
+// LearningCaseService service CRUD cho learning_cases.
 type LearningCaseService struct{}
 
 // NewLearningCaseService tạo service.
@@ -40,6 +40,7 @@ func (s *LearningCaseService) getColl() (*mongo.Collection, error) {
 
 // CreateLearningCaseFromAction build LearningCase từ ActionPending và lưu.
 // Gọi khi ActionPending đóng vòng đời — từ worker (executed/failed) hoặc handler (rejected).
+// Supplement §7.2: không ghi learning đầy đủ khi decision case đóng timeout/manual/proposed (trừ khi env tắt skip).
 func CreateLearningCaseFromAction(ctx context.Context, ap *pkgapproval.ActionPending) (*models.LearningCase, error) {
 	if ap == nil {
 		return nil, nil
@@ -47,6 +48,9 @@ func CreateLearningCaseFromAction(ctx context.Context, ap *pkgapproval.ActionPen
 	lc, err := BuildLearningCaseFromAction(ctx, ap)
 	if err != nil {
 		return nil, err
+	}
+	if shouldSkipLearningForDecisionClosure(lc.DecisionCaseClosureType) {
+		return nil, nil
 	}
 	svc := NewLearningCaseService()
 	return svc.CreateLearningCase(ctx, lc)

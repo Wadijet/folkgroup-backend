@@ -166,20 +166,42 @@ func (am *AuthManager) getUserPermissions(userID string, activeRoleID *primitive
 	return permissions, nil
 }
 
+// bearerAuthFromRequest ưu tiên header Authorization; nếu rỗng thì dùng query access_token hoặc token.
+// WebSocket trên Chrome/Flutter Web không gửi được custom header trên handshake — client thường truyền ?access_token=...
+func bearerAuthFromRequest(c fiber.Ctx) string {
+	h := strings.TrimSpace(c.Get("Authorization"))
+	if h != "" {
+		return h
+	}
+	if t := strings.TrimSpace(c.Query("access_token")); t != "" {
+		return "Bearer " + t
+	}
+	if t := strings.TrimSpace(c.Query("token")); t != "" {
+		return "Bearer " + t
+	}
+	return ""
+}
+
+// activeRoleIDFromRequest ưu tiên X-Active-Role-ID; fallback query role_id (cùng use case WS trình duyệt).
+func activeRoleIDFromRequest(c fiber.Ctx) string {
+	if s := strings.TrimSpace(c.Get("X-Active-Role-ID")); s != "" {
+		return s
+	}
+	return strings.TrimSpace(c.Query("role_id"))
+}
+
 // AuthMiddleware middleware xác thực cho Fiber
 func AuthMiddleware(requirePermission string) fiber.Handler {
 	// Sử dụng singleton instance của AuthManager
 	authManager := GetAuthManager()
 
 	return func(c fiber.Ctx) error {
-		// Lấy token từ header
-		authHeader := c.Get("Authorization")
+		authHeader := bearerAuthFromRequest(c)
 		if authHeader == "" {
-			// Chỉ log khi thiếu token (lỗi quan trọng)
 			logger.GetAppLogger().WithFields(logrus.Fields{
 				"path":   c.Path(),
 				"method": c.Method(),
-			}).Warn("❌ [AUTH] Missing Authorization header")
+			}).Warn("❌ [AUTH] Thiếu Authorization và thiếu access_token/token trên query")
 			HandleErrorResponse(c, common.ErrTokenMissing)
 			return nil
 		}
@@ -268,8 +290,7 @@ func enforceActiveRolePermission(c fiber.Ctx, authManager *AuthManager, user aut
 		return true
 	}
 
-	// Lấy active role ID từ header (role context)
-	activeRoleIDStr := c.Get("X-Active-Role-ID")
+	activeRoleIDStr := activeRoleIDFromRequest(c)
 
 	if activeRoleIDStr == "" {
 		logger.GetAppLogger().WithFields(logrus.Fields{
@@ -277,10 +298,10 @@ func enforceActiveRolePermission(c fiber.Ctx, authManager *AuthManager, user aut
 			"user_email": user.Email,
 			"path":       c.Path(),
 			"permission": requirePermission,
-		}).Warn("❌ [AUTH] Missing X-Active-Role-ID header")
+		}).Warn("❌ [AUTH] Thiếu X-Active-Role-ID và thiếu role_id trên query")
 		HandleErrorResponse(c, common.NewError(
 			common.ErrCodeAuthRole,
-			"Thiếu header X-Active-Role-ID. Vui lòng chọn role để làm việc.",
+			"Thiếu header X-Active-Role-ID hoặc query role_id. Vui lòng chọn role để làm việc.",
 			common.StatusBadRequest,
 			nil,
 		))

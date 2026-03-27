@@ -5,6 +5,7 @@ package aidecisionsvc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 
 	"meta_commerce/internal/approval"
@@ -17,12 +18,19 @@ import (
 
 // Event types cho propose request (Vision 08 event-driven).
 const (
+	// EventTypeExecutorProposeRequested — chuẩn duy nhất: mọi domain (payload.domain).
+	EventTypeExecutorProposeRequested = "executor.propose_requested"
+	// EventTypeAdsProposeRequested — alias lịch sử; consumer xử lý giống executor.propose_requested.
 	EventTypeAdsProposeRequested = "ads.propose_requested"
+	EventTypeExecuteRequested    = "aidecision.execute_requested" // AI Decision: chỉ worker được gọi ExecuteWithCase
 )
 
-// EmitAdsProposeRequest emit event ads.propose_requested — Ads gọi thay vì ProposeForAds.
-// Consumer sẽ xử lý và gọi ProposeForAds.
-func EmitAdsProposeRequest(ctx context.Context, proposeInput approval.ProposeInput, ownerOrgID primitive.ObjectID, baseURL string) (eventID string, err error) {
+// EmitExecutorProposeRequest ghi queue AI Decision — không gọi approval.Propose trực tiếp từ API domain.
+// Consumer gọi ProposeForAds (ads) hoặc approval.Propose (domain khác).
+func EmitExecutorProposeRequest(ctx context.Context, domain string, proposeInput approval.ProposeInput, ownerOrgID primitive.ObjectID, baseURL string) (eventID string, err error) {
+	if domain == "" {
+		return "", fmt.Errorf("domain không được để trống")
+	}
 	if baseURL == "" {
 		baseURL = os.Getenv("BASE_URL")
 	}
@@ -30,6 +38,7 @@ func EmitAdsProposeRequest(ctx context.Context, proposeInput approval.ProposeInp
 		baseURL = "https://localhost"
 	}
 	payload := buildProposeEventPayload(proposeInput, ownerOrgID, baseURL)
+	payload["domain"] = domain
 	entityID := ""
 	if proposeInput.Payload != nil {
 		if cid, ok := proposeInput.Payload["campaignId"].(string); ok {
@@ -38,15 +47,15 @@ func EmitAdsProposeRequest(ctx context.Context, proposeInput approval.ProposeInp
 	}
 	svc := NewAIDecisionService()
 	res, err := svc.EmitEvent(ctx, &EmitEventInput{
-		EventType:   EventTypeAdsProposeRequested,
-		EventSource: "ads",
-		EntityType:  "campaign",
-		EntityID:   entityID,
-		OrgID:      ownerOrgID.Hex(),
-		OwnerOrgID: ownerOrgID,
-		Priority:   "high",
-		Lane:       aidecisionmodels.EventLaneFast,
-		Payload:    payload,
+		EventType:   EventTypeExecutorProposeRequested,
+		EventSource: domain,
+		EntityType:  domain,
+		EntityID:    entityID,
+		OrgID:       ownerOrgID.Hex(),
+		OwnerOrgID:  ownerOrgID,
+		Priority:    "high",
+		Lane:        aidecisionmodels.EventLaneFast,
+		Payload:     payload,
 	})
 	if err != nil {
 		return "", err
@@ -54,15 +63,20 @@ func EmitAdsProposeRequest(ctx context.Context, proposeInput approval.ProposeInp
 	return res.EventID, nil
 }
 
+// EmitAdsProposeRequest emit executor.propose_requested (domain=ads) — thay cho Ads gọi ProposeForAds trực tiếp.
+func EmitAdsProposeRequest(ctx context.Context, proposeInput approval.ProposeInput, ownerOrgID primitive.ObjectID, baseURL string) (eventID string, err error) {
+	return EmitExecutorProposeRequest(ctx, "ads", proposeInput, ownerOrgID, baseURL)
+}
+
 func buildProposeEventPayload(proposeInput approval.ProposeInput, ownerOrgID primitive.ObjectID, baseURL string) map[string]interface{} {
 	payload := map[string]interface{}{
-		"ownerOrgIdHex": ownerOrgID.Hex(),
-		"baseURL":       baseURL,
-		"actionType":    proposeInput.ActionType,
-		"reason":        proposeInput.Reason,
+		"ownerOrgIdHex":    ownerOrgID.Hex(),
+		"baseURL":          baseURL,
+		"actionType":       proposeInput.ActionType,
+		"reason":           proposeInput.Reason,
 		"eventTypePending": proposeInput.EventTypePending,
-		"approvePath":   proposeInput.ApprovePath,
-		"rejectPath":    proposeInput.RejectPath,
+		"approvePath":      proposeInput.ApprovePath,
+		"rejectPath":       proposeInput.RejectPath,
 	}
 	if proposeInput.Payload != nil {
 		payload["payload"] = proposeInput.Payload

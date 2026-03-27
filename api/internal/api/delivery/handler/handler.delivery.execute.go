@@ -1,7 +1,7 @@
 // Package deliveryhdl — Handler cho Execution Engine.
 //
 // HandleExecute POST /executor/execute — nhận ExecutionActionInput, validate, route, thực thi.
-// Gate: Mọi action phải qua Executor. Gọi POST /executor/actions/propose hoặc POST /ai-decision/execute.
+// Gate: Mọi action phải qua Executor. Gọi POST /executor/actions/propose hoặc POST /ai-decision/execute (enqueue event).
 // Khi DELIVERY_ALLOW_DIRECT_USE=true (env) cho phép gọi trực tiếp (deprecated, backward compat).
 package deliveryhdl
 

@@ -55,11 +55,32 @@ type RuleAppliedEntry struct {
 	Output       string `json:"output,omitempty" bson:"output,omitempty"`
 }
 
+// LearningActionLifecycle mốc thời gian trên action_pending khi đóng (Unix milliseconds).
+type LearningActionLifecycle struct {
+	ProposedAt       int64  `json:"proposedAt,omitempty" bson:"proposedAt,omitempty"`
+	ApprovedAt       int64  `json:"approvedAt,omitempty" bson:"approvedAt,omitempty"`
+	RejectedAt       int64  `json:"rejectedAt,omitempty" bson:"rejectedAt,omitempty"`
+	ExecutedAt       int64  `json:"executedAt,omitempty" bson:"executedAt,omitempty"`
+	FinalStatus      string `json:"finalStatus,omitempty" bson:"finalStatus,omitempty"` // executed | rejected | failed | cancelled
+	IdempotencyKey   string `json:"idempotencyKey,omitempty" bson:"idempotencyKey,omitempty"`
+	ActionCreatedAt  int64  `json:"actionCreatedAt,omitempty" bson:"actionCreatedAt,omitempty"`
+	ActionUpdatedAt  int64  `json:"actionUpdatedAt,omitempty" bson:"actionUpdatedAt,omitempty"`
+}
+
 // LearningCase document lưu trong learning_cases — schema vision 11.
 type LearningCase struct {
 	ID                   primitive.ObjectID   `json:"id,omitempty" bson:"_id,omitempty"`
 	CaseId               string               `json:"caseId,omitempty" bson:"caseId,omitempty"` // dc_xxx — cho manual create, builder sinh từ sourceRefId
 	DecisionID           string               `json:"decisionId,omitempty" bson:"decisionId,omitempty"`
+	// DecisionCaseID neo ngược decision_cases_runtime — tra cứu E2E cùng executionTraceId / queue event.
+	DecisionCaseID       string               `json:"decisionCaseId,omitempty" bson:"decisionCaseId,omitempty" index:"single:1"`
+	// CorrelationID từ envelope queue / payload (nếu có).
+	CorrelationID        string               `json:"correlationId,omitempty" bson:"correlationId,omitempty" index:"single:1"`
+	// AIDecisionProposeEventID eventId (evt_*) của bản ghi decision_events_queue đã gọi propose.
+	AIDecisionProposeEventID string           `json:"aidecisionProposeEventId,omitempty" bson:"aidecisionProposeEventId,omitempty" index:"single:1"`
+	ParentEventID        string               `json:"parentEventId,omitempty" bson:"parentEventId,omitempty"`
+	RootEventID          string               `json:"rootEventId,omitempty" bson:"rootEventId,omitempty"`
+	ActionLifecycle      LearningActionLifecycle `json:"actionLifecycle,omitempty" bson:"actionLifecycle,omitempty"`
 	EntityType           string               `json:"entityType" bson:"entityType"`     // session | campaign | action_pending | touchpoint_plan
 	EntityID             string               `json:"entityId" bson:"entityId"`
 	ContextSnapshot      map[string]interface{} `json:"contextSnapshot,omitempty" bson:"contextSnapshot,omitempty"`
@@ -68,7 +89,7 @@ type LearningCase struct {
 	ParamVersion         string               `json:"paramVersion,omitempty" bson:"paramVersion,omitempty"`
 	Decision             map[string]interface{} `json:"decision,omitempty" bson:"decision,omitempty"`
 	ActionExecuted       map[string]interface{} `json:"actionExecuted,omitempty" bson:"actionExecuted,omitempty"`
-	ExecutionTraceID     string               `json:"executionTraceId,omitempty" bson:"executionTraceId,omitempty"`
+	ExecutionTraceID     string               `json:"executionTraceId,omitempty" bson:"executionTraceId,omitempty" index:"single:1"`
 	Outcome              LearningOutcome      `json:"outcome,omitempty" bson:"outcome,omitempty"`
 	Evaluation           LearningEvaluation   `json:"evaluation,omitempty" bson:"evaluation,omitempty"`
 	Learning             LearningLearning     `json:"learning,omitempty" bson:"learning,omitempty"`
@@ -87,6 +108,8 @@ type LearningCase struct {
 	GoalCode     string `json:"goalCode,omitempty" bson:"goalCode,omitempty"`
 	TargetType   string `json:"targetType,omitempty" bson:"targetType,omitempty"`
 	TargetId     string `json:"targetId,omitempty" bson:"targetId,omitempty"`
+	// DecisionCaseClosureType đồng bộ từ decision_cases_runtime khi action gắn decisionCaseId (vd. closed_complete).
+	DecisionCaseClosureType string `json:"decisionCaseClosureType,omitempty" bson:"decisionCaseClosureType,omitempty"`
 }
 
 // Entity type constants

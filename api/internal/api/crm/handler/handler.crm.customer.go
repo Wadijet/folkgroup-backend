@@ -8,6 +8,7 @@ import (
 	"time"
 
 	basehdl "meta_commerce/internal/api/base/handler"
+	crmqueue "meta_commerce/internal/api/aidecision/crmqueue"
 	crmdto "meta_commerce/internal/api/crm/dto"
 	crmmodels "meta_commerce/internal/api/crm/models"
 	crmvc "meta_commerce/internal/api/crm/service"
@@ -143,8 +144,8 @@ func (h *CrmCustomerHandler) HandleRebuildCrm(c fiber.Ctx) error {
 	})
 }
 
-// HandleRecalculateAllCustomers xử lý POST /customers/recalculate-all — đưa N job batch tính toán lại tất cả khách vào queue.
-// Body: ownerOrganizationId, batchSize (mặc định 200 — số khách mỗi batch, restart chỉ mất 1 batch).
+// HandleRecalculateAllCustomers xử lý POST /customers/recalculate-all — một event AI Decision recalculate toàn bộ khách theo org (limit=0).
+// Body: ownerOrganizationId, batchSize (tùy chọn — dùng làm poolSize worker; mặc định 12).
 func (h *CrmCustomerHandler) HandleRecalculateAllCustomers(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {
 		var input struct {
@@ -170,31 +171,27 @@ func (h *CrmCustomerHandler) HandleRecalculateAllCustomers(c fiber.Ctx) error {
 			})
 			return nil
 		}
-		batchSize := input.BatchSize
-		if batchSize <= 0 {
-			batchSize = 200
+		poolSize := input.BatchSize
+		if poolSize <= 0 {
+			poolSize = 12
 		}
-		jobIDs, err := h.BulkJobService.EnqueueRecalculateAllBatches(c.Context(), *orgID, batchSize, input.IsPriority)
+		eventID, err := crmqueue.EmitCrmIntelligenceRecalculateAllRequested(c.Context(), *orgID, 0, poolSize)
 		if err != nil {
 			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
-				"code": common.ErrCodeDatabase.Code, "message": "Lỗi đưa job vào queue: " + err.Error(), "status": "error",
+				"code": common.ErrCodeDatabase.Code, "message": "Lỗi ghi event AI Decision: " + err.Error(), "status": "error",
 			})
 			return nil
 		}
-		jobIdStrs := make([]string, len(jobIDs))
-		for i, id := range jobIDs {
-			jobIdStrs[i] = id.Hex()
-		}
 		c.Status(common.StatusAccepted).JSON(fiber.Map{
-			"code": common.StatusAccepted, "message": "Các job tính toán lại tất cả khách đã được đưa vào queue, worker sẽ xử lý từng batch",
-			"data": fiber.Map{"jobIds": jobIdStrs, "totalBatches": len(jobIDs), "status": "queued"},
+			"code": common.StatusAccepted, "message": "Đã đưa tính toán lại toàn bộ khách (theo org) vào queue AI Decision",
+			"data": fiber.Map{"eventId": eventID, "status": "queued_ai_decision"},
 			"status": "success",
 		})
 		return nil
 	})
 }
 
-// HandleRecalculateCustomer xử lý POST /customers/:unifiedId/recalculate — đưa job tính toán lại 1 khách vào queue.
+// HandleRecalculateCustomer xử lý POST /customers/:unifiedId/recalculate — ghi event recalculate một khách vào queue AI Decision.
 func (h *CrmCustomerHandler) HandleRecalculateCustomer(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {
 		unifiedId := c.Params("unifiedId")
@@ -211,21 +208,19 @@ func (h *CrmCustomerHandler) HandleRecalculateCustomer(c fiber.Ctx) error {
 			})
 			return nil
 		}
-		var input struct {
-			IsPriority bool `json:"isPriority"` // Job ưu tiên: bắt buộc chạy ngay, không bị throttle
-		}
-		_ = c.Bind().Body(&input)
-		params := bson.M{"unifiedId": unifiedId}
-		jobID, err := h.BulkJobService.Enqueue(c.Context(), crmmodels.CrmBulkJobRecalculateOne, *orgID, params, input.IsPriority)
+		_ = c.Bind().Body(&struct {
+			IsPriority bool `json:"isPriority"`
+		}{})
+		eventID, err := crmqueue.EmitCrmIntelligenceRecalculateOneRequested(c.Context(), unifiedId, *orgID)
 		if err != nil {
 			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
-				"code": common.ErrCodeDatabase.Code, "message": "Lỗi đưa job vào queue: " + err.Error(), "status": "error",
+				"code": common.ErrCodeDatabase.Code, "message": "Lỗi ghi event AI Decision: " + err.Error(), "status": "error",
 			})
 			return nil
 		}
 		c.Status(common.StatusAccepted).JSON(fiber.Map{
-			"code": common.StatusAccepted, "message": "Job tính toán lại khách hàng đã được đưa vào queue, worker sẽ xử lý",
-			"data": fiber.Map{"jobId": jobID.Hex(), "status": "queued"},
+			"code": common.StatusAccepted, "message": "Đã đưa tính toán lại khách hàng vào queue AI Decision",
+			"data": fiber.Map{"eventId": eventID, "status": "queued_ai_decision"},
 			"status": "success",
 		})
 		return nil

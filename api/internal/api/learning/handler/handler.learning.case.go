@@ -103,6 +103,22 @@ func HandleListLearningCases(c fiber.Ctx) error {
 		if targetId := c.Query("targetId"); targetId != "" {
 			filter["targetId"] = targetId
 		}
+		// Lọc theo action_pending._id hex — phục vụ E2E CIO → Executor → Learning
+		if sourceRefId := c.Query("sourceRefId"); sourceRefId != "" {
+			filter["sourceRefId"] = sourceRefId
+		}
+		if decisionCaseId := c.Query("decisionCaseId"); decisionCaseId != "" {
+			filter["decisionCaseId"] = decisionCaseId
+		}
+		if traceId := c.Query("traceId"); traceId != "" {
+			filter["executionTraceId"] = traceId
+		}
+		if correlationId := c.Query("correlationId"); correlationId != "" {
+			filter["correlationId"] = correlationId
+		}
+		if proposeEventId := c.Query("aidecisionProposeEventId"); proposeEventId != "" {
+			filter["aidecisionProposeEventId"] = proposeEventId
+		}
 
 		limit := 50
 		if s := c.Query("limit"); s != "" {

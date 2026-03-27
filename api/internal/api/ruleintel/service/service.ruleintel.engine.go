@@ -61,11 +61,13 @@ func NewRuleEngineService() (*RuleEngineService, error) {
 
 // RunInput input khi gọi Rule Engine.
 type RunInput struct {
-	RuleID        string                 `json:"rule_id"`
-	Domain        string                 `json:"domain"`
-	EntityRef     models.EntityRef      `json:"entity_ref"`
-	Layers        map[string]interface{} `json:"layers"`
+	RuleID         string                 `json:"rule_id"`
+	Domain         string                 `json:"domain"`
+	EntityRef      models.EntityRef       `json:"entity_ref"`
+	Layers         map[string]interface{} `json:"layers"`
 	ParamsOverride map[string]interface{} `json:"params_override,omitempty"`
+	// SkipTrace true: không ghi rule_execution_logs (dùng cho routing nóng, tránh đầy trace).
+	SkipTrace bool `json:"skip_trace,omitempty"`
 }
 
 // Run chạy rule theo rule_id, trả về output và report.
@@ -143,9 +145,11 @@ func (s *RuleEngineService) Run(ctx context.Context, input *RunInput) (*engine.R
 		trace.Explanation = map[string]interface{}{"log": errMsg, "result": "error"}
 	}
 
-	if err := s.saveTrace(ctx, trace); err != nil {
-		// Log nhưng không fail
-		_ = err
+	if !input.SkipTrace {
+		if err := s.saveTrace(ctx, trace); err != nil {
+			// Log nhưng không fail
+			_ = err
+		}
 	}
 
 	if err != nil {

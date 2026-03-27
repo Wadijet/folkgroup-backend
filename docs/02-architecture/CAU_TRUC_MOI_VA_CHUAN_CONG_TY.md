@@ -38,10 +38,10 @@
 
 ### 1.2c Tách domain Report (đã làm, đủ service/ + dto/ + handler/)
 
-- **api/internal/api/report/service/** (package **reportsvc**): Service – `service.report.go`, `service.report.engine.go` (ReportService: definitions, snapshots, dirty_periods; Compute, MarkDirty, FindSnapshotsForTrend, GetUnprocessedDirtyPeriods, SetDirtyProcessed). Không embed BaseServiceMongoImpl.
+- **api/internal/api/report/service/** (package **reportsvc**): Service – `service.report.go`, `service.report.engine.go`, `service.report.redis_touch.go` (touch Redis `ff:rt:*` + flush → MarkDirty), `service.report.hooks.go` (helper `markDirtyForPeriods`). ReportService: definitions, snapshots, dirty_periods; Compute, MarkDirty, … Không embed BaseServiceMongoImpl.
 - **api/internal/api/report/dto/** (package **reportdto**): DTO – `dto.report.go` (ReportTrendQuery, ReportRecomputeBody).
 - **api/internal/api/report/handler/** (package **reporthdl**): Handler – `handler.report.go` (HandleTrend, HandleRecompute). Gọi handler.SafeHandlerWrapper.
-- Router (facebook_routes.go) dùng reporthdl.NewReportHandler(); worker report_dirty_worker và service.pc.pos.order import reportsvc từ api/internal/api/report/service.
+- Router (facebook_routes.go) dùng reporthdl.NewReportHandler(); worker **report_dirty_worker** + **report_redis_touch_worker**; consumer AI Decision gọi `RecordReportTouchFromDataChange` (không MarkDirty tức thì từ `datachanged`).
 
 ### 1.3 Cấu trúc thư mục hiện tại (tóm tắt)
 

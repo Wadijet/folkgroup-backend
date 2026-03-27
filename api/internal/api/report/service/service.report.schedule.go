@@ -1,5 +1,5 @@
 // Package reportsvc - Cấu hình lịch chạy ReportDirtyWorker theo từng domain (ads, order, customer).
-// Mỗi domain có interval và batch riêng, config qua env hoặc API runtime.
+// Mỗi domain có interval và batch riêng (override qua env/API); mặc định chung: nhanh và đồng nhất.
 package reportsvc
 
 import (
@@ -9,6 +9,15 @@ import (
 	"sync"
 	"time"
 )
+
+// Mặc định chung cho cả ba domain (có thể tách qua REPORT_*_INTERVAL / API).
+const (
+	defaultReportDirtyInterval = 30 * time.Second
+	defaultReportDirtyBatch    = 20
+)
+
+// Ngưỡng tối thiểu interval từ env/API (tránh tick quá dày gây tải DB).
+const minReportDirtyInterval = 5 * time.Second
 
 // ReportScheduleConfig cấu hình lịch chạy cho một nhóm reportKeys (vd: ads_daily, order_daily, customer_daily).
 type ReportScheduleConfig struct {
@@ -82,7 +91,7 @@ func getEffectiveScheduleConfig(domain string, envInterval string, envBatch stri
 	var batch int
 	if hasOverride && ov.Interval != "" {
 		d, err := time.ParseDuration(ov.Interval)
-		if err == nil && d >= time.Minute {
+		if err == nil && d >= minReportDirtyInterval {
 			interval = d
 		} else {
 			interval = parseReportInterval(envInterval, defaultInterval)
@@ -101,9 +110,9 @@ func getEffectiveScheduleConfig(domain string, envInterval string, envBatch stri
 // GetReportScheduleConfigs trả về cấu hình lịch chạy cho 3 domain.
 // Thứ tự: API override > env > default. Dùng cho worker và API GET.
 func GetReportScheduleConfigs() []ReportScheduleConfig {
-	adsInterval, adsBatch := getEffectiveScheduleConfig("ads", "REPORT_ADS_INTERVAL", "REPORT_ADS_BATCH", 2*time.Minute, 20)
-	orderInterval, orderBatch := getEffectiveScheduleConfig("order", "REPORT_ORDER_INTERVAL", "REPORT_ORDER_BATCH", 5*time.Minute, 15)
-	customerInterval, customerBatch := getEffectiveScheduleConfig("customer", "REPORT_CUSTOMER_INTERVAL", "REPORT_CUSTOMER_BATCH", 10*time.Minute, 10)
+	adsInterval, adsBatch := getEffectiveScheduleConfig("ads", "REPORT_ADS_INTERVAL", "REPORT_ADS_BATCH", defaultReportDirtyInterval, defaultReportDirtyBatch)
+	orderInterval, orderBatch := getEffectiveScheduleConfig("order", "REPORT_ORDER_INTERVAL", "REPORT_ORDER_BATCH", defaultReportDirtyInterval, defaultReportDirtyBatch)
+	customerInterval, customerBatch := getEffectiveScheduleConfig("customer", "REPORT_CUSTOMER_INTERVAL", "REPORT_CUSTOMER_BATCH", defaultReportDirtyInterval, defaultReportDirtyBatch)
 
 	return []ReportScheduleConfig{
 		{Name: "ads", ReportKeys: []string{"ads_daily"}, Interval: adsInterval, BatchSize: adsBatch},
@@ -112,7 +121,7 @@ func GetReportScheduleConfigs() []ReportScheduleConfig {
 	}
 }
 
-// parseReportInterval đọc duration từ env. Hỗ trợ: "2m", "15m", "1h", "24h".
+// parseReportInterval đọc duration từ env. Hỗ trợ: "30s", "2m", "1h", "24h" (tối thiểu 5s).
 func parseReportInterval(envKey string, defaultVal time.Duration) time.Duration {
 	v := strings.TrimSpace(os.Getenv(envKey))
 	if v == "" {
@@ -122,7 +131,7 @@ func parseReportInterval(envKey string, defaultVal time.Duration) time.Duration 
 	if err != nil {
 		return defaultVal
 	}
-	if d < time.Minute {
+	if d < minReportDirtyInterval {
 		return defaultVal
 	}
 	return d

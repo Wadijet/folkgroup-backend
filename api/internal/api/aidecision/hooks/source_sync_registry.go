@@ -16,7 +16,7 @@ var (
 
 // sourceSyncPrefixesMap trả về map collection → tiền tố event (entity.inserted / entity.updated).
 // Không gồm: auth, notification, delivery, CTA, agent, content, AI, report, queue worker CRM,
-// approval/ads internal, decision/learning/rule/cix — chỉ bản ghi nghiệp vụ / mirror API ngoài.
+// approval/ads internal, decision/learning/rule (trừ cix_analysis_results — fan-in AID sau tính CIX).
 func sourceSyncPrefixesMap() map[string]string {
 	sourceSyncOnce.Do(func() {
 		c := global.MongoDB_ColNames
@@ -43,6 +43,9 @@ func sourceSyncPrefixesMap() map[string]string {
 			c.CrmCustomers:       "crm_customer",
 			c.CrmActivityHistory: "crm_activity",
 			c.CrmNotes:           "crm_note",
+
+			// CIX — kết quả phân tích hội thoại (ghi DB → datachanged → AID)
+			c.CixAnalysisResults: "cix_analysis_result",
 
 			// Meta Marketing API
 			c.MetaAdAccounts:               "meta_ad_account",
@@ -76,9 +79,9 @@ func IsSourceSyncDataChangedEvent(eventType string) bool {
 			return true
 		}
 	}
-	// Các event đặc biệt đã có trong registry prefix (conversation, message) + order
+	// Các event đặc biệt đã có trong registry prefix (conversation, message, cix_analysis_result) + order
 	switch pfx {
-	case "conversation", "message", "order":
+	case "conversation", "message", "order", "cix_analysis_result":
 		return true
 	default:
 		return false

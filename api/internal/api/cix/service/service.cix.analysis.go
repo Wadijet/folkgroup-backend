@@ -11,14 +11,14 @@ import (
 	"strings"
 	"time"
 
-	aidecisionsvc "meta_commerce/internal/api/aidecision/service"
 	cixdto "meta_commerce/internal/api/cix/dto"
 	cixmodels "meta_commerce/internal/api/cix/models"
 	crmvc "meta_commerce/internal/api/crm/service"
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
-	ruleintelsvc "meta_commerce/internal/api/ruleintel/service"
+	ruleintelengine "meta_commerce/internal/api/ruleintel/engine"
 	ruleintelmodels "meta_commerce/internal/api/ruleintel/models"
+	ruleintelsvc "meta_commerce/internal/api/ruleintel/service"
 
 	basesvc "meta_commerce/internal/api/base/service"
 
@@ -106,6 +106,21 @@ func (s *CixAnalysisService) getCustomerContext(ctx context.Context, customerIdO
 	}
 }
 
+// appendCixPipelineTrace thêm trace_id từ một lần Run (bỏ qua trùng liên tiếp).
+func appendCixPipelineTrace(dst *[]string, runRes *ruleintelengine.RunResult) {
+	if dst == nil || runRes == nil {
+		return
+	}
+	t := strings.TrimSpace(runRes.TraceID)
+	if t == "" {
+		return
+	}
+	if len(*dst) > 0 && (*dst)[len(*dst)-1] == t {
+		return
+	}
+	*dst = append(*dst, t)
+}
+
 // runPipeline chạy Rule Engine pipeline Raw → L1 → L2 → L3 → Flag → Action.
 func (s *CixAnalysisService) runPipeline(ctx context.Context, raw map[string]interface{}, customerCtx map[string]interface{}, ownerOrgID primitive.ObjectID) (*cixmodels.CixAnalysisResult, error) {
 	ruleSvc, err := ruleintelsvc.NewRuleEngineService()
@@ -123,11 +138,14 @@ func (s *CixAnalysisService) runPipeline(ctx context.Context, raw map[string]int
 		"cix_customer_context": customerCtx,
 	}
 
+	var pipelineTraces []string
+
 	// L1
 	runRes, err := ruleSvc.Run(ctx, &ruleintelsvc.RunInput{RuleID: "RULE_CIX_LAYER1_STAGE", Domain: "cix", EntityRef: entityRef, Layers: layers})
 	if err != nil {
 		return nil, err
 	}
+	appendCixPipelineTrace(&pipelineTraces, runRes)
 	if out, ok := runRes.Result.(map[string]interface{}); ok {
 		layers["cix_layer1"] = out
 	}
@@ -137,6 +155,7 @@ func (s *CixAnalysisService) runPipeline(ctx context.Context, raw map[string]int
 	if err != nil {
 		return nil, err
 	}
+	appendCixPipelineTrace(&pipelineTraces, runRes)
 	if out, ok := runRes.Result.(map[string]interface{}); ok {
 		layers["cix_layer2"] = out
 	}
@@ -146,12 +165,16 @@ func (s *CixAnalysisService) runPipeline(ctx context.Context, raw map[string]int
 	if err != nil {
 		return nil, err
 	}
+	appendCixPipelineTrace(&pipelineTraces, runRes)
 	if out, ok := runRes.Result.(map[string]interface{}); ok {
 		layers["cix_layer2_adj"] = out
 	}
 
 	// L3 — Rule hoặc LLM (theo CIX_LAYER3_MODE: rule | llm | hybrid)
-	layer3 := s.resolveLayer3(ctx, raw, customerCtx, ownerOrgID, ruleSvc, entityRef, layers)
+	layer3, l3Trace := s.resolveLayer3(ctx, raw, customerCtx, ownerOrgID, ruleSvc, entityRef, layers)
+	if l3Trace != "" {
+		appendCixPipelineTrace(&pipelineTraces, &ruleintelengine.RunResult{TraceID: l3Trace})
+	}
 	layers["cix_layer3"] = map[string]interface{}{
 		"buyingIntent":   layer3.BuyingIntent,
 		"objectionLevel": layer3.ObjectionLevel,
@@ -163,15 +186,18 @@ func (s *CixAnalysisService) runPipeline(ctx context.Context, raw map[string]int
 	if err != nil {
 		return nil, err
 	}
+	appendCixPipelineTrace(&pipelineTraces, runRes)
 	if out, ok := runRes.Result.(map[string]interface{}); ok {
 		layers["cix_flags"] = out
 	}
 
-	// Actions
+	// Actions — traceId từ lần chạy này dùng làm neo tới rule_execution_logs (đề xuất hành động).
 	runRes, err = ruleSvc.Run(ctx, &ruleintelsvc.RunInput{RuleID: "RULE_CIX_ACTIONS", Domain: "cix", EntityRef: entityRef, Layers: layers})
 	if err != nil {
 		return nil, err
 	}
+	appendCixPipelineTrace(&pipelineTraces, runRes)
+	cixRuleTraceID := strings.TrimSpace(runRes.TraceID)
 
 	// Build result
 	L1 := layers["cix_layer1"].(map[string]interface{})
@@ -206,7 +232,9 @@ func (s *CixAnalysisService) runPipeline(ctx context.Context, raw map[string]int
 	}
 
 	return &cixmodels.CixAnalysisResult{
-		Layer1: cixmodels.CixLayer1{Stage: getStr(L1, "stage")},
+		TraceID:              cixRuleTraceID,
+		PipelineRuleTraceIDs: pipelineTraces,
+		Layer1:               cixmodels.CixLayer1{Stage: getStr(L1, "stage")},
 		Layer2: cixmodels.CixLayer2{
 			IntentStage:      getStr(L2, "intentStage"),
 			UrgencyLevel:     getStr(L2, "urgencyLevel"),
@@ -236,25 +264,25 @@ func getCixLayer3Mode() string {
 	}
 }
 
-// resolveLayer3 quyết định Layer 3 từ Rule hoặc LLM theo CIX_LAYER3_MODE.
-func (s *CixAnalysisService) resolveLayer3(ctx context.Context, raw map[string]interface{}, customerCtx map[string]interface{}, ownerOrgID primitive.ObjectID, ruleSvc *ruleintelsvc.RuleEngineService, entityRef ruleintelmodels.EntityRef, layers map[string]interface{}) cixmodels.CixLayer3 {
+// resolveLayer3 quyết định Layer 3 từ Rule hoặc LLM theo CIX_LAYER3_MODE. Chuỗi thứ hai là trace_id RULE_CIX_LAYER3_SIGNALS khi có chạy rule.
+func (s *CixAnalysisService) resolveLayer3(ctx context.Context, raw map[string]interface{}, customerCtx map[string]interface{}, ownerOrgID primitive.ObjectID, ruleSvc *ruleintelsvc.RuleEngineService, entityRef ruleintelmodels.EntityRef, layers map[string]interface{}) (cixmodels.CixLayer3, string) {
 	mode := getCixLayer3Mode()
 	turns, _ := raw["turns"].([]map[string]interface{})
 
-	runRuleL3 := func() cixmodels.CixLayer3 {
+	runRuleL3 := func() (cixmodels.CixLayer3, string) {
 		runRes, err := ruleSvc.Run(ctx, &ruleintelsvc.RunInput{RuleID: "RULE_CIX_LAYER3_SIGNALS", Domain: "cix", EntityRef: entityRef, Layers: layers})
 		if err != nil {
-			return cixmodels.CixLayer3{BuyingIntent: "none", ObjectionLevel: "none", Sentiment: "neutral"}
+			return cixmodels.CixLayer3{BuyingIntent: "none", ObjectionLevel: "none", Sentiment: "neutral"}, ""
 		}
 		out, ok := runRes.Result.(map[string]interface{})
 		if !ok {
-			return cixmodels.CixLayer3{BuyingIntent: "none", ObjectionLevel: "none", Sentiment: "neutral"}
+			return cixmodels.CixLayer3{BuyingIntent: "none", ObjectionLevel: "none", Sentiment: "neutral"}, ""
 		}
 		return cixmodels.CixLayer3{
 			BuyingIntent:   getStr(out, "buyingIntent"),
 			ObjectionLevel: getStr(out, "objectionLevel"),
 			Sentiment:      getStr(out, "sentiment"),
-		}
+		}, strings.TrimSpace(runRes.TraceID)
 	}
 
 	tryLLM := func() *cixmodels.CixLayer3 {
@@ -281,20 +309,21 @@ func (s *CixAnalysisService) resolveLayer3(ctx context.Context, raw map[string]i
 	// llm: ưu tiên LLM, fallback Rule nếu LLM không khả dụng
 	if mode == "llm" {
 		if l3 := tryLLM(); l3 != nil {
-			return *l3
+			return *l3, ""
 		}
 		return runRuleL3()
 	}
 
 	// hybrid: Rule trước, nếu Rule trả giá trị mặc định (inquiring, neutral, none) → thử LLM
-	ruleL3 := runRuleL3()
+	ruleL3, l3tid := runRuleL3()
 	if ruleL3.BuyingIntent != "inquiring" || ruleL3.Sentiment != "neutral" || ruleL3.ObjectionLevel != "none" {
-		return ruleL3
+		return ruleL3, l3tid
 	}
 	if l3 := tryLLM(); l3 != nil {
-		return *l3
+		// Rule đã chạy — vẫn trả trace L3 để pipeline đủ log
+		return *l3, l3tid
 	}
-	return ruleL3
+	return ruleL3, l3tid
 }
 
 func getStr(m map[string]interface{}, key string) string {
@@ -344,29 +373,8 @@ func (s *CixAnalysisService) AnalyzeSession(ctx context.Context, sessionUid, cus
 		}
 	}
 
-	// Gửi sang AI Decision: luôn emit cix.analysis_completed → consumer gọi ReceiveCixPayload.
-	if len(result.ActionSuggestions) > 0 {
-		go func() {
-			decSvc := aidecisionsvc.NewAIDecisionService()
-			_, _ = decSvc.EmitEvent(context.Background(), &aidecisionsvc.EmitEventInput{
-				EventType:     "cix.analysis_completed",
-				EventSource:   "cix",
-				EntityType:    "cix_analysis_result",
-				EntityID:      result.ID.Hex(),
-				OrgID:         ownerOrgID.Hex(),
-				OwnerOrgID:    ownerOrgID,
-				Priority:      "high",
-				Lane:          "fast",
-				TraceID:       result.TraceID,
-				CorrelationID: result.CorrelationID,
-				Payload: map[string]interface{}{
-					"analysisResultId": result.ID.Hex(),
-					"sessionUid":     result.SessionUid,
-					"customerUid":    result.CustomerUid,
-				},
-			})
-		}()
-	}
+	// Fan-in AID: InsertOne → EmitDataChanged → hook aidecision → cix_analysis_result.inserted trong decision_events_queue
+	// (consumer gọi ReceiveCixPayload). Không emit thêm cix.analysis_completed ở đây để tránh trùng event.
 
 	return result, nil
 }
@@ -390,11 +398,12 @@ func ToCixAnalysisResponse(r *cixmodels.CixAnalysisResult) *cixdto.CixAnalysisRe
 		return nil
 	}
 	resp := &cixdto.CixAnalysisResponse{
-		ID:                r.ID.Hex(),
-		SessionUid:        r.SessionUid,
-		CustomerUid:       r.CustomerUid,
-		TraceID:           r.TraceID,
-		Layer1:            cixdto.CixLayer1DTO{Stage: r.Layer1.Stage},
+		ID:                   r.ID.Hex(),
+		SessionUid:         r.SessionUid,
+		CustomerUid:          r.CustomerUid,
+		TraceID:              r.TraceID,
+		PipelineRuleTraceIDs: r.PipelineRuleTraceIDs,
+		Layer1:               cixdto.CixLayer1DTO{Stage: r.Layer1.Stage},
 		Layer2: cixdto.CixLayer2DTO{
 			IntentStage:      r.Layer2.IntentStage,
 			UrgencyLevel:     r.Layer2.UrgencyLevel,

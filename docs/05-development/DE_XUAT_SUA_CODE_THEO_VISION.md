@@ -26,7 +26,7 @@
 | **Approval mode** | Config-driven (ApprovalModeConfig), ResolveImmediate | Rải rác: ads_meta_config, CIX_APPROVAL_ACTIONS env, ShouldAutoApprove trong scheduler | Thiếu ApprovalModeConfig, ResolveImmediate |
 | **Ads auto-approve** | Scheduler chỉ Propose; Engine ResolveImmediate | Scheduler gọi ProposeAndApprove trực tiếp khi ShouldAutoApprove | Vi phạm: logic approval nằm trong domain |
 | **Delivery Gate** | Chỉ nhận từ Executor (source=APPROVAL_GATE) | DELIVERY_ALLOW_DIRECT_USE=true mới cho phép; logic đảo (block khi false) | Cần validate source, deprecate direct |
-| **Decision Events** | Emit event → AI Decision consume | CIX gọi sync ReceiveCixPayload; Ads không emit event | Chưa event-driven đầy đủ |
+| **Decision Events** | Emit event → AI Decision consume | **Đã bổ sung (2026-03-23):** `aidecision.execute_requested`, `POST /ai-decision/execute` → 202; **ReceiveCixPayload** chỉ enqueue. **(2026-03-24)** Đề xuất Executor thống nhất: `executor.propose_requested` (payload `domain`); `POST /executor/actions/propose` không gọi `approval.Propose` trực tiếp. Alias queue cũ `ads.propose_requested`. | Còn gap: Intake/Aggregation đầy đủ theo vision 3 lớp, Arbitration |
 | **Executor 7 sub-layer** | Policy Registry, Guardrail, Outcome Registry | Chỉ có Propose/Approve/Execute cơ bản | Thiếu Policy Registry, Guardrail, Outcome |
 
 ---
@@ -42,7 +42,7 @@
 - Không approval, không execution
 
 **Code hiện tại (`api/internal/api/aidecision/service/`):**
-- `Execute()`: nhận CIXPayload sync, parse actionSuggestions, applyPolicy (env CIX_APPROVAL_ACTIONS), proposeCixAction / proposeAndApproveAutoCixAction
+- `Execute()` / `ExecuteWithCase()`: vẫn là lõi quyết định — được gọi **chỉ từ worker** khi consume event **`aidecision.execute_requested`** (và các luồng nội bộ khác nếu có). **HTTP** `POST /ai-decision/execute` không gọi trực tiếp; parse actionSuggestions, applyPolicy (env CIX_APPROVAL_ACTIONS), proposeCixAction / proposeAndApproveAutoCixAction chạy trong worker.
 - Không có Event Intake (sync call, không consume event)
 - Không có Context Aggregation (chỉ dùng CIXPayload, CustomerCtx chưa merge đầy đủ)
 - Không có Arbitration
@@ -185,7 +185,7 @@ GetApprovalMode                                Policy từ config
 | Platform L1 | docs-shared/architecture/vision/00 - ai-commerce-os-platform-l1.md |
 | AI Decision | docs-shared/architecture/vision/07 - ai-decision.md |
 | Executor | docs-shared/architecture/vision/08 - executor.md |
-| Rà soát | docs-shared/architecture/RA_SOAT_TRIEN_KHAI_VISION.md |
+| Rà soát | docs-shared/architecture/reviews/RA_SOAT_TRIEN_KHAI_VISION.md |
 | System Boundary | docs-shared/architecture/foundational/system-boundary.md |
 | Event System | docs-shared/architecture/foundational/event-system.md |
 | Phương án Decision Brain | [PHUONG_AN_TRIEN_KHAI_AI_DECISION_VA_LEARNING.md](./PHUONG_AN_TRIEN_KHAI_AI_DECISION_VA_LEARNING.md) |

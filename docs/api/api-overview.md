@@ -2,7 +2,7 @@
 
 **Mục đích:** Tổng quan API surface — endpoint, method, module. Giúp developer nhìn nhanh và Cursor AI hiểu cấu trúc API.
 
-**Canonical chi tiết:** `docs-shared/ai-context/folkform/api-context.md`
+**Canonical chi tiết (một nguồn — `docs-shared` trên workspace / junction):** `docs-shared/ai-context/folkform/api-context.md` (AI Decision live trace: **Version 4.02**). Bổ sung `opsTier`: `docs-shared/ai-context/folkform/api-context-ai-decision-ops-tier.md` (đề xuất **4.09**).
 
 ---
 
@@ -25,7 +25,7 @@
 | **meta** | `/meta` | Ad-account, campaign, ad-set, ad, ad-insight, activity-history | meta/ |
 | **pc** | `/pc` | Pancake Pages, POS | pc/ |
 | **webhook** | `/webhook` | Webhook endpoints | webhook/ |
-| **report** | `/report` | Report definitions, snapshots, dirty periods | report/ |
+| **report** | `/report` | Definitions, snapshots, dirty periods; API trend/recompute/MarkDirty. **Dirty từ CRUD:** Redis touch (`ff:rt:*`) trong consumer AI Decision → worker `report_redis_touch_flush` → `report_dirty_periods` | report/ |
 | **crm** | `/crm` | Customers, CRM pending ingest, bulk jobs, rebuild, recalculate | crm/ |
 | **notification** | `/notification` | Channels, templates, routing, trigger | notification/ |
 | **cta** | `/cta` | CTA Library | cta/ |
@@ -34,6 +34,7 @@
 | **content** | `/content` | Content drafts, publications, videos | content/ |
 | **ai** | `/ai` | AI workflows, steps, prompts, provider profiles | ai/ |
 | **rule-intelligence** | `/rule-intelligence` | Rule Engine, definition, logic, param-set, output-contract, run, logs | ruleintel/ |
+| **ai-decision** | `/ai-decision` | Queue execute (202 + eventId + **traceId**), live trace (timeline + WS), cases | aidecision/ |
 
 ---
 
@@ -116,7 +117,7 @@ Chi tiết: [02-architecture/core/rule-intelligence](../02-architecture/core/rul
 
 | Method | Path | Mô tả |
 |--------|------|-------|
-| GET | `/learning/cases` | List learning cases (filter: domain, caseType, goalCode, result, targetType, targetId) |
+| GET | `/learning/cases` | List learning cases (filter: `domain`, `caseType`, `goalCode`, `result`, `targetType`, `targetId`, `sourceRefId`, **`decisionCaseId`**, **`traceId`** (map `executionTraceId`), **`correlationId`**, **`aidecisionProposeEventId`**) |
 | GET | `/learning/cases/:id` | Find by ID |
 | POST | `/learning/cases` | Create learning case |
 | GET | `/learning/rule-suggestions` | List rule suggestions (Phase 3 — filter: domain, goalCode, status) |
@@ -126,8 +127,46 @@ Chi tiết: [02-architecture/core/learning-engine](../02-architecture/core/learn
 
 ---
 
+## AI Decision (event-driven)
+
+| Method | Path | Mô tả |
+|--------|------|--------|
+| POST | `/ai-decision/execute` | Enqueue event **`aidecision.execute_requested`**. **HTTP 202**, `data.eventId`, **`data.traceId`** (sinh sẵn nếu body không có `traceId`) — worker `AIDecisionConsumer` gọi `ExecuteWithCase` (không trả quyết định đồng bộ). |
+| GET | `/ai-decision/traces/:traceId/timeline` | **Replay** các sự kiện live đã buffer (JSON `data.events`). Quyền: `MetaAdAccount.Read` + org. |
+| GET | `/ai-decision/traces/:traceId/live` | **WebSocket** — gửi replay như timeline, sau đó stream tiếp; mỗi message = một JSON (`phase`, `summary`, `step`, …). Quyền: `MetaAdAccount.Read` + org. |
+| GET | `/ai-decision/org-live/timeline` | Replay buffer live **theo org** (mọi trace). |
+| GET | `/ai-decision/org-live/metrics` | Snapshot **trung tâm chỉ huy** (`schemaVersion` **2**): nhóm **`meta`**, **`queue.depth`**, **`intake`**, **`publishCounters`** (lũy kế phase/sourceKind), **`realtime.gaugeByPhase`**, **`consumer`**, **`workers`**, `hasRecentConsumerActivity`, `alerts`. Quyền: `MetaAdAccount.Read` + org. Chi tiết: [THIET_KE v1.8](../05-development/THIET_KE_TRUNG_TAM_CHI_HUY_AI_DECISION.md). |
+| GET | `/ai-decision/org-live` | **WebSocket** — replay org timeline + stream sự kiện; định kỳ gửi thêm message `type: "aggregate"` (cùng payload như GET metrics) cho UI real-time. |
+| POST | `/ai-decision/events` | Ingest event vào `decision_events_queue`. Response `data`: `eventId`, `status`, **`opsTier`**, **`opsTierLabelVi`** — phân loại vận hành theo `eventType` (cùng logic feed live; chi tiết mục **4.4** trong [THIET_KE_TRUNG_TAM_CHI_HUY_AI_DECISION.md](../05-development/THIET_KE_TRUNG_TAM_CHI_HUY_AI_DECISION.md)). |
+| POST | `/ai-decision/cases/:decisionCaseId/close` | Đóng decision case runtime |
+
+**Canonical (docs-shared — một nguồn):** [api-context.md](../../docs-shared/ai-context/folkform/api-context.md) — **Version 4.02** (live trace). **`opsTier`:** [api-context-ai-decision-ops-tier.md](../../docs-shared/ai-context/folkform/api-context-ai-decision-ops-tier.md) (đề xuất **4.09**). **Vision / envelope live:** [08 - ai-decision](../../docs-shared/architecture/vision/08%20-%20ai-decision.md); bổ sung tier: [16-ai-decision-ops-tier.md](../../docs-shared/architecture/vision/16-ai-decision-ops-tier.md).
+
+**Env (live & command center):** `AI_DECISION_LIVE_ENABLED` — mặc định bật; `=0` tắt ring/WebSocket/replay; **phễu + gauge phase trace vẫn cập nhật** qua cùng hook `Publish` (chỉ nhánh metrics). `AI_DECISION_METRICS_RECONCILE_SEC` — chu kỳ đồng bộ độ sâu queue Mongo → RAM (mặc định 300). `AI_DECISION_WS_AGGREGATE_SEC` — chu kỳ message `aggregate` trên WS `org-live` (mặc định 3). `AI_DECISION_METRICS_CHANGE_LOG` — `=1` bật log chi tiết mỗi lần đếm metrics (mặc định tắt). **`AI_DECISION_LIVE_ORG_PERSIST`** — chỉ khi `=1` mới ghi replay org-live ra Mongo collection **`decision_org_live_events`** (mặc định tắt; restart chỉ còn ring RAM). **Metrics command center** (lũy kế, gauge, consumer): **RAM theo process** — xem [THIET_KE_TRUNG_TAM_CHI_HUY_AI_DECISION.md](../05-development/THIET_KE_TRUNG_TAM_CHI_HUY_AI_DECISION.md).
+
+---
+
+## Executor — đề xuất (Propose) qua AI Decision
+
+| Method | Path | Mô tả |
+|--------|------|--------|
+| POST | `/executor/actions/propose` | Body: `domain`, `actionType`, `reason`, `payload`, … — **enqueue** `executor.propose_requested` (payload có `domain`). **HTTP 202** + `data.eventId`. Consumer gọi `approval.Propose`; **không** trả `action_pending` đồng bộ. |
+| POST | `/ads/actions/propose` | Cùng nguyên tắc — `EmitAdsProposeRequest` → `executor.propose_requested` (`domain=ads`). **HTTP 202** + `eventId`. |
+
+Chi tiết vision: [08 - ai-decision.md §8.1](../../docs-shared/architecture/vision/08%20-%20ai-decision.md).
+
+---
+
 ## Changelog
 
+- 2026-03-25: AI Decision — **`opsTier` / `opsTierLabelVi`** trên `DecisionLiveEvent` (feed/timeline) + response `POST /ai-decision/events`; package `eventopstier`; org-live persist Mongo `decision_org_live_events` + env `AI_DECISION_LIVE_ORG_PERSIST` (mặc định tắt); [THIET_KE v1.8](../05-development/THIET_KE_TRUNG_TAM_CHI_HUY_AI_DECISION.md) mục 4.4.
+- 2026-03-25: AI Decision — **command center schema 2** (`GET org-live/metrics` + WS `aggregate`): JSON nhóm `meta` / `queue` / `intake` / `publishCounters` / `realtime` — [THIET_KE v1.7](../05-development/THIET_KE_TRUNG_TAM_CHI_HUY_AI_DECISION.md); api-context [4.08](../../docs-shared/ai-context/folkform/api-context.md#version-408); vision [08 §16.1](../../docs-shared/architecture/vision/08%20-%20ai-decision.md) v7.7.1.
+- 2026-03-25: AI Decision — **command center v1.4**: response thêm `gaugeByPhase`, `consumer`; phân biệt lũy kế vs gauge; metrics toàn RAM (per process); cập nhật [THIET_KE_TRUNG_TAM_CHI_HUY_AI_DECISION.md](../05-development/THIET_KE_TRUNG_TAM_CHI_HUY_AI_DECISION.md), env `AI_DECISION_METRICS_CHANGE_LOG`.
+- 2026-03-25: AI Decision — **command center**: `GET /ai-decision/org-live/metrics`, WS **`/org-live`** message `type: "aggregate"`; reconcile queue Mongo → RAM; env `AI_DECISION_METRICS_RECONCILE_SEC`, `AI_DECISION_WS_AGGREGATE_SEC`; doc [THIET_KE_TRUNG_TAM_CHI_HUY_AI_DECISION.md](../05-development/THIET_KE_TRUNG_TAM_CHI_HUY_AI_DECISION.md).
+- 2026-03-25: Learning — **`GET /learning/cases`** thêm filter trace E2E (`decisionCaseId`, `traceId`, `correlationId`, `aidecisionProposeEventId`); consumer **`executor.propose_requested`** merge envelope queue vào payload propose; doc [learning-engine §7–9](../02-architecture/core/learning-engine.md); vision [08 §18](../../docs-shared/architecture/vision/08%20-%20ai-decision.md)
+- 2026-03-24: Executor — **POST /executor/actions/propose** và **POST /ads/actions/propose** chỉ enqueue **`executor.propose_requested`** (202 + `eventId`); vision [08 §6 / §8.1](../../docs-shared/architecture/vision/08%20-%20ai-decision.md)
+- 2026-03-23: AI Decision — **live trace**: `traceId` trong response `POST /execute`; **GET /traces/:traceId/timeline** + WebSocket **/traces/:traceId/live**; `AI_DECISION_LIVE_ENABLED`; vision [08 §16](../../docs-shared/architecture/vision/08%20-%20ai-decision.md)
+- 2026-03-23: AI Decision — **POST /ai-decision/execute** chỉ còn **202 + eventId** (queue `aidecision.execute_requested`); cập nhật `api-context.md` v4.01
 - 2026-03-19: Phase 3 Learning — thêm GET/PATCH `/learning/rule-suggestions` (gợi ý điều chỉnh rule từ failure rate)
 - 2025-03-17: Thêm GET `/rule-intelligence/logs/:traceId` — xem rule execution log; trace_id truyền vào proposal payload
 - 2025-03-15: Thêm Rule Intelligence (run, definition, logic, param-set, output-contract)

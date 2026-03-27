@@ -3,6 +3,8 @@
 **Ngày:** 2026-03-18  
 **Tham chiếu:** [PHUONG_AN_TRIEN_KHAI_CIX.md](./PHUONG_AN_TRIEN_KHAI_CIX.md), [THIET_KE_MODULE_CIO.md](./THIET_KE_MODULE_CIO.md), [identity-links-model](../../docs-shared/architecture/data-contract/identity-links-model.md)
 
+> **Triển khai `cix_analysis_results` (2026-03-26):** Document phẳng — field **`traceId`** (UUID `rule_execution_logs` của bước **RULE_CIX_ACTIONS**), **`pipelineRuleTraceIds`** ([]string — thứ tự trace các bước rule pipeline), **`correlationId`** (tuỳ có). API response CIX có **`pipelineRuleTraceIds`**. Chi tiết hợp đồng: [unified-data-contract §2.5b](../../docs-shared/architecture/data-contract/unified-data-contract.md#contract-25b-trace-queue).
+
 ---
 
 ## 1. Nguyên Tắc Chốt

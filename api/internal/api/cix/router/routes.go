@@ -22,7 +22,7 @@ func Register(v1 fiber.Router, _ *apirouter.Router) error {
 		return fmt.Errorf("tạo CixAnalysisHandler: %w", err)
 	}
 
-	// POST /cix/analyze — Phân tích session
+	// POST /cix/analyze — Ghi cix.analysis_requested (queue AI Decision), không đồng bộ
 	apirouter.RegisterRouteWithMiddleware(v1, "/cix/analyze", "POST", "", []fiber.Handler{analyzeMiddleware, orgContextMiddleware}, analysisHandler.HandleAnalyzeSession)
 
 	// GET /cix/analysis/:sessionUid — Lấy kết quả phân tích theo session

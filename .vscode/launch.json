@@ -10,7 +10,8 @@
             "mode": "auto",
             "program": "${workspaceFolder}/api/cmd/server",
             "env": {
-                "LOG_OUTPUT": "stdout"
+                "LOG_OUTPUT": "stdout",
+                "AI_DECISION_LIVE_ORG_PERSIST": "true"
             },
             "args": []
         }

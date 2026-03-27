@@ -86,6 +86,8 @@ func handleProposeLogic(c fiber.Ctx) error {
 			AdId:         input.AdId,
 			Value:        input.Value,
 			Reason:       input.Reason,
+			RuleCode:     input.RuleCode,
+			TraceID:      input.TraceID,
 			Payload:      input.Payload,
 		}, *orgID, baseURL)
 		if err != nil {

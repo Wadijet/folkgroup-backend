@@ -467,23 +467,6 @@ func CreateActionPendingIdempotencyIndex(ctx context.Context, collection *mongo.
 	return err
 }
 
-// CreateDecisionCaseIndexes tạo index cho decision_cases.
-func CreateDecisionCaseIndexes(ctx context.Context, collection *mongo.Collection) error {
-	indexes := []mongo.IndexModel{
-		{Keys: bson.D{{Key: "caseId", Value: 1}}, Options: options.Index().SetName("caseId_unique").SetUnique(true)},
-		{Keys: bson.D{{Key: "ownerOrganizationId", Value: 1}, {Key: "domain", Value: 1}, {Key: "createdAt", Value: -1}}, Options: options.Index().SetName("decision_org_domain_created")},
-		{Keys: bson.D{{Key: "ownerOrganizationId", Value: 1}, {Key: "targetType", Value: 1}, {Key: "targetId", Value: 1}}, Options: options.Index().SetName("decision_org_target")},
-		{Keys: bson.D{{Key: "caseType", Value: 1}}, Options: options.Index().SetName("caseType_single")},
-		{Keys: bson.D{{Key: "caseCategory", Value: 1}}, Options: options.Index().SetName("caseCategory_single")},
-		{Keys: bson.D{{Key: "goalCode", Value: 1}}, Options: options.Index().SetName("goalCode_single")},
-		{Keys: bson.D{{Key: "result", Value: 1}}, Options: options.Index().SetName("result_single")},
-		{Keys: bson.D{{Key: "sourceClosedAt", Value: -1}}, Options: options.Index().SetName("sourceClosedAt_single")},
-		{Keys: bson.D{{Key: "sourceRef.refType", Value: 1}, {Key: "sourceRef.refId", Value: 1}}, Options: options.Index().SetName("decision_source_ref")},
-	}
-	_, err := collection.Indexes().CreateMany(ctx, indexes)
-	return err
-}
-
 // CreateCrmCustomerProfileIndexes tạo index cho profile nested (profile.name, profile.phoneNumbers).
 // Gọi sau CreateIndexes cho CrmCustomer.
 func CreateCrmCustomerProfileIndexes(ctx context.Context, collection *mongo.Collection) error {

@@ -7,6 +7,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 
+	crmqueue "meta_commerce/internal/api/aidecision/crmqueue"
 	crmmodels "meta_commerce/internal/api/crm/models"
 	crmvc "meta_commerce/internal/api/crm/service"
 	"meta_commerce/internal/logger"
@@ -199,37 +200,42 @@ func (w *CrmBulkWorker) processJob(ctx context.Context, svc *crmvc.CrmCustomerSe
 		if unifiedId == "" {
 			return nil, nil
 		}
-		result, err := svc.RecalculateCustomerFromAllSources(ctx, unifiedId, job.OwnerOrganizationID)
+		eventID, err := crmqueue.EmitCrmIntelligenceRecalculateOneRequested(ctx, unifiedId, job.OwnerOrganizationID)
 		if err != nil {
 			return nil, err
 		}
 		return bson.M{
-			"unifiedId": result.UnifiedId,
-			"updatedAt": result.UpdatedAt,
+			"eventId": eventID,
+			"status":  "queued_ai_decision",
+			"message": "Đã đưa recalculate một khách vào queue AI Decision; worker consumer sẽ chạy RecalculateCustomerFromAllSources",
 		}, nil
 
 	case crmmodels.CrmBulkJobRecalculateAll:
 		limit := parseInt(params, "limit", 0)
 		poolSize := GetEffectivePoolSize(12, PriorityLow)
-		result, err := svc.RecalculateAllCustomers(ctx, job.OwnerOrganizationID, limit, poolSize)
+		eventID, err := crmqueue.EmitCrmIntelligenceRecalculateAllRequested(ctx, job.OwnerOrganizationID, limit, poolSize)
 		if err != nil {
 			return nil, err
 		}
-		return bson.M{"totalProcessed": result.TotalProcessed, "totalFailed": result.TotalFailed, "failedIds": result.FailedIds}, nil
+		return bson.M{
+			"eventId": eventID,
+			"status":  "queued_ai_decision",
+			"message": "Đã đưa recalculate toàn org vào queue AI Decision; consumer gọi RecalculateAllCustomers",
+		}, nil
 
 	case crmmodels.CrmBulkJobRecalculateBatch:
 		offset := parseInt(params, "offset", 0)
 		limit := parseInt(params, "limit", 200)
 		poolSize := GetEffectivePoolSize(12, PriorityLow)
-		jobID := job.ID
-		onProgress := func(p bson.M) {
-			_ = w.bulkJobSvc.UpdateProgress(ctx, jobID, p)
-		}
-		result, err := svc.RecalculateCustomersBatch(ctx, job.OwnerOrganizationID, offset, limit, poolSize, job.Progress, onProgress)
+		eventID, err := crmqueue.EmitCrmIntelligenceRecalculateBatchRequested(ctx, job.OwnerOrganizationID, offset, limit, poolSize)
 		if err != nil {
 			return nil, err
 		}
-		return bson.M{"totalProcessed": result.TotalProcessed, "totalFailed": result.TotalFailed, "failedIds": result.FailedIds}, nil
+		return bson.M{
+			"eventId": eventID,
+			"status":  "queued_ai_decision",
+			"message": "Đã đưa recalculate batch vào queue AI Decision; consumer gọi RecalculateCustomersBatch (không cập nhật progress từng bước qua bulk job)",
+		}, nil
 
 	default:
 		return nil, nil

@@ -23,7 +23,7 @@ func getActiveOrgID(c fiber.Ctx) *primitive.ObjectID {
 	return &oid
 }
 
-// HandleExecute POST /ai-decision/execute — AI Decision: nhận context, trả Execution Plan.
+// HandleExecute POST /ai-decision/execute — enqueue aidecision.execute_requested (chỉ event-driven, worker xử lý).
 func HandleExecute(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {
 		var req aidecisionsvc.ExecuteRequest
@@ -41,14 +41,16 @@ func HandleExecute(c fiber.Ctx) error {
 			return nil
 		}
 		svc := aidecisionsvc.NewAIDecisionService()
-		resp, err := svc.Execute(c.Context(), &req, *orgID)
+		emitRes, err := svc.EmitExecuteRequested(c.Context(), &req, *orgID, orgID.Hex(), "")
 		if err != nil {
-			errCode, msg, statusCode := common.GetErrorResponseInfo(err, "Ra quyết định thất bại")
+			errCode, msg, statusCode := common.GetErrorResponseInfo(err, "Xếp hàng ra quyết định thất bại")
 			c.Status(statusCode).JSON(fiber.Map{"code": errCode, "message": msg, "status": "error"})
 			return nil
 		}
-		c.Status(common.StatusOK).JSON(fiber.Map{
-			"code": common.StatusOK, "message": "Thành công", "data": resp, "status": "success",
+		c.Status(common.StatusAccepted).JSON(fiber.Map{
+			"code": common.StatusAccepted, "message": "Đã xếp hàng — worker AI Decision sẽ xử lý", "data": fiber.Map{
+				"eventId": emitRes.EventID, "status": emitRes.Status, "traceId": emitRes.TraceID,
+			}, "status": "success",
 		})
 		return nil
 	})

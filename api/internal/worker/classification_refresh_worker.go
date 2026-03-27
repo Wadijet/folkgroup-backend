@@ -1,14 +1,12 @@
-// Package worker - ClassificationRefreshWorker tính lại phân loại khách hàng (lifecycle, journey, momentum...)
-// theo chu kỳ. Chạy khi không có tác động (order/conversation) để tránh phân loại bị sai theo thời gian.
+// Package worker - ClassificationRefreshWorker định kỳ enqueue phân loại khách (lifecycle, journey...)
+// qua queue AI Decision (consumer gọi RunClassificationRefreshBatch), không gọi RefreshMetrics trực tiếp tại đây.
 package worker
 
 import (
 	"context"
 	"time"
 
-	"github.com/sirupsen/logrus"
-
-	crmvc "meta_commerce/internal/api/crm/service"
+	crmqueue "meta_commerce/internal/api/aidecision/crmqueue"
 	"meta_commerce/internal/logger"
 	"meta_commerce/internal/worker/metrics"
 )
@@ -19,31 +17,15 @@ const (
 	ClassificationRefreshModeSmart = "smart" // Chỉ khách gần ngưỡng lifecycle
 )
 
-// ClassificationRefreshWorker worker tính lại phân loại khách hàng định kỳ.
-//
-// Hai chế độ:
-//   - full: Duyệt tất cả khách có orderCount >= 1, gọi RefreshMetrics từng batch.
-//     Dùng cho chạy hàng ngày (vd: 2h sáng) — đảm bảo toàn bộ phân loại cập nhật.
-//   - smart: Chỉ xử lý khách có lastOrderAt trong vùng 28–33, 88–96, 178–186 ngày.
-//     Giảm tải vì chỉ refresh khách gần ngưỡng active↔cooling, cooling↔inactive, inactive↔dead.
+// ClassificationRefreshWorker mỗi tick ghi event classification_refresh vào decision_events_queue.
 type ClassificationRefreshWorker struct {
-	crmService *crmvc.CrmCustomerService
-	interval   time.Duration // Khoảng thời gian giữa các lần chạy (vd: 24h)
-	batchSize  int           // Số khách tối đa mỗi lần (vd: 200)
-	mode       string        // "full" hoặc "smart"
+	interval  time.Duration
+	batchSize int
+	mode      string // "full" hoặc "smart"
 }
 
 // NewClassificationRefreshWorker tạo worker mới.
-//
-// Tham số:
-//   - interval: Khoảng cách giữa các lần chạy (mặc định: 24h)
-//   - batchSize: Số khách tối đa mỗi lần (mặc định: 200)
-//   - mode: "full" hoặc "smart"
 func NewClassificationRefreshWorker(interval time.Duration, batchSize int, mode string) (*ClassificationRefreshWorker, error) {
-	crmService, err := crmvc.NewCrmCustomerService()
-	if err != nil {
-		return nil, err
-	}
 	if interval < time.Hour {
 		interval = 24 * time.Hour
 	}
@@ -54,115 +36,95 @@ func NewClassificationRefreshWorker(interval time.Duration, batchSize int, mode 
 		mode = ClassificationRefreshModeSmart
 	}
 	return &ClassificationRefreshWorker{
-		crmService: crmService,
-		interval:   interval,
-		batchSize:  batchSize,
-		mode:       mode,
+		interval:  interval,
+		batchSize: batchSize,
+		mode:      mode,
 	}, nil
 }
 
-// Start chạy worker trong vòng lặp.
+// Start chạy worker trong vòng lặp (cùng mẫu CrmIngestWorker: không dùng Ticker — tránh khi inactive phải chờ cả chu kỳ 24h mới kiểm tra lại).
 func (w *ClassificationRefreshWorker) Start(ctx context.Context) {
 	log := logger.GetAppLogger()
 
-	ticker := time.NewTicker(w.interval)
-	defer ticker.Stop()
+	schedName := WorkerClassificationFull
+	if w.mode == ClassificationRefreshModeSmart {
+		schedName = WorkerClassificationSmart
+	}
 
 	log.WithFields(map[string]interface{}{
-		"interval":  w.interval.String(),
-		"batchSize": w.batchSize,
-		"mode":      w.mode,
-	}).Info("📊 [CLASSIFICATION_REFRESH] Starting Classification Refresh Worker...")
+		"interval":    w.interval.String(),
+		"batchSize":   w.batchSize,
+		"mode":        w.mode,
+		"schedWorker": schedName,
+	}).Info("📊 [CLASSIFICATION_REFRESH] Starting Classification Refresh Worker (AI Decision queue)...")
 
-	// Chạy ngay lần đầu sau 1 phút (tránh chạy lúc startup)
-	time.Sleep(time.Minute)
+	// Chờ hệ thống ổn định trước tick đầu (Mongo/registry).
+	select {
+	case <-ctx.Done():
+		log.Info("📊 [CLASSIFICATION_REFRESH] Classification Refresh Worker stopped")
+		return
+	case <-time.After(1 * time.Minute):
+	}
 
 	for {
+		interval, batchFromSchedule := GetEffectiveWorkerSchedule(schedName, w.interval, w.batchSize)
+
+		if !IsWorkerActive(schedName) {
+			select {
+			case <-ctx.Done():
+				log.Info("📊 [CLASSIFICATION_REFRESH] Classification Refresh Worker stopped")
+				return
+			case <-time.After(1 * time.Minute):
+			}
+			continue
+		}
+
+		p := GetPriority(schedName, PriorityLowest)
+		if ShouldThrottle(p) {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(interval):
+			}
+			continue
+		}
+
+		effInterval := GetEffectiveInterval(interval, p)
+		if effInterval > interval {
+			select {
+			case <-ctx.Done():
+				log.Info("📊 [CLASSIFICATION_REFRESH] Classification Refresh Worker stopped")
+				return
+			case <-time.After(effInterval - interval):
+			}
+		}
+
 		select {
 		case <-ctx.Done():
 			log.Info("📊 [CLASSIFICATION_REFRESH] Classification Refresh Worker stopped")
 			return
-		case <-ticker.C:
-			workerName := WorkerClassificationFull
-			if w.mode == ClassificationRefreshModeSmart {
-				workerName = WorkerClassificationSmart
-			}
-			if !IsWorkerActive(workerName) {
-				time.Sleep(1 * time.Minute)
-				continue
-			}
-			p := GetPriority(WorkerClassificationFull, PriorityLowest)
-			if w.mode == ClassificationRefreshModeSmart {
-				p = GetPriority(WorkerClassificationSmart, PriorityLowest)
-			}
-			if ShouldThrottle(p) {
-				continue
-			}
-			if effInterval := GetEffectiveInterval(w.interval, p); effInterval > w.interval {
-				time.Sleep(effInterval - w.interval)
-			}
-			w.runBatch(ctx, log)
+		case <-time.After(interval):
 		}
-	}
-}
 
-// runBatch chạy một đợt refresh: lấy batch khách → RefreshMetrics từng người.
-func (w *ClassificationRefreshWorker) runBatch(ctx context.Context, log *logrus.Logger) {
-	start := time.Now()
-	defer func() {
-		metrics.RecordDuration("classification_refresh:"+w.mode, time.Since(start))
-	}()
-	p := GetPriority(WorkerClassificationFull, PriorityLowest)
-	if w.mode == ClassificationRefreshModeSmart {
-		p = GetPriority(WorkerClassificationSmart, PriorityLowest)
-	}
-	batchSize := GetEffectiveBatchSize(w.batchSize, p)
-	defer func() {
-		if r := recover(); r != nil {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.WithField("panic", r).Error("📊 [CLASSIFICATION_REFRESH] Panic khi enqueue, sẽ thử lần sau")
+				}
+			}()
+			batchSize := GetEffectiveBatchSize(batchFromSchedule, p)
+			start := time.Now()
+			eventID, err := crmqueue.EmitCrmIntelligenceClassificationRefreshRequested(ctx, w.mode, batchSize)
+			metrics.RecordDuration("classification_refresh:"+w.mode, time.Since(start))
+			if err != nil {
+				log.WithError(err).Warn("📊 [CLASSIFICATION_REFRESH] Không ghi được event vào AI Decision queue")
+				return
+			}
 			log.WithFields(map[string]interface{}{
-				"panic": r,
-			}).Error("📊 [CLASSIFICATION_REFRESH] Panic khi xử lý, sẽ tiếp tục lần chạy tiếp theo")
-		}
-	}()
-
-	skip := 0
-	totalProcessed := 0
-
-	for {
-		list, err := w.crmService.ListCustomerIdsForClassificationRefresh(ctx, w.mode, batchSize, skip)
-		if err != nil {
-			log.WithError(err).Error("📊 [CLASSIFICATION_REFRESH] Lỗi lấy danh sách khách cần refresh")
-			return
-		}
-		if len(list) == 0 {
-			break
-		}
-
-		processed := 0
-		for _, c := range list {
-			if err := w.crmService.RefreshMetrics(ctx, c.UnifiedId, c.OwnerOrgID); err != nil {
-				log.WithError(err).WithFields(map[string]interface{}{
-					"unifiedId":  c.UnifiedId,
-					"ownerOrgId": c.OwnerOrgID.Hex(),
-				}).Warn("📊 [CLASSIFICATION_REFRESH] RefreshMetrics thất bại, bỏ qua")
-				continue
-			}
-			processed++
-		}
-		totalProcessed += processed
-
-		if processed > 0 {
-			log.WithFields(map[string]interface{}{
-				"batchProcessed": processed,
-				"batchSize":      len(list),
-				"totalProcessed": totalProcessed,
-			}).Info("📊 [CLASSIFICATION_REFRESH] Đã cập nhật phân loại khách hàng")
-		}
-
-		// Chế độ smart: chỉ 1 batch (ít khách gần ngưỡng). Full: tiếp tục đến hết.
-		if w.mode == ClassificationRefreshModeSmart || len(list) < batchSize {
-			break
-		}
-		skip += w.batchSize
+				"eventId":   eventID,
+				"batchSize": batchSize,
+				"mode":      w.mode,
+			}).Info("📊 [CLASSIFICATION_REFRESH] Đã enqueue classification refresh (AI Decision)")
+		}()
 	}
 }

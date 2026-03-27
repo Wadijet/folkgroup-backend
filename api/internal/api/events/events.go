@@ -1,6 +1,6 @@
 // Package events cung cấp cơ chế event trung tâm khi dữ liệu thay đổi qua CRUD.
 // Các service CRUD không cần override từng method — BaseServiceMongoImpl tự động phát event.
-// Logic phản ứng (report MarkDirty, cache invalidation, ...) đăng ký qua OnDataChanged.
+// Vision L1: chỉ hook aidecision đăng ký OnDataChanged → decision_events_queue; consumer gọi applyDatachangedSideEffects (một cửa: ingest / report / ads / refresh metrics).
 package events
 
 import (

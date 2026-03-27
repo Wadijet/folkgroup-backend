@@ -14,6 +14,9 @@ type DebounceState struct {
 	CustomerID     string             `json:"customerId" bson:"customerId"`
 	Channel        string             `json:"channel" bson:"channel"`
 	LastEventID    string             `json:"lastEventId" bson:"lastEventId"`
-	LastMessageAt  int64              `json:"lastMessageAt" bson:"lastMessageAt" index:"single:1"`
-	CreatedAt      int64              `json:"createdAt" bson:"createdAt"`
+	// TraceID / CorrelationID — lấy từ event đầu tiên trong cửa sổ debounce ($setOnInsert), nối lại khi emit message.batch_ready.
+	TraceID       string `json:"traceId,omitempty" bson:"traceId,omitempty"`
+	CorrelationID string `json:"correlationId,omitempty" bson:"correlationId,omitempty"`
+	LastMessageAt int64  `json:"lastMessageAt" bson:"lastMessageAt" index:"single:1"`
+	CreatedAt     int64  `json:"createdAt" bson:"createdAt"`
 }

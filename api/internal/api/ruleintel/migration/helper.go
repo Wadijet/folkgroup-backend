@@ -9,7 +9,7 @@ import (
 	"meta_commerce/internal/cta"
 )
 
-// GetSystemOrgIDForSeed lấy System Organization ID. Best-effort: nếu chưa có (InitRegistry chạy trước InitDefaultData) thì trả về NilObjectID.
+// GetSystemOrgIDForSeed lấy System Organization ID. Best-effort: nếu chưa có (ví dụ seed gọi trước InitRootOrganization) thì trả về NilObjectID.
 func GetSystemOrgIDForSeed(ctx context.Context) primitive.ObjectID {
 	id, err := cta.GetSystemOrganizationID(ctx)
 	if err != nil {

@@ -25,6 +25,8 @@ type ProposeInput struct {
 	AdId         string                 `json:"adId"`
 	Value        interface{}            `json:"value"`   // Budget (cent), % (INCREASE/DECREASE), tên mới (SET_NAME)
 	Reason       string                 `json:"reason" validate:"required"` // Lý do đề xuất — bắt buộc
+	RuleCode     string                 `json:"ruleCode"`                   // Mã rule / idempotency — đồng bộ với ads service
+	TraceID      string                 `json:"traceId"`                    // Link rule_execution_logs (tuỳ chọn)
 	Payload      map[string]interface{} `json:"payload"` // Bổ sung (vd: name cho SET_NAME)
 }
 

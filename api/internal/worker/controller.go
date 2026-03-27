@@ -168,7 +168,8 @@ func newController() *Controller {
 			thresholdRAMThrottle = n
 		}
 	}
-	thresholdRAMPause := 75.0
+	// ≥ ngưỡng → Paused (hầu hết worker nghỉ). 75% quá sớm trên Windows/Linux (RAM cache); mặc định 88.
+	thresholdRAMPause := 88.0
 	if v := os.Getenv("WORKER_RAM_THRESHOLD_PAUSE"); v != "" {
 		if n, err := strconv.ParseFloat(v, 64); err == nil && n > 0 {
 			thresholdRAMPause = n
@@ -406,6 +407,14 @@ func (c *Controller) ShouldThrottle(p Priority) bool {
 	return false
 }
 
+// ShouldThrottleWorker giống ShouldThrottle nhưng cho phép worker bỏ qua pause/throttle (env WORKER_RESOURCE_THROTTLE_BYPASS / WORKER_AI_DECISION_CONSUMER_IGNORE_RESOURCE_THROTTLE).
+func (c *Controller) ShouldThrottleWorker(workerName string, p Priority) bool {
+	if IsWorkerBypassingResourceThrottle(workerName) {
+		return false
+	}
+	return c.ShouldThrottle(p)
+}
+
 // GetEffectiveInterval trả về interval hiệu dụng theo priority (khi Throttled: base * multiplier).
 func (c *Controller) GetEffectiveInterval(base time.Duration, p Priority) time.Duration {
 	if !c.enabled {
@@ -418,8 +427,9 @@ func (c *Controller) GetEffectiveInterval(base time.Duration, p Priority) time.D
 	if s == StateThrottled {
 		return base * time.Duration(mul)
 	}
-	if s == StatePaused && (p == PriorityCritical || p == PriorityHigh) {
-		return base * 2 // Khi Paused vẫn chạy nhưng chậm hơn
+	// Paused: chỉ làm chậm High (Critical giữ tốc độ — pipeline báo cáo + AID không bị nghẽn gấp đôi).
+	if s == StatePaused && p == PriorityHigh {
+		return base * 2
 	}
 	return base
 }
@@ -447,26 +457,107 @@ func (c *Controller) GetEffectiveBatchSize(base int, p Priority) int {
 	return base
 }
 
-// GetEffectivePoolSize trả về pool size hiệu dụng theo trạng thái CPU/RAM.
-// Khi Throttled: base/2 (tối thiểu 1); khi Paused: 1 (chạy tuần tự để giảm tải).
+// scalePoolUnderThrottle giảm thêm pool khi CPU/RAM tăng trong khoảng [throttle, pause] (state vẫn Throttled).
+// stress=0 → giữ nguyên n; stress→1 → giảm tối đa một nửa (tối thiểu 1).
+func scalePoolUnderThrottle(n int, cpu, ram, thCPU, paCPU, thRAM, paRAM float64) int {
+	if n <= 1 {
+		return n
+	}
+	var stress float64
+	denC := paCPU - thCPU
+	if denC > 1e-6 {
+		fc := (cpu - thCPU) / denC
+		if fc > stress {
+			stress = fc
+		}
+	}
+	denR := paRAM - thRAM
+	if denR > 1e-6 {
+		fr := (ram - thRAM) / denR
+		if fr > stress {
+			stress = fr
+		}
+	}
+	if stress < 0 {
+		stress = 0
+	}
+	if stress > 1 {
+		stress = 1
+	}
+	factor := 1.0 - 0.5*stress
+	scaled := int(float64(n) * factor)
+	if scaled < 1 {
+		return 1
+	}
+	return scaled
+}
+
+// GetEffectivePoolSize trả về pool size hiệu dụng theo tài nguyên (CPU/RAM) và priority.
+// - Normal: trả về base (từ env/API pool size).
+// - Throttled: base / getBatchDivisor(p) (cùng logic giảm tải với batch), tối thiểu 1; sau đó scale thêm
+//   khi CPU hoặc RAM tiến gần ngưỡng pause (trong vùng throttle).
+// - Paused: 1 (tuần tự).
+// Consumer AI Decision và các worker dùng pool (ads execution, report dirty, delivery) đều đi qua hàm này.
 func (c *Controller) GetEffectivePoolSize(base int, p Priority) int {
 	if !c.enabled || base <= 1 {
 		return base
 	}
 	c.mu.RLock()
 	s := c.state
+	div := c.getBatchDivisor(p)
+	cpu := c.cpuPercent
+	ram := c.ramPercent
+	thC := c.thresholdThrottle
+	paC := c.thresholdPause
+	thR := c.thresholdRAMThrottle
+	paR := c.thresholdRAMPause
 	c.mu.RUnlock()
+
 	if s == StatePaused {
+		// Critical: không ép pool=1 (pipeline báo cáo/AID vẫn cần độ rộng tối thiểu); các priority khác tuần tự.
+		if p == PriorityCritical {
+			n := base / 2
+			if n < 1 {
+				n = 1
+			}
+			return n
+		}
 		return 1
 	}
-	if s == StateThrottled {
-		n := base / 2
-		if n < 1 {
-			n = 1
-		}
-		return n
+	if s != StateThrottled {
+		return base
 	}
-	return base
+	if div < 1 {
+		div = 1
+	}
+	n := base / div
+	if n < 1 {
+		n = 1
+	}
+	n = scalePoolUnderThrottle(n, cpu, ram, thC, paC, thR, paR)
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+// GetEffectiveIntervalForWorker giống GetEffectiveInterval; nếu worker bypass resource throttle thì luôn dùng base.
+func (c *Controller) GetEffectiveIntervalForWorker(workerName string, base time.Duration, p Priority) time.Duration {
+	if IsWorkerBypassingResourceThrottle(workerName) {
+		return base
+	}
+	return c.GetEffectiveInterval(base, p)
+}
+
+// GetEffectivePoolSizeForWorker giống GetEffectivePoolSize; bypass → luôn base (full pool).
+func (c *Controller) GetEffectivePoolSizeForWorker(workerName string, base int, p Priority) int {
+	if IsWorkerBypassingResourceThrottle(workerName) {
+		if base < 1 {
+			return 1
+		}
+		return base
+	}
+	return c.GetEffectivePoolSize(base, p)
 }
 
 // GetState trả về trạng thái hiện tại (để debug).
@@ -567,6 +658,11 @@ func ShouldThrottle(p Priority) bool {
 	return DefaultController().ShouldThrottle(p)
 }
 
+// ShouldThrottleWorker package-level: có tôn trọng bypass theo tên worker (xem IsWorkerBypassingResourceThrottle).
+func ShouldThrottleWorker(workerName string, p Priority) bool {
+	return DefaultController().ShouldThrottleWorker(workerName, p)
+}
+
 // GetEffectiveInterval package-level helper. Truyền priority để xác định interval khi Throttled.
 func GetEffectiveInterval(base time.Duration, p Priority) time.Duration {
 	return DefaultController().GetEffectiveInterval(base, p)
@@ -577,7 +673,17 @@ func GetEffectiveBatchSize(base int, p Priority) int {
 	return DefaultController().GetEffectiveBatchSize(base, p)
 }
 
-// GetEffectivePoolSize package-level helper. Truyền priority để xác định pool size khi Throttled/Paused.
+// GetEffectivePoolSize package-level helper: pool theo state CPU/RAM + priority + mức tải trong vùng throttle.
 func GetEffectivePoolSize(base int, p Priority) int {
 	return DefaultController().GetEffectivePoolSize(base, p)
+}
+
+// GetEffectiveIntervalForWorker package-level.
+func GetEffectiveIntervalForWorker(workerName string, base time.Duration, p Priority) time.Duration {
+	return DefaultController().GetEffectiveIntervalForWorker(workerName, base, p)
+}
+
+// GetEffectivePoolSizeForWorker package-level.
+func GetEffectivePoolSizeForWorker(workerName string, base int, p Priority) int {
+	return DefaultController().GetEffectivePoolSizeForWorker(workerName, base, p)
 }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"time"
 
+	"meta_commerce/internal/api/aidecision/adsautop"
 	adssvc "meta_commerce/internal/api/ads/service"
 	"meta_commerce/internal/logger"
 	coreworker "meta_commerce/internal/worker"
@@ -112,7 +113,7 @@ func (w *AdsDailySchedulerWorker) process(ctx context.Context) {
 	}
 	// 16:00, 18:00 — Volume Push (BLITZ 16h, NORMAL 18h)
 	if (h == 16 || h == 18) && m == 0 {
-		adssvc.RunVolumePush(ctx, w.baseURL)
+		adsautop.RunVolumePush(ctx, w.baseURL)
 	}
 	// Mỗi :00 trong khung 9–20h — Rule 13 Throttle (1-2-6): cap Ad Set tệ 15%
 	if h >= 9 && h <= 20 && m == 0 {

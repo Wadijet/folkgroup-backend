@@ -45,6 +45,8 @@ type CixAnalysisResult struct {
 	CustomerUid        string             `json:"customerUid" bson:"customerUid" index:"single:1"` // cust_xxx
 	TraceID            string             `json:"traceId" bson:"traceId" index:"single:1,sparse"`
 	CorrelationID      string             `json:"correlationId" bson:"correlationId" index:"single:1,sparse"`
+	// PipelineRuleTraceIDs thứ tự các lần chạy rule trong pipeline CIX (L1→L2→Adj→[L3]→Flags→Actions) — tra rule_execution_logs.
+	PipelineRuleTraceIDs []string `json:"pipelineRuleTraceIds,omitempty" bson:"pipelineRuleTraceIds,omitempty"`
 	Layer1             CixLayer1          `json:"layer1" bson:"layer1"`
 	Layer2             CixLayer2          `json:"layer2" bson:"layer2"`
 	Layer3             CixLayer3          `json:"layer3" bson:"layer3"`

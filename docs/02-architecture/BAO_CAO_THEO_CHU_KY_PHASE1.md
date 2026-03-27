@@ -10,20 +10,29 @@ Tài liệu **tổng hợp** đủ để triển khai Phase 1: định nghĩa tr
 
 - **Báo cáo** tính theo chu kỳ (ngày) và **lưu sẵn** (snapshot). Client gọi API trend → đọc snapshot, không tính realtime.
 - **Định nghĩa** trong DB: collection `report_definitions`. Mỗi document = một báo cáo (key, name, periodType, sourceCollection, timeField, dimensions, metrics[]).
-- **Khi dữ liệu nguồn đổi** → hook đánh dấu period “dirty” → worker hoặc API recompute tính lại và ghi snapshot.
+- **Khi dữ liệu nguồn đổi** → (thiết kế Phase 1: hook **MarkDirty**; **triển khai hiện tại:** touch **Redis** → worker flush **MarkDirty**) → worker `report_dirty_*` hoặc API **recompute** tính lại và ghi snapshot.
 - **Phase 1:** Một report = **một** collection nguồn; tất cả metrics lấy từ cùng sourceCollection. (Sau có thể mở rộng mỗi metric có sourceCollection riêng.)
 
 ---
 
 ## 2. Luồng
 
+**Phase 1 (thiết kế tài liệu gốc):**
+
 ```
 pc_pos_orders (Insert/Update) → Hook → MarkDirty(reportKey, periodKey, org)
-                                        ↓
-report_definitions (load) → Engine (1 aggregation) → report_snapshots (upsert)
-                                        ↑
-Worker/Cron đọc report_dirty_periods → Recompute từng (reportKey, periodKey, org)
 ```
+
+**Triển khai backend hiện tại (một cửa AI Decision + Redis):**
+
+```
+Mongo CRUD → EmitDataChanged → decision_events_queue (datachanged)
+    → applyDatachangedSideEffects → RecordReportTouchFromDataChange → Redis keys ff:rt:*
+    → worker report_redis_touch_flush → MarkDirty → report_dirty_periods
+    → worker report_dirty_* → Compute → report_snapshots
+```
+
+**Chung:** Engine đọc `report_definitions` → aggregation → `report_snapshots`. **API** trend / recompute và **MarkDirty** thủ công vẫn hoạt động như cũ.
 
 ---
 
@@ -91,12 +100,13 @@ Worker/Cron đọc report_dirty_periods → Recompute từng (reportKey, periodK
 
 ---
 
-## 5. Hook
+## 5. Hook (Phase 1) / Nguồn dirty thực tế (backend)
 
-- **Vị trí:** Trong PcPosOrderService (hoặc service collection nguồn), sau InsertOne/UpdateOne thành công.
-- **Logic:** Từ document lấy posCreatedAt (hoặc insertedAt, createdAt), ownerOrganizationId. Suy ra periodKey (ngày, timezone cố định). Query `report_definitions` có sourceCollection = "pc_pos_orders" → danh sách key. Với mỗi key gọi MarkDirty(ctx, reportKey, periodKey, ownerOrganizationId).
-- **MarkDirty:** Insert vào report_dirty_periods (reportKey, periodKey, ownerOrganizationId, markedAt = now Unix seconds, processedAt = null). Có thể upsert để tránh trùng.
-- **Không** gọi engine trong request.
+**Phase 1 (tài liệu gốc):** Hook trong service collection nguồn sau ghi DB → **MarkDirty** trực tiếp.
+
+**Backend hiện tại:** Không hook MarkDirty trong từng service POS/CRM. **`events.EmitDataChanged`** → queue AI Decision → **`applyDatachangedSideEffects`** gọi **`RecordReportTouchFromDataChange`** (collections: `pc_pos_orders`, `pc_pos_customers`, `crm_activity_history`, `meta_ad_insights` — cùng điều kiện lọc period như trước). **MarkDirty** vào Mongo chỉ sau khi worker **`report_redis_touch_flush`** đọc Redis. Cần **REDIS_ADDR**; nếu Redis tắt, dirty từ CRUD không được ghi (vẫn dùng API MarkDirty/recompute).
+
+- **Không** gọi engine trong request consumer.
 
 ---
 
@@ -123,8 +133,10 @@ API trend/balance từ snapshot = chính; từ DB = phụ (đối chiếu).
 
 ## 7. Worker / Cron
 
-- Định kỳ (ví dụ mỗi 5 phút): đọc report_dirty_periods có processedAt = null (giới hạn N bản ghi).
-- Với mỗi bản ghi: gọi engine (reportKey, periodKey, ownerOrganizationId) → sau khi ghi snapshot set processedAt = now Unix seconds (hoặc xóa bản ghi).
+1. **`report_redis_touch_flush`:** Một worker, ba chu kỳ flush (`REPORT_REDIS_TOUCH_FLUSH_INTERVAL_*_SEC`) theo prefix `ff:rt:a|*`, `ff:rt:o|*`, `ff:rt:c|*` → **MarkDirty** rồi xóa key; poll tick `REPORT_REDIS_TOUCH_POLL_TICK_SEC`.
+2. **`report_dirty_ads` / `report_dirty_order` / `report_dirty_customer`:** Định kỳ đọc `report_dirty_periods` có `processedAt` = null (giới hạn batch) → **Compute** → set processed (hoặc xóa dirty).
+
+Chi tiết env: [WORKER_CONFIG_ENV_VARS.md](../05-development/WORKER_CONFIG_ENV_VARS.md) mục Redis & báo cáo.
 
 ---
 
@@ -177,7 +189,7 @@ Chèn (upsert) một document vào `report_definitions`:
 ```
 
 **Lưu ý:**
-- Hook MarkDirty dùng `posCreatedAt` từ document để suy periodKey.
+- Touch / MarkDirty từ CRUD dùng cùng logic thời gian (vd. `posCreatedAt`) để suy periodKey; chi tiết trong `service.report.redis_touch.go`.
 - `statusDimension` + `statusLabels`: thống kê theo trạng thái đơn (posData.status). Danh sách trạng thái theo [Pancake POS API](docs-shared/ai-context/pancake-pos/api-context.md#trạng-thái-đơn-hàng-order-status).
 
 ---
@@ -189,6 +201,25 @@ Chèn (upsert) một document vào `report_definitions`:
 - **Đa tổ chức:** Luôn filter và snapshot theo ownerOrganizationId. API lấy org từ context.
 - **Response:** Chuẩn dự án: code, message, data, status (success/error). Message Tiếng Việt.
 - **Permission:** Report.Read (xem trend), Report.Recompute (chạy lại). Gắn middleware cho route `/api/reports/*`.
+
+---
+
+## 11. Cấu hình Redis & báo cáo (triển khai)
+
+| Biến môi trường | Mặc định | Mô tả |
+|------------------|----------|--------|
+| `REDIS_ADDR` | (rỗng) | Bắt buộc để ghi touch từ `datachanged` (vd. `localhost:6379`). |
+| `REDIS_PASSWORD` | (rỗng) | Tuỳ chọn. |
+| `REDIS_DB` | `0` | DB Redis. |
+| `REPORT_REDIS_TOUCH_TTL_SEC` | `7200` | TTL key `ff:rt:*` (giây). |
+| `REPORT_REDIS_TOUCH_FLUSH_INTERVAL_ADS_SEC` | `30` | Chu kỳ flush nhóm **ads**. |
+| `REPORT_REDIS_TOUCH_FLUSH_INTERVAL_ORDER_SEC` | `120` | Chu kỳ flush nhóm **order**. |
+| `REPORT_REDIS_TOUCH_FLUSH_INTERVAL_CUSTOMER_SEC` | `300` | Chu kỳ flush nhóm **customer**. |
+| `REPORT_REDIS_TOUCH_POLL_TICK_SEC` | `5` | Vòng lặp worker kiểm tra (giây). |
+
+Một worker **`report_redis_touch_flush`**, ba nhịp độc lập — xem `GetReportRedisTouchFlushIntervals` trong code.
+
+Tham chiếu code: `api/internal/redisclient`, `api/internal/api/report/service/service.report.redis_touch.go`, `api/internal/worker/report_redis_touch_worker.go`, `worker.aidecision.datachanged_side_effects.go`.
 
 ---
 

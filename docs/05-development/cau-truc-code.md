@@ -55,6 +55,7 @@ Request → Router → Middleware → Handler → Service → Repository → Dat
 
 ## 📚 Tài Liệu Liên Quan
 
+- **[Nguyên tắc CRUD → AI Decision (hook + queue)](NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md)** — Không phá luồng `EmitDataChanged` / `decision_events_queue`
 - [Thêm API Mới](them-api-moi.md)
 - [Thêm Service Mới](them-service-moi.md)
 - [Coding Standards](coding-standards.md)

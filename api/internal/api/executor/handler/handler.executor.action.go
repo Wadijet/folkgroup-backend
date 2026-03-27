@@ -54,9 +54,7 @@ type ExecuteInput struct {
 }
 
 // HandlePropose POST /executor/actions/propose
-// Vision 08 Phase 0: API này chủ yếu dùng nội bộ (AI Decision, test). External nên dùng domain-specific API:
-// - Ads: POST /ads/actions/propose
-// - CIO: không còn domain propose riêng (đã gỡ session/plan/touchpoint).
+// Chỉ enqueue AI Decision (executor.propose_requested); consumer gọi approval.Propose — không gọi trực tiếp từ handler.
 func HandlePropose(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {
 		var input ProposeInput
@@ -96,36 +94,16 @@ func HandlePropose(c fiber.Ctx) error {
 			ApprovePath:      approvePath,
 			RejectPath:       rejectPath,
 		}
-		// Vision 08 event-driven: Ads/CIO emit event; domain khác gọi approval.Propose
-		var err error
-		switch input.Domain {
-		case "ads":
-			var eventID string
-			eventID, err = aidecisionsvc.EmitAdsProposeRequest(c.Context(), proposeInput, *orgID, baseURL)
-			if err == nil {
-				c.Status(common.StatusAccepted).JSON(fiber.Map{
-					"code": common.StatusAccepted, "message": "Đã nhận đề xuất, đang xử lý", "data": fiber.Map{"eventId": eventID}, "status": "success",
-				})
-				return nil
-			}
-		default:
-			// Vision: mọi action cần decisionId, contextSnapshot — EnrichProposeInputWithTrace trước khi Propose
-			aidecisionsvc.EnrichProposeInputWithTrace(input.Domain, &proposeInput)
-			result, proposeErr := approval.Propose(c.Context(), input.Domain, proposeInput, *orgID, baseURL)
-			if proposeErr != nil {
-				err = proposeErr
-				break
-			}
-			c.Status(common.StatusCreated).JSON(fiber.Map{
-				"code": common.StatusCreated, "message": "Đã thêm đề xuất vào queue", "data": result, "status": "success",
-			})
-			return nil
-		}
+		eventID, err := aidecisionsvc.EmitExecutorProposeRequest(c.Context(), input.Domain, proposeInput, *orgID, baseURL)
 		if err != nil {
 			c.Status(common.StatusInternalServerError).JSON(fiber.Map{
 				"code": common.ErrCodeInternalServer.Code, "message": err.Error(), "status": "error",
 			})
+			return nil
 		}
+		c.Status(common.StatusAccepted).JSON(fiber.Map{
+			"code": common.StatusAccepted, "message": "Đã nhận đề xuất, đang xử lý qua AI Decision", "data": fiber.Map{"eventId": eventID}, "status": "success",
+		})
 		return nil
 	})
 }

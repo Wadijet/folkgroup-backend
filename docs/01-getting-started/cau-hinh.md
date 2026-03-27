@@ -60,6 +60,21 @@ MONGODB_DBNAME_DATA=folkform_data
 - Replica set: `mongodb://host1:27017,host2:27017/?replicaSet=rs0`
 - Atlas: `mongodb+srv://username:password@cluster.mongodb.net/`
 
+### Redis (báo cáo — touch từ datachanged)
+
+| Biến | Mô tả | Mặc định | Bắt buộc |
+|------|--------|----------|----------|
+| `REDIS_ADDR` | Địa chỉ Redis (vd. `localhost:6379`) | (rỗng) | Không — **rỗng** thì không ghi touch báo cáo từ CRUD |
+| `REDIS_PASSWORD` | Mật khẩu | (rỗng) | Không |
+| `REDIS_DB` | Chỉ số DB | `0` | Không |
+| `REPORT_REDIS_TOUCH_TTL_SEC` | TTL key touch (giây) | `7200` | Không |
+| `REPORT_REDIS_TOUCH_FLUSH_INTERVAL_ADS_SEC` | Chu kỳ flush nhóm ads (giây) | `30` | Không |
+| `REPORT_REDIS_TOUCH_FLUSH_INTERVAL_ORDER_SEC` | Chu kỳ flush nhóm order (giây) | `120` | Không |
+| `REPORT_REDIS_TOUCH_FLUSH_INTERVAL_CUSTOMER_SEC` | Chu kỳ flush nhóm customer (giây) | `300` | Không |
+| `REPORT_REDIS_TOUCH_POLL_TICK_SEC` | Bước kiểm tra trong worker (giây) | `5` | Không |
+
+Luồng: thay đổi dữ liệu nguồn → `decision_events_queue` → ghi key `ff:rt:*` trên Redis → worker **`report_redis_touch_flush`** (ba nhịp) → `report_dirty_periods` → worker `report_dirty_*`. Chi tiết: [WORKER_CONFIG_ENV_VARS.md](../05-development/WORKER_CONFIG_ENV_VARS.md), [BAO_CAO_THEO_CHU_KY_PHASE1.md](../02-architecture/BAO_CAO_THEO_CHU_KY_PHASE1.md) §2/§7/§11.
+
 ### CORS Configuration
 
 | Biến | Mô Tả | Mặc Định | Bắt Buộc |

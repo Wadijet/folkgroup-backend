@@ -109,6 +109,25 @@ Cho phép chỉnh ngưỡng CPU/RAM và mức ưu tiên từng worker qua biến
 - **workerRetentionsClear**: Mảng worker_name cần xóa override retention.
 - **alertWebhookURL**: URL để POST khi CPU/RAM/disk quá tải. Rỗng = tắt. Env: `WORKER_ALERT_WEBHOOK_URL`.
 
+### Redis & báo cáo (touch → MarkDirty)
+
+Luồng **không** MarkDirty ngay trong consumer `datachanged`: ghi key Redis `ff:rt:*`, worker **`report_redis_touch_flush`** (một process) gọi `MarkDirty` theo **ba nhịp độc lập** (ads / order / customer).
+
+| Env (config server) | Mặc định (KD) | Mô tả |
+|---------------------|---------------|--------|
+| `REDIS_ADDR` | (rỗng) | Có giá trị mới kết nối Redis; rỗng = không ghi touch từ CRUD. |
+| `REDIS_PASSWORD` | (rỗng) | Tuỳ chọn. |
+| `REDIS_DB` | `0` | Index DB Redis. |
+| `REPORT_REDIS_TOUCH_TTL_SEC` | `7200` | TTL (giây) cho key touch. |
+| `REPORT_REDIS_TOUCH_FLUSH_INTERVAL_ADS_SEC` | `30` | Chu kỳ flush **ads** (ads_daily) — chiến dịch cần gần realtime. |
+| `REPORT_REDIS_TOUCH_FLUSH_INTERVAL_ORDER_SEC` | `120` | Chu kỳ flush **order** (đơn / doanh thu). |
+| `REPORT_REDIS_TOUCH_FLUSH_INTERVAL_CUSTOMER_SEC` | `300` | Chu kỳ flush **customer** (profile/segment đổi chậm hơn). |
+| `REPORT_REDIS_TOUCH_POLL_TICK_SEC` | `5` | Bước ngủ giữa các vòng **kiểm tra** trong worker (không thay thế ba interval trên). |
+
+API `GET /system/worker-config` → `workerSchedules.report_redis_touch_flush.interval` thể hiện **poll tick** (mặc định ~5s), không phải chu kỳ từng loại — từng loại chỉnh bằng env ở bảng trên.
+
+Worker: **`report_redis_touch_flush`** — ưu tiên **Normal (3)**; `WORKER_REPORT_REDIS_TOUCH_FLUSH_INTERVAL` override **poll tick** (duration).
+
 ---
 
 ## 1. Ngưỡng Throttle (CPU, RAM, Disk)
@@ -213,7 +232,7 @@ API: `alertWebhookURL` trong PUT body — string. Rỗng = tắt.
 
 **Workers đã hỗ trợ config runtime (interval, batch):** crm_ingest, crm_bulk, notification_command_cleanup, ads_execution.
 
-**Report workers (interval, batch qua reportSchedules hoặc workerSchedules):** report_dirty_ads, report_dirty_order, report_dirty_customer — mỗi worker độc lập, config riêng (priority, active, pool size).
+**Report workers (interval, batch qua reportSchedules hoặc workerSchedules):** report_dirty_ads, report_dirty_order, report_dirty_customer — mỗi worker độc lập, config riêng (priority, active, pool size). Thêm **report_redis_touch_flush** (quét Redis → MarkDirty) — interval qua `workerSchedules` hoặc env ở bảng Redis & báo cáo phía trên.
 
 **Workers hỗ trợ config runtime (interval, retention):** notification_agent_activity_cleanup.
 
@@ -228,7 +247,7 @@ API: `alertWebhookURL` trong PUT body — string. Rỗng = tắt.
 | `order` | report_dirty_order |
 | `customer` | report_dirty_customer, crm_ingest, crm_bulk, crm_classification_full, crm_classification_smart |
 | `notification` | notification_delivery_processor, notification_delivery_cleanup |
-| `system` | notification_command_cleanup, notification_agent_command_cleanup, notification_agent_activity_cleanup |
+| `system` | report_redis_touch_flush, notification_command_cleanup, notification_agent_command_cleanup, notification_agent_activity_cleanup |
 
 API GET trả `workerMetadata` với field `domain` — dùng để nhóm/filter workers theo domain.
 
@@ -239,6 +258,7 @@ API GET trả `workerMetadata` với field `domain` — dùng để nhóm/filter
 | `report_dirty_ads` | report | ads | Tính toán lại báo cáo ads_daily khi có dirty periods | `WORKER_PRIORITY_REPORT_DIRTY_ADS` | 1 (Critical) |
 | `report_dirty_order` | report | order | Tính toán lại báo cáo order_daily khi có dirty periods | `WORKER_PRIORITY_REPORT_DIRTY_ORDER` | 1 (Critical) |
 | `report_dirty_customer` | report | customer | Tính toán lại báo cáo customer_daily khi có dirty periods | `WORKER_PRIORITY_REPORT_DIRTY_CUSTOMER` | 1 (Critical) |
+| `report_redis_touch_flush` | report | system | Một worker, ba nhịp flush theo prefix ads/order/customer → MarkDirty | `WORKER_PRIORITY_REPORT_REDIS_TOUCH_FLUSH` | 3 (Normal) |
 | `notification_delivery_processor` | notification | notification | Xử lý hàng đợi gửi thông báo (email, Telegram, SMS...) | `WORKER_PRIORITY_NOTIFICATION_DELIVERY_PROCESSOR` | 2 (High) |
 | `notification_delivery_cleanup` | notification | notification | Dọn item bị kẹt trong hàng đợi delivery | `WORKER_PRIORITY_NOTIFICATION_DELIVERY_CLEANUP` | 4 (Low) |
 | `notification_command_cleanup` | notification | system | Dọn command cũ hết hạn | `WORKER_PRIORITY_NOTIFICATION_COMMAND_CLEANUP` | 4 (Low) |
@@ -247,7 +267,7 @@ API GET trả `workerMetadata` với field `domain` — dùng để nhóm/filter
 | `crm_ingest` | crm | customer | Đồng bộ dữ liệu customer từ agent vào hệ thống | `WORKER_PRIORITY_CRM_INGEST` | 2 (High) |
 | `crm_bulk` | crm | customer | Xử lý bulk job cập nhật customer hàng loạt | `WORKER_PRIORITY_CRM_BULK` | 4 (Low) |
 | `ads_execution` | ads | ads | Thực thi đề xuất quảng cáo đã duyệt | `WORKER_PRIORITY_ADS_EXECUTION` | 3 (Normal) |
-| `ads_auto_propose` | ads | ads | Tạo đề xuất quảng cáo tự động theo rule | `WORKER_PRIORITY_ADS_AUTO_PROPOSE` | 3 (Normal) |
+| `ads_auto_propose` | ads | aidecision | Auto propose (aidecision/adsautop → executor.propose_requested) | `WORKER_PRIORITY_ADS_AUTO_PROPOSE` | 3 (Normal) |
 | `ads_circuit_breaker` | ads | ads | Giám sát và tạm dừng account khi lỗi Meta API | `WORKER_PRIORITY_ADS_CIRCUIT_BREAKER` | 3 (Normal) |
 | `ads_daily_scheduler` | ads | ads | Lên lịch mode detection và task ads hàng ngày | `WORKER_PRIORITY_ADS_DAILY_SCHEDULER` | 3 (Normal) |
 | `ads_pancake_heartbeat` | ads | ads | Gửi heartbeat đến Pancake đồng bộ trạng thái | `WORKER_PRIORITY_ADS_PANCAKE_HEARTBEAT` | 3 (Normal) |

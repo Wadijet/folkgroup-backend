@@ -14,6 +14,9 @@ Thư mục chứa **quy tắc thiết kế backend** cho AI khi làm việc vớ
 
 API contract và design cross-repo: [docs-shared/ai-context/folkform/api-context.md](../../docs-shared/ai-context/folkform/api-context.md)
 
+- **Trace W3C (`w3cTraceId`, span, timeline):** [api-context — Version 4.10](../../docs-shared/ai-context/folkform/api-context.md#version-410); [unified-data-contract — §2.5c](../../docs-shared/architecture/data-contract/unified-data-contract.md#contract-25c-w3c-trace).
+- **Case vs trace / API audit (list case, queue, org-live persist):** [api-context — Version 4.11](../../docs-shared/ai-context/folkform/api-context.md#version-411); [unified-data-contract — §2.5d](../../docs-shared/architecture/data-contract/unified-data-contract.md#contract-25d-case-trace-audit).
+
 ---
 
-**Cập nhật:** 2025-03-13
+**Cập nhật:** 2026-03-26

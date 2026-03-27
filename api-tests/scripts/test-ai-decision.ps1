@@ -67,7 +67,7 @@ catch {
     Write-Host "  FAILED (HTTP $status): $($_.Exception.Message)" -ForegroundColor Red
 }
 
-# --- 2. POST /ai-decision/execute ---
+# --- 2. POST /ai-decision/execute (202 + eventId — chi event-driven) ---
 Write-Host "`n[2] POST /ai-decision/execute" -ForegroundColor Magenta
 $executeBody = @{
     sessionUid  = "sess_test_001"
@@ -79,8 +79,13 @@ $executeBody = @{
 
 try {
     $executeResp = Invoke-RestMethod -Uri "$baseURL/ai-decision/execute" -Method POST -Headers $headers -Body $executeBody -ErrorAction Stop
-    Write-Host "  PASSED (HTTP 200)" -ForegroundColor Green
-    Write-Host "  DecisionID: $($executeResp.data.decisionId)" -ForegroundColor Gray
+    if ($executeResp.code -eq 202 -and $executeResp.data.eventId) {
+        Write-Host "  PASSED (HTTP 202 — da xep hang)" -ForegroundColor Green
+        Write-Host "  EventID: $($executeResp.data.eventId)" -ForegroundColor Gray
+    }
+    else {
+        Write-Host "  FAILED: response khong hop le (can code 202 + data.eventId)" -ForegroundColor Red
+    }
 }
 catch {
     $status = $_.Exception.Response.StatusCode.value__

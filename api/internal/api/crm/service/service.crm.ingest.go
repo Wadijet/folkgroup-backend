@@ -45,13 +45,13 @@ func (s *CrmCustomerService) IngestOrderTouchpoint(ctx context.Context, customer
 	if !found || unifiedId == "" {
 		return nil
 	}
-	// FindOne 1 lần — truyền vào MergeProfile, RefreshMetrics và snapshot (tối ưu giảm DB round-trips).
+	// FindOne 1 lần — truyền vào MergeProfile và snapshot (tối ưu giảm DB round-trips).
+	// Metrics CRM (RefreshMetrics): hook collection → AI Decision consumer quyết định và emit crmqueue (không emit từ ingest).
 	cust, errCust := s.FindOne(ctx, bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}, nil)
 	if errCust != nil {
 		return nil
 	}
 	s.MergeProfileFromOrder(ctx, unifiedId, ownerOrgID, orderDoc, &cust)
-	_ = s.RefreshMetrics(ctx, unifiedId, ownerOrgID, &cust)
 
 	activityType := "order_created"
 	if isUpdate {
@@ -383,7 +383,7 @@ func formatAmountVND(amount float64) string {
 // Một điểm vào duy nhất cho backfill, worker, recalculate — đảm bảo cả CIO và Customer đều được cập nhật.
 // Trả về (logged bool, err error): logged=true nếu đã ghi activity; logged=false nếu không resolve được (bỏ qua).
 func (s *CrmCustomerService) IngestConversationTouchpoint(ctx context.Context, customerId string, ownerOrgID primitive.ObjectID, conversationId string, skipIfExists bool, convDoc *fbmodels.FbConversation) (bool, error) {
-	// AI Decision: thay đổi fb_conversations đã được OnDataChanged → queue.
+	// Thay đổi fb_conversations: EmitDataChanged → decision_events_queue → consumer AI Decision → crmingest (không gọi CRM từ hook).
 	if customerId == "" {
 		return false, nil
 	}
@@ -445,13 +445,12 @@ func (s *CrmCustomerService) IngestConversationTouchpoint(ctx context.Context, c
 	if !found || unifiedId == "" {
 		return false, nil
 	}
-	// FindOne 1 lần — truyền vào MergeProfile, RefreshMetrics và snapshot (tối ưu giảm DB round-trips).
+	// FindOne 1 lần — truyền vào MergeProfile và snapshot (tối ưu giảm DB round-trips).
 	cust, errCust := s.FindOne(ctx, bson.M{"unifiedId": unifiedId, "ownerOrganizationId": ownerOrgID}, nil)
 	if errCust != nil {
 		return false, nil
 	}
 	s.MergeProfileFromConversation(ctx, unifiedId, ownerOrgID, convDoc, &cust)
-	_ = s.RefreshMetrics(ctx, unifiedId, ownerOrgID, &cust)
 
 	// sourceRef: conversationId (đủ cho deduplication; pageId lưu trong metadata để tách rõ theo kênh/page)
 	sourceRef := map[string]interface{}{"conversationId": conversationId}

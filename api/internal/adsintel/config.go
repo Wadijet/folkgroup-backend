@@ -4,7 +4,7 @@ package adsintel
 // DefaultWindowDays số ngày mặc định cho window (raw.window).
 const DefaultWindowDays = 7
 
-// DebounceMs thời gian debounce (ms) cho nguồn đơn/hội thoại — tránh recompute trùng cùng entity.
+// DebounceMs — fallback ms cũ cho một số đường gọi tùy biến (không dùng làm mặc định trailing Ads; trailing Ads = DebounceMsInsightBatch).
 const DebounceMs = 3000
 
 // DebounceMsInsightBatch — gom recompute Ads Intelligence khi meta_ad_insights không gấp (mặc định 15 phút).

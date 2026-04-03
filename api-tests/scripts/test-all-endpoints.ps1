@@ -191,7 +191,7 @@ Test-Endpoint "GET" "/fb-customer/find" -Description "Find Facebook customers"
 
 # ===== PANCAKE ENDPOINTS =====
 Write-Host "`n--- Pancake Endpoints ---" -ForegroundColor Magenta
-Test-Endpoint "GET" "/pancake/order/find" -Description "Find Pancake orders"
+# Đơn legacy /pancake/order đã bỏ; đơn POS: /pancake-pos/order (mục Pancake POS bên dưới).
 # Access Token được đăng ký trong Facebook routes, không có prefix /pancake/
 Test-Endpoint "GET" "/access-token/find" -Description "Find access tokens"
 

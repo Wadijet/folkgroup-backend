@@ -32,6 +32,24 @@ const (
 	UIDPrefixActivity    = "act_"
 	UIDPrefixConversation = "conv_"
 	UIDPrefixDecisionCase = "dcs_" // decision case (runtime)
+
+	// POS catalog (CIO sync — pc_pos_*)
+	UIDPrefixPosProduct   = "pprd_"
+	UIDPrefixPosCategory  = "pctg_"
+	UIDPrefixPosVariation = "pvar_"
+	UIDPrefixPosWarehouse = "pwhs_"
+	UIDPrefixPosShop      = "pshp_"
+
+	// Meta Marketing API (CIO sync — meta_*)
+	UIDPrefixMetaAdAccount = "macc_"
+	UIDPrefixMetaCampaign  = "mcmp_"
+	UIDPrefixMetaAdSet     = "mset_"
+	UIDPrefixMetaAd        = "mtad_"
+	UIDPrefixMetaInsight   = "mins_"
+
+	// Facebook messages (CIO interaction_message)
+	UIDPrefixFbMessage     = "fmsg_" // metadata 1 doc / conversation — fb_messages
+	UIDPrefixFbMessageItem = "fmit_" // từng tin — fb_message_items
 )
 
 // alphanumeric cho unique_part (base62-like, bỏ 0OIl để tránh nhầm).

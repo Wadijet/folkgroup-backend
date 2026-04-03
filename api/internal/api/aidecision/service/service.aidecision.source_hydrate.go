@@ -216,4 +216,13 @@ func hydratePcPosOrderFromRaw(p map[string]interface{}, raw bson.M) {
 			p["orderUid"] = s
 		}
 	}
+	// Hội thoại gắn đơn (POS) — giúp case order_risk + CRM refresh resolve khách.
+	if strFromPayload(p, "conversationId") == "" && pos != nil {
+		for _, key := range []string{"conversation_id", "conversationId", "fb_conversation_id"} {
+			if s := stringFromBSONValue(pos[key]); s != "" {
+				p["conversationId"] = s
+				break
+			}
+		}
+	}
 }

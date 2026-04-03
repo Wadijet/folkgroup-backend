@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 
@@ -56,6 +57,53 @@ func getUpdatedAtFromStructSourceField(data interface{}, sourceDataField string)
 	return 0
 }
 
+// tryBackfillIdentityOnSyncSkip — khi sync skip vì bản ghi DB đã mới hơn payload, vẫn bổ sung uid/sourceIds/links nếu thiếu
+// (tránh bản ghi kẹt mãi không có 4 lớp identity).
+func tryBackfillIdentityOnSyncSkip[T any](ctx context.Context, svc *BaseServiceMongoImpl[T], filter interface{}, existing T) {
+	collName := svc.Collection().Name()
+	if !identity.ShouldEnrich(collName) {
+		return
+	}
+	docMap, err := utility.ToMap(existing)
+	if err != nil {
+		return
+	}
+	if !identity.NeedsIdentityBackfill(collName, docMap) {
+		return
+	}
+	if err := identity.EnrichIdentity4Layers(ctx, collName, docMap, nil); err != nil {
+		logrus.WithError(err).WithField("collection", collName).Warn("DoSyncUpsert: backfill identity khi skip sync thất bại")
+		return
+	}
+	set := bson.M{}
+	if v := docMap["uid"]; v != nil {
+		set["uid"] = v
+	}
+	if v := docMap["sourceIds"]; v != nil {
+		set["sourceIds"] = v
+	}
+	if v := docMap["links"]; v != nil {
+		set["links"] = v
+	}
+	if len(set) == 0 {
+		return
+	}
+	if _, err := svc.Collection().UpdateOne(ctx, filter, bson.M{"$set": set}); err != nil {
+		logrus.WithError(err).WithField("collection", collName).Warn("DoSyncUpsert: UpdateOne backfill identity thất bại")
+		return
+	}
+	var updated T
+	if err := svc.Collection().FindOne(ctx, filter).Decode(&updated); err != nil {
+		return
+	}
+	events.EmitDataChanged(ctx, events.DataChangeEvent{
+		CollectionName:   collName,
+		Operation:        events.OpUpdate,
+		Document:         updated,
+		PreviousDocument: existing,
+	})
+}
+
 // ParseUpdatedAtFromSet lấy Unix ms từ updateData.Set theo sourceDataField (posData hoặc panCakeData) và key updated_at.
 func ParseUpdatedAtFromSet(set map[string]interface{}, sourceDataField string) int64 {
 	if set == nil {
@@ -97,6 +145,7 @@ func DoSyncUpsert[T any](ctx context.Context, svc *BaseServiceMongoImpl[T], filt
 	if isExisting && newUpdatedAt > 0 {
 		existingUpdatedAt := getUpdatedAtFromStructSourceField(existing, sourceDataField)
 		if existingUpdatedAt >= newUpdatedAt {
+			tryBackfillIdentityOnSyncSkip(ctx, svc, filter, existing)
 			return zero, true, nil
 		}
 	}
@@ -104,10 +153,18 @@ func DoSyncUpsert[T any](ctx context.Context, svc *BaseServiceMongoImpl[T], filt
 	if err := prepareUpsertUpdateData(ctx, zero, updateData, existing, isExisting); err != nil {
 		return zero, false, err
 	}
-	// Enrich identity 4 lớp khi sync upsert tạo document mới
-	if !isExisting && identity.ShouldEnrich(svc.Collection().Name()) {
-		if err := enrichUpsertInsertIdentity(ctx, svc.Collection().Name(), updateData); err != nil {
-			return zero, false, common.NewError(common.ErrCodeValidationFormat, "Lỗi enrich identity: "+err.Error(), common.StatusBadRequest, err)
+
+	identity.ScrubEmptyIdentityFieldsFromSet(updateData.Set)
+
+	if identity.ShouldEnrich(svc.Collection().Name()) {
+		if !isExisting {
+			if err := enrichUpsertInsertIdentity(ctx, svc.Collection().Name(), updateData); err != nil {
+				return zero, false, common.NewError(common.ErrCodeValidationFormat, "Lỗi enrich identity: "+err.Error(), common.StatusBadRequest, err)
+			}
+		} else {
+			if err := enrichUpsertUpdateIdentity(ctx, svc.Collection().Name(), updateData, existing); err != nil {
+				return zero, false, common.NewError(common.ErrCodeValidationFormat, "Lỗi enrich identity (update): "+err.Error(), common.StatusBadRequest, err)
+			}
 		}
 	}
 	if newUpdatedAt > 0 {

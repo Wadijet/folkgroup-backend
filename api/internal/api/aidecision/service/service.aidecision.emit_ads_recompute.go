@@ -5,16 +5,17 @@ import (
 	"context"
 	"strings"
 
+	"meta_commerce/internal/api/aidecision/eventtypes"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// EventTypeAdsIntelligenceRecomputeRequested — worker gọi metasvc.ApplyAdsIntelligenceRecomputeWithMode.
-const EventTypeAdsIntelligenceRecomputeRequested = "ads.intelligence.recompute_requested"
+// EventTypeAdsIntelligenceRecomputeRequested — consumer chỉ enqueue ads_intel_compute; worker domain ads gọi ApplyAdsIntelligenceRecomputeWithMode.
+const EventTypeAdsIntelligenceRecomputeRequested = eventtypes.AdsIntelligenceRecomputeRequested
 
-// EventTypeAdsIntelligenceRecalculateAllRequested — worker gọi metasvc.RecalculateAllMetaAds.
-const EventTypeAdsIntelligenceRecalculateAllRequested = "ads.intelligence.recalculate_all_requested"
+// EventTypeAdsIntelligenceRecalculateAllRequested — consumer chỉ enqueue ads_intel_compute; worker domain ads gọi RecalculateAllMetaAds.
+const EventTypeAdsIntelligenceRecalculateAllRequested = eventtypes.AdsIntelligenceRecalculateAllRequested
 
 // EmitAdsIntelligenceRecomputeRequested đưa yêu cầu tính lại metrics Ads vào decision_events_queue.
 // recomputeMode: rỗng hoặc "source" (hook); "full" (API tính lại full entity).

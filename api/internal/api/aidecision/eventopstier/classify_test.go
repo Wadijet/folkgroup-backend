@@ -1,21 +1,26 @@
 package eventopstier
 
-import "testing"
+import (
+	"testing"
+
+	"meta_commerce/internal/api/aidecision/eventtypes"
+)
 
 func TestClassifyEventType(t *testing.T) {
 	tests := []struct {
 		et       string
 		wantTier string
 	}{
-		{"aidecision.execute_requested", TierDecision},
-		{"executor.propose_requested", TierDecision},
-		{"order.inserted", TierPipeline},
+		{eventtypes.AIDecisionExecuteRequested, TierDecision},
+		{eventtypes.ExecutorProposeRequested, TierDecision},
+		{eventtypes.OrderInserted, TierPipeline},
 		{"fb_customer.updated", TierPipeline},
 		{"crm_customer.inserted", TierPipeline},
 		{"crm_note.updated", TierPipeline},
 		{"meta_ad.updated", TierOperational},
 		{"pos_product.inserted", TierOperational},
-		{"crm.intelligence.compute_requested", TierOperational},
+		{eventtypes.CrmIntelligenceComputeRequested, TierOperational},
+		{eventtypes.CrmIntelligenceRecomputeRequested, TierOperational},
 		{"", TierUnknown},
 		{"custom.vendor.event", TierUnknown},
 	}

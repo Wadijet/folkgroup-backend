@@ -5,6 +5,8 @@
 
 > **Triển khai `cix_analysis_results` (2026-03-26):** Document phẳng — field **`traceId`** (UUID `rule_execution_logs` của bước **RULE_CIX_ACTIONS**), **`pipelineRuleTraceIds`** ([]string — thứ tự trace các bước rule pipeline), **`correlationId`** (tuỳ có). API response CIX có **`pipelineRuleTraceIds`**. Chi tiết hợp đồng: [unified-data-contract §2.5b](../../docs-shared/architecture/data-contract/unified-data-contract.md#contract-25b-trace-queue).
 
+> **Hàng đợi job CIX (2026-03-31):** Code dùng collection **`cix_intel_compute`** + worker **`CixIntelComputeWorker`** (cùng quy ước `*_intel_compute` với CRM/Ads/Order). Tài liệu dưới đây gọi **`cix_pending_analysis`** là **tên thiết kế cũ / Option B** — khi đọc §8, coi **`cix_intel_compute`** là bản triển khai tương đương. Fan-in AI Decision: **`cix_intel_recomputed`** + `analysisResultId` → `ReceiveCixPayload` — xem [NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md](./NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md) §1.1.
+
 ---
 
 ## 1. Nguyên Tắc Chốt

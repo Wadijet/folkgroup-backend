@@ -1,6 +1,9 @@
 // Package worker — AIDecisionConsumerWorker consume decision_events_queue, xử lý event.
 //
 // Luồng (Vision): event vào queue → worker consume → AI Decision (ResolveOrCreate, context, decision) → proposals → Executor.
+//
+// Nguyên tắc: pipeline raw → các lớp (L1/L2/L3) → flag/metrics chỉ do worker domain (crm_intel_compute, order_intel_compute, ads_intel_compute, cix_intel_compute, …).
+// Consumer AI Decision chỉ enqueue job domain / điều phối case / merge payload đã có — không đọc meta_campaigns để dựng Intelligence, không gọi RefreshMetrics/AnalyzeSession/ApplyAdsIntelligence.
 package worker
 
 import (
@@ -13,8 +16,9 @@ import (
 	"time"
 
 	"meta_commerce/internal/api/aidecision/adsautop"
-	crmqueue "meta_commerce/internal/api/aidecision/crmqueue"
+	"meta_commerce/internal/api/aidecision/crmqueue"
 	"meta_commerce/internal/api/aidecision/decisionlive"
+	"meta_commerce/internal/api/aidecision/eventintake"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 	aidecisionsvc "meta_commerce/internal/api/aidecision/service"
 	cixsvc "meta_commerce/internal/api/cix/service"
@@ -355,7 +359,7 @@ func ownerOrgIDFromDecisionEvent(evt *aidecisionmodels.DecisionEvent) primitive.
 	return ownerOrgID
 }
 
-// processAdsIntelligenceRecomputeRequested — consumer: source (hook) hoặc full (API một Ad).
+// processAdsIntelligenceRecomputeRequested — consumer chỉ enqueue ads_intel_compute; tính toán do worker domain ads.
 func processAdsIntelligenceRecomputeRequested(ctx context.Context, evt *aidecisionmodels.DecisionEvent) error {
 	objectType, _ := evt.Payload["objectType"].(string)
 	objectId, _ := evt.Payload["objectId"].(string)
@@ -374,10 +378,10 @@ func processAdsIntelligenceRecomputeRequested(ctx context.Context, evt *aidecisi
 	if objectType == "" || objectId == "" || adAccountId == "" || ownerOrgID.IsZero() {
 		return nil
 	}
-	return metasvc.ApplyAdsIntelligenceRecomputeWithMode(ctx, objectType, objectId, adAccountId, ownerOrgID, source, recomputeMode)
+	return metasvc.EnqueueAdsIntelCompute(ctx, objectType, objectId, adAccountId, ownerOrgID, source, recomputeMode, evt.EventID)
 }
 
-// processAdsIntelligenceRecalculateAllRequested — batch RecalculateAllMetaAds trong worker (không chạy sync từ HTTP).
+// processAdsIntelligenceRecalculateAllRequested — consumer chỉ enqueue ads_intel_compute; batch chạy tại worker domain ads.
 func processAdsIntelligenceRecalculateAllRequested(ctx context.Context, evt *aidecisionmodels.DecisionEvent) error {
 	ownerOrgID := evt.OwnerOrganizationID
 	if ownerOrgID.IsZero() {
@@ -392,8 +396,7 @@ func processAdsIntelligenceRecalculateAllRequested(ctx context.Context, evt *aid
 		return nil
 	}
 	limit := payloadIntFromDecisionPayload(evt.Payload, "limit")
-	_, err := metasvc.RecalculateAllMetaAds(ctx, ownerOrgID, limit)
-	return err
+	return metasvc.EnqueueAdsIntelComputeRecalculateAll(ctx, ownerOrgID, limit, evt.EventID)
 }
 
 func payloadIntFromDecisionPayload(m map[string]interface{}, key string) int {
@@ -415,15 +418,48 @@ func payloadIntFromDecisionPayload(m map[string]interface{}, key string) int {
 	}
 }
 
-// processCrmIntelligenceComputeRequested — worker AI Decision thực thi RefreshMetrics / Recalculate (không gọi trực tiếp từ ingest/bulk).
-func processCrmIntelligenceComputeRequested(ctx context.Context, evt *aidecisionmodels.DecisionEvent) error {
-	op, _ := evt.Payload["operation"].(string)
-	if op == "" {
+// processCixAnalysisRequested — consumer chỉ enqueue cix_intel_compute (cùng mẫu CRM/Ads/Order); AnalyzeSession chạy tại WorkerCixIntelCompute.
+func processCixAnalysisRequested(ctx context.Context, evt *aidecisionmodels.DecisionEvent) error {
+	if evt == nil || evt.Payload == nil {
 		return nil
 	}
-	svc, err := crmvc.NewCrmCustomerService()
+	ownerOrgID := evt.OwnerOrganizationID
+	if ownerOrgID.IsZero() {
+		return nil
+	}
+	queueSvc, err := cixsvc.NewCixQueueService()
 	if err != nil {
 		return err
+	}
+	convID := ""
+	if c, ok := evt.Payload["conversationId"].(string); ok {
+		convID = c
+	}
+	custID := ""
+	if c, ok := evt.Payload["customerId"].(string); ok {
+		custID = c
+	}
+	channel := "messenger"
+	if ch, ok := evt.Payload["channel"].(string); ok {
+		channel = ch
+	}
+	normalizedRecordUid := evt.EntityID
+	if u, ok := evt.Payload["normalizedRecordUid"].(string); ok {
+		normalizedRecordUid = u
+	}
+	return queueSvc.EnqueueAnalysis(ctx, cixsvc.EnqueueAnalysisInput{
+		ConversationID:      convID,
+		CustomerID:          custID,
+		Channel:             channel,
+		CioEventUid:         normalizedRecordUid,
+		OwnerOrganizationID: ownerOrgID,
+	})
+}
+
+// processCrmIntelligenceComputeRequested — consumer chỉ enqueue crm_intel_compute; RefreshMetrics / Recalculate* chạy tại worker domain CRM.
+func processCrmIntelligenceComputeRequested(ctx context.Context, evt *aidecisionmodels.DecisionEvent) error {
+	if evt == nil || evt.Payload == nil {
+		return nil
 	}
 	ownerOrgID := evt.OwnerOrganizationID
 	if ownerOrgID.IsZero() {
@@ -434,85 +470,44 @@ func processCrmIntelligenceComputeRequested(ctx context.Context, evt *aidecision
 			}
 		}
 	}
-	log := logger.GetAppLogger()
-	switch op {
-	case crmqueue.CrmComputeOpRefresh:
-		uid, _ := evt.Payload["unifiedId"].(string)
-		if uid == "" || ownerOrgID.IsZero() {
-			return nil
-		}
-		return svc.RefreshMetrics(ctx, uid, ownerOrgID)
-	case crmqueue.CrmComputeOpRecalculateOne:
-		uid, _ := evt.Payload["unifiedId"].(string)
-		if uid == "" || ownerOrgID.IsZero() {
-			return nil
-		}
-		_, err := svc.RecalculateCustomerFromAllSources(ctx, uid, ownerOrgID)
-		return err
-	case crmqueue.CrmComputeOpRecalculateAll:
-		if ownerOrgID.IsZero() {
-			return nil
-		}
-		limit := payloadIntFromDecisionPayload(evt.Payload, "limit")
-		poolSize := payloadIntFromDecisionPayload(evt.Payload, "poolSize")
-		if poolSize <= 0 {
-			poolSize = 12
-		}
-		_, err := svc.RecalculateAllCustomers(ctx, ownerOrgID, limit, poolSize)
-		return err
-	case crmqueue.CrmComputeOpRecalculateBatch:
-		if ownerOrgID.IsZero() {
-			return nil
-		}
-		offset := payloadIntFromDecisionPayload(evt.Payload, "offset")
-		limit := payloadIntFromDecisionPayload(evt.Payload, "limit")
-		poolSize := payloadIntFromDecisionPayload(evt.Payload, "poolSize")
-		if poolSize <= 0 {
-			poolSize = 12
-		}
-		_, err := svc.RecalculateCustomersBatch(ctx, ownerOrgID, offset, limit, poolSize, nil, nil)
-		return err
-	case crmqueue.CrmComputeOpRecalculateMismatch:
-		if ownerOrgID.IsZero() {
-			return nil
-		}
-		limit := payloadIntFromDecisionPayload(evt.Payload, "limit")
-		poolSize := payloadIntFromDecisionPayload(evt.Payload, "poolSize")
-		if poolSize <= 0 {
-			poolSize = 10
-		}
-		_, err := svc.RecalculateMismatchCustomers(ctx, ownerOrgID, limit, poolSize)
-		return err
-	case crmqueue.CrmComputeOpRecalculateOrderCountMismatch:
-		if ownerOrgID.IsZero() {
-			return nil
-		}
-		limit := payloadIntFromDecisionPayload(evt.Payload, "limit")
-		poolSize := payloadIntFromDecisionPayload(evt.Payload, "poolSize")
-		if poolSize <= 0 {
-			poolSize = 12
-		}
-		_, err := svc.RecalculateOrderCountMismatchCustomers(ctx, ownerOrgID, limit, poolSize)
-		return err
-	case crmqueue.CrmComputeOpRecalculateAllOrgs:
-		poolSize := payloadIntFromDecisionPayload(evt.Payload, "poolSize")
-		if poolSize <= 0 {
-			poolSize = 12
-		}
-		_, _, _, err := svc.RecalculateAllCustomersForAllOrgs(ctx, poolSize)
-		return err
-	case crmqueue.CrmComputeOpClassificationRefresh:
-		mode, _ := evt.Payload["mode"].(string)
-		bs := payloadIntFromDecisionPayload(evt.Payload, "batchSize")
-		if bs <= 0 {
-			bs = 200
-		}
-		n := svc.RunClassificationRefreshBatch(ctx, log, mode, bs)
-		log.WithFields(map[string]interface{}{"processed": n, "mode": mode}).Debug("[CRM] Classification refresh (AI Decision consumer)")
-		return nil
-	default:
+	return crmvc.EnqueueCrmIntelComputeFromDecisionEvent(ctx, evt.EventID, ownerOrgID, evt.Payload)
+}
+
+// processCrmIntelligenceRecomputeRequested — crm.intelligence.recompute_requested (như ads.intelligence.recompute_requested): debounce theo org+unifiedId rồi xếp crm_intel_compute (refresh); gấp → enqueue ngay.
+func processCrmIntelligenceRecomputeRequested(ctx context.Context, evt *aidecisionmodels.DecisionEvent) error {
+	if evt == nil || evt.Payload == nil {
 		return nil
 	}
+	ownerOrgID := evt.OwnerOrganizationID
+	if ownerOrgID.IsZero() {
+		if hex, ok := evt.Payload["ownerOrgIdHex"].(string); ok && hex != "" {
+			oid, err := primitive.ObjectIDFromHex(hex)
+			if err == nil {
+				ownerOrgID = oid
+			}
+		}
+	}
+	if ownerOrgID.IsZero() {
+		return nil
+	}
+	unifiedID := strings.TrimSpace(strFromPayload(evt.Payload, "unifiedId"))
+	if unifiedID == "" {
+		return nil
+	}
+	payload := map[string]interface{}{
+		"operation":     crmqueue.CrmComputeOpRefresh,
+		"unifiedId":     unifiedID,
+		"ownerOrgIdHex": ownerOrgID.Hex(),
+	}
+	if eventintake.PayloadMarksIntelUrgent(evt.Payload) {
+		return crmvc.EnqueueCrmIntelComputeFromDecisionEvent(ctx, evt.EventID, ownerOrgID, payload)
+	}
+	win := eventintake.CrmIntelAfterIngestDebounceWindow()
+	if win <= 0 {
+		return crmvc.EnqueueCrmIntelComputeFromDecisionEvent(ctx, evt.EventID, ownerOrgID, payload)
+	}
+	eventintake.ScheduleCrmIntelligenceRecomputeDebounce(ownerOrgID.Hex(), unifiedID, win, evt.TraceID, evt.CorrelationID, evt.EventID)
+	return nil
 }
 
 // processSyncedSourceWithDebounce: bản ghi đồng bộ từ nguồn (conversation/message trên Mongo). Debounce: upsert state → message.batch_ready.
@@ -562,55 +557,9 @@ func processOrderEvent(ctx context.Context, svc *aidecisionsvc.AIDecisionService
 	return OrchestrateOrderSourceEvent(ctx, svc, evt)
 }
 
-// processCommerceOrderCompleted — Learning Engine / pipeline sau đơn hoàn thành (Vision 07); hiện chỉ ghi log — Phase 2 gắn learning_cases.
-func processCommerceOrderCompleted(ctx context.Context, evt *aidecisionmodels.DecisionEvent) error {
-	log := logger.GetAppLogger()
-	orderUid := ""
-	if u, ok := evt.Payload["orderUid"].(string); ok {
-		orderUid = u
-	}
-	log.WithFields(map[string]interface{}{
-		"eventId": evt.EventID, "orderUid": orderUid, "eventType": evt.EventType,
-	}).Debug("📋 [ORDER_INTEL] commerce.order_completed — chờ Phase 2 Learning Engine")
-	_ = ctx
-	return nil
-}
-
 // skipHydrate: true khi processSyncedSourceWithDebounce đã gọi HydrateDatachangedPayload (tránh FindOne trùng).
 func processSourceEvent(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent, skipHydrate bool) error {
 	return OrchestrateConversationSourceEvent(ctx, svc, evt, skipHydrate)
-}
-
-// processConversationIntelligenceRequested — bridge fb_message_items (gom) → cix.analysis_requested (Conversation Intelligence / CIX).
-func processConversationIntelligenceRequested(ctx context.Context, _ *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) error {
-	if evt == nil || evt.Payload == nil {
-		return nil
-	}
-	ownerOrgID := evt.OwnerOrganizationID
-	if ownerOrgID.IsZero() {
-		return nil
-	}
-	convID := ""
-	if c, ok := evt.Payload["conversationId"].(string); ok {
-		convID = strings.TrimSpace(c)
-	}
-	if convID == "" {
-		return nil
-	}
-	custID := ""
-	if c, ok := evt.Payload["customerId"].(string); ok {
-		custID = strings.TrimSpace(c)
-	}
-	channel := "messenger"
-	if ch, ok := evt.Payload["channel"].(string); ok && strings.TrimSpace(ch) != "" {
-		channel = strings.TrimSpace(ch)
-	}
-	normalizedUID := ""
-	if u, ok := evt.Payload["normalizedRecordUid"].(string); ok {
-		normalizedUID = strings.TrimSpace(u)
-	}
-	_, err := aidecisionsvc.EmitCixAnalysisRequested(ctx, convID, custID, channel, ownerOrgID, normalizedUID, evt.TraceID, evt.CorrelationID)
-	return err
 }
 
 // receiveCixAnalysisIntoAID đọc bản ghi cix_analysis_results theo _id hex → ReceiveCixPayload (merge case + TryExecuteIfReady).
@@ -637,34 +586,6 @@ func receiveCixAnalysisIntoAID(ctx context.Context, svc *aidecisionsvc.AIDecisio
 	return svc.ReceiveCixPayload(ctx, &result, ownerOrgID)
 }
 
-// processCixAnalysisResultDataChanged — hook datachanged: cix_analysis_result.inserted | .updated.
-func processCixAnalysisResultDataChanged(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) error {
-	if evt == nil {
-		return nil
-	}
-	analysisID := strings.TrimSpace(evt.EntityID)
-	if evt.Payload != nil {
-		if id, ok := evt.Payload["analysisResultId"].(string); ok && strings.TrimSpace(id) != "" {
-			analysisID = strings.TrimSpace(id)
-		} else if u, ok := evt.Payload["normalizedRecordUid"].(string); ok && strings.TrimSpace(u) != "" {
-			analysisID = strings.TrimSpace(u)
-		}
-	}
-	return receiveCixAnalysisIntoAID(ctx, svc, analysisID, evt.OwnerOrganizationID)
-}
-
-// processCixAnalysisCompleted xử lý cix.analysis_completed (legacy) — cùng receiveCixAnalysisIntoAID.
-func processCixAnalysisCompleted(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) error {
-	if evt == nil || evt.Payload == nil {
-		return nil
-	}
-	analysisID, _ := evt.Payload["analysisResultId"].(string)
-	if strings.TrimSpace(analysisID) == "" {
-		return nil
-	}
-	return receiveCixAnalysisIntoAID(ctx, svc, analysisID, evt.OwnerOrganizationID)
-}
-
 // processCustomerContextReady cập nhật case với customer context, gọi TryExecuteIfReady.
 func processCustomerContextReady(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) error {
 	convID := ""
@@ -689,24 +610,28 @@ func processCustomerContextReady(ctx context.Context, svc *aidecisionsvc.AIDecis
 	return svc.TryExecuteIfReady(ctx, convID, custID, evt.OrgID, ownerOrgID)
 }
 
-// processOrderFlagsEmitted cập nhật case với order flags, gọi TryExecuteIfReady nếu case cần order context.
-func processOrderFlagsEmitted(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) error {
-	orderID := ""
-	if o, ok := evt.Payload["orderId"].(string); ok {
-		orderID = o
-	}
-	custID := ""
-	if c, ok := evt.Payload["customerId"].(string); ok {
-		custID = c
-	}
-	convID := ""
-	if c, ok := evt.Payload["conversationId"].(string); ok {
-		convID = c
+// processOrderIntelRecomputed — sau worker Order Intelligence (một event duy nhất: flags + layer + orderCompletedTransition).
+func processOrderIntelRecomputed(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) error {
+	if evt == nil || evt.Payload == nil {
+		return nil
 	}
 	ownerOrgID := evt.OwnerOrganizationID
 	if ownerOrgID.IsZero() {
 		return nil
 	}
+	orderID := strings.TrimSpace(strFromPayload(evt.Payload, "orderId"))
+	if orderID == "" {
+		orderID = strings.TrimSpace(strFromPayload(evt.Payload, "orderUid"))
+	}
+	custID := strings.TrimSpace(strFromPayload(evt.Payload, "customerId"))
+	convID := strings.TrimSpace(strFromPayload(evt.Payload, "conversationId"))
+
+	if payloadBoolTrue(evt.Payload, "orderCompletedTransition") {
+		logger.GetAppLogger().WithFields(map[string]interface{}{
+			"eventId": evt.EventID, "orderUid": orderID, "eventType": evt.EventType,
+		}).Debug("📋 [ORDER_INTEL] order_intel_recomputed — đơn vừa chuyển completed; Phase 2 Learning Engine có thể bám payload")
+	}
+
 	flags, _ := evt.Payload["flags"].([]interface{})
 	orderPayload := map[string]interface{}{"flags": flags}
 	if v, ok := evt.Payload["layer1"]; ok {
@@ -729,7 +654,6 @@ func processOrderFlagsEmitted(ctx context.Context, svc *aidecisionsvc.AIDecision
 			return err
 		}
 	}
-	// Tránh hai execute_requested (order_risk + conversation) trừ khi ORDER_FLAGS_ALLOW_DUAL_EXECUTE=true
 	if convID != "" && custID != "" {
 		if emittedOrderRisk && !aidecisionsvc.OrderFlagsAllowDualExecute() {
 			return nil
@@ -739,8 +663,92 @@ func processOrderFlagsEmitted(ctx context.Context, svc *aidecisionsvc.AIDecision
 	return nil
 }
 
-// processAdsContextRequested — đọc snapshot Intelligence từ meta_campaigns, emit ads.context_ready (không stub).
-func processAdsContextRequested(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) error {
+// processIntelRecomputedForAID — sau CRM intelligence: cập nhật case theo unifiedId + TryExecuteIfReady khi có conv+cust trên payload.
+func processIntelRecomputedForAID(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) error {
+	if evt == nil || evt.Payload == nil {
+		return nil
+	}
+	ownerOrgID := evt.OwnerOrganizationID
+	if ownerOrgID.IsZero() {
+		return nil
+	}
+	orgID := strings.TrimSpace(evt.OrgID)
+	if orgID == "" {
+		orgID = ownerOrgID.Hex()
+	}
+	unifiedID := strings.TrimSpace(strFromPayload(evt.Payload, "unifiedId"))
+	if unifiedID != "" {
+		_ = svc.RefreshOpenCasesAfterCrmIntel(ctx, unifiedID, orgID, ownerOrgID)
+	}
+	convID := strings.TrimSpace(strFromPayload(evt.Payload, "conversationId"))
+	custID := strings.TrimSpace(strFromPayload(evt.Payload, "customerId"))
+	if convID != "" && custID != "" {
+		return svc.TryExecuteIfReady(ctx, convID, custID, orgID, ownerOrgID)
+	}
+	return nil
+}
+
+// processCixIntelRecomputed — sau worker CIX: ReceiveCixPayload theo analysisResultId; event cũ không có id chỉ TryExecuteIfReady.
+func processCixIntelRecomputed(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) error {
+	if evt == nil || evt.Payload == nil {
+		return nil
+	}
+	ownerOrgID := evt.OwnerOrganizationID
+	if ownerOrgID.IsZero() {
+		return nil
+	}
+	analysisID := strings.TrimSpace(strFromPayload(evt.Payload, "analysisResultId"))
+	if analysisID != "" {
+		return receiveCixAnalysisIntoAID(ctx, svc, analysisID, ownerOrgID)
+	}
+	convID := strings.TrimSpace(strFromPayload(evt.Payload, "conversationId"))
+	custID := strings.TrimSpace(strFromPayload(evt.Payload, "customerId"))
+	if convID == "" || custID == "" {
+		return nil
+	}
+	return svc.TryExecuteIfReady(ctx, convID, custID, evt.OrgID, ownerOrgID)
+}
+
+func strFromPayload(m map[string]interface{}, key string) string {
+	v, ok := m[key]
+	if !ok || v == nil {
+		return ""
+	}
+	s, ok := v.(string)
+	if !ok {
+		return ""
+	}
+	return s
+}
+
+func payloadBoolTrue(m map[string]interface{}, key string) bool {
+	if m == nil {
+		return false
+	}
+	v, ok := m[key]
+	if !ok || v == nil {
+		return false
+	}
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		s := strings.ToLower(strings.TrimSpace(t))
+		return s == "true" || s == "1" || s == "yes"
+	case float64:
+		return t != 0
+	case int:
+		return t != 0
+	case int64:
+		return t != 0
+	default:
+		return false
+	}
+}
+
+// processAdsContextRequested — bước 4 (phần consumer): chỉ enqueue ads_intel_compute jobKind=context_ready.
+// Worker domain ads đọc meta_campaigns, đóng gói payload → emit ads.context_ready (không đọc DB nặng tại đây).
+func processAdsContextRequested(ctx context.Context, evt *aidecisionmodels.DecisionEvent) error {
 	adAccountID := ""
 	if a, ok := evt.Payload["adAccountId"].(string); ok {
 		adAccountID = a
@@ -753,36 +761,15 @@ func processAdsContextRequested(ctx context.Context, svc *aidecisionsvc.AIDecisi
 	if ownerOrgID.IsZero() || campaignID == "" {
 		return nil
 	}
-	adsPayload := aidecisionsvc.BuildAdsIntelligenceContextPayloadFromDB(ctx, campaignID, adAccountID, ownerOrgID)
-	return emitAdsContextReadyAfterRequested(ctx, svc, evt, adAccountID, campaignID, ownerOrgID, adsPayload)
-}
-
-func emitAdsContextReadyAfterRequested(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent, adAccountID, campaignID string, ownerOrgID primitive.ObjectID, adsPayload map[string]interface{}) error {
-	entityID := adAccountID
-	if entityID == "" {
-		entityID = campaignID
+	orgID := strings.TrimSpace(evt.OrgID)
+	if orgID == "" {
+		orgID = ownerOrgID.Hex()
 	}
-	_, err := svc.EmitEvent(ctx, &aidecisionsvc.EmitEventInput{
-		EventType:     "ads.context_ready",
-		EventSource:   "aidecision",
-		EntityType:    "ad_account",
-		EntityID:      entityID,
-		OrgID:         evt.OrgID,
-		OwnerOrgID:    ownerOrgID,
-		Priority:      "normal",
-		Lane:          aidecisionmodels.EventLaneBatch,
-		TraceID:       evt.TraceID,
-		CorrelationID: evt.CorrelationID,
-		Payload: map[string]interface{}{
-			"adAccountId": adAccountID,
-			"campaignId":  campaignID,
-			"ads":         adsPayload,
-		},
-	})
-	return err
+	return metasvc.EnqueueAdsIntelComputeContextReady(ctx, evt.EventID, orgID, evt.TraceID, evt.CorrelationID, campaignID, adAccountID, ownerOrgID)
 }
 
-// processAdsContextReady cập nhật case ads_optimization; adsautop.RunAdsProposeFromContextReady → ads.propose_requested khi RULE khớp.
+// processAdsContextReady — bước 5: snapshot đã có trong payload (ads.context_ready).
+// Gắn context vào case → RunAdsProposeFromContextReady (ACTION_RULE) → có thể ads.propose_requested / executor.
 func processAdsContextReady(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) error {
 	adAccountID := ""
 	if a, ok := evt.Payload["adAccountId"].(string); ok {

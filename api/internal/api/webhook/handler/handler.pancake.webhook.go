@@ -1,4 +1,4 @@
-// Package webhookhdl - handler webhook Pancake (conversation, message, order, customer).
+// Package webhookhdl - handler webhook Pancake (conversation, message, customer).
 package webhookhdl
 
 import (
@@ -8,7 +8,6 @@ import (
 
 	basehdl "meta_commerce/internal/api/base/handler"
 	fbsvc "meta_commerce/internal/api/fb/service"
-	pcsvc "meta_commerce/internal/api/pc/service"
 	webhookdto "meta_commerce/internal/api/webhook/dto"
 	webhookmodels "meta_commerce/internal/api/webhook/models"
 	webhooksvc "meta_commerce/internal/api/webhook/service"
@@ -23,7 +22,6 @@ import (
 
 // PancakeWebhookHandler xử lý các webhook từ Pancake API
 type PancakeWebhookHandler struct {
-	pcOrderService        *pcsvc.PcOrderService
 	fbConversationService *fbsvc.FbConversationService
 	fbMessageService      *fbsvc.FbMessageService
 	fbCustomerService     *fbsvc.FbCustomerService
@@ -33,10 +31,6 @@ type PancakeWebhookHandler struct {
 
 // NewPancakeWebhookHandler tạo mới PancakeWebhookHandler
 func NewPancakeWebhookHandler() (*PancakeWebhookHandler, error) {
-	pcOrderService, err := pcsvc.NewPcOrderService()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create pc order service: %v", err)
-	}
 	fbConversationService, err := fbsvc.NewFbConversationService()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create fb conversation service: %v", err)
@@ -58,7 +52,6 @@ func NewPancakeWebhookHandler() (*PancakeWebhookHandler, error) {
 		return nil, fmt.Errorf("failed to create webhook log service: %v", err)
 	}
 	return &PancakeWebhookHandler{
-		pcOrderService:        pcOrderService,
 		fbConversationService: fbConversationService,
 		fbMessageService:      fbMessageService,
 		fbCustomerService:     fbCustomerService,
@@ -91,8 +84,6 @@ func (h *PancakeWebhookHandler) HandlePancakeWebhook(c fiber.Ctx) error {
 		var processErr error
 		if req.Payload.EventType != "" {
 			switch req.Payload.EventType {
-			case "order_created", "order_updated":
-				processErr = h.handleOrderEvent(ctx, req.Payload)
 			case "conversation_updated":
 				processErr = h.handleConversationEvent(ctx, req.Payload)
 			case "message_received":
@@ -121,33 +112,6 @@ func (h *PancakeWebhookHandler) HandlePancakeWebhook(c fiber.Ctx) error {
 		})
 		return nil
 	})
-}
-
-func (h *PancakeWebhookHandler) handleOrderEvent(ctx context.Context, payload webhookdto.PancakeWebhookPayload) error {
-	orderData, ok := payload.Data["order"].(map[string]interface{})
-	if !ok {
-		orderData = payload.Data
-	}
-	if orderData == nil {
-		return fmt.Errorf("không tìm thấy dữ liệu order trong payload")
-	}
-	pancakeOrderId, ok := orderData["id"].(string)
-	if !ok {
-		if idNum, ok := orderData["id"].(float64); ok {
-			pancakeOrderId = fmt.Sprintf("%.0f", idNum)
-		} else {
-			return fmt.Errorf("không tìm thấy order ID trong dữ liệu")
-		}
-	}
-	filter := bson.M{"pancakeOrderId": pancakeOrderId}
-	now := time.Now().UnixMilli()
-	update := bson.M{
-		"$set": bson.M{"panCakeData": orderData, "updatedAt": now},
-		"$setOnInsert": bson.M{"pancakeOrderId": pancakeOrderId, "status": 0, "createdAt": now},
-	}
-	opts := options.FindOneAndUpdate().SetUpsert(true).SetReturnDocument(options.After)
-	_, err := h.pcOrderService.BaseServiceMongoImpl.FindOneAndUpdate(ctx, filter, update, opts)
-	return err
 }
 
 // handleConversationEvent xử lý webhook conversation_updated.

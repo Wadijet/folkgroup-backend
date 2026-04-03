@@ -123,7 +123,7 @@ External → CIO → Domain Collections → Event Hook
 |------|------------|------------|
 | **Source** | `conversation.message_inserted`, `message.batch_ready`, `cio_event.inserted`, `order.inserted`, `customer.updated`, `ads.updated` | CRUD hook |
 | **Work Request** | `cix.analysis_requested`, `customer.context_requested`, `ads.context_requested`, `order.recompute_requested` | AI Decision → Domain |
-| **Result** | `cix.analysis_completed`, `customer.context_ready`, `ads.context_ready`, `order.flags_emitted` | Domain → AI Decision |
+| **Result** | **`cix_intel_recomputed`**, `crm_intel_recomputed`, `customer.context_ready`, `ads.context_ready`, **`order_intel_recomputed`** | Domain worker → AI Decision (2026-03: bỏ `cix.analysis_completed` / `order.flags_emitted` trên luồng chính) |
 | **Execution** | `execution.completed`, `execution.failed`, `execution.rejected` | Executor → Learning |
 
 ### 4.3 Debounce (Supplement §2.6)
@@ -207,12 +207,12 @@ opened
 
 ## 6. Domain Workers (Supplement §11)
 
-| Domain | Worker | Consume | Emit |
-|--------|--------|---------|------|
-| CIX | `worker.cix.request` | `cix.analysis_requested` | `cix.analysis_completed` |
-| CRM | `worker.crm.request` | `customer.context_requested` | `customer.context_ready` |
-| Ads | `worker.ads.request` | `ads.context_requested` | `ads.context_ready` |
-| Order | `worker.order.request` | `order.recompute_requested` | `order.flags_emitted` |
+| Domain | Worker | Consume (queue) | Emit (handoff) |
+|--------|--------|-----------------|----------------|
+| CIX | **`cix_intel_compute`** | `cix.analysis_requested` → enqueue job | **`cix_intel_recomputed`** |
+| CRM | **`crm_intel_compute`** / context | `crm.intelligence.*`, `customer.context_requested` | **`crm_intel_recomputed`**, `customer.context_ready` |
+| Ads | **`ads_intel_compute`** / pipeline | `ads.*` | **`campaign_intel_recomputed`**, `ads.context_ready` |
+| Order | **`order_intel_compute`** | `order.*`, `order.recompute_requested` | **`order_intel_recomputed`** |
 
 **Retry backoff (BẮT BUỘC):** Attempt 1→5s, 2→30s, 3→2 phút, 4→10 phút. `scheduled_at = now + delay` → event chuyển `deferred`.
 
@@ -431,7 +431,7 @@ Executor check `idempotency_key` trước khi tạo mới — retry không tạo
 | 1 | Order Context worker | pc/worker/worker.pc.order_context.go | ✅ |
 | 2 | ads.context_requested → ready | consumer AID (`service.aidecision.ads_context_payload` + dispatch) | ✅ |
 | 3 | UpdateCaseWithOrderContext, UpdateCaseWithAdsContext | service.aidecision.case.go | ✅ |
-| 4 | Consumer: order.flags_emitted, ads.context_ready | worker.aidecision.consumer.go | ✅ |
+| 4 | Consumer: **`order_intel_recomputed`**, **`cix_intel_recomputed`**, ads.context_ready | worker.aidecision.consumer.go | ✅ |
 | 5 | LearningCases collection | learning_cases, LearningCaseService dùng LearningCases | ✅ |
 | 6 | CloseCase 404 | CloseCaseWithOrgCheck trả ErrNotFound | ✅ |
 

@@ -7,8 +7,8 @@ import (
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 )
 
-// BuildAdsOptimizationLiveEvent dựng DecisionLiveEvent cho pipeline Ads (ads.context_ready → ACTION_RULE → propose).
-// campaignId/adAccountId: tham chiếu hiển thị; có thể rỗng nếu đọc từ refs sau merge.
+// BuildAdsOptimizationLiveEvent — Dựng sự kiện timeline cho luồng tối ưu Ads: từ «ngữ cảnh sẵn sàng» → quy tắc → đề xuất.
+// campaignId / adAccountId: hiển thị nhanh; có thể rỗng nếu đã có trong refs của envelope job.
 func BuildAdsOptimizationLiveEvent(
 	caseDoc *aidecisionmodels.DecisionCase,
 	queueEvt *aidecisionmodels.DecisionEvent,
@@ -19,10 +19,10 @@ func BuildAdsOptimizationLiveEvent(
 	campaignID, adAccountID string,
 ) decisionlive.DecisionLiveEvent {
 	adsSections := []decisionlive.DecisionLiveDetailSection{
-		{Title: "Diễn giải nghiệp vụ (mốc Ads này — luồng đầy đủ là nhiều live_event)", Items: []string{
-			"Ngữ cảnh chiến dịch thường qua các mốc queue trước (mỗi mốc một live_event).",
-			"Tại mốc đánh giá: đối chiếu số liệu với quy tắc (ACTION_RULE / metrics).",
-			"Gợi ý / duyệt: có thể là mốc propose hoặc queue khác — xem timeline.",
+		{Title: "Luồng tối ưu quảng cáo (mỗi bước có thể là một mốc timeline)", Items: []string{
+			"Trước bước này thường đã có các mốc trên hàng đợi (chuẩn bị ngữ cảnh, v.v.) — mỗi mốc một dòng timeline.",
+			"Ở bước đánh giá: hệ thống đối chiếu số liệu chiến dịch với quy tắc hành động.",
+			"Sau đó có thể là mốc đề xuất hoặc job khác — theo dõi tiếp trên cùng một trace.",
 		}},
 	}
 	ev := decisionlive.DecisionLiveEvent{
@@ -39,7 +39,7 @@ func BuildAdsOptimizationLiveEvent(
 		ev.CorrelationID = caseDoc.CorrelationID
 		decisionlive.EnrichLiveEventFromCase(caseDoc.DecisionCaseID, caseDoc.TraceID, &ev)
 	}
-	rs := "Đánh giá chiến dịch theo số liệu và quy tắc; có thể tạo gợi ý chờ duyệt."
+	rs := "Đối chiếu số liệu chiến dịch với quy tắc; nếu đủ điều kiện sẽ tạo gợi ý chờ duyệt."
 	if strings.TrimSpace(ev.ReasoningSummary) == "" {
 		ev.ReasoningSummary = rs
 	}
@@ -61,7 +61,7 @@ func BuildAdsOptimizationLiveEvent(
 }
 
 func adsMergeStructuredBullets(campaignID, adAccountID string, queueEvt *aidecisionmodels.DecisionEvent, detail []string) []string {
-	in := "Dựa trên số liệu chiến dịch đã lưu và nội dung tác vụ."
+	in := "Dựa trên số liệu chiến dịch đã lưu trên hệ thống và nội dung job hiện tại."
 	if cid := firstNonEmpty(campaignID, refVal(queueEvt, "campaignId")); cid != "" {
 		in = "Chiến dịch: " + cid
 		if aa := firstNonEmpty(adAccountID, refVal(queueEvt, "adAccountId")); aa != "" {
@@ -69,8 +69,8 @@ func adsMergeStructuredBullets(campaignID, adAccountID string, queueEvt *aidecis
 		}
 		in += "."
 	}
-	mech := "Hệ thống đối chiếu số liệu với quy tắc; nếu có gợi ý sẽ đưa vào bước duyệt."
-	out := "Xem tóm tắt phía trên cho kết quả từng bước."
+	mech := "Đối chiếu số liệu với quy tắc; nếu có hành động phù hợp sẽ chuyển sang bước duyệt / thực thi."
+	out := "Kết luận từng bước nằm ở dòng tóm tắt phía trên."
 	core := []string{in, mech, out}
 	if len(detail) == 0 {
 		return core

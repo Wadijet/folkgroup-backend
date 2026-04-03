@@ -373,8 +373,8 @@ func (s *CixAnalysisService) AnalyzeSession(ctx context.Context, sessionUid, cus
 		}
 	}
 
-	// Fan-in AID: InsertOne → EmitDataChanged → hook aidecision → cix_analysis_result.inserted trong decision_events_queue
-	// (consumer gọi ReceiveCixPayload). Không emit thêm cix.analysis_completed ở đây để tránh trùng event.
+	// Fan-in AID: worker cix_intel_compute emit cix_intel_recomputed (payload analysisResultId) → ReceiveCixPayload.
+	// Collection cix_analysis_results không bắn datachanged vào decision queue (tránh trùng luồng).
 
 	return result, nil
 }

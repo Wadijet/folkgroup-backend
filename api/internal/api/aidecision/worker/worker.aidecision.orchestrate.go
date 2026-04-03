@@ -9,6 +9,7 @@ import (
 
 	"meta_commerce/internal/api/aidecision/decisionlive"
 	"meta_commerce/internal/api/aidecision/decisionlive/livecopy"
+	"meta_commerce/internal/api/aidecision/eventtypes"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 	aidecisionsvc "meta_commerce/internal/api/aidecision/service"
 	orderintelsvc "meta_commerce/internal/api/orderintel/service"
@@ -17,7 +18,7 @@ import (
 )
 
 // OrchestrateConversationSourceEvent — ResolveOrCreate case hội thoại + emit work request domain.
-// CRM ingest / refresh metrics đã chạy trong applyDatachangedSideEffects (trước dispatch).
+// CRM ingest (queue crm_pending_ingest) đã được xếp trong applyDatachangedSideEffects (trước dispatch); intel CRM sau worker + crm.intelligence.recompute_requested.
 func OrchestrateConversationSourceEvent(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent, skipHydrate bool) error {
 	if !skipHydrate {
 		svc.HydrateDatachangedPayload(ctx, evt)
@@ -61,8 +62,8 @@ func OrchestrateConversationSourceEvent(ctx context.Context, svc *aidecisionsvc.
 	emittedCustomer := false
 	if custID != "" {
 		_, _ = svc.EmitEvent(ctx, &aidecisionsvc.EmitEventInput{
-			EventType:     "customer.context_requested",
-			EventSource:   "aidecision",
+			EventType:     eventtypes.CustomerContextRequested,
+			EventSource:   aidecisionsvc.EventSourceAIDecision,
 			EntityType:    "customer",
 			EntityID:      custID,
 			OrgID:         evt.OrgID,
@@ -86,8 +87,8 @@ func OrchestrateConversationSourceEvent(ctx context.Context, svc *aidecisionsvc.
 		return nil
 	}
 	_, err = svc.EmitEvent(ctx, &aidecisionsvc.EmitEventInput{
-		EventType:     "cix.analysis_requested",
-		EventSource:   "aidecision",
+		EventType:     eventtypes.CixAnalysisRequested,
+		EventSource:   aidecisionsvc.EventSourceAIDecision,
 		EntityType:    "conversation",
 		EntityID:      convID,
 		OrgID:         evt.OrgID,
@@ -109,7 +110,7 @@ func OrchestrateConversationSourceEvent(ctx context.Context, svc *aidecisionsvc.
 }
 
 // OrchestrateOrderSourceEvent — ResolveOrCreate case order_risk + enqueue Order Intelligence (domain worker).
-// CRM ingest / refresh metrics đã chạy trong applyDatachangedSideEffects.
+// CRM ingest (queue) đã xếp trong applyDatachangedSideEffects.
 func OrchestrateOrderSourceEvent(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) error {
 	svc.HydrateDatachangedPayload(ctx, evt)
 
@@ -162,7 +163,7 @@ func OrchestrateOrderSourceEvent(ctx context.Context, svc *aidecisionsvc.AIDecis
 	return err
 }
 
-// publishOrchestrateConversation ghi bước điều phối hội thoại (audit + timeline) — gạch đầu dòng chi tiết bên trong.
+// publishOrchestrateConversation — Publish timeline sau khi điều phối hội thoại (neo case + việc xếp hàng tiếp theo).
 func publishOrchestrateConversation(ownerOrgID primitive.ObjectID, evt *aidecisionmodels.DecisionEvent, caseDoc *aidecisionmodels.DecisionCase, createdNew bool, convID, custID, channel, normalizedRecordUid string, emittedCustomer, emittedCix bool) {
 	tid := strings.TrimSpace(evt.TraceID)
 	if tid == "" || ownerOrgID.IsZero() {
@@ -172,7 +173,7 @@ func publishOrchestrateConversation(ownerOrgID primitive.ObjectID, evt *aidecisi
 	decisionlive.Publish(ownerOrgID, tid, evLive)
 }
 
-// publishOrchestrateOrder ghi bước điều phối đơn / order_risk + Order Intelligence.
+// publishOrchestrateOrder — Publish timeline sau khi điều phối đơn (hồ sơ rủi ro đơn + xếp hàng phân tích đơn).
 func publishOrchestrateOrder(ownerOrgID primitive.ObjectID, evt *aidecisionmodels.DecisionEvent, caseDoc *aidecisionmodels.DecisionCase, createdNew bool, orderUid, custID, convID string, enqueuedOrderIntelOK bool) {
 	tid := strings.TrimSpace(evt.TraceID)
 	if tid == "" || ownerOrgID.IsZero() {

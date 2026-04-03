@@ -2,11 +2,18 @@ package models
 
 import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
+
+	"meta_commerce/internal/utility/identity"
 )
 
 // PcPosProduct lưu thông tin sản phẩm từ Pancake POS API
 type PcPosProduct struct {
 	ID                primitive.ObjectID     `json:"id,omitempty" bson:"_id,omitempty"`                                                          // ID của product trong MongoDB
+	// ===== IDENTITY 4 LỚP (enrich trong basesvc DoSyncUpsert / Upsert / Insert) =====
+	Uid          string                       `json:"uid" bson:"uid" index:"single:1"`                      // pprd_xxx — canonical
+	SourceIds    map[string]string            `json:"sourceIds,omitempty" bson:"sourceIds,omitempty"`        // pos → posData.id
+	SourceIdsPos string                       `json:"-" bson:"sourceIds.pos,omitempty" index:"single:1,sparse"`
+	Links        map[string]identity.LinkItem `json:"links,omitempty" bson:"links,omitempty"` // shop → pshp_xxx (resolve/pending)
 	ProductId         string                 `json:"productId" bson:"productId" index:"text" extract:"PosData\\.id,converter=string"`            // ID của product trên Pancake POS (extract từ PosData["id"], UUID string)
 	ShopId            int64                  `json:"shopId" bson:"shopId" index:"text" extract:"PosData\\.shop_id,converter=int64,optional"`     // ID của shop (extract từ PosData["shop_id"])
 	Name              string                 `json:"name" bson:"name" index:"text" extract:"PosData\\.name,converter=string,optional"`           // Tên sản phẩm (extract từ PosData["name"])

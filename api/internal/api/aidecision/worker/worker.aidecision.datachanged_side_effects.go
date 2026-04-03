@@ -1,5 +1,4 @@
-// Package worker — Một cửa sau hook: mọi event datachanged → consumer gọi đây trước dispatch.
-// Quyết định ingest CRM / report / ads / refresh metrics — không tách luồng song song ngoài AI Decision.
+// Package worker — Điều phối datachanged: một cửa gọi miền (CRM / báo cáo / Meta / Order / CIX) — không chứa logic đồng bộ hay tính toán nặng.
 package worker
 
 import (
@@ -8,20 +7,29 @@ import (
 	"time"
 
 	"meta_commerce/internal/api/aidecision/crmqueue"
-	"meta_commerce/internal/api/aidecision/crmingest"
 	"meta_commerce/internal/api/aidecision/eventintake"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 	aidecisionsvc "meta_commerce/internal/api/aidecision/service"
+	cixdec "meta_commerce/internal/api/conversationintel/datachanged"
+	crmdec "meta_commerce/internal/api/crm/datachanged"
+	orderdatachanged "meta_commerce/internal/api/order/datachanged"
 	crmvc "meta_commerce/internal/api/crm/service"
 	"meta_commerce/internal/api/events"
-	conversationintel "meta_commerce/internal/api/conversationintel"
-	metahooks "meta_commerce/internal/api/meta/hooks"
-	reportsvc "meta_commerce/internal/api/report/service"
+	metadec "meta_commerce/internal/api/meta/datachanged"
+	orderinteldec "meta_commerce/internal/api/orderintel/datachanged"
+	rptdec "meta_commerce/internal/api/report/datachanged"
 	"meta_commerce/internal/global"
+	"meta_commerce/internal/logger"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
+
+// orderIntelTrailingDebounce — Order intelligence từ pc_pos_orders: mặc định 5 phút; Realtime/gấp → ngay.
+const orderIntelTrailingDebounce = 5 * time.Minute
+
+// cixIntelTrailingDebounce — CIX từ fb_message_items: mặc định 1 phút.
+const cixIntelTrailingDebounce = 1 * time.Minute
 
 // buildDataChangeEventFromSource đọc bản ghi Mongo hiện tại — dùng cho apply và flush side-effect trì hoãn.
 func buildDataChangeEventFromSource(ctx context.Context, src, idHex, op string) (events.DataChangeEvent, bool) {
@@ -53,9 +61,7 @@ func buildDataChangeEventFromSource(ctx context.Context, src, idHex, op string) 
 	}, true
 }
 
-// applyDatachangedSideEffects hydrate payload → CRM ingest / Report / Ads → (tuỳ collection) xếp job refresh metrics.
-// Không đăng ký OnDataChanged riêng; không gọi EnqueueCrmIngest / EmitCrmIntelligenceRefresh từ orchestrate khác.
-// Trì hoặc (trailing) theo mức nghiệp vụ (eventintake.ClassifyDatachangedBusinessUrgency) + env BUSINESS_DEFER_* / DEFER_*.
+// applyDatachangedSideEffects — chỉ điều phối: policy/debounce → CRM ingest chỉ queue; intel CRM sau ingest worker + crm.intelligence.recompute_requested.
 func applyDatachangedSideEffects(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) error {
 	if evt == nil || evt.Payload == nil || evt.EventSource != "datachanged" {
 		return nil
@@ -83,6 +89,14 @@ func applyDatachangedSideEffects(ctx context.Context, svc *aidecisionsvc.AIDecis
 	if !ok {
 		return nil
 	}
+	// Chiếu đơn Pancake → commerce_orders (canonical) trước policy intel — Order Intel đọc từ commerce_orders.
+	if src == global.MongoDB_ColNames.PcPosOrders {
+		if err := orderdatachanged.SyncCommerceOrderFromPancakeDataChange(ctx, e); err != nil {
+			logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
+				"eventId": evt.EventID, "sourceCollection": src,
+			}).Warn("📋 [COMMERCE_ORDER] Không đồng bộ commerce_orders từ pc_pos_orders")
+		}
+	}
 	orgHex := evt.OrgID
 	if orgHex == "" && !evt.OwnerOrganizationID.IsZero() {
 		orgHex = evt.OwnerOrganizationID.Hex()
@@ -95,12 +109,19 @@ func applyDatachangedSideEffects(ctx context.Context, svc *aidecisionsvc.AIDecis
 		reportWin = eventintake.DeferWindowFor(urgency, eventintake.DeferChannelReport)
 		refreshWin = eventintake.DeferWindowFor(urgency, eventintake.DeferChannelCRMRefresh)
 	}
+	if crmdec.IsCustomerIntelligenceSourceCollection(src) {
+		if eventintake.ClassifyDatachangedBusinessUrgency(evt, src, op) == eventintake.UrgencyRealtime {
+			// Giữ refreshWin từ rule / DeferWindowFor
+		} else {
+			refreshWin = crmdec.CustomerIntelTrailingDebounce
+		}
+	}
 
 	if dec.AllowCRMIngest {
 		if ingestWin > 0 {
 			eventintake.ScheduleDeferredSideEffect(eventintake.DeferredKindCrmIngest, orgHex, src, idHex, ingestWin)
 		} else {
-			crmingest.EnqueueFromDatachangedEvent(ctx, e)
+			crmdec.IngestFromDataChange(ctx, e)
 		}
 	}
 
@@ -108,27 +129,111 @@ func applyDatachangedSideEffects(ctx context.Context, svc *aidecisionsvc.AIDecis
 		if reportWin > 0 {
 			eventintake.ScheduleDeferredSideEffect(eventintake.DeferredKindReport, orgHex, src, idHex, reportWin)
 		} else {
-			reportsvc.RecordReportTouchFromDataChange(ctx, e)
+			rptdec.RecordTouchFromDataChange(ctx, e)
 		}
 	}
 
 	if dec.AllowAds {
-		metahooks.ProcessDataChangeForAdsProfile(ctx, e)
+		metadec.ProcessAdsProfileFromDataChange(ctx, e)
 	}
 
 	if src == global.MongoDB_ColNames.FbMessageItems {
-		conversationintel.ProcessDataChangeForMessageItem(ctx, e, evt.TraceID, evt.CorrelationID, evt.OrgID)
+		var rawMsg bson.M
+		if m, ok := e.Document.(bson.M); ok {
+			rawMsg = m
+		}
+		cixWin := cixIntelDeferWindow(evt, rawMsg)
+		if cixWin <= 0 {
+			if err := cixdec.EnqueueCixComputeFromDataChange(ctx, e, idHex); err != nil {
+				logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
+					"eventId": evt.EventID, "orgHex": orgHex, "sourceCollection": src,
+				}).Warn("📋 [CIX_INTEL] Không xếp job cix_intel_compute từ fb_message_items datachanged")
+			}
+		} else {
+			eventintake.ScheduleDeferredSideEffect(eventintake.DeferredKindCixIntelCompute, orgHex, src, idHex, cixWin)
+		}
+	}
+
+	if src == global.MongoDB_ColNames.PcPosOrders {
+		oWin := orderIntelDeferWindow(evt, src, op)
+		if oWin <= 0 {
+			if err := orderinteldec.EnqueueIntelligenceFromParentEvent(ctx, evt); err != nil {
+				logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
+					"eventId": evt.EventID, "orgHex": orgHex,
+				}).Warn("📋 [ORDER_INTEL] Không xếp job order_intel_compute từ pc_pos_orders datachanged")
+			}
+		} else {
+			eventintake.ScheduleDeferredSideEffect(eventintake.DeferredKindOrderIntelCompute, orgHex, src, idHex, oWin)
+		}
 	}
 
 	if refreshWin > 0 {
 		eventintake.ScheduleDeferredSideEffect(eventintake.DeferredKindCrmRefresh, orgHex, src, idHex, refreshWin)
 		return nil
 	}
-	return emitCrmIntelligenceRefreshAfterDatachanged(ctx, evt)
+	// Tính lại CRM intelligence: không enqueue trực tiếp từ đây — chỉ sau CrmIngestWorker (crm.intelligence.recompute_requested + debounce consumer).
+	return nil
+}
+
+// resolveUnifiedIDForCrmIntelRecompute — từ payload datachanged đã hydrate (customerId / unifiedId).
+func resolveUnifiedIDForCrmIntelRecompute(ctx context.Context, ownerOrgID primitive.ObjectID, payload map[string]interface{}) string {
+	if ownerOrgID.IsZero() || payload == nil {
+		return ""
+	}
+	if u, ok := payload["unifiedId"].(string); ok {
+		if s := strings.TrimSpace(u); s != "" {
+			return s
+		}
+	}
+	custID := ""
+	if c, ok := payload["customerId"].(string); ok {
+		custID = strings.TrimSpace(c)
+	}
+	if custID == "" {
+		return ""
+	}
+	svc, err := crmvc.NewCrmCustomerService()
+	if err != nil {
+		return ""
+	}
+	uid, ok := svc.ResolveUnifiedId(ctx, custID, ownerOrgID)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(uid)
+}
+
+// flushCrmIntelAfterIngestDue xếp crm_intel_compute (refresh) sau debounce crm.intelligence.recompute_requested.
+func flushCrmIntelAfterIngestDue(ctx context.Context) {
+	for _, j := range eventintake.TakeDueCrmIntelAfterIngestJobs(time.Now()) {
+		ownerOID, err := primitive.ObjectIDFromHex(strings.TrimSpace(j.OrgHex))
+		if err != nil || ownerOID.IsZero() {
+			continue
+		}
+		unified := strings.TrimSpace(j.UnifiedID)
+		if unified == "" {
+			continue
+		}
+		parentID := strings.TrimSpace(j.ParentEventID)
+		if parentID == "" {
+			parentID = "crm_intel_after_ingest_debounce"
+		}
+		payload := map[string]interface{}{
+			"operation":     crmqueue.CrmComputeOpRefresh,
+			"unifiedId":     unified,
+			"ownerOrgIdHex": ownerOID.Hex(),
+		}
+		if err := crmvc.EnqueueCrmIntelComputeFromDecisionEvent(ctx, parentID, ownerOID, payload); err != nil {
+			logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
+				"orgHex": j.OrgHex, "unifiedId": unified,
+			}).Warn("📋 [CRM_INTEL_DEBOUNCE] Không xếp job crm_intel_compute sau debounce ingest")
+		}
+	}
 }
 
 // flushDeferredDatachangedSideEffects chạy các side-effect đã đến hạn (gọi mỗi tick consumer, trước khi lease event mới).
 func flushDeferredDatachangedSideEffects(ctx context.Context, svc *aidecisionsvc.AIDecisionService) {
+	flushCrmIntelAfterIngestDue(ctx)
 	jobs := eventintake.TakeDueDeferredSideEffectJobs(time.Now())
 	if len(jobs) == 0 {
 		return
@@ -139,9 +244,9 @@ func flushDeferredDatachangedSideEffects(ctx context.Context, svc *aidecisionsvc
 			continue
 		}
 		evt := &aidecisionmodels.DecisionEvent{
-			EventSource:           "datachanged",
-			OrgID:                 j.OrgHex,
-			OwnerOrganizationID:   ownerOID,
+			EventSource:         "datachanged",
+			OrgID:               j.OrgHex,
+			OwnerOrganizationID: ownerOID,
 			Payload: map[string]interface{}{
 				"sourceCollection":    j.Coll,
 				"normalizedRecordUid": j.IDHex,
@@ -157,69 +262,50 @@ func flushDeferredDatachangedSideEffects(ctx context.Context, svc *aidecisionsvc
 		}
 		switch j.Kind {
 		case eventintake.DeferredKindReport:
-			reportsvc.RecordReportTouchFromDataChange(ctx, e)
+			rptdec.RecordTouchFromDataChange(ctx, e)
 		case eventintake.DeferredKindCrmIngest:
-			crmingest.EnqueueFromDatachangedEvent(ctx, e)
+			crmdec.IngestFromDataChange(ctx, e)
 		case eventintake.DeferredKindCrmRefresh:
-			_ = emitCrmIntelligenceRefreshAfterDatachanged(ctx, evt)
+			uid := resolveUnifiedIDForCrmIntelRecompute(ctx, ownerOID, evt.Payload)
+			if uid != "" {
+				if _, err := crmqueue.EmitCrmIntelligenceRecomputeRequested(ctx, uid, ownerOID, j.Coll, ""); err != nil {
+					logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
+						"orgHex": j.OrgHex, "coll": j.Coll, "unifiedId": uid,
+					}).Warn("📋 [CRM] Flush defer CRM refresh: không emit crm.intelligence.recompute_requested")
+				}
+			}
+		case eventintake.DeferredKindOrderIntelCompute:
+			if err := orderinteldec.EnqueueIntelligenceFromParentEvent(ctx, evt); err != nil {
+				logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
+					"orgHex": j.OrgHex, "coll": j.Coll, "idHex": j.IDHex,
+				}).Warn("📋 [ORDER_INTEL] Flush defer: không xếp job order_intel_compute")
+			}
+		case eventintake.DeferredKindCixIntelCompute:
+			if err := cixdec.EnqueueCixComputeFromDataChange(ctx, e, j.IDHex); err != nil {
+				logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
+					"orgHex": j.OrgHex, "coll": j.Coll, "idHex": j.IDHex,
+				}).Warn("📋 [CIX_INTEL] Flush defer: không xếp job cix_intel_compute")
+			}
 		}
 	}
 }
 
-// emitCrmIntelligenceRefreshAfterDatachanged xếp crm.intelligence.compute_requested (RefreshMetrics) — chỉ gọi từ applyDatachangedSideEffects.
-func emitCrmIntelligenceRefreshAfterDatachanged(ctx context.Context, evt *aidecisionmodels.DecisionEvent) error {
-	if evt == nil || evt.Payload == nil {
-		return nil
+func orderIntelDeferWindow(evt *aidecisionmodels.DecisionEvent, src, op string) time.Duration {
+	if evt != nil && evt.Payload != nil && eventintake.PayloadMarksIntelUrgent(evt.Payload) {
+		return 0
 	}
-	ownerOrgID := evt.OwnerOrganizationID
-	if ownerOrgID.IsZero() {
-		return nil
+	if eventintake.ClassifyDatachangedBusinessUrgency(evt, src, op) == eventintake.UrgencyRealtime {
+		return 0
 	}
-	src, _ := evt.Payload["sourceCollection"].(string)
-	switch src {
-	case global.MongoDB_ColNames.CrmCustomers:
-		uid := strings.TrimSpace(payloadStrCRMRefresh(evt.Payload, "unifiedId"))
-		if uid == "" {
-			return nil
-		}
-		_, err := crmqueue.EmitCrmIntelligenceRefreshRequested(ctx, uid, ownerOrgID)
-		return err
-	case global.MongoDB_ColNames.PcPosOrders,
-		global.MongoDB_ColNames.FbConvesations,
-		global.MongoDB_ColNames.FbMessages,
-		global.MongoDB_ColNames.PcPosCustomers,
-		global.MongoDB_ColNames.FbCustomers:
-		return emitCrmRefreshByCustomerID(ctx, evt, ownerOrgID)
-	default:
-		return nil
-	}
+	return orderIntelTrailingDebounce
 }
 
-func emitCrmRefreshByCustomerID(ctx context.Context, evt *aidecisionmodels.DecisionEvent, ownerOrgID primitive.ObjectID) error {
-	custID := strings.TrimSpace(payloadStrCRMRefresh(evt.Payload, "customerId"))
-	if custID == "" {
-		return nil
+func cixIntelDeferWindow(evt *aidecisionmodels.DecisionEvent, rawMsg bson.M) time.Duration {
+	if evt != nil && evt.Payload != nil && eventintake.PayloadMarksIntelUrgent(evt.Payload) {
+		return 0
 	}
-	svc, err := crmvc.NewCrmCustomerService()
-	if err != nil {
-		return err
+	if eventintake.MessageTextMarksIntelUrgent(eventintake.ExtractFbMessageItemTextLower(rawMsg)) {
+		return 0
 	}
-	unifiedID, ok := svc.ResolveUnifiedId(ctx, custID, ownerOrgID)
-	if !ok || unifiedID == "" {
-		return nil
-	}
-	_, err = crmqueue.EmitCrmIntelligenceRefreshRequested(ctx, unifiedID, ownerOrgID)
-	return err
-}
-
-func payloadStrCRMRefresh(m map[string]interface{}, key string) string {
-	v, ok := m[key]
-	if !ok || v == nil {
-		return ""
-	}
-	s, ok := v.(string)
-	if !ok {
-		return ""
-	}
-	return strings.TrimSpace(s)
+	return cixIntelTrailingDebounce
 }

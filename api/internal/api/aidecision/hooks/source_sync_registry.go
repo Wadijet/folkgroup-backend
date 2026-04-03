@@ -1,4 +1,38 @@
 // Package hooks — registry collection Mongo chứa dữ liệu đồng bộ từ hệ thống bên ngoài → event AI Decision.
+// Chuỗi eventType đầy đủ cho pipeline (ads.context_*, crm_intel_recomputed, …): xem package aidecision/eventtypes.
+//
+// Bảng registry + ghi decision_events_queue mặc định (sau OnDataChanged, theo map + quy tắc Meta trong code):
+//
+//	Collection Mongo (init.go)              Prefix event              Ghi queue mặc định
+//	--------------------------------------  ------------------------  --------------------
+//	fb_conversations                        conversation              có
+//	fb_messages                             message                   có
+//	pc_pos_orders                           order                     có
+//	commerce_orders                         (không ghi queue mặc định — chiếu từ pc_pos_orders; DatachangedEmitPerCollection nếu thêm key)
+//	fb_pages                                fb_page                   không (DatachangedEmitPerCollection)
+//	fb_message_items                        fb_message_item           có
+//	fb_posts                                fb_post                   không (DatachangedEmitPerCollection)
+//	fb_customers                            fb_customer               có
+//	pc_pos_customers                        pos_customer              có
+//	pc_pos_shops                            pos_shop                  không (DatachangedEmitPerCollection)
+//	pc_pos_warehouses                       pos_warehouse             không (DatachangedEmitPerCollection)
+//	pc_pos_products                         pos_product               không (DatachangedEmitPerCollection)
+//	pc_pos_variations                       pos_variation             không (DatachangedEmitPerCollection)
+//	pc_pos_categories                       pos_category              không (DatachangedEmitPerCollection)
+//	crm_customers                           crm_customer              không (DatachangedEmitPerCollection)
+//	crm_activity_history                    crm_activity              không (DatachangedEmitPerCollection)
+//	crm_notes                               crm_note                  không (DatachangedEmitPerCollection)
+//	cix_analysis_results                    cix_analysis_result       không (DatachangedEmitPerCollection)
+//	meta_ad_insights                        meta_ad_insight           có
+//	meta_ad_accounts                        meta_ad_account           không (meta_insight_only)
+//	meta_campaigns                          meta_campaign             không (meta_insight_only)
+//	meta_adsets                             meta_adset                không (meta_insight_only)
+//	meta_ads                                meta_ad                   không (meta_insight_only)
+//	meta_ad_insights_daily_snapshots        meta_ad_insight_daily_snapshot  không (meta_insight_only)
+//	webhook_logs                            webhook_log               không (DatachangedEmitPerCollection)
+//
+// Cột “Ghi queue mặc định” = ShouldEmitDatachangedToDecisionQueue: map DatachangedEmitPerCollection (datachanged_emit_per_collection.go)
+// nếu có key; không thì non-Meta → có, nhóm Meta → chỉ meta_ad_insights. Chi tiết: datachanged_emit_filter.go.
 package hooks
 
 import (
@@ -9,6 +43,7 @@ import (
 )
 
 // Bản đồ được dựng sau khi initColNames() chạy (sync.Once lần đầu gọi).
+// Bảng collection + bật ghi queue mặc định: xem comment đầu file package.
 var (
 	sourceSyncOnce       sync.Once
 	sourceSyncCollPrefix map[string]string // collection name → event prefix (vd fb_page → fb_page.inserted)
@@ -31,7 +66,6 @@ func sourceSyncPrefixesMap() map[string]string {
 			c.FbMessageItems:  "fb_message_item",
 			c.FbPosts:         "fb_post",
 			c.FbCustomers:     "fb_customer",
-			c.PcOrders:        "pc_order",
 			c.PcPosCustomers:  "pos_customer",
 			c.PcPosShops:      "pos_shop",
 			c.PcPosWarehouses: "pos_warehouse",

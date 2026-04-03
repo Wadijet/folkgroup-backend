@@ -244,7 +244,7 @@ func (s *AIDecisionService) UpdateCaseWithCustomerContext(ctx context.Context, c
 	return err
 }
 
-// UpdateCaseWithOrderContext cập nhật case với order flags khi nhận order.flags_emitted.
+// UpdateCaseWithOrderContext cập nhật case với order flags khi nhận order_intel_recomputed.
 // Cập nhật tối đa hai case: (1) conversation_response theo conv+cust (2) order_risk theo orderUid.
 func (s *AIDecisionService) UpdateCaseWithOrderContext(ctx context.Context, orderID, customerID, convID, orgID string, ownerOrgID primitive.ObjectID, orderPayload map[string]interface{}) error {
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.DecisionCasesRuntime)

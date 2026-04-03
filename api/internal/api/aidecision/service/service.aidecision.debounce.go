@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"meta_commerce/internal/api/aidecision/eventtypes"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 	"meta_commerce/internal/global"
 
@@ -17,7 +18,8 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-const debounceWindowSec = 30
+// debounceWindowSec — gom tin trước khi emit message.batch_ready (mặc định 1 phút); pattern gấp vẫn flush ngay.
+const debounceWindowSec = 60
 const eventGroupMessageBurst = "message_burst"
 
 // CriticalPatterns từ khóa flush ngay, không chờ window.
@@ -94,7 +96,7 @@ func (s *AIDecisionService) FlushExpired(ctx context.Context) (int, error) {
 	emitted := 0
 	for _, st := range states {
 		_, err = s.EmitEvent(ctx, &EmitEventInput{
-			EventType:     "message.batch_ready",
+			EventType:     eventtypes.MessageBatchReady,
 			EventSource:   "debounce",
 			EntityType:    "conversation",
 			EntityID:      st.ConversationID,

@@ -1,5 +1,5 @@
 // Package metasvc — Ads Intelligence: cập nhật raw + layer + roll-up sau khi nguồn (insight/POS/hội thoại) đổi.
-// Được gọi từ worker AI Decision khi consume event ads.intelligence.recompute_requested (event-driven).
+// ApplyAdsIntelligenceRecomputeWithMode được gọi từ worker domain ads (ads_intel_compute), không gọi trực tiếp từ consumer AI Decision.
 package metasvc
 
 import (

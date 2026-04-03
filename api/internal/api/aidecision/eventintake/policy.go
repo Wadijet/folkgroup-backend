@@ -2,7 +2,7 @@
 //
 // Lớp 1: DoSyncUpsert — giảm ghi DB khi đồng bộ ngoài.
 // Lớp 2: hook aidecision (OnDataChanged) — cổng enqueue (org, registry, không delete); so updated_at nguồn thuộc lớp 1.
-// Sau khi vào queue: worker applyDatachangedSideEffects (một cửa) quyết định ingest / report / ads / refresh metrics — không tách luồng OnDataChanged khác.
+// Sau khi vào queue: worker applyDatachangedSideEffects (một cửa) quyết định enqueue CRM ingest / report / ads — intel CRM qua worker ingest + recompute_requested.
 // Policy (đây): dedupe CRM ingest theo cửa sổ (AI_DECISION_EVENTINTAKE_CRM_DEDUPE_SEC).
 // Trì hoãn trailing + mức nghiệp vụ: datachanged_defer.go, datachanged_business.go — BUSINESS_DEFER_* và DEFER_* (ghi đè theo kênh nếu set trong env).
 package eventintake

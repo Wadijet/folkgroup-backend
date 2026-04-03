@@ -1147,6 +1147,33 @@ func enrichUpsertInsertIdentity(ctx context.Context, collectionName string, upda
 	return nil
 }
 
+// enrichUpsertUpdateIdentity merge bản ghi đang có với $set, gọi EnrichIdentity4Layers, rồi ghi uid/sourceIds/links vào Set (cập nhật document đã tồn tại).
+func enrichUpsertUpdateIdentity(ctx context.Context, collectionName string, updateData *UpdateData, existing interface{}) error {
+	if !identity.ShouldEnrich(collectionName) {
+		return nil
+	}
+	docMap, err := utility.ToMap(existing)
+	if err != nil {
+		return fmt.Errorf("ToMap(existing) cho enrich identity: %w", err)
+	}
+	for k, v := range updateData.Set {
+		docMap[k] = v
+	}
+	if err := identity.EnrichIdentity4Layers(ctx, collectionName, docMap, nil); err != nil {
+		return err
+	}
+	if v := docMap["uid"]; v != nil {
+		updateData.Set["uid"] = v
+	}
+	if v := docMap["sourceIds"]; v != nil {
+		updateData.Set["sourceIds"] = v
+	}
+	if v := docMap["links"]; v != nil {
+		updateData.Set["links"] = v
+	}
+	return nil
+}
+
 // Upsert thực hiện thao tác update nếu tồn tại, insert nếu chưa tồn tại
 func (s *BaseServiceMongoImpl[T]) Upsert(ctx context.Context, filter interface{}, data interface{}) (T, error) {
 	var zero T

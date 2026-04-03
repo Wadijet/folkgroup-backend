@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
+
+	"meta_commerce/internal/utility/identity"
 )
 
 // MetaAdInsightDailySnapshot lưu snapshot cumulative "today" mỗi lần agent sync insights (15p/lần).
@@ -14,6 +16,11 @@ import (
 // spend_09:00_10:00 = snapshot_10:00.spend - snapshot_09:00.spend.
 type MetaAdInsightDailySnapshot struct {
 	ID                  primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"`
+	// ===== IDENTITY 4 LỚP (enrich trước InsertOne trong SaveDailySnapshot) =====
+	Uid           string                       `json:"uid" bson:"uid" index:"single:1"`
+	SourceIds     map[string]string            `json:"sourceIds,omitempty" bson:"sourceIds,omitempty"`
+	SourceIdsMeta string                       `json:"-" bson:"sourceIds.meta,omitempty" index:"single:1,sparse"`
+	Links         map[string]identity.LinkItem `json:"links,omitempty" bson:"links,omitempty"`
 	ObjectId            string             `json:"objectId" bson:"objectId" index:"single:1,compound:snapshot_lookup"`
 	ObjectType          string             `json:"objectType" bson:"objectType" index:"single:1,compound:snapshot_lookup"`
 	AdAccountId         string             `json:"adAccountId" bson:"adAccountId" index:"single:1,compound:snapshot_lookup"`

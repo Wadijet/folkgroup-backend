@@ -2,11 +2,18 @@ package models
 
 import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
+
+	"meta_commerce/internal/utility/identity"
 )
 
 // PcPosVariation lưu thông tin biến thể sản phẩm từ Pancake POS API
 type PcPosVariation struct {
 	ID             primitive.ObjectID     `json:"id,omitempty" bson:"_id,omitempty"`                                                                   // ID của variation trong MongoDB
+	// ===== IDENTITY 4 LỚP =====
+	Uid          string                       `json:"uid" bson:"uid" index:"single:1"`
+	SourceIds    map[string]string            `json:"sourceIds,omitempty" bson:"sourceIds,omitempty"`
+	SourceIdsPos string                       `json:"-" bson:"sourceIds.pos,omitempty" index:"single:1,sparse"`
+	Links        map[string]identity.LinkItem `json:"links,omitempty" bson:"links,omitempty"`
 	VariationId    string                 `json:"variationId" bson:"variationId" index:"text,unique" extract:"PosData\\.id,converter=string"`          // ID của variation trên Pancake POS (extract từ PosData["id"], UUID string)
 	ProductId      string                 `json:"productId" bson:"productId" index:"text" extract:"PosData\\.product_id,converter=string,optional"`    // ID của product (extract từ PosData["product_id"], UUID string)
 	ShopId         int64                  `json:"shopId" bson:"shopId" index:"text" extract:"PosData\\.shop_id,converter=int64,optional"`              // ID của shop (extract từ PosData["shop_id"])

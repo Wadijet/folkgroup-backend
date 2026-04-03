@@ -1,15 +1,14 @@
 package identity
 
 import (
-	"meta_commerce/internal/global"
 	"meta_commerce/internal/utility"
 )
 
 // ColConfig cấu hình identity cho 1 collection.
 type ColConfig struct {
 	Prefix     string
-	SourceKeys []SourceKeyConfig  // path -> source key
-	LinkKeys   []LinkKeyConfig    // path -> link key, source
+	SourceKeys []SourceKeyConfig // path -> source key
+	LinkKeys   []LinkKeyConfig   // path -> link key, source
 }
 
 type SourceKeyConfig struct {
@@ -23,21 +22,32 @@ type LinkKeyConfig struct {
 	Source string // pos, facebook, zalo (để resolve)
 }
 
+// registry — key phải là tên collection thật (khớp cmd/server/init.go initColNames).
+// Không dùng global.MongoDB_ColNames.Xxx làm key: lúc init package các field đó vẫn "" → mọi entry gộp thành một key rỗng → ShouldEnrich("pc_pos_orders") luôn false.
 var registry = map[string]ColConfig{
-	global.MongoDB_ColNames.CrmCustomers: {
+	"crm_customers": {
 		Prefix: utility.UIDPrefixCustomer,
 		// sourceIds đã có struct riêng, không extract từ payload
 	},
-	global.MongoDB_ColNames.PcPosCustomers: {
+	"pc_pos_customers": {
 		Prefix: utility.UIDPrefixCustomer,
-		SourceKeys: []SourceKeyConfig{{Path: "posData.id", Source: "pos"}},
+		// sourceIds: mọi định danh ngoài của cùng entity khách (POS API id, khách inbox Pancake, PSID ghép page).
+		SourceKeys: []SourceKeyConfig{
+			{Path: "posData.id", Source: "pos"},
+			{Path: "posData.customer_id", Source: "pancake_customer"},
+			{Path: "posData.fb_id", Source: "facebook"},
+		},
+		// links.shop: cửa hàng POS (resolve uid pshp_ khi có resolver; không thì pending + externalRefs).
+		LinkKeys: []LinkKeyConfig{
+			{Path: "shopId", Key: "shop", Source: "pos"},
+		},
 	},
-	global.MongoDB_ColNames.FbCustomers: {
-		Prefix: utility.UIDPrefixCustomer,
+	"fb_customers": {
+		Prefix:     utility.UIDPrefixCustomer,
 		SourceKeys: []SourceKeyConfig{{Path: "panCakeData.id", Source: "facebook"}},
 	},
-	global.MongoDB_ColNames.PcPosOrders: {
-		Prefix: utility.UIDPrefixOrder,
+	"pc_pos_orders": {
+		Prefix:     utility.UIDPrefixOrder,
 		SourceKeys: []SourceKeyConfig{{Path: "posData.id", Source: "pos"}},
 		LinkKeys: []LinkKeyConfig{
 			{Path: "customerId", Key: "customer", Source: "pos"},
@@ -45,7 +55,92 @@ var registry = map[string]ColConfig{
 			{Path: "posData.customer_id", Key: "customer", Source: "pos"},
 		},
 	},
-	global.MongoDB_ColNames.FbConvesations: {
+	// commerce_orders — đơn canonical; posData giữ layout Pancake khi source=pancake_pos (enrich/CRUD sau này).
+	"commerce_orders": {
+		Prefix:     utility.UIDPrefixOrder,
+		SourceKeys: []SourceKeyConfig{{Path: "posData.id", Source: "pos"}},
+		LinkKeys: []LinkKeyConfig{
+			{Path: "customerId", Key: "customer", Source: "pos"},
+			{Path: "posData.customer.id", Key: "customer", Source: "pos"},
+			{Path: "posData.customer_id", Key: "customer", Source: "pos"},
+		},
+	},
+	"pc_pos_products": {
+		Prefix:     utility.UIDPrefixPosProduct,
+		SourceKeys: []SourceKeyConfig{{Path: "posData.id", Source: "pos"}},
+		LinkKeys: []LinkKeyConfig{
+			{Path: "shopId", Key: "shop", Source: "pos"},
+		},
+	},
+	"pc_pos_categories": {
+		Prefix:     utility.UIDPrefixPosCategory,
+		SourceKeys: []SourceKeyConfig{{Path: "posData.id", Source: "pos"}},
+		LinkKeys: []LinkKeyConfig{
+			{Path: "shopId", Key: "shop", Source: "pos"},
+		},
+	},
+	"pc_pos_variations": {
+		Prefix:     utility.UIDPrefixPosVariation,
+		SourceKeys: []SourceKeyConfig{{Path: "posData.id", Source: "pos"}},
+		LinkKeys: []LinkKeyConfig{
+			{Path: "productId", Key: "product", Source: "pos"},
+			{Path: "shopId", Key: "shop", Source: "pos"},
+		},
+	},
+	"pc_pos_warehouses": {
+		Prefix:     utility.UIDPrefixPosWarehouse,
+		SourceKeys: []SourceKeyConfig{{Path: "panCakeData.id", Source: "pos"}},
+		LinkKeys: []LinkKeyConfig{
+			{Path: "shopId", Key: "shop", Source: "pos"},
+		},
+	},
+	"pc_pos_shops": {
+		Prefix:     utility.UIDPrefixPosShop,
+		SourceKeys: []SourceKeyConfig{{Path: "panCakeData.id", Source: "pos"}},
+	},
+	"meta_ad_accounts": {
+		Prefix:     utility.UIDPrefixMetaAdAccount,
+		SourceKeys: []SourceKeyConfig{{Path: "metaData.id", Source: "meta"}},
+	},
+	"meta_campaigns": {
+		Prefix:     utility.UIDPrefixMetaCampaign,
+		SourceKeys: []SourceKeyConfig{{Path: "metaData.id", Source: "meta"}},
+		LinkKeys: []LinkKeyConfig{
+			{Path: "adAccountId", Key: "adAccount", Source: "meta"},
+		},
+	},
+	"meta_adsets": {
+		Prefix:     utility.UIDPrefixMetaAdSet,
+		SourceKeys: []SourceKeyConfig{{Path: "metaData.id", Source: "meta"}},
+		LinkKeys: []LinkKeyConfig{
+			{Path: "campaignId", Key: "campaign", Source: "meta"},
+			{Path: "adAccountId", Key: "adAccount", Source: "meta"},
+		},
+	},
+	"meta_ads": {
+		Prefix:     utility.UIDPrefixMetaAd,
+		SourceKeys: []SourceKeyConfig{{Path: "metaData.id", Source: "meta"}},
+		LinkKeys: []LinkKeyConfig{
+			{Path: "adSetId", Key: "adSet", Source: "meta"},
+			{Path: "campaignId", Key: "campaign", Source: "meta"},
+			{Path: "adAccountId", Key: "adAccount", Source: "meta"},
+		},
+	},
+	"meta_ad_insights": {
+		Prefix:     utility.UIDPrefixMetaInsight,
+		SourceKeys: []SourceKeyConfig{{Path: "objectId", Source: "meta"}},
+		LinkKeys: []LinkKeyConfig{
+			{Path: "adAccountId", Key: "adAccount", Source: "meta"},
+		},
+	},
+	"meta_ad_insights_daily_snapshots": {
+		Prefix:     utility.UIDPrefixMetaInsight,
+		SourceKeys: []SourceKeyConfig{{Path: "objectId", Source: "meta"}},
+		LinkKeys: []LinkKeyConfig{
+			{Path: "adAccountId", Key: "adAccount", Source: "meta"},
+		},
+	},
+	"fb_conversations": {
 		Prefix: utility.UIDPrefixConversation,
 		LinkKeys: []LinkKeyConfig{
 			{Path: "customerId", Key: "customer", Source: "facebook"},
@@ -54,11 +149,26 @@ var registry = map[string]ColConfig{
 			{Path: "panCakeData.page_customer.id", Key: "customer", Source: "facebook"},
 		},
 	},
-	global.MongoDB_ColNames.CrmActivityHistory: {
+	"fb_messages": {
+		Prefix:     utility.UIDPrefixFbMessage,
+		SourceKeys: []SourceKeyConfig{{Path: "conversationId", Source: "facebook"}},
+		LinkKeys: []LinkKeyConfig{
+			{Path: "customerId", Key: "customer", Source: "facebook"},
+			{Path: "conversationId", Key: "conversation", Source: "facebook"},
+		},
+	},
+	"fb_message_items": {
+		Prefix:     utility.UIDPrefixFbMessageItem,
+		SourceKeys: []SourceKeyConfig{{Path: "messageId", Source: "facebook"}},
+		LinkKeys: []LinkKeyConfig{
+			{Path: "conversationId", Key: "conversation", Source: "facebook"},
+		},
+	},
+	"crm_activity_history": {
 		Prefix: utility.UIDPrefixActivity,
 		// links từ unifiedId trong activity
 	},
-	global.MongoDB_ColNames.CrmNotes: {
+	"crm_notes": {
 		Prefix: utility.UIDPrefixNote,
 		LinkKeys: []LinkKeyConfig{
 			{Path: "customerId", Key: "customer", Source: ""},
@@ -82,9 +192,7 @@ func ShouldEnrich(collectionName string) bool {
 func GetAllEnrichedCollectionNames() []string {
 	names := make([]string, 0, len(registry))
 	for k := range registry {
-		if k != "" {
-			names = append(names, k)
-		}
+		names = append(names, k)
 	}
 	return names
 }

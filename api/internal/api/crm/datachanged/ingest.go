@@ -1,6 +1,6 @@
-// Package crmingest — Đưa thay đổi collection nguồn vào crm_pending_ingest sau khi đã qua decision_events_queue (AI Decision consumer).
-// Hook EmitDataChanged không gọi trực tiếp CRM; chỉ aidecision/hooks emit event, consumer gọi EnqueueFromDatachangedEvent.
-package crmingest
+// Package datachanged — Miền CRM: mọi ingest sau datachanged chỉ ghi crm_pending_ingest; CrmIngestWorker merge rồi emit crm.intelligence.recompute_requested.
+// Consumer AI Decision không gọi merge đồng bộ tại đây.
+package datachanged
 
 import (
 	"context"
@@ -11,8 +11,8 @@ import (
 	"meta_commerce/internal/logger"
 )
 
-// EnqueueFromDatachangedEvent ghi job vào crm_pending_ingest — chỉ gọi từ worker AI Decision (sau event datachanged).
-func EnqueueFromDatachangedEvent(ctx context.Context, e events.DataChangeEvent) {
+// IngestFromDataChange xếp job vào crm_pending_ingest (khách POS/FB, đơn, hội thoại, ghi chú).
+func IngestFromDataChange(ctx context.Context, e events.DataChangeEvent) {
 	if e.Document == nil {
 		return
 	}

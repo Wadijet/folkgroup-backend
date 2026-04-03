@@ -1,6 +1,10 @@
 package decisionlive
 
-import "testing"
+import (
+	"testing"
+
+	"meta_commerce/internal/api/aidecision/eventtypes"
+)
 
 func TestClassifyEventTypeFeedSource(t *testing.T) {
 	tests := []struct {
@@ -13,10 +17,12 @@ func TestClassifyEventTypeFeedSource(t *testing.T) {
 		{"crm_customer.inserted", FeedSourceCrm},
 		{"conversation.inserted", FeedSourceConversation},
 		{"order.updated", FeedSourceOrder},
-		{"cix.analysis_requested", FeedSourceIntel},
-		{"ads.context_requested", FeedSourceAds},
-		{"ads.intelligence.recompute_requested", FeedSourceIntel},
-		{"aidecision.execute_requested", FeedSourceDecision},
+		{eventtypes.CixAnalysisRequested, FeedSourceIntel},
+		{eventtypes.AdsContextRequested, FeedSourceAds},
+		{eventtypes.AdsIntelligenceRecomputeRequested, FeedSourceIntel},
+		{eventtypes.CrmIntelligenceRecomputeRequested, FeedSourceCrm},
+		{eventtypes.CampaignIntelRecomputed, FeedSourceIntel},
+		{eventtypes.AIDecisionExecuteRequested, FeedSourceDecision},
 		{"webhook_log.inserted", FeedSourceWebhook},
 	}
 	for _, tc := range tests {
@@ -29,14 +35,14 @@ func TestClassifyEventTypeFeedSource(t *testing.T) {
 func TestEnrichLiveEventFeedSource_queue(t *testing.T) {
 	ev := DecisionLiveEvent{
 		SourceKind: SourceQueue,
-		Refs:       map[string]string{"eventType": "meta_campaign.updated"},
+		Refs:       map[string]string{"eventType": eventtypes.CampaignIntelRecomputed},
 	}
 	enrichLiveEventFeedSource(&ev)
-	if ev.FeedSourceCategory != FeedSourceMetaSync {
+	if ev.FeedSourceCategory != FeedSourceIntel {
 		t.Fatalf("category %q", ev.FeedSourceCategory)
 	}
-	if ev.SourceKind != FeedSourceMetaSync {
-		t.Fatalf("mong sourceKind đồng bộ meta_sync, got %q", ev.SourceKind)
+	if ev.SourceKind != FeedSourceIntel {
+		t.Fatalf("mong sourceKind intel sau recompute campaign, got %q", ev.SourceKind)
 	}
 	if ev.FeedSourceLabelVi == "" {
 		t.Fatal("empty label")

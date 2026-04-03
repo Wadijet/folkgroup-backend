@@ -2,12 +2,19 @@ package models
 
 import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
+
+	"meta_commerce/internal/utility/identity"
 )
 
 // MetaCampaign lưu thông tin Campaign từ Meta Marketing API.
 // Các field CampaignId, AdAccountId, Name, Objective, Status, EffectiveStatus có extract tag để lấy từ metaData khi ghi.
 type MetaCampaign struct {
 	ID                  primitive.ObjectID     `json:"id,omitempty" bson:"_id,omitempty"`
+	// ===== IDENTITY 4 LỚP =====
+	Uid           string                       `json:"uid" bson:"uid" index:"single:1"`
+	SourceIds     map[string]string            `json:"sourceIds,omitempty" bson:"sourceIds,omitempty"`
+	SourceIdsMeta string                       `json:"-" bson:"sourceIds.meta,omitempty" index:"single:1,sparse"`
+	Links         map[string]identity.LinkItem `json:"links,omitempty" bson:"links,omitempty"`
 	CampaignId          string                 `json:"campaignId" bson:"campaignId" index:"unique;text;single:1,compound:meta_campaign_lookup_unique;compound:meta_campaign_by_account" extract:"metaData\\.id,converter=string,required"`
 	AdAccountId         string                 `json:"adAccountId" bson:"adAccountId" index:"text;single:1,compound:meta_campaign_lookup_unique;compound:meta_campaign_by_account" extract:"metaData\\.account_id,converter=string,optional"`
 	Name                string                 `json:"name" bson:"name" index:"text" extract:"metaData\\.name,converter=string,optional"`

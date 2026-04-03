@@ -83,7 +83,6 @@ func main() {
 		"pc_pos_variations",
 		"pc_pos_categories",
 		"pc_pos_orders",
-		"pc_orders",
 
 		// Content Storage (Module 1)
 		"content_nodes",

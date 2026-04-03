@@ -1,6 +1,10 @@
 package decisionlive
 
-import "strings"
+import (
+	"strings"
+
+	"meta_commerce/internal/api/aidecision/eventtypes"
+)
 
 // Giá trị feedSourceCategory — ổn định cho chip lọc UI (khác với sourceKind thô: queue / unknown).
 const (
@@ -153,11 +157,11 @@ func classifyEventTypeFeedSource(et string) string {
 		return FeedSourceQueue
 	}
 	switch s {
-	case "aidecision.execute_requested", "executor.propose_requested", "ads.propose_requested":
+	case eventtypes.AIDecisionExecuteRequested, eventtypes.ExecutorProposeRequested, eventtypes.AdsProposeRequested:
 		return FeedSourceDecision
 	}
 	// CRM & khách (crm.* API + crm_* datachanged + fb_customer.*)
-	if strings.HasPrefix(s, "crm.") || strings.HasPrefix(s, "crm_") || strings.HasPrefix(s, "fb_customer.") {
+	if strings.HasPrefix(s, eventtypes.PrefixCrmDot) || strings.HasPrefix(s, eventtypes.PrefixCrmUnderscore) || strings.HasPrefix(s, "fb_customer.") {
 		return FeedSourceCrm
 	}
 	if strings.HasPrefix(s, "webhook_log.") {
@@ -172,30 +176,31 @@ func classifyEventTypeFeedSource(et string) string {
 	if strings.HasPrefix(s, "fb_page.") || strings.HasPrefix(s, "fb_post.") || strings.HasPrefix(s, "fb_message_item.") {
 		return FeedSourceMetaSync
 	}
-	// Ads intelligence (batch) → intel; còn lại ads.* → ads hoặc decision
-	if strings.HasPrefix(s, "ads.intelligence.") {
+	// Ads intelligence (batch) → intel; campaign_intel_* / *_{domain}_intel_recomputed sau worker → intel
+	if strings.HasPrefix(s, eventtypes.PrefixAdsIntelligence) || strings.HasPrefix(s, eventtypes.PrefixCampaignIntel) ||
+		strings.HasPrefix(s, eventtypes.PrefixCrmIntelUnderscore) || strings.HasPrefix(s, eventtypes.PrefixOrderIntelUnderscore) || strings.HasPrefix(s, eventtypes.PrefixCixIntelUnderscore) {
 		return FeedSourceIntel
 	}
-	if strings.HasPrefix(s, "ads.context_") || s == "ads.updated" {
+	if strings.HasPrefix(s, eventtypes.PrefixAdsContext) || s == eventtypes.AdsUpdated {
 		return FeedSourceAds
 	}
 	if strings.HasPrefix(s, "ads.") {
 		return FeedSourceAds
 	}
 	// Intel pipeline (CIX, order intel, customer context, commerce…)
-	if strings.HasPrefix(s, "cix.") || strings.HasPrefix(s, "cix_analysis_result.") ||
-		strings.HasPrefix(s, "conversation.intelligence_") ||
-		strings.HasPrefix(s, "order.intelligence_") || strings.HasPrefix(s, "order.recompute_") || strings.HasPrefix(s, "order.flags_") ||
-		strings.HasPrefix(s, "customer.context_") || s == "commerce.order_completed" ||
-		s == "conversation.message_inserted" || s == "message.batch_ready" {
+	if strings.HasPrefix(s, eventtypes.PrefixCixDot) ||
+		strings.HasPrefix(s, eventtypes.PrefixOrderIntelligenceLegacy) || strings.HasPrefix(s, eventtypes.PrefixOrderRecompute) ||
+		strings.HasPrefix(s, eventtypes.PrefixCustomerContext) ||
+		s == eventtypes.OrderIntelRecomputed ||
+		s == eventtypes.ConversationMessageInserted || s == eventtypes.MessageBatchReady {
 		return FeedSourceIntel
 	}
 	// Hội thoại / tin nhắn datachanged (inserted/updated)
-	if strings.HasPrefix(s, "conversation.") || strings.HasPrefix(s, "message.") {
+	if strings.HasPrefix(s, eventtypes.PrefixConversation) || strings.HasPrefix(s, eventtypes.PrefixMessage) {
 		return FeedSourceConversation
 	}
 	// Đơn datachanged
-	if strings.HasPrefix(s, "order.") || strings.HasPrefix(s, "pc_order.") {
+	if strings.HasPrefix(s, eventtypes.PrefixOrder) {
 		return FeedSourceOrder
 	}
 	return FeedSourceQueue

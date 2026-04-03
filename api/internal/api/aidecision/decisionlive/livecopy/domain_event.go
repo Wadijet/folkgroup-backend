@@ -4,6 +4,7 @@ package livecopy
 import (
 	"strings"
 
+	"meta_commerce/internal/api/aidecision/eventtypes"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 )
 
@@ -17,8 +18,8 @@ type DomainNarrative struct {
 // DomainNarrativeFromQueueEvent trích narrative từ envelope decision_events_queue.
 func DomainNarrativeFromQueueEvent(evt *aidecisionmodels.DecisionEvent) DomainNarrative {
 	out := DomainNarrative{
-		StepTitle:       "Xử lý tác vụ",
-		BusinessOneLine: "Một việc đã được xếp hàng chờ; hệ thống sẽ xử lý theo đúng loại việc.",
+		StepTitle:       "Xử lý job AI Decision",
+		BusinessOneLine: "Một job đã vào hàng đợi AI Decision; hệ thống sẽ xử lý đúng theo loại sự kiện.",
 	}
 	if evt == nil {
 		return out
@@ -34,7 +35,37 @@ func DomainNarrativeFromQueueEvent(evt *aidecisionmodels.DecisionEvent) DomainNa
 	decisionCaseID := strFromPayload(p, "decisionCaseId", "decisionCaseID")
 
 	switch et {
-	case "meta_campaign.inserted", "meta_campaign.updated":
+	case eventtypes.CampaignIntelRecomputed:
+		out.StepTitle = "Phân tích chiến dịch quảng cáo đã cập nhật"
+		out.BusinessOneLine = "Dữ liệu intelligence trên chiến dịch vừa được tính lại; bước sau có thể là chuẩn bị ngữ cảnh và gợi ý tối ưu."
+		if campaignID != "" {
+			out.EntityBullets = append(out.EntityBullets, "Chiến dịch: "+campaignID)
+		}
+		if adAccountID != "" {
+			out.EntityBullets = append(out.EntityBullets, "Tài khoản quảng cáo: "+adAccountID)
+		}
+	case eventtypes.CrmIntelRecomputed:
+		out.StepTitle = "Phân tích khách (CRM) đã cập nhật"
+		out.BusinessOneLine = "Chỉ số và bức tranh khách vừa được tính lại; có thể tiếp tục gợi ý hoặc hành động khi đã đủ thông tin."
+		if u := strFromPayload(p, "unifiedId", "unified_id"); u != "" {
+			out.EntityBullets = append(out.EntityBullets, "Khách (unified): "+u)
+		}
+	case eventtypes.OrderIntelRecomputed:
+		out.StepTitle = "Phân tích đơn hàng đã cập nhật"
+		out.BusinessOneLine = "Hệ thống vừa làm mới bản tóm tắt đơn (cảnh báo, trạng thái, mức độ rủi ro) để các bước sau dùng số liệu mới nhất."
+		if orderID != "" {
+			out.EntityBullets = append(out.EntityBullets, "Đơn: "+orderID)
+		}
+		if convID != "" {
+			out.EntityBullets = append(out.EntityBullets, "Hội thoại: "+convID)
+		}
+	case eventtypes.CixIntelRecomputed:
+		out.StepTitle = "Phân tích hội thoại (CIX) đã xong"
+		out.BusinessOneLine = "Đã có kết quả đọc ý nghĩa tin nhắn; hệ thống có thể cập nhật hồ sơ xử lý và đề xuất bước tiếp theo."
+		if convID != "" {
+			out.EntityBullets = append(out.EntityBullets, "Hội thoại: "+convID)
+		}
+	case eventtypes.MetaCampaignInserted, eventtypes.MetaCampaignUpdated:
 		out.StepTitle = "Đồng bộ chiến dịch quảng cáo (Meta)"
 		out.BusinessOneLine = "Cập nhật thông tin chiến dịch từ Meta; có thể dùng cho báo cáo và gợi ý tối ưu."
 		if campaignID != "" {
@@ -43,29 +74,23 @@ func DomainNarrativeFromQueueEvent(evt *aidecisionmodels.DecisionEvent) DomainNa
 		if adAccountID != "" {
 			out.EntityBullets = append(out.EntityBullets, "Tài khoản quảng cáo: "+adAccountID)
 		}
-	case "ads.context_requested":
-		out.StepTitle = "Chuẩn bị dữ liệu quảng cáo"
-		out.BusinessOneLine = "Đang lấy số liệu và trạng thái chiến dịch để đánh giá theo quy tắc."
+	case eventtypes.AdsContextRequested:
+		out.StepTitle = "Đang thu thập ngữ cảnh quảng cáo"
+		out.BusinessOneLine = "Hệ thống đang gom số liệu và trạng thái chiến dịch để chạy quy tắc đánh giá."
 		if campaignID != "" {
 			out.EntityBullets = append(out.EntityBullets, "Chiến dịch: "+campaignID)
 		}
-	case "ads.context_ready":
-		out.StepTitle = "Đánh giá gợi ý quảng cáo"
-		out.BusinessOneLine = "Đã đủ dữ liệu; hệ thống áp quy tắc để có thể tạo gợi ý hoặc kết thúc hợp lý."
+	case eventtypes.AdsContextReady:
+		out.StepTitle = "Sẵn sàng đánh giá gợi ý quảng cáo"
+		out.BusinessOneLine = "Ngữ cảnh đã đủ; hệ thống sẽ áp quy tắc để tạo gợi ý hoặc kết thúc nếu không cần hành động."
 		out.EntityBullets = append(out.EntityBullets, "Có thể không có gợi ý nếu chưa đạt điều kiện.")
-	case "order.inserted", "order.updated":
+	case eventtypes.OrderInserted, eventtypes.OrderUpdated:
 		out.StepTitle = "Thay đổi đơn hàng"
 		out.BusinessOneLine = "Đơn mới hoặc vừa sửa; có thể cập nhật cảnh báo và theo dõi rủi ro."
 		if orderID != "" {
 			out.EntityBullets = append(out.EntityBullets, "Đơn: "+orderID)
 		}
-	case "order.flags_emitted":
-		out.StepTitle = "Cờ trên đơn đã cập nhật"
-		out.BusinessOneLine = "Đã có cờ/cảnh báo trên đơn; có thể bước sau là đánh giá hoặc thông báo."
-		if orderID != "" {
-			out.EntityBullets = append(out.EntityBullets, "Đơn: "+orderID)
-		}
-	case "conversation.inserted", "conversation.updated", "message.inserted", "message.updated":
+	case eventtypes.ConversationInserted, eventtypes.ConversationUpdated, eventtypes.MessageInserted, eventtypes.MessageUpdated:
 		out.StepTitle = "Đồng bộ hội thoại / tin nhắn"
 		out.BusinessOneLine = "Tin nhắn hoặc hội thoại thay đổi; có thể gom nhóm trước khi phân tích."
 		if convID != "" {
@@ -74,43 +99,37 @@ func DomainNarrativeFromQueueEvent(evt *aidecisionmodels.DecisionEvent) DomainNa
 		if custID != "" {
 			out.EntityBullets = append(out.EntityBullets, "Khách: "+custID)
 		}
-	case "conversation.message_inserted", "message.batch_ready":
-		out.StepTitle = "Phân tích hội thoại"
-		out.BusinessOneLine = "Đang xử lý tin nhắn để phân tích nội dung."
+	case eventtypes.ConversationMessageInserted, eventtypes.MessageBatchReady:
+		out.StepTitle = "Xử lý tin nhắn cho phân tích"
+		out.BusinessOneLine = "Đang xử lý (hoặc gom lô) tin nhắn trước khi phân tích sâu."
 		if convID != "" {
 			out.EntityBullets = append(out.EntityBullets, "Hội thoại: "+convID)
 		}
-	case "cix_analysis_result.inserted", "cix_analysis_result.updated", "cix.analysis_completed":
-		out.StepTitle = "Kết quả phân tích hội thoại"
-		out.BusinessOneLine = "Đã có kết quả phân tích; có thể cập nhật hồ sơ và bước xử lý tiếp."
-		if convID != "" {
-			out.EntityBullets = append(out.EntityBullets, "Hội thoại: "+convID)
-		}
-	case "customer.context_ready":
+	case eventtypes.CustomerContextReady:
 		out.StepTitle = "Thông tin khách đã đủ"
 		out.BusinessOneLine = "Đủ thông tin khách để kết hợp với phân tích và quyết định."
 		if custID != "" {
 			out.EntityBullets = append(out.EntityBullets, "Khách: "+custID)
 		}
-	case "conversation.intelligence_requested":
-		out.StepTitle = "Tính lại tóm tắt hội thoại"
-		out.BusinessOneLine = "Yêu cầu tổng hợp/tính toán theo cấu hình."
-	case "executor.propose_requested", "ads.propose_requested":
+	case eventtypes.ExecutorProposeRequested, eventtypes.AdsProposeRequested:
 		out.StepTitle = "Tạo đề xuất chờ duyệt"
 		out.BusinessOneLine = "Đưa gợi ý vào bước duyệt hoặc thực hiện."
 		out.EntityBullets = append(out.EntityBullets, "Bước sau: duyệt / thực hiện trên hệ thống.")
-	case "pos_variation.updated", "pos_product.updated", "pos_customer.updated", "pos_shop.updated", "pos_warehouse.updated":
+	case eventtypes.PosVariationUpdated, eventtypes.PosProductUpdated, eventtypes.PosCustomerUpdated, eventtypes.PosShopUpdated, eventtypes.PosWarehouseUpdated:
 		out.StepTitle = "Đồng bộ POS / kho / sản phẩm"
 		out.BusinessOneLine = "Dữ liệu cửa hàng hoặc kho thay đổi; có thể cập nhật báo cáo liên quan."
-	case "meta_ad.updated", "meta_adset.updated", "meta_ad_insight.updated", "meta_ad_account.updated":
+	case eventtypes.MetaAdUpdated, eventtypes.MetaAdsetUpdated, eventtypes.MetaAdInsightUpdated, eventtypes.MetaAdAccountUpdated:
 		out.StepTitle = "Đồng bộ quảng cáo Meta (chi tiết)"
 		out.BusinessOneLine = "Cập nhật quảng cáo hoặc số liệu từ Meta cho báo cáo."
-	case "commerce.order_completed":
-		out.StepTitle = "Đơn hoàn thành"
-		out.BusinessOneLine = "Đơn đã hoàn thành; có thể kích hoạt báo cáo hoặc chăm sóc sau bán."
-	case "crm.intelligence.compute_requested":
-		out.StepTitle = "Cập nhật chỉ số khách (CRM)"
-		out.BusinessOneLine = "Tính lại hoặc cập nhật chỉ số gắn với khách hàng."
+	case eventtypes.CrmIntelligenceComputeRequested:
+		out.StepTitle = "Yêu cầu cập nhật chỉ số khách"
+		out.BusinessOneLine = "Đã xếp hàng tính lại chỉ số / intelligence gắn với khách hàng."
+	case eventtypes.CrmIntelligenceRecomputeRequested:
+		out.StepTitle = "Yêu cầu tính lại CRM intelligence"
+		out.BusinessOneLine = "Giống luồng ads.intelligence.recompute_requested: sau ingest (hoặc nguồn khác) vào queue AID; consumer debounce rồi xếp job domain."
+		if u := strFromPayload(p, "unifiedId", "unified_id"); u != "" {
+			out.EntityBullets = append(out.EntityBullets, "Khách (unified): "+u)
+		}
 	default:
 		if strings.HasPrefix(et, "meta_") {
 			out.StepTitle = "Đồng bộ Meta"
@@ -119,7 +138,7 @@ func DomainNarrativeFromQueueEvent(evt *aidecisionmodels.DecisionEvent) DomainNa
 			out.StepTitle = "Đồng bộ POS"
 			out.BusinessOneLine = "Cập nhật dữ liệu cửa hàng hoặc kho."
 		} else {
-			out.BusinessOneLine = "Xử lý theo loại việc đã cấu hình."
+			out.BusinessOneLine = "Xử lý theo loại sự kiện đã cấu hình trên hàng đợi."
 		}
 	}
 	if decisionCaseID != "" && !strings.Contains(strings.Join(out.EntityBullets, " "), decisionCaseID) {
@@ -134,7 +153,7 @@ func DomainNarrativeFromQueueEvent(evt *aidecisionmodels.DecisionEvent) DomainNa
 		if v, ok := srcMap[src]; ok {
 			srcLabel = v
 		}
-		out.EntityBullets = append(out.EntityBullets, "Nguồn phát: "+srcLabel)
+		out.EntityBullets = append(out.EntityBullets, "Nguồn sự kiện: "+srcLabel)
 	}
 	return out
 }

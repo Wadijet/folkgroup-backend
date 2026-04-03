@@ -3,12 +3,13 @@ package livecopy
 import (
 	"testing"
 
+	"meta_commerce/internal/api/aidecision/eventtypes"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 )
 
 func TestDomainNarrativeFromQueueEvent_MetaCampaign(t *testing.T) {
 	evt := &aidecisionmodels.DecisionEvent{
-		EventType:   "meta_campaign.updated",
+		EventType:   eventtypes.CampaignIntelRecomputed,
 		EventSource: "datachanged",
 		Payload: map[string]interface{}{
 			"campaignId": "c1",
@@ -26,7 +27,7 @@ func TestDomainNarrativeFromQueueEvent_MetaCampaign(t *testing.T) {
 func TestBuildQueueConsumerEvent_Done(t *testing.T) {
 	evt := &aidecisionmodels.DecisionEvent{
 		EventID:     "evt_x",
-		EventType:   "order.updated",
+		EventType:   eventtypes.OrderUpdated,
 		EventSource: "datachanged",
 	}
 	ev := BuildQueueConsumerEvent(evt, QueueMilestoneHandlerDone, nil, nil)

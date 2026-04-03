@@ -27,7 +27,7 @@ func SetDefaultResolver(r Resolver) {
 // EnrichIdentity4Layers bổ sung uid, sourceIds, links vào doc (map) trước khi InsertOne.
 // Chỉ gọi khi ShouldEnrich(collectionName) = true.
 // doc phải có _id (ObjectID). Nếu có ownerOrganizationId sẽ dùng để resolve links.
-// Nguyên tắc: đã có rồi thì bỏ qua — không ghi đè dữ liệu identity đã tồn tại.
+// Nguyên tắc (4 lớp id / data contract): phần nào đã có và hợp lệ thì giữ; chỉ bổ sung phần còn thiếu — không ghi đè uid/sourceIds/links đã đúng.
 func EnrichIdentity4Layers(ctx context.Context, collectionName string, doc map[string]interface{}, resolver Resolver) error {
 	cfg, ok := GetConfig(collectionName)
 	if !ok {
@@ -150,6 +150,99 @@ func EnrichIdentity4Layers(ctx context.Context, collectionName string, doc map[s
 		}
 	}
 	return nil
+}
+
+// NeedsIdentityBackfill trả true khi document thuộc collection có cấu hình enrich mà thiếu uid
+// hoặc thiếu sourceIds tương ứng trong khi payload vẫn có giá trị tại path đã cấu hình.
+func NeedsIdentityBackfill(collectionName string, doc map[string]interface{}) bool {
+	cfg, ok := GetConfig(collectionName)
+	if !ok {
+		return false
+	}
+	if strings.TrimSpace(toString(doc["uid"])) == "" {
+		return true
+	}
+	existingSids, _ := doc["sourceIds"].(map[string]interface{})
+	for _, sk := range cfg.SourceKeys {
+		hasSource := existingSids != nil && strings.TrimSpace(toString(existingSids[sk.Source])) != ""
+		if hasSource {
+			continue
+		}
+		if v := getMapValueByPath(doc, sk.Path); v != nil && strings.TrimSpace(toString(v)) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// ScrubEmptyIdentityFieldsFromSet xóa uid/sourceIds/links khỏi map $set khi payload rỗng,
+// để không ghi đè identity đã lưu và để upsert insert áp dụng $setOnInsert enrich (Mongo không dùng SetOnInsert cho field đã có trong $set).
+func ScrubEmptyIdentityFieldsFromSet(set map[string]interface{}) {
+	if set == nil {
+		return
+	}
+	if emptyIdentityUID(set["uid"]) {
+		delete(set, "uid")
+	}
+	if emptyIdentitySourceIds(set["sourceIds"]) {
+		delete(set, "sourceIds")
+	}
+	if emptyIdentityLinks(set["links"]) {
+		delete(set, "links")
+	}
+}
+
+func emptyIdentityUID(v interface{}) bool {
+	if v == nil {
+		return true
+	}
+	s, ok := v.(string)
+	if !ok {
+		return false
+	}
+	return strings.TrimSpace(s) == ""
+}
+
+func emptyIdentitySourceIds(v interface{}) bool {
+	if v == nil {
+		return true
+	}
+	switch m := v.(type) {
+	case map[string]interface{}:
+		if len(m) == 0 {
+			return true
+		}
+		for _, val := range m {
+			if strings.TrimSpace(toString(val)) != "" {
+				return false
+			}
+		}
+		return true
+	case map[string]string:
+		if len(m) == 0 {
+			return true
+		}
+		for _, val := range m {
+			if strings.TrimSpace(val) != "" {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func emptyIdentityLinks(v interface{}) bool {
+	if v == nil {
+		return true
+	}
+	switch m := v.(type) {
+	case map[string]interface{}:
+		return len(m) == 0
+	default:
+		return false
+	}
 }
 
 func toObjectID(v interface{}) (primitive.ObjectID, error) {

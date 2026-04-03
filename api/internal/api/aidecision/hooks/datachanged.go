@@ -6,6 +6,7 @@
 //
 // Payload queue tối giản: sourceCollection, normalizedRecordUid, dataChangeOperation — consumer hydrate từ Mongo.
 // event_type = <prefix>.inserted|.updated theo source_sync_registry.
+// Ghi queue thực tế qua ShouldEmitDatachangedToDecisionQueue (registry không xóa — chỉ lọc emit).
 package hooks
 
 import (
@@ -36,6 +37,9 @@ func RegisterAIDecisionOnDataChanged(decSvc *aidecisionsvc.AIDecisionService) {
 
 		prefix, ok := sourceSyncPrefixesMap()[e.CollectionName]
 		if !ok {
+			return
+		}
+		if !ShouldEmitDatachangedToDecisionQueue(e.CollectionName) {
 			return
 		}
 		emitUnifiedSourceDataChanged(ctx, decSvc, e, ownerOrgID, prefix)

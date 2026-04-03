@@ -1,6 +1,8 @@
 package models
 
 import (
+	"meta_commerce/internal/utility/identity"
+
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -8,10 +10,13 @@ import (
 type PcPosCustomer struct {
 	ID primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"` // ID của customer trong MongoDB
 
-	// ===== IDENTITY 4 LỚP =====
-	Uid            string           `json:"uid" bson:"uid" index:"single:1"`                      // cust_xxx — ID chuẩn hệ thống
-	SourceIds      map[string]string `json:"sourceIds,omitempty" bson:"sourceIds,omitempty"`       // pos → PosData.id
-	SourceIdsPos   string           `json:"-" bson:"sourceIds.pos,omitempty" index:"single:1,sparse"`
+	// ===== IDENTITY 4 LỚP (data contract §1.5) =====
+	// (1) _id (2) uid (3) sourceIds (4) links — bổ sung qua identity.EnrichIdentity4Layers + registry pc_pos_customers.
+	Uid            string            `json:"uid" bson:"uid" index:"single:1"`                // cust_xxx — canonical
+	SourceIds      map[string]string `json:"sourceIds,omitempty" bson:"sourceIds,omitempty"` // pos, pancake_customer, facebook, …
+	SourceIdsPos   string            `json:"-" bson:"sourceIds.pos,omitempty" index:"single:1,sparse"`
+	Links          map[string]identity.LinkItem `json:"links,omitempty" bson:"links,omitempty"` // shop → pshp_ (resolve/pending)
+	LinksShopUid   string                       `json:"-" bson:"links.shop.uid,omitempty" index:"single:1,sparse"`
 
 	// ===== IDENTIFIERS =====
 	CustomerId string `json:"customerId" bson:"customerId" index:"text,unique" extract:"PosData\\.id,converter=string"` // UUID string - POS Customer ID (extract từ PosData["id"])

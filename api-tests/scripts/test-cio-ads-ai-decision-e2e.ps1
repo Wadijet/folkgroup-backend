@@ -1,4 +1,4 @@
-# E2E: Bot/CIO -> DB (meta_campaigns) -> OnDataChanged -> meta_campaign.updated
+# E2E: Bot/CIO -> DB (meta_campaigns) -> OnDataChanged -> (legacy: meta_campaign.*; luồng chính: recompute -> campaign_intel_recomputed)
 #       -> AI Decision -> ads.context_requested -> (cung consumer AID) ads.context_ready
 #       -> (env) executor.propose_requested (domain=ads) -> AI Decision -> Propose -> Executor (pending)
 #       -> Learning: khi action dong (OnActionClosed) — khong tu dong trong script

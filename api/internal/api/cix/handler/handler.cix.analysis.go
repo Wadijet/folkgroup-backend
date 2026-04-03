@@ -61,7 +61,7 @@ func toResponseMap(r *cixdto.CixAnalysisResponse) fiber.Map {
 }
 
 // HandleAnalyzeSession POST /cix/analyze — Ghi cix.analysis_requested vào queue AI Decision (không gọi AnalyzeSession đồng bộ).
-// Kết quả: CixRequestWorker → cix_pending_analysis → CixAnalysisWorker; dùng GET /cix/analysis/:sessionUid để poll.
+// Kết quả: AI Decision consumer → cix_intel_compute → CixIntelComputeWorker; dùng GET /cix/analysis/:sessionUid để poll.
 func (h *CixAnalysisHandler) HandleAnalyzeSession(c fiber.Ctx) error {
 	ctx := c.Context()
 	orgID := getActiveOrganizationID(c)
@@ -84,7 +84,7 @@ func (h *CixAnalysisHandler) HandleAnalyzeSession(c fiber.Ctx) error {
 		})
 		return nil
 	}
-	eventID, err := aidecisionsvc.EmitCixAnalysisRequested(ctx, req.SessionUid, req.CustomerUid, req.Channel, *orgID, "", "", "")
+	eventID, err := aidecisionsvc.EmitCixAnalysisRequested(ctx, req.SessionUid, req.CustomerUid, req.Channel, *orgID, "", "", "", aidecisionsvc.EventSourceCixHTTP)
 	if err != nil {
 		errCode, msg, statusCode := common.GetErrorResponseInfo(err, "Không thể đưa yêu cầu phân tích vào queue AI Decision")
 		c.Status(statusCode).JSON(fiber.Map{"code": errCode, "message": msg, "status": "error"})
@@ -92,7 +92,7 @@ func (h *CixAnalysisHandler) HandleAnalyzeSession(c fiber.Ctx) error {
 	}
 	c.Status(common.StatusAccepted).JSON(fiber.Map{
 		"code":    common.StatusAccepted,
-		"message": "Đã đưa yêu cầu phân tích CIX vào queue AI Decision (CixRequestWorker → cix_pending_analysis)",
+		"message": "Đã đưa yêu cầu phân tích CIX vào queue AI Decision (consumer → cix_intel_compute)",
 		"data": fiber.Map{
 			"eventId":   eventID,
 			"sessionUid": req.SessionUid,

@@ -7,6 +7,7 @@ import (
 	"context"
 	"time"
 
+	"meta_commerce/internal/api/aidecision/eventtypes"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 	aidecisionsvc "meta_commerce/internal/api/aidecision/service"
 	crmmodels "meta_commerce/internal/api/crm/models"
@@ -83,7 +84,7 @@ func (w *CrmContextWorker) Start(ctx context.Context) {
 				}
 			}()
 
-			evt, err := decSvc.LeaseOneByEventType(ctx, "customer.context_requested", lane, workerID, leaseSec)
+			evt, err := decSvc.LeaseOneByEventType(ctx, eventtypes.CustomerContextRequested, lane, workerID, leaseSec)
 			if err != nil || evt == nil {
 				return
 			}
@@ -169,7 +170,7 @@ func buildCustomerContextPayload(c *crmmodels.CrmCustomer) map[string]interface{
 
 func emitCustomerContextReady(ctx context.Context, decSvc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent, convID, custID, channel string, ownerOrgID primitive.ObjectID, customerPayload map[string]interface{}) error {
 	_, err := decSvc.EmitEvent(ctx, &aidecisionsvc.EmitEventInput{
-		EventType:   "customer.context_ready",
+		EventType:   eventtypes.CustomerContextReady,
 		EventSource: "crm",
 		EntityType:  "customer",
 		EntityID:    custID,

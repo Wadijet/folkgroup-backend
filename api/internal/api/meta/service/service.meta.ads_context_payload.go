@@ -1,5 +1,5 @@
-// Package aidecisionsvc — Payload context Ads cho case / ads.context_ready (snapshot từ Intelligence đã persist).
-package aidecisionsvc
+// Package metasvc — Đọc snapshot Intelligence Ads từ meta_campaigns (chỉ worker domain ads / ads_intel_compute).
+package metasvc
 
 import (
 	"context"
@@ -24,8 +24,8 @@ func expandAdAccountIDForMetaCampaignFilter(adAccountID string) bson.M {
 	return bson.M{"$in": bson.A{adAccountID, "act_" + adAccountID}}
 }
 
-// BuildAdsIntelligenceContextPayloadFromDB đọc currentMetrics từ meta_campaigns (nguồn duy nhất sau rollup Intelligence).
-// Không stub — đồng bộ với alertFlags/layers trên DB. Dùng khi xử lý ads.context_requested trong consumer AID.
+// BuildAdsIntelligenceContextPayloadFromDB đọc currentMetrics từ meta_campaigns (nguồn sau rollup Intelligence).
+// Chỉ gọi từ worker domain (RunAdsIntelComputeJob khi jobKind=context_ready), không gọi từ consumer AI Decision.
 func BuildAdsIntelligenceContextPayloadFromDB(ctx context.Context, campaignID, adAccountID string, ownerOrgID primitive.ObjectID) map[string]interface{} {
 	nowMs := time.Now().UnixMilli()
 	out := map[string]interface{}{
@@ -75,7 +75,6 @@ func BuildAdsIntelligenceContextPayloadFromDB(ctx context.Context, campaignID, a
 	out["layer2"] = layer2
 	out["layer3"] = layer3
 	out["alertFlags"] = cm["alertFlags"]
-	// flags: biểu diễn từ alertFlags (string) cho UI / snapshot — không phải cờ stub.
 	out["flags"] = alertFlagsAsFlagMaps(cm["alertFlags"])
 	return out
 }

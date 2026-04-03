@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"meta_commerce/internal/api/aidecision/decisionlive"
+	"meta_commerce/internal/api/aidecision/eventtypes"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 	cixmodels "meta_commerce/internal/api/cix/models"
 )
@@ -12,12 +13,12 @@ import (
 // BuildCixIntegratedEvent — PhaseCixIntegrated sau ReceiveCixPayload.
 func BuildCixIntegratedEvent(traceID string, caseDoc *aidecisionmodels.DecisionCase, result *cixmodels.CixAnalysisResult) decisionlive.DecisionLiveEvent {
 	bullets := []string{
-		fmt.Sprintf("Đầu vào: %d gợi ý hành động từ CIX; phiên %s, khách %s.", len(result.ActionSuggestions), result.SessionUid, result.CustomerUid),
-		"Cơ chế: ghi contextPackets.cix vào decision_cases_runtime; TryExecuteIfReady khi đủ policy.",
-		"Kết quả mốc này: CIX đã tích hợp vào case — có thể dẫn tới execute_requested.",
+		fmt.Sprintf("CIX trả về %d gợi ý hành động; phiên phân tích %s, khách %s.", len(result.ActionSuggestions), result.SessionUid, result.CustomerUid),
+		"Hệ thống ghi kết quả phân tích vào hồ sơ xử lý (case); nếu đủ điều kiện theo quy tắc sẽ tự xếp hàng bước thực thi.",
+		"Mốc này: phân tích hội thoại đã gắn vào case — có thể tiếp tục tới bước ra quyết định / thực thi.",
 	}
 	if strings.TrimSpace(result.TraceID) != "" {
-		bullets = append(bullets, "Trace rule (CIX): "+strings.TrimSpace(result.TraceID))
+		bullets = append(bullets, "Mã truy vết pipeline rule (CIX): "+strings.TrimSpace(result.TraceID))
 	}
 	sections := []decisionlive.DecisionLiveDetailSection{
 		{Title: "Gợi ý hành động (CIX)", Items: append([]string{}, result.ActionSuggestions...)},
@@ -34,11 +35,11 @@ func BuildCixIntegratedEvent(traceID string, caseDoc *aidecisionmodels.DecisionC
 	ev := decisionlive.DecisionLiveEvent{
 		Phase:          decisionlive.PhaseCixIntegrated,
 		Severity:       decisionlive.SeverityInfo,
-		Summary:        "[Hoàn tất] Đã ghi nhận kết quả phân tích CIX vào decision case.",
+		Summary:        "[Hoàn tất] Đã ghi nhận kết quả phân tích hội thoại (CIX) vào hồ sơ xử lý.",
 		DetailBullets:  bullets,
 		DetailSections: sections,
 		Refs:           refs,
-		ReasoningSummary: "Tích hợp CIX: nguồn gợi ý cho engine; điều kiện execute phụ thuộc policy matrix.",
+		ReasoningSummary: "Kết quả CIX là đầu vào cho bước ra quyết định; có thực thi ngay hay không tùy bảng quy tắc ngữ cảnh.",
 		Step: &decisionlive.TraceStep{
 			Kind:  "cix",
 			Title: "Tích hợp CIX vào case",
@@ -54,9 +55,9 @@ func BuildCixIntegratedEvent(traceID string, caseDoc *aidecisionmodels.DecisionC
 // BuildExecuteReadyEvent — PhaseExecuteReady trước EmitExecuteRequested.
 func BuildExecuteReadyEvent(traceID, correlationID string, caseDoc *aidecisionmodels.DecisionCase) decisionlive.DecisionLiveEvent {
 	bullets := []string{
-		"Đầu vào: đủ requiredContexts; đã có contextPackets.cix.",
-		"Cơ chế: cập nhật status ready_for_decision → emit aidecision.execute_requested.",
-		"Kết quả mốc này: cổng an toàn trước khi engine chạy — tránh execute thiếu ngữ cảnh.",
+		"Đã đủ các ngữ cảnh bắt buộc trên case; đã có kết quả phân tích hội thoại (CIX).",
+		"Hệ thống đánh dấu case sẵn sàng và xếp hàng chạy engine ra quyết định (execute).",
+		"Mốc này: kiểm tra cuối trước khi chạy engine — tránh thực thi khi còn thiếu dữ liệu.",
 	}
 	bullets = append(bullets, "Case: "+caseDoc.DecisionCaseID)
 	var reqList []string
@@ -75,13 +76,13 @@ func BuildExecuteReadyEvent(traceID, correlationID string, caseDoc *aidecisionmo
 	return decisionlive.DecisionLiveEvent{
 		Phase:          decisionlive.PhaseExecuteReady,
 		Severity:       decisionlive.SeverityInfo,
-		Summary:        "[Sẵn sàng] Đủ điều kiện — chuẩn bị thực thi quyết định (execute_requested).",
+		Summary:        "[Sẵn sàng] Đủ điều kiện — sắp chạy engine ra quyết định (đã xếp hàng execute).",
 		CorrelationID:  correlationID,
 		DecisionCaseID: caseDoc.DecisionCaseID,
 		DetailBullets:  bullets,
 		DetailSections: sections,
 		Refs:           refs,
-		ReasoningSummary: "Policy matrix: mọi required context đã có trước khi xếp hàng execute.",
+		ReasoningSummary: "Theo quy tắc: mọi ngữ cảnh bắt buộc đã đủ trước khi xếp hàng bước execute.",
 		Step: &decisionlive.TraceStep{
 			Kind:  "gate",
 			Title: "Kiểm tra đủ ngữ cảnh trước khi execute",
@@ -98,25 +99,25 @@ func BuildOrchestrateConversationEvent(
 	emittedCustomer, emittedCix bool,
 ) decisionlive.DecisionLiveEvent {
 	bullets := []string{
-		"Đầu vào: sự kiện nguồn/datachanged hội thoại; ResolveOrCreate case conversation_response.",
-		"Cơ chế: có thể emit customer.context_requested và cix.analysis_requested.",
-		"Kết quả mốc này: case neo hoặc cập nhật; chuỗi tác vụ phụ tùy payload.",
+		"Có sự kiện đổi trên hội thoại / tin nhắn (thường từ đồng bộ hoặc sau khi dữ liệu nguồn cập nhật).",
+		"Hệ thống tìm hoặc tạo hồ sơ xử lý loại «trả lời hội thoại»; có thể xếp hàng lấy thêm ngữ cảnh khách hoặc phân tích CIX.",
+		"Mốc này: đã neo / cập nhật case; các bước tiếp theo tùy còn thiếu conversationId, customerId, v.v.",
 	}
-	bullets = append(bullets, "Loại case: conversation_response.")
+	bullets = append(bullets, "Loại hồ sơ: phản hồi hội thoại (conversation_response).")
 	if caseDoc != nil {
 		if createdNew {
-			bullets = append(bullets, "Đã tạo decision case mới.")
+			bullets = append(bullets, "Đã tạo hồ sơ xử lý mới.")
 		} else {
-			bullets = append(bullets, "Đã cập nhật case đang mở.")
+			bullets = append(bullets, "Đã cập nhật hồ sơ đang mở.")
 		}
-		bullets = append(bullets, "Case: "+caseDoc.DecisionCaseID)
+		bullets = append(bullets, "Mã hồ sơ: "+caseDoc.DecisionCaseID)
 	} else {
-		bullets = append(bullets, "Không có case sau ResolveOrCreate.")
+		bullets = append(bullets, "Không có hồ sơ sau bước neo case.")
 	}
 	if convID != "" {
 		bullets = append(bullets, "Hội thoại: "+convID)
 	} else {
-		bullets = append(bullets, "Chưa có conversationId — không gửi cix.analysis_requested.")
+		bullets = append(bullets, "Chưa có conversationId — không xếp hàng phân tích CIX.")
 	}
 	if custID != "" {
 		bullets = append(bullets, "Khách: "+custID)
@@ -129,14 +130,14 @@ func BuildOrchestrateConversationEvent(
 	}
 	var subItems []string
 	if emittedCustomer {
-		subItems = append(subItems, "Đã gửi customer.context_requested.")
+		subItems = append(subItems, fmt.Sprintf("Đã xếp hàng lấy thêm ngữ cảnh khách (%s).", eventtypes.CustomerContextRequested))
 	}
 	if emittedCix {
-		subItems = append(subItems, "Đã gửi cix.analysis_requested.")
+		subItems = append(subItems, fmt.Sprintf("Đã xếp hàng phân tích hội thoại (%s).", eventtypes.CixAnalysisRequested))
 	}
 	sections := []decisionlive.DecisionLiveDetailSection{}
 	if len(subItems) > 0 {
-		sections = append(sections, decisionlive.DecisionLiveDetailSection{Title: "Tác vụ đã xếp hàng", Items: subItems})
+		sections = append(sections, decisionlive.DecisionLiveDetailSection{Title: "Việc đã xếp hàng tiếp theo", Items: subItems})
 	}
 	refs := map[string]string{
 		"eventId":     evt.EventID,
@@ -149,14 +150,14 @@ func BuildOrchestrateConversationEvent(
 	ev := decisionlive.DecisionLiveEvent{
 		Phase:          decisionlive.PhaseOrchestrate,
 		Severity:       decisionlive.SeverityInfo,
-		Summary:        "[Hoàn tất] Điều phối case hội thoại và tác vụ chuẩn bị ngữ cảnh.",
+		Summary:        "[Hoàn tất] Đã điều phối hồ sơ hội thoại và các bước chuẩn bị ngữ cảnh.",
 		CorrelationID:  evt.CorrelationID,
 		DetailBullets:  bullets,
 		DetailSections: sections,
-		ReasoningSummary: "Orchestrate: neo case + phát event con theo thiếu/đủ conversationId và customerId.",
+		ReasoningSummary: "Neo case hội thoại và tùy dữ liệu có thể xếp hàng thêm ngữ cảnh khách hoặc phân tích CIX.",
 		Step: &decisionlive.TraceStep{
 			Kind:  "orchestrate",
-			Title: "Điều phối sau sự kiện nguồn",
+			Title: "Điều phối sau sự kiện hội thoại",
 		},
 		Refs: refs,
 	}
@@ -175,27 +176,27 @@ func BuildOrchestrateOrderEvent(
 	enqueuedOrderIntelOK bool,
 ) decisionlive.DecisionLiveEvent {
 	bullets := []string{
-		"Đầu vào: sự kiện nguồn/datachanged đơn; ResolveOrCreate case order_risk.",
-		"Cơ chế: EnqueueOrderIntelligenceFromParent (Order Intelligence domain).",
-		"Kết quả mốc này: case + hàng đợi phân tích đơn (nếu enqueue thành công).",
+		"Có sự kiện đơn hàng mới hoặc cập nhật (thường sau khi dữ liệu nguồn đổi).",
+		"Hệ thống tìm hoặc tạo hồ sơ loại «rủi ro đơn» và xếp hàng phân tích đơn (Order Intelligence) khi có thể.",
+		"Mốc này: case đã neo / cập nhật; phân tích đơn được xếp hàng nếu bước enqueue thành công.",
 	}
-	bullets = append(bullets, "Loại case: order_risk.")
+	bullets = append(bullets, "Loại hồ sơ: rủi ro đơn (order_risk).")
 	if caseDoc != nil {
 		if createdNew {
-			bullets = append(bullets, "Đã tạo case order_risk.")
+			bullets = append(bullets, "Đã tạo hồ sơ rủi ro đơn mới.")
 		} else {
-			bullets = append(bullets, "Đã cập nhật case order_risk đang mở.")
+			bullets = append(bullets, "Đã cập nhật hồ sơ rủi ro đơn đang mở.")
 		}
-		bullets = append(bullets, "Case: "+caseDoc.DecisionCaseID)
+		bullets = append(bullets, "Mã hồ sơ: "+caseDoc.DecisionCaseID)
 	} else if orderUid != "" {
-		bullets = append(bullets, "Không có case sau ResolveOrCreate.")
+		bullets = append(bullets, "Không có hồ sơ sau bước neo case.")
 	}
 	if orderUid != "" {
 		bullets = append(bullets, "Đơn (uid): "+orderUid)
 		if enqueuedOrderIntelOK {
-			bullets = append(bullets, "EnqueueOrderIntelligence: thành công.")
+			bullets = append(bullets, "Xếp hàng phân tích đơn: thành công.")
 		} else {
-			bullets = append(bullets, "EnqueueOrderIntelligence: lỗi — xem log.")
+			bullets = append(bullets, "Xếp hàng phân tích đơn: lỗi — xem log worker.")
 		}
 	}
 	if custID != "" {
@@ -215,13 +216,13 @@ func BuildOrchestrateOrderEvent(
 	ev := decisionlive.DecisionLiveEvent{
 		Phase:         decisionlive.PhaseOrchestrate,
 		Severity:      decisionlive.SeverityInfo,
-		Summary:       "[Hoàn tất] Điều phối case rủi ro đơn và hàng đợi phân tích đơn.",
+		Summary:       "[Hoàn tất] Đã điều phối hồ sơ rủi ro đơn và xếp hàng phân tích đơn.",
 		CorrelationID: evt.CorrelationID,
 		DetailBullets: bullets,
-		ReasoningSummary: "Orchestrate đơn: tách case order_risk và intelligence pipeline.",
+		ReasoningSummary: "Tách hồ sơ rủi ro đơn và kích hoạt chuỗi phân tích đơn khi có dữ liệu hợp lệ.",
 		Step: &decisionlive.TraceStep{
 			Kind:  "orchestrate",
-			Title: "Điều phối order_risk",
+			Title: "Điều phối rủi ro đơn hàng",
 		},
 		Refs: refs,
 	}

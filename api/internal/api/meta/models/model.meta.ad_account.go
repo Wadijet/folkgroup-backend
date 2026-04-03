@@ -2,6 +2,8 @@ package models
 
 import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
+
+	"meta_commerce/internal/utility/identity"
 )
 
 // MetaAdAccount lưu thông tin Ad Account từ Meta Marketing API (act_xxx).
@@ -9,6 +11,11 @@ import (
 // Các field AdAccountId, Name, AccountStatus, Currency có extract tag để lấy từ metaData khi đọc.
 type MetaAdAccount struct {
 	ID                   primitive.ObjectID     `json:"id,omitempty" bson:"_id,omitempty"`
+	// ===== IDENTITY 4 LỚP (enrich basesvc Upsert) =====
+	Uid           string                       `json:"uid" bson:"uid" index:"single:1"`
+	SourceIds     map[string]string            `json:"sourceIds,omitempty" bson:"sourceIds,omitempty"`
+	SourceIdsMeta string                       `json:"-" bson:"sourceIds.meta,omitempty" index:"single:1,sparse"`
+	Links         map[string]identity.LinkItem `json:"links,omitempty" bson:"links,omitempty"`
 	AdAccountId          string                 `json:"adAccountId" bson:"adAccountId" index:"unique;text;single:1,compound:meta_adaccount_lookup_unique" extract:"metaData\\.id,converter=string|metaData\\.adAccountId,converter=string"` // act_123456789 (extract từ metaData["id"] hoặc metaData["adAccountId"])
 	Name                 string                 `json:"name" bson:"name" index:"text" extract:"metaData\\.name,converter=string,optional"`                              // Tên ad account (extract từ metaData["name"])
 	AccountStatus        int64                  `json:"accountStatus" bson:"accountStatus" extract:"metaData\\.account_status,converter=int64,optional"`              // Trạng thái 1=active, 2=disabled (extract từ metaData["account_status"])

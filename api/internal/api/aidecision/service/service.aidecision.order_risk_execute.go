@@ -15,7 +15,7 @@ import (
 // Mặc định: giao human xem xét đơn có cờ.
 const envOrderRiskDefaultActions = "ORDER_RISK_DEFAULT_ACTIONS"
 
-// envOrderFlagsAllowDualExecute nếu "true": cùng order.flags_emitted vẫn gọi TryExecuteIfReady (conversation) sau order_risk.
+// envOrderFlagsAllowDualExecute nếu "true": cùng order_intel_recomputed vẫn gọi TryExecuteIfReady (conversation) sau order_risk.
 const envOrderFlagsAllowDualExecute = "ORDER_FLAGS_ALLOW_DUAL_EXECUTE"
 
 // OrderFlagsAllowDualExecute đọc env — mặc định false (tránh hai execute_requested trùng nghiệp vụ).

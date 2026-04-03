@@ -1,4 +1,6 @@
-// publish_queue_live — DecisionLiveEvent cho mọi job decision_events_queue (ngoài pipeline execute_requested).
+// publish_queue_live — Đẩy từng mốc xử lý job trên decision_events_queue lên timeline AI Decision Live
+// (WebSocket / GET replay): bắt đầu xử lý, xong bước chuẩn bị sau datachanged, xong handler, lỗi, v.v.
+// Job loại execute_requested không dùng chuỗi mốc này — timeline execute do engine publish riêng.
 package worker
 
 import (
@@ -12,7 +14,8 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// traceIDForQueueLive: ưu tiên envelope TraceID, sau đó payload traceId/trace_id, cuối cùng synthetic queue_evt_<eventId>.
+// traceIDForQueueLive — Chọn trace để gom mốc trên timeline: ưu tiên TraceID trên envelope,
+// rồi traceId/trace_id trong payload, cuối cùng mã giả queue_evt_<eventId> nếu thiếu.
 func traceIDForQueueLive(evt *aidecisionmodels.DecisionEvent) string {
 	if evt == nil {
 		return ""
@@ -36,7 +39,7 @@ func traceIDForQueueLive(evt *aidecisionmodels.DecisionEvent) string {
 	return ""
 }
 
-// shouldSkipConsumerLiveSpan: execute_requested đã Publish đầy đủ trong ProcessExecuteRequested / engine — tránh trùng timeline.
+// shouldSkipConsumerLiveSpan — true với execute_requested vì timeline đã được engine ghi đủ — tránh trùng mốc queue.
 func shouldSkipConsumerLiveSpan(evt *aidecisionmodels.DecisionEvent) bool {
 	if evt == nil {
 		return true
@@ -56,7 +59,7 @@ func publishQueueLivePhase(ownerOrgID primitive.ObjectID, evt *aidecisionmodels.
 	decisionlive.Publish(ownerOrgID, tid, ev)
 }
 
-// publishQueueConsumerLifecycleStart — sau RecordConsumerWorkBegin, trước processEvent.
+// publishQueueConsumerLifecycleStart — Mốc «bắt đầu xử lý job» (sau khi worker đã lease, trước processEvent).
 func publishQueueConsumerLifecycleStart(ownerOrgID primitive.ObjectID, evt *aidecisionmodels.DecisionEvent) {
 	if shouldSkipConsumerLiveSpan(evt) {
 		return
@@ -64,8 +67,8 @@ func publishQueueConsumerLifecycleStart(ownerOrgID primitive.ObjectID, evt *aide
 	publishQueueLivePhase(ownerOrgID, evt, livecopy.QueueMilestoneProcessingStart, nil, nil)
 }
 
-// publishQueueConsumerLifecycleEnd — sau processEvent (thành công / lỗi).
-// kind: khi thành công — routing_skipped / no_handler đã publish milestone riêng, không gửi thêm HandlerDone (tránh lẫn với đã chạy handler).
+// publishQueueConsumerLifecycleEnd — Mốc «kết thúc xử lý» sau processEvent (thành công hoặc lỗi).
+// Nếu kind là routing_skipped hoặc no_handler thì không gửi HandlerDone — các trường hợp đó đã có mốc riêng, tránh hiểu nhầm là đã chạy handler đầy đủ.
 func publishQueueConsumerLifecycleEnd(ownerOrgID primitive.ObjectID, evt *aidecisionmodels.DecisionEvent, processErr error, kind aidecisionmodels.ConsumerCompletionKind) {
 	if shouldSkipConsumerLiveSpan(evt) {
 		return
@@ -82,7 +85,7 @@ func publishQueueConsumerLifecycleEnd(ownerOrgID primitive.ObjectID, evt *aideci
 	}
 }
 
-// publishQueueDatachangedEffectsDone — sau applyDatachangedSideEffects (chỉ eventSource datachanged).
+// publishQueueDatachangedEffectsDone — Mốc «đã xong bước chuẩn bị sau khi dữ liệu đổi» (chỉ EventSource = datachanged).
 func publishQueueDatachangedEffectsDone(ownerOrgID primitive.ObjectID, evt *aidecisionmodels.DecisionEvent) {
 	if evt == nil || ownerOrgID.IsZero() || evt.EventSource != "datachanged" {
 		return
@@ -93,7 +96,7 @@ func publishQueueDatachangedEffectsDone(ownerOrgID primitive.ObjectID, evt *aide
 	publishQueueLivePhase(ownerOrgID, evt, livecopy.QueueMilestoneDatachangedDone, nil, nil)
 }
 
-// publishQueueRoutingSkipped — rule routing noop dispatch.
+// publishQueueRoutingSkipped — Mốc «bỏ qua theo quy tắc routing» (noop — không gọi handler nghiệp vụ).
 func publishQueueRoutingSkipped(ownerOrgID primitive.ObjectID, evt *aidecisionmodels.DecisionEvent) {
 	if shouldSkipConsumerLiveSpan(evt) {
 		return
@@ -101,7 +104,7 @@ func publishQueueRoutingSkipped(ownerOrgID primitive.ObjectID, evt *aidecisionmo
 	publishQueueLivePhase(ownerOrgID, evt, livecopy.QueueMilestoneRoutingSkipped, nil, nil)
 }
 
-// publishQueueNoRegisteredHandler — eventType chưa đăng ký consumer handler.
+// publishQueueNoRegisteredHandler — Mốc «chưa có handler» — eventType chưa được đăng ký trong consumer.
 func publishQueueNoRegisteredHandler(ownerOrgID primitive.ObjectID, evt *aidecisionmodels.DecisionEvent) {
 	if shouldSkipConsumerLiveSpan(evt) {
 		return

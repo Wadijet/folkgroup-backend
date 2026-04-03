@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	// StreamAIDecision tên luồng cố định cho client.
+	// StreamAIDecision — Tên kênh WebSocket / schema cho luồng live AI Decision (client đăng ký theo trace hoặc theo org).
 	StreamAIDecision = "aidecision.live"
-	// MaxEventsPerTrace giới hạn ring replay trên bộ nhớ (mỗi org+trace).
+	// MaxEventsPerTrace — Số sự kiện tối đa lưu trong bộ nhớ cho mỗi cặp (org, trace) khi replay timeline.
 	MaxEventsPerTrace = 256
 )
 
@@ -27,12 +27,12 @@ func channelKey(ownerOrgID primitive.ObjectID, traceID string) string {
 	return ownerOrgID.Hex() + ":" + traceID
 }
 
-// orgChannelKey khóa fan-out cho toàn bộ trace trong một tổ chức (màn hình live stream).
+// orgChannelKey — Khóa broadcast: mọi trace của một tổ chức (màn hình «live toàn org»).
 func orgChannelKey(ownerOrgID primitive.ObjectID) string {
 	return ownerOrgID.Hex() + ":__org_feed__"
 }
 
-// liveEnabled mặc định bật; AI_DECISION_LIVE_ENABLED=0 tắt ring/WS (metrics trung tâm chỉ huy vẫn chạy).
+// liveEnabled — Mặc định bật. AI_DECISION_LIVE_ENABLED=0: không ghi ring / không đẩy WebSocket; vẫn cộng metrics trung tâm chỉ huy.
 func liveEnabled() bool {
 	v := strings.TrimSpace(os.Getenv("AI_DECISION_LIVE_ENABLED"))
 	return v == "" || v == "1"
@@ -40,14 +40,16 @@ func liveEnabled() bool {
 
 var livePublishDisabledLogged sync.Once
 
-// Publish: live bật — ring + WebSocket + persist; live tắt — chỉ cập nhật metrics (byPhase, bySourceKind, gauge).
+// Publish — Đưa một DecisionLiveEvent vào hệ thống live:
+// bật live → lưu ring replay, fan-out WebSocket (theo trace và theo org), ghi persist bất đồng bộ;
+// tắt live → chỉ cập nhật bộ đếm / gauge trung tâm chỉ huy (không làm đầy ring).
 func Publish(ownerOrgID primitive.ObjectID, traceID string, ev DecisionLiveEvent) {
 	if traceID == "" || ownerOrgID.IsZero() {
 		if metricsChangeLogEnabled() {
 			logrus.WithFields(logrus.Fields{
 				"orgHex":  ownerOrgID.Hex(),
 				"traceId": traceID,
-			}).Warn("AI Decision live: bỏ qua Publish — trace/org rỗng; không tăng metrics phễu")
+			}).Warn("AI Decision live: bỏ qua Publish — thiếu trace hoặc org; không cộng bộ đếm phễu")
 		}
 		return
 	}
@@ -72,8 +74,8 @@ func Publish(ownerOrgID primitive.ObjectID, traceID string, ev DecisionLiveEvent
 	if !liveEnabled() {
 		livePublishDisabledLogged.Do(func() {
 			logrus.Warn(
-				"AI Decision live: AI_DECISION_LIVE_ENABLED=0 — WS/ring tắt; " +
-					"trung tâm chỉ huy vẫn nhận phase/gauge. Đặt =1 nếu cần timeline/WS.",
+				"AI Decision live: AI_DECISION_LIVE_ENABLED=0 — WebSocket và vòng replay tắt; " +
+					"trung tâm chỉ huy vẫn nhận phase và gauge. Đặt =1 nếu cần timeline và WS.",
 			)
 		})
 		if metricsChangeLogEnabled() {
@@ -81,7 +83,7 @@ func Publish(ownerOrgID primitive.ObjectID, traceID string, ev DecisionLiveEvent
 				"orgHex":  ownerOrgID.Hex(),
 				"traceId": traceID,
 				"phase":   ev.Phase,
-			}).Info("AI Decision live: chỉ cập nhật metrics (live tắt)")
+			}).Info("AI Decision live: chỉ cập nhật bộ đếm / gauge (chế độ live tắt)")
 		}
 		recordCommandCenterPublish(ownerOrgID, ev, "publish_chi_metrics")
 		return
@@ -92,7 +94,7 @@ func Publish(ownerOrgID primitive.ObjectID, traceID string, ev DecisionLiveEvent
 			"orgHex":  ownerOrgID.Hex(),
 			"traceId": traceID,
 			"phase":   ev.Phase,
-		}).Info("AI Decision live: Publish — cộng metrics phễu + fan-out WS")
+		}).Info("AI Decision live: Publish — cộng bộ đếm phễu và đẩy WebSocket")
 	}
 	final := globalStore.append(ownerOrgID, traceID, ev)
 	RecordCommandCenterPublish(ownerOrgID, final)
@@ -102,7 +104,7 @@ func Publish(ownerOrgID primitive.ObjectID, traceID string, ev DecisionLiveEvent
 	persistOrgLiveEventAsync(ownerOrgID, orgEv)
 }
 
-// Timeline trả snapshot replay (GET hoặc gửi ngay sau khi mở WS).
+// Timeline — Trả về bản sao các sự kiện đã publish cho một trace (GET replay hoặc nối sau khi mở WS).
 func Timeline(ownerOrgID primitive.ObjectID, traceID string) []DecisionLiveEvent {
 	if traceID == "" || ownerOrgID.IsZero() {
 		return nil
@@ -112,7 +114,7 @@ func Timeline(ownerOrgID primitive.ObjectID, traceID string) []DecisionLiveEvent
 	return out
 }
 
-// Subscribe đăng ký nhận event sau thời điểm hiện tại (replay dùng Timeline trước).
+// Subscribe — Đăng ký kênh nhận sự kiện realtime cho một trace (client nên gọi Timeline trước để không lỡ mốc cũ).
 func Subscribe(ownerOrgID primitive.ObjectID, traceID string) (<-chan DecisionLiveEvent, func()) {
 	if traceID == "" || ownerOrgID.IsZero() {
 		ch := make(chan DecisionLiveEvent)
@@ -122,14 +124,14 @@ func Subscribe(ownerOrgID primitive.ObjectID, traceID string) (<-chan DecisionLi
 	return globalHub.subscribe(channelKey(ownerOrgID, traceID))
 }
 
-// OrgTimeline replay buffer live theo tổ chức (GET hoặc mở WS org-live).
+// OrgTimeline — Buffer replay gộp mọi trace trong một tổ chức (GET hoặc WS org-live).
 func OrgTimeline(ownerOrgID primitive.ObjectID) []DecisionLiveEvent {
 	out := globalOrgFeed.snapshotOrg(ownerOrgID)
 	backfillLiveEventsDerivedFields(out)
 	return out
 }
 
-// SubscribeOrg đăng ký mọi sự kiện AI Decision của org (mọi trace).
+// SubscribeOrg — Đăng ký nhận mọi sự kiện live của org (không lọc theo trace).
 func SubscribeOrg(ownerOrgID primitive.ObjectID) (<-chan DecisionLiveEvent, func()) {
 	if ownerOrgID.IsZero() {
 		ch := make(chan DecisionLiveEvent)

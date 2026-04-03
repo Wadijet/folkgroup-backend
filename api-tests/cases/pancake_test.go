@@ -35,39 +35,37 @@ func TestPancakeAPIs(t *testing.T) {
 	client := utils.NewHTTPClient(baseURL, 10)
 	client.SetToken(token)
 
-	// Test Pancake Order APIs
-	t.Run("🥞 Pancake Order APIs", func(t *testing.T) {
-		// Test 1: Lấy danh sách orders
-		t.Run("Lấy danh sách orders", func(t *testing.T) {
-			resp, body, err := client.GET("/pancake/order/find")
+	// Test Pancake POS Order APIs (đơn POS; legacy pc_orders đã bỏ)
+	t.Run("🥞 Pancake POS Order APIs", func(t *testing.T) {
+		t.Run("Lấy danh sách đơn POS", func(t *testing.T) {
+			resp, body, err := client.GET("/pancake-pos/order/find")
 			if err != nil {
-				t.Fatalf("❌ Lỗi khi lấy danh sách orders: %v", err)
+				t.Fatalf("❌ Lỗi khi lấy danh sách đơn POS: %v", err)
 			}
 
 			if resp.StatusCode == http.StatusOK {
 				var result map[string]interface{}
 				err = json.Unmarshal(body, &result)
 				assert.NoError(t, err, "Phải parse được JSON response")
-				fmt.Printf("✅ Lấy danh sách orders thành công\n")
+				fmt.Printf("✅ Lấy danh sách đơn POS thành công\n")
 			} else {
-				fmt.Printf("⚠️ Lấy danh sách orders yêu cầu quyền (status: %d)\n", resp.StatusCode)
+				fmt.Printf("⚠️ Lấy danh sách đơn POS yêu cầu quyền (status: %d)\n", resp.StatusCode)
 			}
 		})
 
-		// Test 2: Count orders
-		t.Run("Đếm số lượng orders", func(t *testing.T) {
-			resp, body, err := client.GET("/pancake/order/count")
+		t.Run("Đếm đơn POS", func(t *testing.T) {
+			resp, body, err := client.GET("/pancake-pos/order/count")
 			if err != nil {
-				t.Fatalf("❌ Lỗi khi đếm orders: %v", err)
+				t.Fatalf("❌ Lỗi khi đếm đơn POS: %v", err)
 			}
 
 			if resp.StatusCode == http.StatusOK {
 				var result map[string]interface{}
 				err = json.Unmarshal(body, &result)
 				assert.NoError(t, err, "Phải parse được JSON response")
-				fmt.Printf("✅ Đếm orders thành công\n")
+				fmt.Printf("✅ Đếm đơn POS thành công\n")
 			} else {
-				fmt.Printf("⚠️ Đếm orders yêu cầu quyền (status: %d)\n", resp.StatusCode)
+				fmt.Printf("⚠️ Đếm đơn POS yêu cầu quyền (status: %d)\n", resp.StatusCode)
 			}
 		})
 	})

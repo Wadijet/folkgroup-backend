@@ -42,7 +42,7 @@ func (s *AIDecisionService) ReceiveCixPayload(ctx context.Context, result *cixmo
 	return s.TryExecuteIfReady(ctx, result.SessionUid, result.CustomerUid, ownerOrgID.Hex(), ownerOrgID)
 }
 
-// publishCixIntegratedStep timeline/audit: đã ghi CIX vào case (gạch đầu dòng + section chi tiết).
+// publishCixIntegratedStep — Ghi mốc timeline: kết quả phân tích CIX đã được gắn vào hồ sơ (tóm tắt + chi tiết).
 func publishCixIntegratedStep(ownerOrgID primitive.ObjectID, traceID string, caseDoc *aidecisionmodels.DecisionCase, result *cixmodels.CixAnalysisResult) {
 	if ownerOrgID.IsZero() || traceID == "" || result == nil {
 		return
@@ -52,7 +52,7 @@ func publishCixIntegratedStep(ownerOrgID primitive.ObjectID, traceID string, cas
 }
 
 // TryExecuteIfReady kiểm tra case đủ context → cập nhật status → Execute.
-// Gọi từ processCixAnalysisCompleted và processCustomerContextReady.
+// Gọi từ processCixIntelRecomputed (sau ReceiveCixPayload), processCustomerContextReady, processOrderIntelRecomputed.
 func (s *AIDecisionService) TryExecuteIfReady(ctx context.Context, conversationID, customerID, orgID string, ownerOrgID primitive.ObjectID) error {
 	caseDoc, err := s.FindCaseByConversation(ctx, conversationID, customerID, orgID, ownerOrgID)
 	if err != nil || caseDoc == nil {
@@ -123,7 +123,7 @@ func (s *AIDecisionService) UpdateCaseStatus(ctx context.Context, decisionCaseID
 	return nil
 }
 
-// publishExecuteReadyStep audit/UI: đủ điều kiện — sắp gửi execute_requested.
+// publishExecuteReadyStep — Ghi mốc timeline: đủ ngữ cảnh — sắp xếp hàng chạy engine (execute_requested).
 func publishExecuteReadyStep(ownerOrgID primitive.ObjectID, traceID, correlationID string, caseDoc *aidecisionmodels.DecisionCase) {
 	if ownerOrgID.IsZero() || traceID == "" || caseDoc == nil {
 		return

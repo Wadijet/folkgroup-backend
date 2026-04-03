@@ -26,14 +26,14 @@ type MongoDB_Auth_CollectionName struct {
 	FbMessageItems          string // Tên collection cho từng message riêng lẻ trên Facebook
 	FbPosts                 string // Tên collection cho bài viết trên Facebook
 	FbCustomers             string // Tên collection cho khách hàng từ Facebook (Pancake)
-	PcOrders                string // Tên collection cho đơn hàng trên PanCake
 	PcPosCustomers          string // Tên collection cho khách hàng từ Pancake POS
 	PcPosShops              string // Tên collection cho cửa hàng từ Pancake POS API
 	PcPosWarehouses         string // Tên collection cho kho hàng từ Pancake POS API
 	PcPosProducts           string // Tên collection cho sản phẩm từ Pancake POS API
 	PcPosVariations         string // Tên collection cho biến thể sản phẩm từ Pancake POS API
 	PcPosCategories         string // Tên collection cho danh mục sản phẩm từ Pancake POS API
-	PcPosOrders             string // Tên collection cho đơn hàng từ Pancake POS API
+	PcPosOrders             string // Tên collection cho đơn hàng từ Pancake POS API (mirror Pancake)
+	CommerceOrders          string // commerce_orders: đơn canonical đa nguồn (Order Intel đọc từ đây)
 
 	// Notification System Collections (Hệ thống 2 - Routing/Template)
 	NotificationSenders      string // Tên collection cho notification senders
@@ -88,7 +88,9 @@ type MongoDB_Auth_CollectionName struct {
 	CrmActivityHistory  string // crm_activity_history: lịch sử hoạt động
 	CrmNotes            string // crm_notes: ghi chú khách
 	CrmPendingIngest    string // crm_pending_ingest: queue cho worker xử lý Merge/Ingest
-	CrmBulkJobs         string // crm_bulk_jobs: queue cho worker xử lý sync, backfill, recalculate
+	CrmBulkJobs string // crm_bulk_jobs: queue cho worker xử lý sync, backfill, recalculate
+	// CrmIntelCompute — quy ước chung với Ads/Order: collection MongoDB `{domain}_intel_compute` = chuỗi đăng ký worker Worker{Domain}IntelCompute.
+	CrmIntelCompute string // crm_intel_compute
 
 	// Module Meta Ads (tiền tố meta_)
 	MetaAdAccounts  string // meta_ad_accounts: ad accounts (act_xxx)
@@ -127,6 +129,9 @@ type MongoDB_Auth_CollectionName struct {
 
 	// Module Ads — Rule 13 Throttle Gỡ cap (FolkForm v4.1)
 	AdsThrottleState string // ads_throttle_state: ad set đang bị cap, dùng cho logic remove
+	// Module Recompute Debounce Queue — theo dõi giảm chấn tính lại theo entity (dùng chung multi-domain)
+	RecomputeDebounceQueue string // decision_recompute_debounce_queue: hàng đợi giảm chấn trước queue domain
+	AdsIntelCompute string // ads_intel_compute — job ApplyAdsIntelligenceRecompute / RecalculateAll
 
 	// Module Decision Brain — Learning memory cho AI Commerce
 	LearningCases   string // learning_cases: ký ức học tập — 1 case per action, sau outcome (PLATFORM_L1)
@@ -140,12 +145,12 @@ type MongoDB_Auth_CollectionName struct {
 	RuleExecutionLogs    string // rule_execution_logs: Execution Trace
 
 	// Module CIX — Contextual Conversation Intelligence
-	CixAnalysisResults  string // cix_analysis_results: kết quả phân tích hội thoại Raw→L1→L2→L3→Flag→Action
-	CixPendingAnalysis string // cix_pending_analysis: hàng đợi phân tích — CIO event → enqueue → worker
+	CixAnalysisResults string // cix_analysis_results: kết quả phân tích hội thoại Raw→L1→L2→L3→Flag→Action
+	CixIntelCompute    string // cix_intel_compute: job phân tích (CIO → enqueue; WorkerCixIntelCompute), cùng quy ước *_intel_compute
 
 	// Module Order Intelligence — Vision 07 (Raw→L1→L2→L3→Flags per order)
 	OrderIntelligenceSnapshots string // order_intelligence_snapshots: snapshot theo đơn (upsert theo orderUid + org)
-	OrderIntelligencePending   string // order_intelligence_pending: hàng đợi domain — worker tính Raw→L3→Flags, không tính trong consumer AI Decision
+	OrderIntelCompute string // order_intel_compute — worker tính Raw→L3→Flags, không tính trong consumer AI Decision
 
 	// Module AI Decision — Event & Decision Case (PLATFORM_L1_EVENT_DECISION_SUPPLEMENT)
 	DecisionEventsQueue   string // decision_events_queue: hàng đợi event chờ AI Decision xử lý

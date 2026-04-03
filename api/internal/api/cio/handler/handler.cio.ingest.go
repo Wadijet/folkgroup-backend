@@ -20,6 +20,9 @@ import (
 //	filter: tùy chọn — cùng ý nghĩa với query ?filter={} (JSON). Body filter được merge đè lên query.
 //	data: payload giống hệt body từng domain (order, pos_*, interaction_*, fb_customer, meta_*, …).
 //
+// Domain "order" (pc_pos_orders): filter cần orderId (và shopId nếu cần); ownerOrganizationId lấy từ JWT khi không gửi.
+// data tối thiểu: { "posData": <order từ Pancake POS> } — backend extract flatten + uid/sourceIds/links (4 lớp).
+//
 // Luồng: merge filter (?filter= + body.filter) → ProcessMergedFilter trên handler domain → SyncUpsertOneFromParts / UpsertMessagesFromParts
 // (handler gọi *Service.RunSyncUpsertOneFromJSON / RunUpsertMessagesFromJSON — logic nghiệp vụ nằm ở service).
 type CioIngestRequest struct {

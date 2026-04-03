@@ -16,6 +16,7 @@ import (
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/utility"
+	"meta_commerce/internal/utility/identity"
 )
 
 // PcPosOrderService là cấu trúc chứa các phương thức liên quan đến Pancake POS Order.
@@ -56,6 +57,11 @@ func (s *PcPosOrderService) SyncFlattenedFromPosData(ctx context.Context, id pri
 	if err != nil {
 		return zero, fmt.Errorf("ToMap thất bại: %w", err)
 	}
+	if identity.ShouldEnrich(global.MongoDB_ColNames.PcPosOrders) {
+		if err := identity.EnrichIdentity4Layers(ctx, global.MongoDB_ColNames.PcPosOrders, dataMap, nil); err != nil {
+			return zero, fmt.Errorf("enrich identity 4 lớp trước ReplaceOne thất bại: %w", err)
+		}
+	}
 	_, err = s.Collection().ReplaceOne(ctx, bson.M{"_id": id}, dataMap)
 	if err != nil {
 		return zero, common.ConvertMongoError(err)
@@ -75,7 +81,11 @@ func (s *PcPosOrderService) SyncUpsertOne(ctx context.Context, filter interface{
 	return basesvc.DoSyncUpsert(ctx, s.BaseServiceMongoImpl, filter, data, "posData", "posUpdatedAt")
 }
 
-// RunSyncUpsertOneFromJSON gom logic sync-upsert từ JSON body + filter (CIO ingest domain order).
+// RunSyncUpsertOneFromJSON gom logic sync-upsert từ JSON body + filter.
+//
+// CIO POST /v1/cio/ingest — domain "order": filter khuyến nghị { "orderId", "shopId"? };
+// ownerOrganizationId lấy từ JWT (active org) nếu body/filter chưa có. Body tối thiểu { "posData": <object POS> };
+// extract flatten + identity 4 lớp chạy trong DoSyncUpsert.
 func (s *PcPosOrderService) RunSyncUpsertOneFromJSON(ctx context.Context, filter map[string]interface{}, body []byte, activeOrgID *primitive.ObjectID) (pcmodels.PcPosOrder, bool, error) {
 	var zero pcmodels.PcPosOrder
 	var order pcmodels.PcPosOrder

@@ -58,7 +58,7 @@ type ExecuteResponse struct {
 	Confidence       float64                          `json:"confidence,omitempty"`
 }
 
-// publishDecisionLive gắn nhãn nguồn + neo case (audit) trước khi đẩy lên timeline live.
+// publishDecisionLive — Bổ sung nhãn nguồn, neo hồ sơ (case) rồi gọi decisionlive.Publish (timeline + WS).
 func publishDecisionLive(ownerOrgID primitive.ObjectID, traceID string, srcKind, srcTitle string, caseDoc *aidecisionmodels.DecisionCase, ev decisionlive.DecisionLiveEvent) {
 	cid, ctid := "", ""
 	if caseDoc != nil {

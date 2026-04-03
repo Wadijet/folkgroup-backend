@@ -51,9 +51,6 @@ func ClassifyDatachangedBusinessUrgency(evt *aidecisionmodels.DecisionEvent, sou
 		c.PcPosProducts, c.PcPosVariations, c.PcPosCategories, c.PcPosShops, c.PcPosWarehouses,
 		c.FbPages, c.FbPosts, c.WebhookLogs:
 		return UrgencyBackground
-	case c.PcOrders:
-		// Đơn legacy Pancake (không phải POS API) — ưu tiên thấp hơn luồng đơn POS chính.
-		return UrgencyBackground
 	}
 
 	// --- Realtime: chạm trực tiếp khách, tiền, hoặc thao tác nhân viên trên hồ sơ ---

@@ -401,12 +401,6 @@ var InitialPermissions = []authmodels.Permission{
 	{Name: "FbPost.Update", Describe: "Quyền cập nhật bài viết", Group: "Pancake", Category: "FbPost"},
 	{Name: "FbPost.Delete", Describe: "Quyền xóa bài viết", Group: "Pancake", Category: "FbPost"},
 
-	// Quản lý đơn hàng Pancake: Thêm, xem, sửa, xóa
-	{Name: "PcOrder.Insert", Describe: "Quyền tạo đơn hàng", Group: "Pancake", Category: "PcOrder"},
-	{Name: "PcOrder.Read", Describe: "Quyền xem danh sách đơn hàng", Group: "Pancake", Category: "PcOrder"},
-	{Name: "PcOrder.Update", Describe: "Quyền cập nhật đơn hàng", Group: "Pancake", Category: "PcOrder"},
-	{Name: "PcOrder.Delete", Describe: "Quyền xóa đơn hàng", Group: "Pancake", Category: "PcOrder"},
-
 	// Quản lý tin nhắn Facebook Item: Thêm, xem, sửa, xóa
 	{Name: "FbMessageItem.Insert", Describe: "Quyền tạo tin nhắn item", Group: "Pancake", Category: "FbMessageItem"},
 	{Name: "FbMessageItem.Read", Describe: "Quyền xem danh sách tin nhắn item", Group: "Pancake", Category: "FbMessageItem"},

@@ -25,7 +25,6 @@ import (
 const (
 	colFbConversations = "fb_conversations"
 	colFbMessageItems  = "fb_message_items"
-	colPcOrders        = "pc_orders"
 	colPcPosOrders     = "pc_pos_orders"
 
 	// Timezone cho phân tích — giống report engine (Asia/Ho_Chi_Minh)
@@ -71,7 +70,7 @@ func main() {
 	analyzeConversationsByDayAndHour(ctx, db)
 	// 2. Phân tích fb_message_items (số tin nhắn) theo ngày và giờ
 	analyzeMessagesByDayAndHour(ctx, db)
-	// 3. Phân tích đơn hàng (pc_orders + pc_pos_orders) theo ngày và giờ
+	// 3. Phân tích đơn hàng (pc_pos_orders) theo ngày và giờ
 	analyzeOrdersByDayAndHour(ctx, db)
 	// 4. Phân tích theo tháng trong năm (xu hướng theo mùa)
 	analyzeByMonth(ctx, db)
@@ -310,24 +309,18 @@ func analyzeMessagesByDayAndHour(ctx context.Context, db *mongo.Database) {
 }
 
 func analyzeOrdersByDayAndHour(ctx context.Context, db *mongo.Database) {
-	// pc_orders
-	pcColl := db.Collection(colPcOrders)
-	pcCount, _ := pcColl.CountDocuments(ctx, bson.M{})
-
-	// pc_pos_orders
 	posColl := db.Collection(colPcPosOrders)
 	posCount, _ := posColl.CountDocuments(ctx, bson.M{})
 
-	total := pcCount + posCount
-	if total == 0 {
-		fmt.Printf("⚠ Không có dữ liệu đơn hàng (pc_orders + pc_pos_orders)\n\n")
+	if posCount == 0 {
+		fmt.Printf("⚠ Không có dữ liệu đơn hàng (pc_pos_orders)\n\n")
 		return
 	}
 
 	fmt.Println(strings.Repeat("=", 70))
-	fmt.Println("📊 3. ĐƠN HÀNG (pc_orders + pc_pos_orders) - Theo ngày & giờ")
+	fmt.Println("📊 3. ĐƠN HÀNG (pc_pos_orders) - Theo ngày & giờ")
 	fmt.Println(strings.Repeat("=", 70))
-	fmt.Printf("pc_orders: %d | pc_pos_orders: %d | Tổng: %d\n", pcCount, posCount, total)
+	fmt.Printf("pc_pos_orders: %d\n", posCount)
 	fmt.Printf("⏱️  Thời gian gốc: posData.inserted_at (qua insertedAt/posCreatedAt) | Timezone: %s\n\n", tzVietnam)
 
 	// Thời gian GỐC: insertedAt, posCreatedAt extract từ posData.inserted_at. KHÔNG dùng createdAt (sync).

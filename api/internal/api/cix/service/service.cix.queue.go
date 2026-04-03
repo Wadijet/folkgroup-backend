@@ -17,19 +17,19 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// CixQueueService service hàng đợi phân tích CIX.
+// CixQueueService service hàng đợi phân tích CIX (collection cix_intel_compute).
 type CixQueueService struct {
-	*basesvc.BaseServiceMongoImpl[cixmodels.CixPendingAnalysis]
+	*basesvc.BaseServiceMongoImpl[cixmodels.CixIntelComputeJob]
 }
 
 // NewCixQueueService tạo service mới.
 func NewCixQueueService() (*CixQueueService, error) {
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CixPendingAnalysis)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CixIntelCompute)
 	if !ok {
-		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.CixPendingAnalysis, common.ErrNotFound)
+		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.CixIntelCompute, common.ErrNotFound)
 	}
 	return &CixQueueService{
-		BaseServiceMongoImpl: basesvc.NewBaseServiceMongo[cixmodels.CixPendingAnalysis](coll),
+		BaseServiceMongoImpl: basesvc.NewBaseServiceMongo[cixmodels.CixIntelComputeJob](coll),
 	}, nil
 }
 
@@ -42,14 +42,14 @@ type EnqueueAnalysisInput struct {
 	OwnerOrganizationID  primitive.ObjectID
 }
 
-// EnqueueAnalysis thêm job vào cix_pending_analysis (upsert theo conversationId).
+// EnqueueAnalysis thêm job vào cix_intel_compute (upsert theo conversationId).
 // Gọi từ CIO ingestion sau khi InsertOne cio_event (conversation_updated, message_updated).
 func (s *CixQueueService) EnqueueAnalysis(ctx context.Context, input EnqueueAnalysisInput) error {
 	if input.ConversationID == "" {
 		return nil
 	}
 	now := time.Now().UnixMilli()
-	job := cixmodels.CixPendingAnalysis{
+	job := cixmodels.CixIntelComputeJob{
 		ConversationID:      input.ConversationID,
 		CustomerID:          input.CustomerID,
 		Channel:             input.Channel,

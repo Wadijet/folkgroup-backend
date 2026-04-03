@@ -21,6 +21,7 @@ import (
 	ruleintelmodels "meta_commerce/internal/api/ruleintel/models"
 	cixmodels "meta_commerce/internal/api/cix/models"
 	orderintelmodels "meta_commerce/internal/api/orderintel/models"
+	ordermodels "meta_commerce/internal/api/order/models"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 	learningmodels "meta_commerce/internal/api/learning/models"
 	"meta_commerce/internal/database"
@@ -58,7 +59,6 @@ func initColNames() {
 	global.MongoDB_ColNames.FbMessageItems = "fb_message_items"
 	global.MongoDB_ColNames.FbPosts = "fb_posts"
 	global.MongoDB_ColNames.FbCustomers = "fb_customers"
-	global.MongoDB_ColNames.PcOrders = "pc_orders"
 	global.MongoDB_ColNames.PcPosCustomers = "pc_pos_customers"
 	global.MongoDB_ColNames.PcPosShops = "pc_pos_shops"
 	global.MongoDB_ColNames.PcPosWarehouses = "pc_pos_warehouses"
@@ -66,6 +66,7 @@ func initColNames() {
 	global.MongoDB_ColNames.PcPosVariations = "pc_pos_variations"
 	global.MongoDB_ColNames.PcPosCategories = "pc_pos_categories"
 	global.MongoDB_ColNames.PcPosOrders = "pc_pos_orders"
+	global.MongoDB_ColNames.CommerceOrders = "commerce_orders"
 
 	// Notification System Collections (Hệ thống 2 - Routing/Template)
 	global.MongoDB_ColNames.NotificationSenders = "notification_senders"
@@ -121,6 +122,7 @@ func initColNames() {
 	global.MongoDB_ColNames.CrmNotes = "crm_notes"
 	global.MongoDB_ColNames.CrmPendingIngest = "crm_pending_ingest"
 	global.MongoDB_ColNames.CrmBulkJobs = "crm_bulk_jobs"
+	global.MongoDB_ColNames.CrmIntelCompute = "crm_intel_compute"
 
 	// Module Meta Ads
 	global.MongoDB_ColNames.MetaAdAccounts = "meta_ad_accounts"
@@ -141,6 +143,8 @@ func initColNames() {
 	global.MongoDB_ColNames.AdsCampaignHourly = "ads_campaign_hourly"
 	global.MongoDB_ColNames.AdsCampPeakProfiles = "ads_camp_peak_profiles"
 	global.MongoDB_ColNames.AdsThrottleState = "ads_throttle_state"
+	global.MongoDB_ColNames.RecomputeDebounceQueue = "decision_recompute_debounce_queue"
+	global.MongoDB_ColNames.AdsIntelCompute = "ads_intel_compute"
 	global.MongoDB_ColNames.LearningCases = "learning_cases"
 	global.MongoDB_ColNames.RuleSuggestions = "rule_suggestions"
 
@@ -153,11 +157,11 @@ func initColNames() {
 
 	// Module CIX — Contextual Conversation Intelligence
 	global.MongoDB_ColNames.CixAnalysisResults = "cix_analysis_results"
-	global.MongoDB_ColNames.CixPendingAnalysis = "cix_pending_analysis"
+	global.MongoDB_ColNames.CixIntelCompute = "cix_intel_compute"
 
 	// Module Order Intelligence — Vision 07
 	global.MongoDB_ColNames.OrderIntelligenceSnapshots = "order_intelligence_snapshots"
-	global.MongoDB_ColNames.OrderIntelligencePending = "order_intelligence_pending"
+	global.MongoDB_ColNames.OrderIntelCompute = "order_intel_compute"
 
 	// Module AI Decision — Event & Decision Case (PLATFORM_L1_EVENT_DECISION_SUPPLEMENT)
 	global.MongoDB_ColNames.DecisionEventsQueue = "decision_events_queue"
@@ -214,7 +218,6 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.FbMessageItems), fbmodels.FbMessageItem{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.FbPosts), fbmodels.FbPost{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.FbCustomers), fbmodels.FbCustomer{})
-	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.PcOrders), pcmodels.PcOrder{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.PcPosCustomers), pcmodels.PcPosCustomer{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.PcPosShops), pcmodels.PcPosShop{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.PcPosWarehouses), pcmodels.PcPosWarehouse{})
@@ -222,6 +225,7 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.PcPosVariations), pcmodels.PcPosVariation{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.PcPosCategories), pcmodels.PcPosCategory{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.PcPosOrders), pcmodels.PcPosOrder{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CommerceOrders), ordermodels.CommerceOrder{})
 
 	// Notification System Indexes (Hệ thống 2 - Routing/Template)
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.NotificationSenders), notifmodels.NotificationChannelSender{})
@@ -274,6 +278,7 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmNotes), crmmodels.CrmNote{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmPendingIngest), crmmodels.CrmPendingIngest{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmBulkJobs), crmmodels.CrmBulkJob{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmIntelCompute), crmmodels.CrmIntelComputeJob{})
 
 	// Module Meta Ads
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.MetaAdAccounts), metamodels.MetaAdAccount{})
@@ -294,6 +299,8 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsCampaignHourly), adsmodels.AdsCampaignHourly{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsCampPeakProfiles), adsmodels.AdsCampPeakProfile{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsThrottleState), adsmodels.AdsThrottleState{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.RecomputeDebounceQueue), metamodels.RecomputeDebounceQueue{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsIntelCompute), adsmodels.AdsIntelComputeJob{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.LearningCases), learningmodels.LearningCase{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.RuleSuggestions), learningmodels.RuleSuggestion{})
 
@@ -306,11 +313,11 @@ func initDatabase_MongoDB() {
 
 	// Module CIX — Contextual Conversation Intelligence
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CixAnalysisResults), cixmodels.CixAnalysisResult{})
-	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CixPendingAnalysis), cixmodels.CixPendingAnalysis{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CixIntelCompute), cixmodels.CixIntelComputeJob{})
 
 	// Module Order Intelligence
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.OrderIntelligenceSnapshots), orderintelmodels.OrderIntelligenceSnapshot{})
-	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.OrderIntelligencePending), orderintelmodels.OrderIntelligencePendingJob{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.OrderIntelCompute), orderintelmodels.OrderIntelComputeJob{})
 
 	// Module AI Decision — Event & Decision Case
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DecisionEventsQueue), aidecisionmodels.DecisionEvent{})

@@ -2,11 +2,18 @@ package models
 
 import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
+
+	"meta_commerce/internal/utility/identity"
 )
 
 // PcPosWarehouse lưu thông tin kho hàng từ Pancake POS API
 type PcPosWarehouse struct {
 	ID          primitive.ObjectID     `json:"id,omitempty" bson:"_id,omitempty"`                                                             // ID của warehouse trong MongoDB
+	// ===== IDENTITY 4 LỚP =====
+	Uid          string                       `json:"uid" bson:"uid" index:"single:1"`
+	SourceIds    map[string]string            `json:"sourceIds,omitempty" bson:"sourceIds,omitempty"`
+	SourceIdsPos string                       `json:"-" bson:"sourceIds.pos,omitempty" index:"single:1,sparse"`
+	Links        map[string]identity.LinkItem `json:"links,omitempty" bson:"links,omitempty"`
 	WarehouseId string                 `json:"warehouseId" bson:"warehouseId" index:"text" extract:"PanCakeData\\.id,converter=string"`       // ID của warehouse trên Pancake POS (extract từ PanCakeData["id"], convert sang string - UUID)
 	ShopId      int64                  `json:"shopId" bson:"shopId" index:"text" extract:"PanCakeData\\.shop_id,converter=int64,optional"`    // ID của shop (extract từ PanCakeData["shop_id"])
 	Name        string                 `json:"name" bson:"name" index:"text" extract:"PanCakeData\\.name,converter=string,optional"`          // Tên kho hàng (extract từ PanCakeData["name"])

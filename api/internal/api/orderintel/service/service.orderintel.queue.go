@@ -1,4 +1,4 @@
-// Package orderintelsvc — Hàng đợi domain order_intelligence_pending (Raw→L3→Flags tính ở worker domain, không trong consumer AI Decision).
+// Package orderintelsvc — Hàng đợi domain order_intel_compute (Raw→L3→Flags tính ở worker domain, không trong consumer AI Decision).
 package orderintelsvc
 
 import (
@@ -15,7 +15,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// EnqueueOrderIntelligenceFromParent đưa job vào order_intelligence_pending sau order.inserted/updated (đã hydrate).
+// EnqueueOrderIntelligenceFromParent đưa job vào order_intel_compute sau order.inserted/updated (đã hydrate).
 func EnqueueOrderIntelligenceFromParent(ctx context.Context, parent *aidecisionmodels.DecisionEvent) error {
 	if parent == nil || parent.Payload == nil {
 		return nil
@@ -39,7 +39,7 @@ func EnqueueOrderIntelligenceFromParent(ctx context.Context, parent *aidecisionm
 			mongoHex = norm
 		}
 	}
-	job := &orderintelmodels.OrderIntelligencePendingJob{
+	job := &orderintelmodels.OrderIntelComputeJob{
 		OrderUid:            orderUid,
 		OwnerOrganizationID: ownerOrgID,
 		NormalizedRecordUid: norm,
@@ -56,7 +56,7 @@ func EnqueueOrderIntelligenceFromParent(ctx context.Context, parent *aidecisionm
 	if job.OrderUid == "" && job.MongoRecordIdHex == "" {
 		return nil
 	}
-	return upsertPendingJob(ctx, job)
+	return upsertOrderIntelComputeJob(ctx, job)
 }
 
 // EnqueueFromRecomputeDecisionEvent — consumer AI Decision chỉ chuyển job sang domain (không tính toán tại đây).
@@ -108,7 +108,7 @@ func enqueueFromGenericAIDecisionPayload(ctx context.Context, evt *aidecisionmod
 	if u, ok := evt.Payload["normalizedRecordUid"].(string); ok {
 		norm = strings.TrimSpace(u)
 	}
-	job := &orderintelmodels.OrderIntelligencePendingJob{
+	job := &orderintelmodels.OrderIntelComputeJob{
 		OrderUid:            orderUid,
 		OwnerOrganizationID: ownerOrgID,
 		NormalizedRecordUid: norm,
@@ -126,11 +126,11 @@ func enqueueFromGenericAIDecisionPayload(ctx context.Context, evt *aidecisionmod
 	if job.OrderUid == "" && job.MongoRecordIdHex == "" {
 		return nil
 	}
-	return upsertPendingJob(ctx, job)
+	return upsertOrderIntelComputeJob(ctx, job)
 }
 
-func upsertPendingJob(ctx context.Context, job *orderintelmodels.OrderIntelligencePendingJob) error {
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderIntelligencePending)
+func upsertOrderIntelComputeJob(ctx context.Context, job *orderintelmodels.OrderIntelComputeJob) error {
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderIntelCompute)
 	if !ok {
 		return nil
 	}

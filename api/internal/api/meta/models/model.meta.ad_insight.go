@@ -2,6 +2,8 @@ package models
 
 import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
+
+	"meta_commerce/internal/utility/identity"
 )
 
 // MetaAdInsight lưu insights (hiệu suất) từ Meta Insights API.
@@ -9,6 +11,11 @@ import (
 // ObjectId, ObjectType, AdAccountId do sync logic truyền (phụ thuộc level). Các metric có extract tag.
 type MetaAdInsight struct {
 	ID                  primitive.ObjectID     `json:"id,omitempty" bson:"_id,omitempty"`
+	// ===== IDENTITY 4 LỚP =====
+	Uid           string                       `json:"uid" bson:"uid" index:"single:1"`
+	SourceIds     map[string]string            `json:"sourceIds,omitempty" bson:"sourceIds,omitempty"`
+	SourceIdsMeta string                       `json:"-" bson:"sourceIds.meta,omitempty" index:"single:1,sparse"`
+	Links         map[string]identity.LinkItem `json:"links,omitempty" bson:"links,omitempty"`
 	ObjectId            string                 `json:"objectId" bson:"objectId" index:"text;single:1,compound:meta_insight_agg"`       // act_xxx, campaign_id, adset_id, ad_id (truyền từ sync)
 	ObjectType          string                 `json:"objectType" bson:"objectType" index:"single:1,compound:meta_insight_agg"`      // ad_account, campaign, adset, ad (truyền từ sync)
 	AdAccountId         string                 `json:"adAccountId" bson:"adAccountId" index:"text;single:1,compound:meta_insight_agg"` // truyền từ sync

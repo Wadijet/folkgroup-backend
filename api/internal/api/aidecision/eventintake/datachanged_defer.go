@@ -1,5 +1,12 @@
 // Package eventintake — Hàng đợi trì hoãn side-effect datachanged (trailing debounce).
 //
+// Mục tiêu debounce (gom yêu cầu tính toán / side-effect):
+// Nhiều lần thay đổi dữ liệu gần nhau có thể cùng dẫn tới một loại việc (vd. tính lại intelligence khách, xếp lại job order/CIX…).
+// Thay vì chuyển xuống domain từng lần, ta gom theo khóa (org + collection + id bản ghi nguồn): mỗi lần có event mới
+// thì lùi deadline thêm một cửa sổ (trailing). Khi qua cửa sổ mà không còn cập nhật, chỉ flush một lần —
+// tức tối đa một yêu cầu tương ứng cho khóa đó, tránh tính toán lặp sát nhau không cần thiết.
+// Cửa sổ cụ thể (vd. vài phút cho CRM refresh) do hằng số / rule / env quyết định; «gấp» dùng window=0 và không ghi vào map này.
+//
 // Khi RULE_DATACHANGED_SIDE_EFFECT_POLICY chạy thành công: số giây do script + PARAM_DATACHANGED_SIDE_EFFECT_POLICY quyết định (ưu tiên hơn env tier).
 // Fallback: phân tầng datachanged_business.go + env:
 //   - AI_DECISION_BUSINESS_DEFER_OPERATIONAL_SEC — cửa sổ gom cho mức “vận hành” (mặc định 90).
@@ -31,9 +38,11 @@ const (
 type DeferredSideEffectKind string
 
 const (
-	DeferredKindReport     DeferredSideEffectKind = "report"
-	DeferredKindCrmRefresh DeferredSideEffectKind = "crm_refresh"
-	DeferredKindCrmIngest  DeferredSideEffectKind = "crm_ingest"
+	DeferredKindReport            DeferredSideEffectKind = "report"
+	DeferredKindCrmRefresh        DeferredSideEffectKind = "crm_refresh"
+	DeferredKindCrmIngest         DeferredSideEffectKind = "crm_ingest"
+	DeferredKindOrderIntelCompute DeferredSideEffectKind = "order_intel_compute"
+	DeferredKindCixIntelCompute   DeferredSideEffectKind = "cix_intel_compute"
 )
 
 // DeferredSideEffectFlushJob một việc đến hạn cần chạy trong worker (đọc lại Mongo rồi gọi report/ingest/refresh).
@@ -49,16 +58,20 @@ type deferEntityKey struct {
 }
 
 var (
-	deferSchedMu   sync.Mutex
-	reportDeferDue map[deferEntityKey]time.Time
-	crmRefDeferDue map[deferEntityKey]time.Time
-	crmIngDeferDue map[deferEntityKey]time.Time
+	deferSchedMu       sync.Mutex
+	reportDeferDue     map[deferEntityKey]time.Time
+	crmRefDeferDue     map[deferEntityKey]time.Time
+	crmIngDeferDue     map[deferEntityKey]time.Time
+	orderIntelDeferDue map[deferEntityKey]time.Time
+	cixIntelDeferDue   map[deferEntityKey]time.Time
 )
 
 func init() {
 	reportDeferDue = make(map[deferEntityKey]time.Time)
 	crmRefDeferDue = make(map[deferEntityKey]time.Time)
 	crmIngDeferDue = make(map[deferEntityKey]time.Time)
+	orderIntelDeferDue = make(map[deferEntityKey]time.Time)
+	cixIntelDeferDue = make(map[deferEntityKey]time.Time)
 }
 
 // deferSecForChannel: nếu env key có trong môi trường → dùng giá trị (0 = không trì hoãn kênh này).
@@ -111,7 +124,8 @@ func DeferWindowFor(u BusinessSideEffectUrgency, ch DeferChannel) time.Duration 
 	return time.Duration(sec) * time.Second
 }
 
-// ScheduleDeferredSideEffect đặt deadline trailing: mỗi lần gọi → due = now + window.
+// ScheduleDeferredSideEffect — Ghi nhận việc cần làm sau; trailing: mỗi lần gọi lại với cùng khóa → due = now + window (lùi hạn).
+// Đến hạn, consumer gọi TakeDueDeferredSideEffectJobs rồi flush đúng một job cho khóa đó (đã xóa khỏi map).
 func ScheduleDeferredSideEffect(kind DeferredSideEffectKind, orgHex, coll, idHex string, window time.Duration) {
 	if window <= 0 {
 		return
@@ -134,6 +148,10 @@ func ScheduleDeferredSideEffect(kind DeferredSideEffectKind, orgHex, coll, idHex
 		crmRefDeferDue[k] = due
 	case DeferredKindCrmIngest:
 		crmIngDeferDue[k] = due
+	case DeferredKindOrderIntelCompute:
+		orderIntelDeferDue[k] = due
+	case DeferredKindCixIntelCompute:
+		cixIntelDeferDue[k] = due
 	}
 }
 
@@ -158,5 +176,7 @@ func TakeDueDeferredSideEffectJobs(now time.Time) []DeferredSideEffectFlushJob {
 	collect(reportDeferDue, DeferredKindReport)
 	collect(crmRefDeferDue, DeferredKindCrmRefresh)
 	collect(crmIngDeferDue, DeferredKindCrmIngest)
+	collect(orderIntelDeferDue, DeferredKindOrderIntelCompute)
+	collect(cixIntelDeferDue, DeferredKindCixIntelCompute)
 	return out
 }

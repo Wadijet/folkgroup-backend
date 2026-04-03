@@ -7,6 +7,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
@@ -14,6 +15,7 @@ import (
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/utility"
+	"meta_commerce/internal/utility/identity"
 
 	basesvc "meta_commerce/internal/api/base/service"
 )
@@ -113,22 +115,52 @@ func (s *FbMessageItemService) UpsertMessages(ctx context.Context, conversationI
 	now := time.Now().UnixMilli()
 	for _, p := range pairs {
 		messageId, msgMap := p.id, p.m
-		if ex, ok := existingByID[messageId]; ok && messageItemSyncUnchanged(ex.MessageData, msgMap) {
+		ex, hadExisting := existingByID[messageId]
+		if hadExisting && messageItemSyncUnchanged(ex.MessageData, msgMap) {
 			logrus.WithFields(logrus.Fields{"messageId": messageId, "conversationId": conversationId}).Debug("FbMessageItem: bỏ qua — không đổi theo inserted_at/updated_at hoặc payload trùng")
 			continue
 		}
 		insertedAt := messagePayloadSourceMS(msgMap)
-		docMap := bson.M{
+		docMap := map[string]interface{}{
 			"conversationId": conversationId,
 			"messageId":      messageId,
 			"messageData":    msgMap,
 			"insertedAt":     insertedAt,
 			"updatedAt":      now,
 		}
+		var merge map[string]interface{}
+		if hadExisting {
+			m, errMap := utility.ToMap(ex)
+			if errMap != nil {
+				return 0, fmt.Errorf("ToMap FbMessageItem: %w", errMap)
+			}
+			merge = m
+		} else {
+			merge = map[string]interface{}{
+				"_id": primitive.NewObjectID(),
+			}
+		}
+		for k, v := range docMap {
+			merge[k] = v
+		}
+		identity.ScrubEmptyIdentityFieldsFromSet(merge)
+		if err := identity.EnrichIdentity4Layers(ctx, global.MongoDB_ColNames.FbMessageItems, merge, nil); err != nil {
+			return 0, fmt.Errorf("enrich identity fb_message_items: %w", err)
+		}
+		setDoc := bson.M{}
+		for k, v := range merge {
+			if k == "_id" {
+				continue
+			}
+			setDoc[k] = v
+		}
 		filter := bson.M{"messageId": messageId}
 		update := bson.M{
-			"$set":         docMap,
-			"$setOnInsert": bson.M{"createdAt": now},
+			"$set": setDoc,
+			"$setOnInsert": bson.M{
+				"createdAt": now,
+				"_id":       merge["_id"],
+			},
 		}
 		operations = append(operations, mongo.NewUpdateOneModel().SetFilter(filter).SetUpdate(update).SetUpsert(true))
 	}

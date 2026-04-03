@@ -1,33 +1,39 @@
-// Package orderintelsvc — Tính Raw → L1 → L2 → L3 → Flags từ bản ghi pc_pos_orders.
+// Package orderintelsvc — Tính Raw → L1 → L2 → L3 → Flags từ intelOrderView (nguồn: commerce_orders, fallback pc_pos_orders).
 package orderintelsvc
 
 import (
-	pcmodels "meta_commerce/internal/api/pc/models"
+	"strings"
+
 	orderintelmodels "meta_commerce/internal/api/orderintel/models"
 )
 
-// ComputeSnapshot tính snapshot intelligence từ đơn POS (không ghi DB).
-func ComputeSnapshot(o *pcmodels.PcPosOrder, nowMs int64) *orderintelmodels.OrderIntelligenceSnapshot {
-	if o == nil {
+// ComputeSnapshot tính snapshot intelligence (không ghi DB).
+// orderUid = canonical ord_*; có thể rỗng — persistence dùng khóa orderId + org.
+func ComputeSnapshot(v *intelOrderView, nowMs int64) *orderintelmodels.OrderIntelligenceSnapshot {
+	if v == nil {
 		return nil
 	}
-	status := o.Status
-	if pd := mapFromIface(o.PosData); pd != nil {
+	uid := strings.TrimSpace(v.Uid)
+	if uid == "" && v.OrderId <= 0 && v.ID.IsZero() {
+		return nil
+	}
+	status := v.Status
+	if pd := mapFromIface(v.PosData); pd != nil {
 		if s, ok := intFromMap(pd, "status"); ok {
 			status = s
 		}
 	}
 	l1 := orderintelmodels.OrderLayer1{Stage: mapStatusToStage(status)}
-	total := totalAfterDiscountVND(o)
+	total := totalAfterDiscountVNDFromView(v)
 	l2 := orderintelmodels.OrderLayer2{
 		AOVTier:               tierFromAOV(total),
-		ConversionQuality:     deriveConversionQuality(o),
-		FulfillmentLatency:    deriveFulfillmentLatency(status, o.InsertedAt, o.PosUpdatedAt, nowMs),
+		ConversionQuality:     deriveConversionQualityFromView(v),
+		FulfillmentLatency:    deriveFulfillmentLatency(status, v.InsertedAt, v.PosUpdatedAt, nowMs),
 		ReturnRisk:            deriveReturnRisk(status),
 		TotalAfterDiscountVND: total,
 	}
 	l3 := orderintelmodels.OrderLayer3{
-		SourceAttribution: deriveSourceAttribution(o),
+		SourceAttribution: deriveSourceAttributionFromView(v),
 		DelayPattern:      deriveDelayPattern(l2.FulfillmentLatency),
 		HighValueSignal:   l2.AOVTier == "premium" || l2.AOVTier == "high",
 		AtRiskReturn:      l3AtRiskReturn(l2.ReturnRisk),
@@ -35,26 +41,26 @@ func ComputeSnapshot(o *pcmodels.PcPosOrder, nowMs int64) *orderintelmodels.Orde
 	flags := deriveFlags(l1, l2, l3)
 
 	tr := orderintelmodels.OrderIntelTrace{
-		AdID:           stringFieldFromPos(o, "ad_id"),
-		PostID:         o.PostId,
-		ConversationID: stringFieldFromPos(o, "conversation_id"),
-		CustomerID:     o.CustomerId,
+		AdID:           stringFieldFromPosData(v.PosData, "ad_id"),
+		PostID:         v.PostId,
+		ConversationID: stringFieldFromPosData(v.PosData, "conversation_id"),
+		CustomerID:     v.CustomerId,
 	}
-	if tr.CustomerID == "" && o.LinksCustomerUid != "" {
-		tr.CustomerID = o.LinksCustomerUid
+	if tr.CustomerID == "" && v.LinksCustomerUid != "" {
+		tr.CustomerID = v.LinksCustomerUid
 	}
 
 	return &orderintelmodels.OrderIntelligenceSnapshot{
-		OrderUid:            o.Uid,
-		OwnerOrganizationID: o.OwnerOrganizationID,
-		OrderID:             o.OrderId,
+		OrderUid:            uid,
+		OwnerOrganizationID: v.OwnerOrganizationID,
+		OrderID:             v.OrderId,
 		Layer1:              l1,
 		Layer2:              l2,
 		Layer3:              l3,
 		Flags:               flags,
 		Trace:               tr,
 		UpdatedAt:           nowMs,
-		CreatedAt:             nowMs,
+		CreatedAt:           nowMs,
 	}
 }
 
@@ -92,9 +98,9 @@ func tierFromAOV(total float64) string {
 	}
 }
 
-func deriveConversionQuality(o *pcmodels.PcPosOrder) string {
-	ad := stringFieldFromPos(o, "ad_id")
-	src := orderSources(o)
+func deriveConversionQualityFromView(v *intelOrderView) string {
+	ad := stringFieldFromPosData(v.PosData, "ad_id")
+	src := orderSourcesFromPosData(v.PosData)
 	hasAdsSource := false
 	for _, x := range src {
 		if x == "-1" {
@@ -143,11 +149,11 @@ func deriveReturnRisk(status int) string {
 	}
 }
 
-func deriveSourceAttribution(o *pcmodels.PcPosOrder) string {
-	if stringFieldFromPos(o, "ad_id") != "" {
+func deriveSourceAttributionFromView(v *intelOrderView) string {
+	if stringFieldFromPosData(v.PosData, "ad_id") != "" {
 		return "ads"
 	}
-	for _, x := range orderSources(o) {
+	for _, x := range orderSourcesFromPosData(v.PosData) {
 		if x == "-1" {
 			return "ads"
 		}
@@ -193,22 +199,21 @@ func deriveFlags(l1 orderintelmodels.OrderLayer1, l2 orderintelmodels.OrderLayer
 	return out
 }
 
-func totalAfterDiscountVND(o *pcmodels.PcPosOrder) float64 {
-	pd := mapFromIface(o.PosData)
+func totalAfterDiscountVNDFromView(v *intelOrderView) float64 {
+	pd := mapFromIface(v.PosData)
 	if pd == nil {
 		return 0
 	}
-	if v, ok := floatFromMap(pd, "total_price_after_sub_discount"); ok {
-		return v
+	if val, ok := floatFromMap(pd, "total_price_after_sub_discount"); ok {
+		return val
 	}
-	if v, ok := floatFromMap(pd, "total_price"); ok {
-		return v
+	if val, ok := floatFromMap(pd, "total_price"); ok {
+		return val
 	}
 	return 0
 }
 
-func stringFieldFromPos(o *pcmodels.PcPosOrder, key string) string {
-	pd := mapFromIface(o.PosData)
+func stringFieldFromPosData(pd map[string]interface{}, key string) string {
 	if pd == nil {
 		return ""
 	}
@@ -218,8 +223,7 @@ func stringFieldFromPos(o *pcmodels.PcPosOrder, key string) string {
 	return ""
 }
 
-func orderSources(o *pcmodels.PcPosOrder) []string {
-	pd := mapFromIface(o.PosData)
+func orderSourcesFromPosData(pd map[string]interface{}) []string {
 	if pd == nil {
 		return nil
 	}
@@ -288,4 +292,3 @@ func floatFromMap(m map[string]interface{}, key string) (float64, bool) {
 		return 0, false
 	}
 }
-

@@ -1,4 +1,4 @@
-// Package router đăng ký các route thuộc domain PC (Pancake): AccessToken, Order, POS Customer/Shop/Warehouse/Product/Variation/Category/Order.
+// Package router đăng ký các route thuộc domain PC (Pancake): AccessToken, POS Customer/Shop/Warehouse/Product/Variation/Category/Order.
 package router
 
 import (
@@ -17,12 +17,6 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 		return fmt.Errorf("create access token handler: %w", err)
 	}
 	r.RegisterCRUDRoutes(v1, "/access-token", accessTokenHandler, apirouter.ReadWriteConfig, "AccessToken")
-
-	pcOrderHandler, err := pchdl.NewPcOrderHandler()
-	if err != nil {
-		return fmt.Errorf("create pancake order handler: %w", err)
-	}
-	r.RegisterCRUDRoutes(v1, "/pancake/order", pcOrderHandler, apirouter.ReadWriteConfig, "PcOrder")
 
 	pcPosCustomerHandler, err := pchdl.NewPcPosCustomerHandler()
 	if err != nil {

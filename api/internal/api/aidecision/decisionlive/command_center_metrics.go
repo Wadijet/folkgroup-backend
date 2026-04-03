@@ -1,11 +1,11 @@
-// Package decisionlive — metrics trung tâm chỉ huy: RAM là chính.
+// Package decisionlive — Metrics cho màn hình trung tâm chỉ huy; số liệu chủ yếu giữ trong RAM process.
 //
-// Bố cục snapshot (schemaVersion 2) — tách rõ nguồn số liệu:
-//   - queue: độ sâu decision_events_queue (Mongo reconcile → RAM).
-//   - intake: đổ vào queue (mỗi EmitEvent InsertOne OK).
-//   - publishCounters: lũy kế lifetime (process) — hook Publish + consumer không trace.
-//   - realtime.gaugeByPhase: gauge tức thời (worker_held, phase trace, …).
-//   - consumer: throughput / avg sau mỗi lần xử lý xong trên process này.
+// Snapshot (schemaVersion 2) — từng nhóm có ý nghĩa riêng, dễ đọc trên UI:
+//   - queue: độ sâu hàng đợi sự kiện (đồng bộ từ Mongo vào RAM theo chu kỳ).
+//   - intake: số lần ghi job vào hàng đợi thành công (mỗi EmitEvent insert OK).
+//   - publishCounters: bộ đếm lũy kế từ đầu process — mỗi lần Publish live (và vài mốc consumer không có trace).
+//   - realtime.gaugeByPhase: chỉ số tức thời (ví dụ job đang giữ, phase đang chạy).
+//   - consumer: thống kê sau mỗi lần consumer xử lý xong trên process này.
 package decisionlive
 
 import (
@@ -24,24 +24,24 @@ import (
 
 const defaultWSAggregateInterval = 3 * time.Second
 
-// metricsChangeLogEnabled: log chi tiết mỗi lần đếm metrics (Publish, intake, reconcile queue, consumer lease). Mặc định tắt — bật: AI_DECISION_METRICS_CHANGE_LOG=1.
+// metricsChangeLogEnabled — Bật log từng lần cộng metrics (Publish, intake, đồng bộ độ sâu queue, consumer lease). Mặc định tắt; bật: AI_DECISION_METRICS_CHANGE_LOG=1.
 func metricsChangeLogEnabled() bool {
 	return strings.TrimSpace(os.Getenv("AI_DECISION_METRICS_CHANGE_LOG")) == "1"
 }
 
-// MetricsChangeLogEnabled để worker / package khác dùng chung cờ (log consumer + Publish live).
+// MetricsChangeLogEnabled — Export cờ dùng chung cho worker và Publish (cùng biến môi trường).
 func MetricsChangeLogEnabled() bool {
 	return metricsChangeLogEnabled()
 }
 
-// CommandCenterAlert cảnh báo nhẹ cho UI command center.
+// CommandCenterAlert — Một dòng cảnh báo hiển thị trên trung tâm chỉ huy (không chặn API).
 type CommandCenterAlert struct {
 	Code     string `json:"code"`
 	Severity string `json:"severity"`
 	Message  string `json:"message"`
 }
 
-// CommandCenterMeta — cờ môi trường; đọc trước khi diễn giải các khối số liệu.
+// CommandCenterMeta — Trạng thái môi trường (live bật/tắt, Redis, …) — client nên đọc trước khi diễn giải các khối số.
 type CommandCenterMeta struct {
 	LivePublishEnabled    bool   `json:"livePublishEnabled"`
 	RedisEnabled          bool   `json:"redisEnabled"`
@@ -49,20 +49,20 @@ type CommandCenterMeta struct {
 	LiveFunnelFromPublish bool   `json:"liveFunnelFromPublish"`
 }
 
-// CommandCenterQueueMetrics — độ sâu queue (nguồn Mongo reconcile → RAM).
+// CommandCenterQueueMetrics — Số job theo trạng thái trên hàng đợi (nguồn: đồng bộ Mongo → RAM).
 type CommandCenterQueueMetrics struct {
 	Depth                         map[string]int64 `json:"depth"`
 	ReconciledAtMs                int64            `json:"reconciledAtMs"`
 	RefreshedFromMongoThisRequest bool             `json:"refreshedFromMongoThisRequest,omitempty"`
 }
 
-// CommandCenterIntakeMetrics — mỗi lần ghi queue thành công (EmitEvent), không phải consumer.
+// CommandCenterIntakeMetrics — Đếm job được đưa vào hàng đợi (EmitEvent thành công), không phải số job consumer đã xử lý.
 type CommandCenterIntakeMetrics struct {
 	ByEventType   map[string]int64 `json:"byEventType"`
 	ByEventSource map[string]int64 `json:"byEventSource"`
 }
 
-// CommandCenterPublishCounters — lũy kế lifetime trên process: hook Publish (+ consumer không trace cho byPhase).
+// CommandCenterPublishCounters — Bộ đếm lũy kế từ khi process khởi động: mỗi lần gọi Publish (theo phase / nguồn / …).
 type CommandCenterPublishCounters struct {
 	ByPhase               map[string]int64 `json:"byPhase"`
 	BySourceKind          map[string]int64 `json:"bySourceKind"`
@@ -70,13 +70,13 @@ type CommandCenterPublishCounters struct {
 	ByOpsTier             map[string]int64 `json:"byOpsTier"`
 }
 
-// CommandCenterRealtimeMetrics — trạng thái tức thời (gauge), không phải lũy kế.
+// CommandCenterRealtimeMetrics — Ảnh chụp tức thời (gauge), không cộng dồn như bộ đếm lifetime.
 type CommandCenterRealtimeMetrics struct {
 	GaugeByPhase map[string]int64 `json:"gaugeByPhase"`
 }
 
-// CommandCenterSnapshot payload aggregate (GET metrics + WS type=aggregate).
-// schemaVersion 2 — nhóm theo semantics; client cũ (flat) cần nâng parser.
+// CommandCenterSnapshot — Gói số liệu gửi qua GET metrics hoặc WebSocket (kiểu aggregate).
+// schemaVersion 2: cấu trúc nhóm theo nghĩa nghiệp vụ; client parse bản flat cũ cần nâng cấp.
 type CommandCenterSnapshot struct {
 	SchemaVersion             int                          `json:"schemaVersion"`
 	AsOfMs                    int64                        `json:"asOfMs"`
@@ -89,6 +89,8 @@ type CommandCenterSnapshot struct {
 	Workers                   CommandCenterWorkersSnapshot `json:"workers"`
 	HasRecentConsumerActivity bool                         `json:"hasRecentConsumerActivity"`
 	Alerts                    []CommandCenterAlert         `json:"alerts,omitempty"`
+	// PipelineStrip — Dữ liệu thanh pipeline (intake → hàng đợi → debounce → miền) cho WS org-live và GET metrics.
+	PipelineStrip CommandCenterPipelineStrip `json:"pipelineStrip"`
 }
 
 type orgLiveBuf struct {
@@ -101,8 +103,8 @@ type orgLiveBuf struct {
 
 var memLive sync.Map // orgHex -> *orgLiveBuf
 
-// demTu: publish_ws | consumer_bat_dau | consumer_hoan_tat_khong_trace | consumer_loi_khong_trace | ...
-// bumpSource: false — chỉ tăng byPhase (dùng khi đã/will bump bySource ở bước khác trong cùng một event).
+// demTu — Nhãn gợi ý nguồn đếm khi bật log chi tiết (ví dụ publish_ws, consumer_bat_dau, publish_chi_metrics…).
+// bumpSource — false: chỉ tăng bộ đếm theo phase; tránh đếm trùng nguồn khi cùng một sự kiện đã tăng ở bước khác.
 func incrementMemLivePublish(orgHex, phase, sk, demTu string, bumpSource bool, feedCat, opsTier string) {
 	v, _ := memLive.LoadOrStore(orgHex, &orgLiveBuf{
 		byPhase:        map[string]int64{},
@@ -151,7 +153,7 @@ func incrementMemLivePublish(orgHex, phase, sk, demTu string, bumpSource bool, f
 		if bumpSource {
 			fields["demTheoNguon"] = sourceCount
 		}
-		logrus.WithFields(fields).Info("AI Decision metrics: phễu (RAM) +1; nguồn +1 nếu demNguon=true")
+		logrus.WithFields(fields).Info("AI Decision metrics: bộ đếm phễu (RAM) +1; đếm theo nguồn khi demNguon=true")
 	}
 }
 
@@ -171,8 +173,9 @@ func queueDepthDocFromMemMap(depth map[string]int64, reconciledAtMs int64) queue
 	}
 }
 
-// RecordConsumerWorkBegin sau lease: gauge worker_held++; không trace thì gauge consuming++ và phễu lũy kế consuming.
-// Luồng có trace: chỉ worker_held ở đây; gauge phase theo chuyển bước Publish.
+// RecordConsumerWorkBegin — Gọi sau khi worker lease job: tăng gauge «đang giữ job».
+// Job không có traceId: thêm gauge «đang consume» và bộ đếm phễu tương ứng.
+// Job có trace: chỉ cập nhật gauge giữ job tại đây; phase chi tiết theo từng bước Publish sau đó.
 func RecordConsumerWorkBegin(ownerOrgID primitive.ObjectID, eventType, traceID string) {
 	if ownerOrgID.IsZero() {
 		return
@@ -189,12 +192,12 @@ func RecordConsumerWorkBegin(ownerOrgID primitive.ObjectID, eventType, traceID s
 	incrementMemLivePublish(orgHex, PhaseConsuming, sk, "consumer_bat_dau", false, "", "")
 }
 
-// RecordCommandCenterPublish đếm mỗi bước phase (đường Publish đầy đủ: ring + WS).
+// RecordCommandCenterPublish — Mỗi sự kiện live đầy đủ (ring + WebSocket): cộng bộ đếm theo phase và nguồn.
 func RecordCommandCenterPublish(ownerOrgID primitive.ObjectID, ev DecisionLiveEvent) {
 	recordCommandCenterPublish(ownerOrgID, ev, "publish_ws")
 }
 
-// recordCommandCenterPublish cập nhật phễu byPhase/bySourceKind + gauge phase (dùng chung khi live bật hoặc chỉ metrics).
+// recordCommandCenterPublish — Cập nhật bộ đếm phễu (phase, nguồn, feed, ops tier) và gauge phase; dùng cả khi live tắt (chỉ metrics).
 func recordCommandCenterPublish(ownerOrgID primitive.ObjectID, ev DecisionLiveEvent, demTu string) {
 	if ownerOrgID.IsZero() {
 		return
@@ -223,8 +226,8 @@ func recordCommandCenterPublish(ownerOrgID primitive.ObjectID, ev DecisionLiveEv
 	adjustGaugeOnLivePublish(orgHex, ev.TraceID, phase)
 }
 
-// BuildCommandCenterSnapshot ghép snapshot theo nhóm (schema 2).
-// refreshQueueDepthFromMongo: true — ép đọc Mongo một lần (hiếm); false — WS + GET mặc định.
+// BuildCommandCenterSnapshot — Dựng snapshot theo nhóm (schema 2).
+// refreshQueueDepthFromMongo=true: ép đọc độ sâu queue từ Mongo ngay (ít dùng); false: dùng RAM đã reconcile (mặc định GET/WS).
 func BuildCommandCenterSnapshot(ctx context.Context, ownerOrgID primitive.ObjectID, refreshQueueDepthFromMongo bool) CommandCenterSnapshot {
 	now := time.Now().UnixMilli()
 	out := CommandCenterSnapshot{
@@ -309,8 +312,8 @@ func BuildCommandCenterSnapshot(ctx context.Context, ownerOrgID primitive.Object
 		out.Alerts = append(out.Alerts, CommandCenterAlert{
 			Code:     "live_disabled",
 			Severity: SeverityWarn,
-			Message: "AI_DECISION_LIVE_ENABLED=0 — không timeline/WS/replay ring; " +
-				"phễu + gauge vẫn theo worker. Queue depth vẫn reconcile Mongo.",
+			Message: "Chế độ live tắt (AI_DECISION_LIVE_ENABLED=0): không có timeline, WebSocket và vòng replay trong RAM; " +
+				"bộ đếm phễu và gauge vẫn cập nhật theo worker. Độ sâu hàng đợi vẫn đồng bộ từ Mongo.",
 		})
 	}
 	inFlight := out.Queue.Depth["in_flight"]
@@ -319,6 +322,7 @@ func BuildCommandCenterSnapshot(ctx context.Context, ownerOrgID primitive.Object
 	}
 	held := out.Realtime.GaugeByPhase[GaugeKeyWorkerHeld]
 	out.HasRecentConsumerActivity = out.Consumer.RunsLastMinute > 0 || inFlight > 0 || held > 0
+	out.PipelineStrip = buildPipelineStrip(ctx, ownerOrgID, orgHex, now, &out.Queue)
 	return out
 }
 
@@ -371,7 +375,7 @@ func applyQueueDepthDocToSnapshot(out *CommandCenterSnapshot, doc queueDepthDoc)
 	d["in_flight"] = doc.Leased + doc.Processing
 }
 
-// WSCommandCenterAggregateInterval chu kỳ gửi bản aggregate trên WebSocket org-live.
+// WSCommandCenterAggregateInterval — Khoảng thời gian gửi một bản snapshot tổng hợp qua WebSocket org-live.
 func WSCommandCenterAggregateInterval() time.Duration {
 	v := strings.TrimSpace(os.Getenv("AI_DECISION_WS_AGGREGATE_SEC"))
 	if v == "" {

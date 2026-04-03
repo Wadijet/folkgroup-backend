@@ -31,13 +31,14 @@ const (
 	WorkerAdsCounterfactual        = "ads_counterfactual"
 	WorkerClassificationFull       = "crm_classification_full"
 	WorkerClassificationSmart      = "crm_classification_smart"
-	WorkerCixAnalysis              = "cix_analysis"
-	WorkerCixRequest               = "cix_request"
+	WorkerCixIntelCompute          = "cix_intel_compute"
 	WorkerAIDecisionConsumer       = "ai_decision_consumer"
 	WorkerAIDecisionDebounce       = "ai_decision_debounce"
 	WorkerAIDecisionClosure        = "ai_decision_closure"
-	WorkerOrderIntelligencePending = "order_intelligence_pending"
+	WorkerOrderIntelCompute = "order_intel_compute"
+	WorkerAdsIntelCompute = "ads_intel_compute"
 	WorkerCrmContext               = "crm_context"
+	WorkerCrmIntelCompute   = "crm_intel_compute"
 	WorkerLearningRuleSuggestion   = "learning_rule_suggestion"
 	WorkerLearningEvaluation       = "learning_evaluation"
 	WorkerLearningInsightAggregate = "learning_insight_aggregate"
@@ -73,13 +74,14 @@ var workerMetadataMap = map[string]WorkerMetadata{
 	WorkerAdsCounterfactual:        {Module: "ads", Domain: "ads", Description: "Đánh giá kill đã qua 4h → counterfactual outcomes (FolkForm v4.1)"},
 	WorkerClassificationFull:       {Module: "crm", Domain: "customer", Description: "Refresh toàn bộ phân loại khách hàng (lifecycle, journey, momentum) — 24h"},
 	WorkerClassificationSmart:      {Module: "crm", Domain: "customer", Description: "Refresh phân loại thông minh — chỉ khách gần ngưỡng lifecycle — 6h"},
-	WorkerCixAnalysis:              {Module: "cix", Domain: "cix", Description: "Phân tích hội thoại từ cix_pending_analysis qua Rule Engine"},
-	WorkerCixRequest:               {Module: "cix", Domain: "cix", Description: "Consume cix.analysis_requested → EnqueueAnalysis (event-driven)"},
+	WorkerCixIntelCompute:          {Module: "cix", Domain: "cix", Description: "Poll cix_intel_compute — Raw→L1→L2→L3 qua Rule Engine (cùng quy ước *_intel_compute); enqueue từ AI Decision consumer (cix.analysis_requested)"},
 	WorkerAIDecisionConsumer:       {Module: "aidecision", Domain: "aidecision", Description: "Consume decision_events_queue (PriorityCritical). Bypass pause/throttle: WORKER_AI_DECISION_CONSUMER_IGNORE_RESOURCE_THROTTLE=1"},
 	WorkerAIDecisionDebounce:       {Module: "aidecision", Domain: "aidecision", Description: "Flush debounce state hết window → emit message.batch_ready"},
 	WorkerAIDecisionClosure:        {Module: "aidecision", Domain: "aidecision", Description: "Đóng case quá hạn với closed_timeout"},
-	WorkerOrderIntelligencePending: {Module: "orderintel", Domain: "order", Description: "Poll order_intelligence_pending — tính Raw→L1→L2→L3→Flags, emit order.flags_emitted / commerce.order_completed"},
+	WorkerOrderIntelCompute: {Module: "orderintel", Domain: "order", Description: "Poll order_intel_compute — tính Raw→L1→L2→L3→Flags, emit order_intel_recomputed"},
+	WorkerAdsIntelCompute: {Module: "ads", Domain: "ads", Description: "Poll ads_intel_compute — ApplyAdsIntelligenceRecompute / RecalculateAll (không tính trong consumer AI Decision)"},
 	WorkerCrmContext:               {Module: "crm", Domain: "customer", Description: "Consume customer.context_requested → load customer → emit customer.context_ready"},
+	WorkerCrmIntelCompute:   {Module: "crm", Domain: "customer", Description: "Poll crm_intel_compute — RefreshMetrics / Recalculate* / classification_refresh (không tính trong consumer AI Decision)"},
 	WorkerLearningRuleSuggestion:   {Module: "learning", Domain: "learning", Description: "Phân tích learning_cases → tạo rule suggestions (Phase 3, LEARNING_RULE_SUGGESTION_ENABLED=true)"},
 	WorkerLearningEvaluation:       {Module: "learning", Domain: "learning", Description: "Batch tính evaluation (outcome_class, error_attribution) cho learning_cases"},
 	WorkerLearningInsightAggregate: {Module: "learning", Domain: "learning", Description: "Aggregate anonymized learning stats cross-merchant (Phase 3)"},
@@ -121,13 +123,14 @@ var defaultWorkerPriorities = map[string]Priority{
 	WorkerAdsCounterfactual:        PriorityLow,
 	WorkerClassificationFull:       PriorityLowest,
 	WorkerClassificationSmart:      PriorityLowest,
-	WorkerCixAnalysis:              PriorityNormal,
-	WorkerCixRequest:               PriorityHigh,
+	WorkerCixIntelCompute:          PriorityNormal,
 	WorkerAIDecisionConsumer:       PriorityCritical, // Paused (RAM/CPU): chỉ Critical còn chạy — consumer không được để High
 	WorkerAIDecisionDebounce:       PriorityNormal,
 	WorkerAIDecisionClosure:        PriorityLow,
-	WorkerOrderIntelligencePending: PriorityHigh,
+	WorkerOrderIntelCompute: PriorityHigh,
+	WorkerAdsIntelCompute: PriorityHigh,
 	WorkerCrmContext:               PriorityNormal,
+	WorkerCrmIntelCompute:   PriorityHigh,
 	WorkerLearningRuleSuggestion:   PriorityLowest,
 	WorkerLearningEvaluation:       PriorityLowest,
 	WorkerLearningInsightAggregate: PriorityLowest,
@@ -172,13 +175,14 @@ var AllWorkerNames = []string{
 	WorkerAdsExecution, WorkerAdsAutoPropose, WorkerAdsCircuitBreaker,
 	WorkerAdsDailyScheduler, WorkerAdsPancakeHeartbeat, WorkerAdsCounterfactual,
 	WorkerClassificationFull, WorkerClassificationSmart,
-	WorkerCixAnalysis,
-	WorkerCixRequest,
+	WorkerCixIntelCompute,
 	WorkerAIDecisionConsumer,
 	WorkerAIDecisionDebounce,
 	WorkerAIDecisionClosure,
-	WorkerOrderIntelligencePending,
+	WorkerOrderIntelCompute,
+	WorkerAdsIntelCompute,
 	WorkerCrmContext,
+	WorkerCrmIntelCompute,
 	WorkerLearningRuleSuggestion,
 	WorkerLearningEvaluation,
 	WorkerLearningInsightAggregate,

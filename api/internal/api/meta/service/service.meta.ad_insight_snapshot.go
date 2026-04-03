@@ -11,6 +11,8 @@ import (
 
 	metamodels "meta_commerce/internal/api/meta/models"
 	"meta_commerce/internal/global"
+	"meta_commerce/internal/utility"
+	"meta_commerce/internal/utility/identity"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -61,7 +63,15 @@ func SaveDailySnapshot(ctx context.Context, doc *metamodels.MetaAdInsight) error
 		CreatedAt:           nowMs,
 		ExpiresAt:           now.Add(7 * 24 * time.Hour), // TTL 7 ngày
 	}
-	_, err := coll.InsertOne(ctx, snap)
+	dataMap, err := utility.ToMap(snap)
+	if err != nil {
+		return fmt.Errorf("snapshot ToMap: %w", err)
+	}
+	dataMap["_id"] = primitive.NewObjectID()
+	if err := identity.EnrichIdentity4Layers(ctx, global.MongoDB_ColNames.MetaAdInsightsDailySnapshots, dataMap, nil); err != nil {
+		return fmt.Errorf("enrich identity snapshot: %w", err)
+	}
+	_, err = coll.InsertOne(ctx, dataMap)
 	return err
 }
 

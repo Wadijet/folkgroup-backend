@@ -11,6 +11,7 @@ import (
 	"meta_commerce/internal/approval"
 	"meta_commerce/internal/utility"
 
+	"meta_commerce/internal/api/aidecision/eventtypes"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -19,10 +20,10 @@ import (
 // Event types cho propose request (Vision 08 event-driven).
 const (
 	// EventTypeExecutorProposeRequested — chuẩn duy nhất: mọi domain (payload.domain).
-	EventTypeExecutorProposeRequested = "executor.propose_requested"
+	EventTypeExecutorProposeRequested = eventtypes.ExecutorProposeRequested
 	// EventTypeAdsProposeRequested — alias lịch sử; consumer xử lý giống executor.propose_requested.
-	EventTypeAdsProposeRequested = "ads.propose_requested"
-	EventTypeExecuteRequested    = "aidecision.execute_requested" // AI Decision: chỉ worker được gọi ExecuteWithCase
+	EventTypeAdsProposeRequested = eventtypes.AdsProposeRequested
+	EventTypeExecuteRequested    = eventtypes.AIDecisionExecuteRequested // AI Decision: chỉ worker được gọi ExecuteWithCase
 )
 
 // EmitExecutorProposeRequest ghi queue AI Decision — không gọi approval.Propose trực tiếp từ API domain.

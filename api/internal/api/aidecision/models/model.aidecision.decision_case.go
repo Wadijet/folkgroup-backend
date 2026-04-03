@@ -57,7 +57,7 @@ type DecisionCase struct {
 	CreatedAt int64 `json:"createdAt" bson:"createdAt"`
 	UpdatedAt int64 `json:"updatedAt" bson:"updatedAt"`
 
-	// LastAdsContextRequestedAt — ms, lần cuối emit ads.context_requested; dùng cooldown tránh nhân job queue khi meta_campaign.updated dồn dập.
+	// LastAdsContextRequestedAt — ms, lần cuối emit ads.context_requested; dùng cooldown tránh nhân job queue khi campaign_intel_recomputed / meta_campaign.updated dồn dập.
 	LastAdsContextRequestedAt int64 `json:"lastAdsContextRequestedAt,omitempty" bson:"lastAdsContextRequestedAt,omitempty"`
 }
 

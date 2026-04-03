@@ -5,31 +5,33 @@ import (
 	"strings"
 
 	"meta_commerce/internal/api/aidecision/decisionlive"
+	"meta_commerce/internal/api/aidecision/eventtypes"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 )
 
 const maxQueueErrRunes = 400
 
-// QueueMilestone — mốc vòng đời consumer cho một job queue (mỗi lần publish queue = một DecisionLiveEvent trên timeline).
+// QueueMilestone — Mốc trong vòng đời xử lý một job trên hàng đợi; mỗi mốc tương ứng một DecisionLiveEvent trên timeline live.
 type QueueMilestone int
 
 const (
-	QueueMilestoneProcessingStart QueueMilestone = iota // lease → sắp dispatch
-	QueueMilestoneDatachangedDone                       // applyDatachangedSideEffects xong
-	QueueMilestoneHandlerDone                           // processEvent thành công
-	QueueMilestoneHandlerError                          // processEvent lỗi
-	QueueMilestoneRoutingSkipped                        // routing noop
-	QueueMilestoneNoHandler                             // chưa đăng ký handler
+	QueueMilestoneProcessingStart QueueMilestone = iota // Worker đã nhận job, sắp xử lý
+	QueueMilestoneDatachangedDone                       // Đã xong bước chuẩn bị sau datachanged (nếu có)
+	QueueMilestoneHandlerDone                           // Handler nghiệp vụ chạy xong, không lỗi
+	QueueMilestoneHandlerError                          // Có lỗi khi chạy handler
+	QueueMilestoneRoutingSkipped                        // Bỏ qua theo quy tắc routing (noop)
+	QueueMilestoneNoHandler                             // Chưa có handler cho loại sự kiện
 )
 
-// BuildQueueConsumerEvent dựng DecisionLiveEvent: tóm tắt cho vận hành (tiêu đề + gạch đầu dòng ngắn).
+// BuildQueueConsumerEvent — Dựng DecisionLiveEvent cho timeline: tóm tắt và gạch đầu dòng ưu tiên người xem không chuyên kỹ thuật.
 func BuildQueueConsumerEvent(evt *aidecisionmodels.DecisionEvent, ms QueueMilestone, processErr error, extraBullets []string) decisionlive.DecisionLiveEvent {
 	dn := DomainNarrativeFromQueueEvent(evt)
 	bullets := queueStructuredBullets(evt, ms, dn, processErr)
 	bullets = append(bullets, extraBullets...)
-	if eid := strings.TrimSpace(evt.EventID); eid != "" {
+	// Chỉ hiện mã theo dõi ở mốc đầu để tránh lặp lại giữa các bước trên cùng một yêu cầu.
+	if eid := strings.TrimSpace(evt.EventID); eid != "" && ms == QueueMilestoneProcessingStart {
 		bullets = append([]string{
-			"Mã tác vụ: " + eid + " — cùng một luồng theo dõi có thể có nhiều lần xử lý (nhiều đợt cập nhật).",
+			"Mã theo dõi yêu cầu: " + eid + ". (Cùng một luồng có thể có thêm yêu cầu khác nếu dữ liệu cập nhật nhiều lần.)",
 		}, bullets...)
 	}
 	sections := queueDetailSections(evt, ms, processErr)
@@ -40,7 +42,7 @@ func BuildQueueConsumerEvent(evt *aidecisionmodels.DecisionEvent, ms QueueMilest
 		Summary:          summary,
 		ReasoningSummary: rs,
 		SourceKind:       decisionlive.SourceQueue,
-		SourceTitle:      evt.EventType,
+		SourceTitle:      queueFriendlyEventLabel(evt),
 		CorrelationID:    evt.CorrelationID,
 		DecisionCaseID:   decisionCaseIDFromQueuePayload(evt),
 		Refs:             decisionlive.RefsFromDecisionEventEnvelope(evt),
@@ -69,17 +71,37 @@ func decisionCaseIDFromQueuePayload(evt *aidecisionmodels.DecisionEvent) string 
 	return ""
 }
 
+// isDatachangedCustomerMirrorOnly — datachanged khách POS/FB/CRM: không có handler «bước chính» trên consumer;
+// merge CRM / báo cáo / ads chỉ chạy trong applyDatachangedSideEffects (mốc DATACHANGED_EFFECTS).
+func isDatachangedCustomerMirrorOnly(evt *aidecisionmodels.DecisionEvent) bool {
+	if evt == nil || evt.EventSource != "datachanged" {
+		return false
+	}
+	et := strings.TrimSpace(evt.EventType)
+	for _, p := range []string{"pos_customer.", "fb_customer.", "crm_customer."} {
+		if strings.HasPrefix(et, p) {
+			return true
+		}
+	}
+	return false
+}
+
 func queueSummaryForMilestone(ms QueueMilestone, dn DomainNarrative, evt *aidecisionmodels.DecisionEvent, processErr error) (phase, severity, summary, reasoningSummary string) {
 	reasoningSummary = dn.BusinessOneLine
 	switch ms {
 	case QueueMilestoneProcessingStart:
 		phase = decisionlive.PhaseQueueProcessing
 		severity = decisionlive.SeverityInfo
-		summary = fmt.Sprintf("Đang xử lý: %s — %s", dn.StepTitle, truncateOneLine(dn.BusinessOneLine, 160))
+		// Dòng tóm tắt ngắn; bối cảnh nằm ở ReasoningSummary / chi tiết — tránh nhồi hai câu dài giống nhau giữa các mốc.
+		summary = fmt.Sprintf("Bắt đầu xử lý: %s", dn.StepTitle)
 	case QueueMilestoneDatachangedDone:
 		phase = decisionlive.PhaseDatachangedEffects
 		severity = decisionlive.SeverityInfo
-		summary = fmt.Sprintf("Đã đồng bộ phần phụ sau khi dữ liệu đổi — %s — tiếp theo là bước chính.", dn.StepTitle)
+		if isDatachangedCustomerMirrorOnly(evt) {
+			summary = fmt.Sprintf("Đã xong đồng bộ phụ (CRM, báo cáo, xếp hàng phân tích… nếu áp dụng). Loại «%s» không có thêm bước xử lý chính trên hàng đợi.", queueFriendlyEventLabel(evt))
+		} else {
+			summary = fmt.Sprintf("Đã xong phần chuẩn bị (đồng bộ phụ). Tiếp theo: %s", dn.StepTitle)
+		}
 	case QueueMilestoneHandlerDone:
 		phase = decisionlive.PhaseQueueDone
 		severity = decisionlive.SeverityInfo
@@ -91,15 +113,20 @@ func queueSummaryForMilestone(ms QueueMilestone, dn DomainNarrative, evt *aideci
 		if processErr != nil {
 			errStr = truncateRunes(processErr.Error(), maxQueueErrRunes)
 		}
-		summary = fmt.Sprintf("Lỗi: %s — %s (%s)", errStr, dn.StepTitle, truncateOneLine(dn.BusinessOneLine, 120))
+		summary = fmt.Sprintf("Có lỗi khi xử lý «%s»: %s", dn.StepTitle, errStr)
 	case QueueMilestoneRoutingSkipped:
 		phase = decisionlive.PhaseSkipped
 		severity = decisionlive.SeverityInfo
-		summary = fmt.Sprintf("Bỏ qua theo cấu hình — %s — loại việc này không cần xử lý sâu.", dn.StepTitle)
+		summary = fmt.Sprintf("Không cần xử lý thêm cho «%s» — đúng cấu hình hệ thống.", dn.StepTitle)
 	case QueueMilestoneNoHandler:
 		phase = decisionlive.PhaseSkipped
-		severity = decisionlive.SeverityWarn
-		summary = fmt.Sprintf("Chưa hỗ trợ loại «%s» — %s. Liên hệ kỹ thuật nếu cần bật.", evt.EventType, dn.StepTitle)
+		if isDatachangedCustomerMirrorOnly(evt) {
+			severity = decisionlive.SeverityInfo
+			summary = fmt.Sprintf("Kết thúc luồng «%s»: không có pipeline/case AI riêng — phần merge CRM và side-effect đã nằm ở bước đồng bộ phụ phía trên.", queueFriendlyEventLabel(evt))
+		} else {
+			severity = decisionlive.SeverityWarn
+			summary = fmt.Sprintf("Chưa hỗ trợ kiểu việc này («%s»). Liên hệ kỹ thuật nếu bạn kỳ vọng có xử lý.", queueFriendlyEventLabel(evt))
+		}
 	default:
 		phase = decisionlive.PhaseQueueProcessing
 		severity = decisionlive.SeverityInfo
@@ -108,100 +135,166 @@ func queueSummaryForMilestone(ms QueueMilestone, dn DomainNarrative, evt *aideci
 	return phase, severity, summary, reasoningSummary
 }
 
+// queueFriendlyEventLabel — nhãn hiển thị ngắn (tiếng Việt); mã kỹ thuật vẫn nằm trong refs khi cần tra cứu.
+func queueFriendlyEventLabel(evt *aidecisionmodels.DecisionEvent) string {
+	if evt == nil {
+		return ""
+	}
+	et := strings.TrimSpace(evt.EventType)
+	switch et {
+	case eventtypes.OrderInserted, eventtypes.OrderUpdated:
+		return "Đơn hàng"
+	case eventtypes.OrderIntelRecomputed:
+		return "Phân tích đơn"
+	case eventtypes.ConversationInserted, eventtypes.ConversationUpdated, eventtypes.MessageInserted, eventtypes.MessageUpdated:
+		return "Hội thoại / tin nhắn"
+	case eventtypes.ConversationMessageInserted, eventtypes.MessageBatchReady:
+		return "Tin nhắn (gom lô)"
+	case eventtypes.CustomerContextReady:
+		return "Thông tin khách"
+	case eventtypes.CrmIntelRecomputed:
+		return "Phân tích khách"
+	case eventtypes.CixIntelRecomputed:
+		return "Phân tích hội thoại"
+	case eventtypes.CampaignIntelRecomputed, eventtypes.MetaCampaignInserted, eventtypes.MetaCampaignUpdated:
+		return "Quảng cáo / chiến dịch"
+	case eventtypes.AdsContextRequested, eventtypes.AdsContextReady:
+		return "Ngữ cảnh quảng cáo"
+	case eventtypes.CrmIntelligenceComputeRequested, eventtypes.CrmIntelligenceRecomputeRequested:
+		return "Cập nhật chỉ số khách"
+	case eventtypes.PosCustomerInserted, eventtypes.PosCustomerUpdated:
+		return "Khách hàng POS"
+	case eventtypes.FbCustomerInserted, eventtypes.FbCustomerUpdated:
+		return "Khách hàng Facebook"
+	case eventtypes.CrmCustomerInserted, eventtypes.CrmCustomerUpdated:
+		return "Khách CRM (đã merge)"
+	default:
+		if et != "" {
+			return et
+		}
+		return "AI Decision"
+	}
+}
+
 func queueStructuredBullets(evt *aidecisionmodels.DecisionEvent, ms QueueMilestone, dn DomainNarrative, processErr error) []string {
-	srcVi := "khác"
+	lineViệc := fmt.Sprintf("Việc đang làm: %s.", dn.StepTitle)
+	var lineNguồn string
 	switch evt.EventSource {
 	case "datachanged":
-		srcVi = "sau khi dữ liệu vừa cập nhật"
+		lineNguồn = "Có thay đổi dữ liệu trên hệ thống vừa được ghi lại — các bước sau sẽ dựa trên bản mới nhất."
 	case "aidecision":
-		srcVi = "từ luồng AI Decision"
+		lineNguồn = "Đây là bước tiếp theo trong luồng xử lý tự động (sau khi một bước trước hoàn tất)."
+	case "debounce":
+		lineNguồn = "Sau khi gom các cập nhật tin nhắn trong một khoảng thời gian ngắn."
+	case "orderintel", "cix_intel", "crm", "meta_ads_intel":
+		lineNguồn = "Kết quả từ bước phân tích / đồng bộ chuyên sâu vừa sẵn sàng."
+	default:
+		if strings.TrimSpace(evt.EventSource) != "" {
+			lineNguồn = "Yêu cầu từ hệ thống (bước nối tiếp trong quy trình)."
+		}
 	}
-	in := fmt.Sprintf("Loại việc: %s — nguồn: %s", evt.EventType, srcVi)
-	if evt.EntityType != "" || evt.EntityID != "" {
-		in += fmt.Sprintf(" — đối tượng: %s %s", evt.EntityType, evt.EntityID)
-	}
-	mech := "Trình tự: hệ thống nhận việc vào hàng đợi"
-	if evt.EventSource == "datachanged" && (ms == QueueMilestoneProcessingStart || ms == QueueMilestoneDatachangedDone) {
-		mech += " → đồng bộ các phần phụ (nếu có) → thực hiện đúng loại việc."
-	} else {
-		mech += " → đọc nội dung → thực hiện đúng loại việc."
-	}
-	var out string
+	var lineMốc string
 	switch ms {
 	case QueueMilestoneProcessingStart:
-		out = "Giai đoạn này: bắt đầu xử lý."
+		lineMốc = "Ở bước này: hệ thống vừa nhận yêu cầu và bắt đầu xử lý."
 	case QueueMilestoneDatachangedDone:
-		out = "Giai đoạn này: đã xong bước đồng bộ phụ; sắp tới là bước chính."
+		if isDatachangedCustomerMirrorOnly(evt) {
+			lineMốc = "Ở bước này: side-effect sau datachanged (merge CRM, báo cáo, ads…) đã chạy hoặc đã lên lịch; với loại khách POS/FB/CRM không còn handler «chính» sau đó."
+		} else {
+			lineMốc = "Ở bước này: đã xong phần đồng bộ phụ (CRM, báo cáo, xếp hàng phân tích… nếu áp dụng). Sắp chạy bước chính."
+		}
 	case QueueMilestoneHandlerDone:
-		out = "Giai đoạn này: đã xử lý xong tác vụ này."
+		lineMốc = "Ở bước này: đã hoàn tất toàn bộ xử lý cho yêu cầu này."
 	case QueueMilestoneHandlerError:
-		out = "Giai đoạn này: có lỗi — hệ thống có thể thử lại."
+		lineMốc = "Ở bước này: xử lý không thành công — có thể được thử lại."
 		if processErr != nil {
-			out += " " + truncateRunes(processErr.Error(), 200)
+			lineMốc += " Thông báo: " + truncateRunes(processErr.Error(), 200)
 		}
 	case QueueMilestoneRoutingSkipped:
-		out = "Giai đoạn này: dừng sớm theo cấu hình, không làm thêm."
+		lineMốc = "Ở bước này: hệ thống quyết định không cần làm thêm — không phải lỗi."
 	case QueueMilestoneNoHandler:
-		out = "Giai đoạn này: chưa có bước xử lý tương ứng."
+		if isDatachangedCustomerMirrorOnly(evt) {
+			lineMốc = "Ở bước này: đúng thiết kế — consumer không đăng ký bước case/pipeline sau cho mirror khách; không phải lỗi hay thiếu tính năng merge CRM."
+		} else {
+			lineMốc = "Ở bước này: chưa có quy trình xử lý tương ứng trên phiên bản hiện tại."
+		}
 	default:
-		out = "Xem tóm tắt phía trên."
+		lineMốc = "Xem dòng tóm tắt phía trên."
 	}
-	base := []string{in, mech, out}
+	base := []string{lineViệc}
+	if lineNguồn != "" {
+		base = append(base, lineNguồn)
+	}
+	base = append(base, lineMốc)
 	if len(dn.EntityBullets) > 0 {
 		base = append(base, dn.EntityBullets...)
 	}
 	return base
 }
 
-// queueDetailSections — diễn giải nội dung trong cùng một mốc queue (không tạo thêm mốc timeline).
+// queueDetailSections — Phần chi tiết trong cùng một mốc timeline (không tạo thêm live_event).
 func queueDetailSections(evt *aidecisionmodels.DecisionEvent, ms QueueMilestone, processErr error) []decisionlive.DecisionLiveDetailSection {
 	var steps []string
 	switch ms {
 	case QueueMilestoneProcessingStart:
 		steps = []string{
-			"Nhận job từ hàng đợi và gán phiên xử lý.",
-			"Xác định loại việc và đối tượng theo envelope.",
+			"Hệ thống đã lấy yêu cầu từ hàng chờ và bắt đầu xử lý.",
+			"Thông tin kèm theo (đơn, khách, chiến dịch…) được đọc để làm đúng việc.",
 		}
 		if evt != nil && evt.EventSource == "datachanged" {
-			steps = append(steps, "Chạy phần phụ sau khi dữ liệu đổi (nếu có), trước bước chính.")
+			steps = append(steps, "Nếu có thay đổi dữ liệu nguồn: có thể chạy trước các bước đồng bộ phụ (CRM, báo cáo, xếp hàng phân tích), rồi mới tới bước chính.")
 		} else {
-			steps = append(steps, "Đọc payload và chuẩn bị handler tương ứng loại việc.")
+			steps = append(steps, "Tiếp theo là bước xử lý đúng với loại việc này.")
 		}
 	case QueueMilestoneDatachangedDone:
-		steps = []string{
-			"Đã xong bước đồng bộ phụ sau khi dữ liệu đổi.",
-			"Chuyển sang xử lý chính theo đúng loại việc.",
+		if isDatachangedCustomerMirrorOnly(evt) {
+			steps = []string{
+				"Với cập nhật khách POS / Facebook / CRM chỉ mirror: consumer xếp job vào crm_pending_ingest (CrmIngestWorker mới merge vào crm_customers).",
+				"Sau đó consumer đóng job ở trạng thái «không có handler chính» — không phải lỗi.",
+			}
+		} else {
+			steps = []string{
+				"Các bước chuẩn bị sau khi dữ liệu đổi (nếu có) đã xong.",
+				"Chuyển sang bước chính: ví dụ cập nhật hồ sơ rủi ro đơn, xếp hàng phân tích, v.v.",
+			}
 		}
 	case QueueMilestoneHandlerDone:
 		steps = []string{
-			"Handler đã chạy xử lý nghiệp vụ theo loại việc.",
-			"Hoàn tất thành công — kết thúc lượt queue này.",
+			"Toàn bộ xử lý nghiệp vụ cho yêu cầu này đã hoàn tất.",
+			"Không còn bước nào trên hàng chờ cho mã yêu cầu này.",
 		}
 	case QueueMilestoneHandlerError:
 		steps = []string{
-			"Có lỗi trong lúc xử lý (chi tiết ở tóm tắt phía trên).",
-			"Có thể thử lại hoặc cần tra log / hỗ trợ kỹ thuật.",
+			"Có lỗi trong lúc xử lý — phần tóm tắt phía trên có thể có thông báo ngắn.",
+			"Hệ thống có thể tự thử lại; nếu lỗi lặp lại, cần xem nhật ký hoặc liên hệ kỹ thuật.",
 		}
 		if processErr != nil {
-			steps = append(steps, "Gợi ý: kiểm tra thông báo lỗi ngắn gọn đi kèm mốc này.")
+			steps = append(steps, "Chi tiết kỹ thuật có thể xuất hiện trong ô lỗi kèm theo.")
 		}
 	case QueueMilestoneRoutingSkipped:
 		steps = []string{
-			"Routing xác định không cần xử lý sâu cho loại việc này.",
-			"Dừng tại đây — không chạy handler nghiệp vụ đầy đủ.",
+			"Theo cấu hình, loại việc này không cần chạy thêm bước sâu.",
+			"Dừng tại đây là đúng thiết kế, không phải sự cố.",
 		}
 	case QueueMilestoneNoHandler:
-		steps = []string{
-			"Loại việc chưa có handler trên môi trường này.",
-			"Cần bật cấu hình hoặc cập nhật phiên bản nếu đây là tính năng mong đợi.",
+		if isDatachangedCustomerMirrorOnly(evt) {
+			steps = []string{
+				"consumer_dispatch không đăng ký handler cho pos_customer.* / fb_customer.* / crm_customer.* — enqueue CRM ingest trong applyDatachangedSideEffects, merge thực tế ở CrmIngestWorker.",
+				"Nếu crm_customers vẫn trống: kiểm tra CrmIngestWorker và backlog crm_pending_ingest, log [CRM], ownerOrganizationId / customerId trên bản ghi nguồn.",
+			}
+		} else {
+			steps = []string{
+				"Phiên bản hệ thống hiện tại chưa có quy trình xử lý cho kiểu việc này.",
+				"Nếu bạn cần tính năng này: kiểm tra cập nhật phần mềm hoặc cấu hình.",
+			}
 		}
 	default:
 		steps = []string{
-			"Theo dõi tóm tắt phía trên — mỗi mốc trên timeline là một live_event riêng.",
+			"Mỗi mốc trên dòng thời gian là một bước riêng — đọc theo thứ tự từ trên xuống.",
 		}
 	}
 	return []decisionlive.DecisionLiveDetailSection{
-		{Title: "Diễn giải trong mốc này", Items: steps},
+		{Title: "Giải thích thêm cho bước này", Items: steps},
 	}
 }
 

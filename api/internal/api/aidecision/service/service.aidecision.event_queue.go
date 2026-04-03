@@ -10,8 +10,9 @@ import (
 	"strings"
 	"time"
 
-	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 	"meta_commerce/internal/api/aidecision/decisionlive"
+	"meta_commerce/internal/api/aidecision/eventtypes"
+	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/traceutil"
 	"meta_commerce/internal/utility"
@@ -398,17 +399,15 @@ func (s *AIDecisionService) FailEvent(ctx context.Context, eventID string, retry
 // DefaultLaneForEventType map event_type → lane mặc định.
 func DefaultLaneForEventType(eventType string) string {
 	switch eventType {
-	case "conversation.message_inserted", "message.batch_ready",
-		"conversation.inserted", "conversation.updated", "message.inserted", "message.updated",
-		"conversation.intelligence_requested",
-		"cix_analysis_result.inserted", "cix_analysis_result.updated",
-		"cix.analysis_requested", "cix.analysis_completed", "customer.context_requested", "customer.context_ready",
-		"order.inserted", "order.updated", "order.recompute_requested", "order.flags_emitted",
-		"order.intelligence_requested", // Order Intelligence — cùng lane fast với order.*
-		"commerce.order_completed",
+	case eventtypes.ConversationMessageInserted, eventtypes.MessageBatchReady,
+		eventtypes.ConversationInserted, eventtypes.ConversationUpdated, eventtypes.MessageInserted, eventtypes.MessageUpdated,
+		eventtypes.CixAnalysisRequested, eventtypes.CustomerContextRequested, eventtypes.CustomerContextReady,
+		eventtypes.OrderInserted, eventtypes.OrderUpdated, eventtypes.OrderRecomputeRequested,
+		eventtypes.OrderIntelligenceRequested, // Order Intelligence — cùng lane fast với order.*
+		eventtypes.OrderIntelRecomputed, eventtypes.CixIntelRecomputed,
 		EventTypeExecutorProposeRequested, EventTypeAdsProposeRequested, EventTypeExecuteRequested:
 		return aidecisionmodels.EventLaneFast
-	case "ads.updated", "ads.context_ready", "ads.context_requested":
+	case eventtypes.AdsUpdated, eventtypes.AdsContextReady, eventtypes.AdsContextRequested:
 		return aidecisionmodels.EventLaneBatch
 	default:
 		return aidecisionmodels.EventLaneNormal

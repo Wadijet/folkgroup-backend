@@ -383,7 +383,7 @@ func formatAmountVND(amount float64) string {
 // Một điểm vào duy nhất cho backfill, worker, recalculate — đảm bảo cả CIO và Customer đều được cập nhật.
 // Trả về (logged bool, err error): logged=true nếu đã ghi activity; logged=false nếu không resolve được (bỏ qua).
 func (s *CrmCustomerService) IngestConversationTouchpoint(ctx context.Context, customerId string, ownerOrgID primitive.ObjectID, conversationId string, skipIfExists bool, convDoc *fbmodels.FbConversation) (bool, error) {
-	// Thay đổi fb_conversations: EmitDataChanged → decision_events_queue → consumer AI Decision → crmingest (không gọi CRM từ hook).
+	// Thay đổi fb_conversations: EmitDataChanged → decision_events_queue → consumer AI Decision → miền crm/datachanged (không gọi CRM từ hook).
 	if customerId == "" {
 		return false, nil
 	}

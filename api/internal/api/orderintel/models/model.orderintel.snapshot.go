@@ -5,12 +5,13 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// OrderIntelligenceSnapshot bản ghi tính toán theo đơn (upsert theo orderUid + org).
+// OrderIntelligenceSnapshot bản ghi tính toán theo đơn — bám Unified Data Contract:
+// orderUid = canonical ord_* (lớp 2), có thể rỗng; khi rỗng upsert theo orderId POS + ownerOrganizationId (lớp 3 external + tenant).
 type OrderIntelligenceSnapshot struct {
 	ID                  primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"`
-	OrderUid            string             `json:"orderUid" bson:"orderUid" index:"compound:order_intel_uid_org"`
+	OrderUid            string             `json:"orderUid" bson:"orderUid" index:"compound:order_intel_uid_org"` // ord_*; để trống nếu đơn chưa gán uid chuẩn
 	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"compound:order_intel_uid_org"`
-	OrderID             int64              `json:"orderId,omitempty" bson:"orderId,omitempty"` // Pancake POS id
+	OrderID             int64              `json:"orderId,omitempty" bson:"orderId,omitempty"` // ID đơn trên Pancake POS (sourceIds.pos / PosData.id)
 	Layer1              OrderLayer1        `json:"layer1" bson:"layer1"`
 	Layer2              OrderLayer2        `json:"layer2" bson:"layer2"`
 	Layer3              OrderLayer3        `json:"layer3" bson:"layer3"`

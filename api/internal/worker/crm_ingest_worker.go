@@ -6,14 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
-
+	crmdec "meta_commerce/internal/api/crm/datachanged"
 	crmmodels "meta_commerce/internal/api/crm/models"
 	crmvc "meta_commerce/internal/api/crm/service"
-	"meta_commerce/internal/api/events"
-	fbmodels "meta_commerce/internal/api/fb/models"
-	pcmodels "meta_commerce/internal/api/pc/models"
-	"meta_commerce/internal/global"
 	"meta_commerce/internal/logger"
 	"meta_commerce/internal/worker/metrics"
 )
@@ -139,6 +134,13 @@ func (w *CrmIngestWorker) Start(ctx context.Context) {
 							"collection": item.CollectionName,
 							"id":         item.ID.Hex(),
 						}).Warn("📋 [CRM_INGEST] Xử lý job lỗi")
+					} else {
+						if nerr := crmdec.NotifyIntelRefreshAfterIngestIfNeeded(ctx, &item); nerr != nil {
+							log.WithError(nerr).WithFields(map[string]interface{}{
+								"collection": item.CollectionName,
+								"id":         item.ID.Hex(),
+							}).Debug("📋 [CRM_INGEST] Thông báo intel refresh sau ingest (AID debounce)")
+						}
 					}
 					if setErr := crmvc.SetCrmIngestProcessed(ctx, item.ID, errStr); setErr != nil {
 						log.WithError(setErr).Warn("📋 [CRM_INGEST] SetCrmIngestProcessed thất bại")
@@ -177,87 +179,8 @@ func (w *CrmIngestWorker) processItem(ctx context.Context, customerSvc *crmvc.Cr
 		}
 	}
 
-	switch collectionName {
-	case global.MongoDB_ColNames.PcPosCustomers:
-		var doc pcmodels.PcPosCustomer
-		if err := bsonMapToStruct(item.Document, &doc); err != nil {
-			return err
-		}
-		return customerSvc.MergeFromPosCustomer(ctx, &doc, 0)
-
-	case global.MongoDB_ColNames.FbCustomers:
-		var doc fbmodels.FbCustomer
-		if err := bsonMapToStruct(item.Document, &doc); err != nil {
-			return err
-		}
-		return customerSvc.MergeFromFbCustomer(ctx, &doc, 0)
-
-	case global.MongoDB_ColNames.PcPosOrders:
-		var doc pcmodels.PcPosOrder
-		if err := bsonMapToStruct(item.Document, &doc); err != nil {
-			return err
-		}
-		customerId := doc.CustomerId
-		if customerId == "" {
-			if m, ok := doc.PosData["customer"].(map[string]interface{}); ok {
-				if id, ok := m["id"].(string); ok {
-					customerId = id
-				}
-			}
-		}
-		if customerId == "" {
-			return nil
-		}
-		channel := "offline"
-		if doc.PageId != "" {
-			channel = "online"
-		} else if doc.PosData != nil {
-			if pid, ok := doc.PosData["page_id"].(string); ok && pid != "" {
-				channel = "online"
-			}
-		}
-		return customerSvc.IngestOrderTouchpoint(ctx, customerId, ownerOrgID, doc.OrderId, item.Operation == events.OpUpdate, channel, false, &doc)
-
-	case global.MongoDB_ColNames.FbConvesations:
-		var doc fbmodels.FbConversation
-		if err := bsonMapToStruct(item.Document, &doc); err != nil {
-			return err
-		}
-		customerId := crmvc.ExtractConversationCustomerId(&doc)
-		if customerId == "" {
-			return nil
-		}
-		_, err := customerSvc.IngestConversationTouchpoint(ctx, customerId, ownerOrgID, doc.ConversationId, false, &doc)
-		return err
-
-	case global.MongoDB_ColNames.CrmNotes:
-		var doc crmmodels.CrmNote
-		if err := bsonMapToStruct(item.Document, &doc); err != nil {
-			return err
-		}
-		switch item.Operation {
-		case events.OpInsert:
-			return customerSvc.IngestNoteTouchpoint(ctx, doc.CustomerId, ownerOrgID, doc.ID.Hex(), false, &doc)
-		case events.OpUpdate:
-			if doc.IsDeleted {
-				return customerSvc.IngestNoteDeletedTouchpoint(ctx, doc.CustomerId, ownerOrgID, doc.ID.Hex(), &doc)
-			}
-			return customerSvc.IngestNoteUpdatedTouchpoint(ctx, doc.CustomerId, ownerOrgID, doc.ID.Hex(), &doc)
-		}
-		return nil
-
-	default:
+	if item.Document == nil {
 		return nil
 	}
-}
-
-func bsonMapToStruct(m bson.M, out interface{}) error {
-	if m == nil {
-		return nil
-	}
-	data, err := bson.Marshal(m)
-	if err != nil {
-		return err
-	}
-	return bson.Unmarshal(data, out)
+	return crmvc.ApplyCrmIngestFromDocument(ctx, customerSvc, collectionName, item.Operation, ownerOrgID, item.Document)
 }

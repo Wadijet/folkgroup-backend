@@ -2,12 +2,19 @@ package models
 
 import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
+
+	"meta_commerce/internal/utility/identity"
 )
 
 // MetaAd lưu thông tin Ad từ Meta Marketing API.
 // Các field có extract tag để lấy từ metaData khi ghi. CreativeId lấy từ metaData.creative.id.
 type MetaAd struct {
 	ID                  primitive.ObjectID     `json:"id,omitempty" bson:"_id,omitempty"`
+	// ===== IDENTITY 4 LỚP =====
+	Uid           string                       `json:"uid" bson:"uid" index:"single:1"`
+	SourceIds     map[string]string            `json:"sourceIds,omitempty" bson:"sourceIds,omitempty"`
+	SourceIdsMeta string                       `json:"-" bson:"sourceIds.meta,omitempty" index:"single:1,sparse"`
+	Links         map[string]identity.LinkItem `json:"links,omitempty" bson:"links,omitempty"`
 	AdId                string                 `json:"adId" bson:"adId" index:"unique;text;single:1,compound:meta_ad_lookup_unique;compound:meta_ad_by_adset" extract:"metaData\\.id,converter=string,required"`
 	AdSetId             string                 `json:"adSetId" bson:"adSetId" index:"text;single:1,compound:meta_ad_by_adset" extract:"metaData\\.adset_id,converter=string,optional"`
 	CampaignId          string                 `json:"campaignId" bson:"campaignId" index:"text" extract:"metaData\\.campaign_id,converter=string,optional"`

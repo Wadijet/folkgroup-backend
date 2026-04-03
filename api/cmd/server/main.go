@@ -464,6 +464,9 @@ func main() {
 	// CRM Ingest Worker
 	reg.Register(worker.WorkerCrmIngest, worker.NewCrmIngestWorker(30*time.Second, 50))
 
+	// CRM Intel Compute — poll crm_intel_compute (domain CRM; không tính trong consumer AI Decision)
+	reg.Register(worker.WorkerCrmIntelCompute, crmworker.NewCrmIntelComputeWorker(3*time.Second))
+
 	// CRM Bulk Worker
 	if w, err := worker.NewCrmBulkWorker(2*time.Minute, 2); err != nil {
 		log.WithError(err).Warn("Failed to create CRM Bulk Worker")
@@ -494,13 +497,10 @@ func main() {
 		reg.Register(worker.WorkerClassificationSmart, w)
 	}
 
-	// CIX Analysis Worker — poll cix_pending_analysis, phân tích hội thoại qua Rule Engine
-	reg.Register(worker.WorkerCixAnalysis, cixworker.NewCixAnalysisWorker(30*time.Second, 50))
+	// CIX Intel Compute — poll cix_intel_compute, phân tích hội thoại qua Rule Engine
+	reg.Register(worker.WorkerCixIntelCompute, cixworker.NewCixIntelComputeWorker(30*time.Second, 50))
 
-	// CIX Request Worker — consume cix.analysis_requested → EnqueueAnalysis (bắt buộc, bridge sang cix_pending_analysis)
-	reg.Register(worker.WorkerCixRequest, cixworker.NewCixRequestWorker(5*time.Second))
-
-	// AI Decision Consumer Worker — consume decision_events_queue, ResolveOrCreate case, bridge CIX
+	// AI Decision Consumer — decision_events_queue (gồm cix.analysis_requested → enqueue cix_intel_compute, giống CRM/Ads/Order)
 	reg.Register(worker.WorkerAIDecisionConsumer, aidecisionworker.NewAIDecisionConsumerWorker(2*time.Second))
 
 	// AI Decision Debounce Worker — flush debounce state hết window → message.batch_ready (chạy khi AI_DECISION_DEBOUNCE_ENABLED=true)
@@ -509,13 +509,16 @@ func main() {
 	// AI Decision Closure Worker — đóng case quá hạn với closed_timeout (AI_DECISION_CLOSURE_MAX_AGE_HOURS=24)
 	reg.Register(worker.WorkerAIDecisionClosure, aidecisionworker.NewAIDecisionClosureWorker(10*time.Minute))
 
-	// Order Intelligence Pending — poll order_intelligence_pending, tính Raw→L3→Flags tại domain
-	reg.Register(worker.WorkerOrderIntelligencePending, orderintelworker.NewOrderIntelligencePendingWorker(3*time.Second))
+	// Order Intel Compute — poll order_intel_compute, tính Raw→L3→Flags tại domain
+	reg.Register(worker.WorkerOrderIntelCompute, orderintelworker.NewOrderIntelComputeWorker(3*time.Second))
+
+	// Ads Intel Compute — poll ads_intel_compute (domain ads; không tính trong consumer AI Decision)
+	reg.Register(worker.WorkerAdsIntelCompute, adsworker.NewAdsIntelComputeWorker(3*time.Second))
 
 	// CRM Context Worker — consume customer.context_requested → load customer → emit customer.context_ready
 	reg.Register(worker.WorkerCrmContext, crmworker.NewCrmContextWorker(5*time.Second))
 
-	// ads.context_requested → ads.context_ready: xử lý bởi AI Decision Consumer (consumer_dispatch), snapshot từ meta_campaigns.
+	// ads.context_requested → enqueue ads_intel_compute (context_ready) → worker domain đọc meta_campaigns → emit ads.context_ready.
 
 	// Learning Rule Suggestion Worker — Phase 3: phân tích learning_cases → rule suggestions (LEARNING_RULE_SUGGESTION_ENABLED=true)
 	reg.Register(worker.WorkerLearningRuleSuggestion, learningworker.NewLearningRuleSuggestionWorker(1*time.Hour))

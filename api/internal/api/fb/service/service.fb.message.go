@@ -9,6 +9,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
@@ -17,6 +18,7 @@ import (
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/utility"
+	"meta_commerce/internal/utility/identity"
 
 	basesvc "meta_commerce/internal/api/base/service"
 )
@@ -178,12 +180,27 @@ func (s *FbMessageService) UpsertMessages(ctx context.Context, conversationId st
 		}
 	}
 
+	merge, errMerge := fbMessageMergeForIdentityEnrich(exists, existingDoc, conversationId, pageId, pageUsername, customerId, mergedPanCakeData, now, hasMore)
+	if errMerge != nil {
+		return existingDoc, errMerge
+	}
+	identity.ScrubEmptyIdentityFieldsFromSet(merge)
+	if err := identity.EnrichIdentity4Layers(ctx, global.MongoDB_ColNames.FbMessages, merge, nil); err != nil {
+		return existingDoc, fmt.Errorf("enrich identity fb_messages: %w", err)
+	}
+	setDoc := bson.M{}
+	for k, v := range merge {
+		if k == "_id" {
+			continue
+		}
+		setDoc[k] = v
+	}
 	update := bson.M{
-		"$set": bson.M{
-			"pageId": pageId, "pageUsername": pageUsername, "customerId": customerId,
-			"panCakeData": mergedPanCakeData, "lastSyncedAt": now, "hasMore": hasMore, "updatedAt": now,
+		"$set": setDoc,
+		"$setOnInsert": bson.M{
+			"createdAt": now,
+			"_id":       merge["_id"],
 		},
-		"$setOnInsert": bson.M{"createdAt": now},
 	}
 	opts := options.FindOneAndUpdate().SetUpsert(true).SetReturnDocument(options.After)
 	var metadataResult fbmodels.FbMessage
@@ -209,6 +226,30 @@ func (s *FbMessageService) UpsertMessages(ctx context.Context, conversationId st
 		return metadataResult, common.ConvertMongoError(err)
 	}
 	return updated, nil
+}
+
+// fbMessageMergeForIdentityEnrich merge bản ghi cũ (nếu có) với patch sync để EnrichIdentity4Layers.
+func fbMessageMergeForIdentityEnrich(exists bool, existing fbmodels.FbMessage, conversationId, pageId, pageUsername, customerId string, mergedPanCake map[string]interface{}, now int64, hasMore bool) (map[string]interface{}, error) {
+	var merge map[string]interface{}
+	if exists {
+		m, err := utility.ToMap(existing)
+		if err != nil {
+			return nil, err
+		}
+		merge = m
+	} else {
+		merge = make(map[string]interface{})
+		merge["_id"] = primitive.NewObjectID()
+	}
+	merge["conversationId"] = conversationId
+	merge["pageId"] = pageId
+	merge["pageUsername"] = pageUsername
+	merge["customerId"] = customerId
+	merge["panCakeData"] = mergedPanCake
+	merge["lastSyncedAt"] = now
+	merge["hasMore"] = hasMore
+	merge["updatedAt"] = now
+	return merge, nil
 }
 
 // RunUpsertMessagesFromJSON parse JSON body + validate + UpsertMessages (dùng chung HTTP và CIO ingest).

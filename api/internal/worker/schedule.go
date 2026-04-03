@@ -42,13 +42,14 @@ var defaultWorkerSchedules = map[string]struct {
 	WorkerAdsCounterfactual:   {30 * time.Minute, 0},
 	WorkerClassificationFull:  {24 * time.Hour, 200},
 	WorkerClassificationSmart: {6 * time.Hour, 200},
-	WorkerCixAnalysis:        {30 * time.Second, 50},  // poll cix_pending_analysis, batch 50
-	WorkerCixRequest:         {5 * time.Second, 1},    // consume cix.analysis_requested → EnqueueAnalysis
+	WorkerCixIntelCompute:    {30 * time.Second, 50}, // poll cix_intel_compute, batch 50
 	WorkerAIDecisionConsumer: {1 * time.Second, 1},    // idle giữa các lần queue trống; khi có hàng dùng busy-poll + burst (batchSize không dùng)
 	WorkerAIDecisionDebounce: {5 * time.Second, 1},    // flush debounce state hết window → message.batch_ready
 	WorkerAIDecisionClosure:  {10 * time.Minute, 1},   // đóng case quá hạn với closed_timeout
-	WorkerOrderIntelligencePending: {3 * time.Second, 1}, // poll order_intelligence_pending, 1 job/tick
+	WorkerOrderIntelCompute: {3 * time.Second, 1}, // poll order_intel_compute, 1 job/tick
+	WorkerAdsIntelCompute: {3 * time.Second, 1}, // poll ads_intel_compute, 1 job/tick
 	WorkerCrmContext:         {5 * time.Second, 1},   // consume customer.context_requested → emit customer.context_ready
+	WorkerCrmIntelCompute: {3 * time.Second, 1}, // poll crm_intel_compute, 1 job/tick
 	WorkerLearningRuleSuggestion: {1 * time.Hour, 1},   // Phase 3: phân tích learning_cases → rule suggestions
 	WorkerLearningEvaluation:     {5 * time.Minute, 50}, // Batch tính evaluation cho learning_cases
 	WorkerLearningInsightAggregate: {6 * time.Hour, 1}, // Phase 3: aggregate cross-merchant (anonymized)

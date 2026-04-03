@@ -4,16 +4,22 @@ package crmqueue
 
 import (
 	"context"
+	"strings"
 
 	"meta_commerce/internal/api/aidecision/eventemit"
+	"meta_commerce/internal/api/aidecision/eventtypes"
 	"meta_commerce/internal/api/aidecision/queuedepth"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// EventTypeCrmIntelligenceComputeRequested — worker CRM Intelligence (payload.operation phân nhánh).
-const EventTypeCrmIntelligenceComputeRequested = "crm.intelligence.compute_requested"
+// EventTypeCrmIntelligenceComputeRequested — consumer chỉ enqueue crm_intel_compute; worker domain CRM thực thi (payload.operation).
+const EventTypeCrmIntelligenceComputeRequested = eventtypes.CrmIntelligenceComputeRequested
+
+// EventTypeCrmIntelligenceRecomputeRequested — yêu cầu tính lại CRM intelligence (cùng dạng tên với ads.intelligence.recompute_requested).
+// Sau ingest worker: consumer AID debounce theo unifiedId rồi xếp crm_intel_compute (refresh).
+const EventTypeCrmIntelligenceRecomputeRequested = eventtypes.CrmIntelligenceRecomputeRequested
 
 // CrmComputeOperation — giá trị payload "operation".
 const (
@@ -69,6 +75,40 @@ func EmitCrmIntelligenceRefreshRequested(ctx context.Context, unifiedId string, 
 	return emitCrmIntelligenceCompute(ctx, CrmComputeOpRefresh, ownerOrgID, map[string]interface{}{
 		"unifiedId": unifiedId,
 	}, aidecisionmodels.EventLaneFast)
+}
+
+// EmitCrmIntelligenceRecomputeRequested — worker crm_pending_ingest sau merge thành công → queue AID (debounce → crm_intel_compute).
+func EmitCrmIntelligenceRecomputeRequested(ctx context.Context, unifiedID string, ownerOrgID primitive.ObjectID, sourceCollection, pendingIngestJobHex string) (string, error) {
+	unifiedID = strings.TrimSpace(unifiedID)
+	if unifiedID == "" || ownerOrgID.IsZero() {
+		return "", nil
+	}
+	payload := map[string]interface{}{
+		"unifiedId":     unifiedID,
+		"ownerOrgIdHex": ownerOrgID.Hex(),
+	}
+	if strings.TrimSpace(sourceCollection) != "" {
+		payload["sourceCollection"] = strings.TrimSpace(sourceCollection)
+	}
+	if strings.TrimSpace(pendingIngestJobHex) != "" {
+		payload["pendingIngestJobId"] = strings.TrimSpace(pendingIngestJobHex)
+	}
+	res, err := eventemit.EmitDecisionEvent(ctx, &eventemit.EmitInput{
+		EventType:   EventTypeCrmIntelligenceRecomputeRequested,
+		EventSource: "crm_ingest",
+		EntityType:  "crm_customer",
+		EntityID:    unifiedID,
+		OrgID:       ownerOrgID.Hex(),
+		OwnerOrgID:  ownerOrgID,
+		Priority:    "normal",
+		Lane:        aidecisionmodels.EventLaneNormal,
+		Payload:     payload,
+	})
+	if err != nil {
+		return "", err
+	}
+	_ = queuedepth.RefreshOrg(ctx, ownerOrgID)
+	return res.EventID, nil
 }
 
 // EmitCrmIntelligenceRecalculateOneRequested — thay RecalculateCustomerFromAllSources gọi trực tiếp.

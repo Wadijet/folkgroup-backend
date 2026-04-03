@@ -64,9 +64,6 @@ var scriptDatachangedSideEffectPolicy = `function evaluate(ctx) {
   ) {
     u = 3;
     reason = 'background_catalog_ads';
-  } else if (src === 'pc_orders') {
-    u = 3;
-    reason = 'background_legacy_orders';
   } else if (src === 'crm_notes' || src === 'crm_customers' || src === 'crm_activity_history') {
     u = 1;
     reason = 'realtime_crm_core';

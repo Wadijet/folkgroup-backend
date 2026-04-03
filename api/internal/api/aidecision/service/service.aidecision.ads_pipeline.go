@@ -1,20 +1,29 @@
-// Package aidecisionsvc — Khép luồng CIO → meta_campaign → ads.context_* (AI Decision).
+// Package aidecisionsvc — Luồng Ads: insight → recompute Intelligence (worker) → campaign_intel_recomputed (meta_ads_intel) → ads.context_*.
 // ACTION_RULE / đề xuất: adsautop + metasvc; ads.context_* trong consumer AID.
 // Ads Intelligence (rollup) chỉ raw/layer/alertFlags — không tính action trên pipeline Intelligence.
 //
-// Mỗi lần ProcessMetaCampaignDataChanged chạy: emit một job ads.context_requested → worker emit ads.context_ready → RunAdsProposeFromContextReady.
-// meta_campaign.updated có thể dồn dập (sync Meta) → nhiều job queue cho cùng một case. Cơ chế cooldown (ADS_CONTEXT_REQUEST_COOLDOWN_SEC + lastAdsContextRequestedAt) giảm trùng.
+// ProcessMetaCampaignDataChanged: đầu vào là campaign_intel_recomputed từ worker sau khi tính Intelligence xong; hoặc legacy meta_campaign.* từ hook datachanged (nếu bật emit Meta đầy đủ).
+// Mỗi lần chạy: emit ads.context_requested → enqueue ads_intel_compute (context_ready) → worker emit ads.context_ready → RunAdsProposeFromContextReady.
+// campaign_intel_recomputed / meta_campaign.updated dồn dập → cooldown (ADS_CONTEXT_REQUEST_COOLDOWN_SEC + lastAdsContextRequestedAt).
 package aidecisionsvc
 
 import (
 	"context"
 
+	"meta_commerce/internal/api/aidecision/eventtypes"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 
 	"github.com/sirupsen/logrus"
 )
 
-// ProcessMetaCampaignDataChanged: đồng bộ campaign (CIO/CRUD) → case ads_optimization → yêu cầu context Ads.
+// EventTypeCampaignIntelRecomputed — worker ads_intel sau recompute Intelligence; tách tên khỏi meta_campaign.* (datachanged CRUD).
+const EventTypeCampaignIntelRecomputed = eventtypes.CampaignIntelRecomputed
+
+// ProcessMetaCampaignDataChanged — bước 3 trong luồng Ads:
+// Đầu vào kỳ vọng: payload có campaignId + adAccountId (từ worker meta_ads_intel sau recompute, hoặc legacy datachanged).
+// - ResolveOrCreate case ads_optimization; AcquireAdsContextRequestSlot (cooldown).
+// - Emit ads.context_requested (chưa phải snapshot — chỉ xếp job bước 4).
+// Bỏ qua nếu adsIntelligenceRollupOnly (rollup metrics qua CRUD, không chạy lại pipeline).
 func (s *AIDecisionService) ProcessMetaCampaignDataChanged(ctx context.Context, evt *aidecisionmodels.DecisionEvent) error {
 	if evt == nil {
 		return nil
@@ -66,12 +75,12 @@ func (s *AIDecisionService) ProcessMetaCampaignDataChanged(ctx context.Context, 
 				"decisionCaseId": decisionCaseID,
 				"campaignId":     campaignID,
 				"cooldownSec":    AdsContextRequestThrottleCooldownSec(),
-			}).Debug("Luồng Ads: bỏ qua ads.context_requested — vẫn trong cooldown (giảm trùng queue khi meta_campaign.updated liên tục)")
+			}).Debug("Luồng Ads: bỏ qua ads.context_requested — vẫn trong cooldown (giảm trùng queue khi campaign_intel_recomputed / meta_campaign.updated liên tục)")
 			return nil
 		}
 		_, err = s.EmitEvent(ctx, &EmitEventInput{
-			EventType:     "ads.context_requested",
-			EventSource:   "aidecision",
+			EventType:     eventtypes.AdsContextRequested,
+			EventSource:   EventSourceAIDecision,
 			EntityType:    "campaign",
 			EntityID:      campaignID,
 			OrgID:         evt.OrgID,
@@ -95,8 +104,8 @@ func (s *AIDecisionService) ProcessMetaCampaignDataChanged(ctx context.Context, 
 	}
 
 	_, err = s.EmitEvent(ctx, &EmitEventInput{
-		EventType:     "ads.context_requested",
-		EventSource:   "aidecision",
+		EventType:     eventtypes.AdsContextRequested,
+		EventSource:   EventSourceAIDecision,
 		EntityType:    "campaign",
 		EntityID:      campaignID,
 		OrgID:         evt.OrgID,

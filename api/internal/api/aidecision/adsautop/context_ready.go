@@ -1,4 +1,5 @@
-// Package adsautop — Xử lý ads.context_ready theo chuẩn AI Decision: đọc Intelligence (flags) từ DB, ACTION_RULE, emit ads.propose_requested.
+// Package adsautop — Xử lý sự kiện «ngữ cảnh Ads đã sẵn sàng» (ads.context_ready): đọc số liệu phân tích đã lưu,
+// áp quy tắc hành động, lưu kết quả và xếp hàng đề xuất chờ duyệt (chuẩn AI Decision).
 package adsautop
 
 import (
@@ -21,30 +22,30 @@ import (
 	mongoopts "go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// RunAdsProposeFromContextReady sau ads.context_ready: lấy currentMetrics từ meta_campaigns (Intelligence — alertFlags/layers),
-// áp ACTION_RULE (metasvc), persist actions + emit ads.propose_requested (cùng chuẩn RunAutoPropose).
-// Ghi timeline decisionlive + cập nhật trạng thái case (ads_optimization_decision) cho UI.
-// Thiếu dữ liệu / không đủ điều kiện → closed_incomplete; rule không đề xuất hành động → closed_no_action; lỗi kỹ thuật → closed_failed (kèm lý do trong outcomeSummary).
-// queueEvt: envelope job ads.context_ready — truyền vào mọi Publish để refs (eventId, trace, entity…) đủ cho audit/timeline nhóm theo job.
+// RunAdsProposeFromContextReady — Chạy sau job «ngữ cảnh Ads đã sẵn sàng»: đọc số liệu phân tích đã lưu trên chiến dịch,
+// áp quy tắc hành động, lưu kết quả đánh giá và phát yêu cầu đề xuất chờ duyệt (chuẩn RunAutoPropose).
+// Ghi các mốc lên timeline live và cập nhật trạng thái hồ sơ ads_optimization cho giao diện.
+// Thiếu dữ liệu → đóng incomplete; rule không chọn hành động → đóng no_action; lỗi kỹ thuật → đóng failed (lý do trong outcomeSummary).
+// queueEvt: envelope job hiện tại — truyền vào mọi Publish để audit/timeline có đủ eventId, trace, tham chiếu entity.
 func RunAdsProposeFromContextReady(ctx context.Context, svc *aidecisionsvc.AIDecisionService, ownerOrgID primitive.ObjectID, orgID, campaignID, adAccountID, baseURL string, queueEvt *aidecisionmodels.DecisionEvent) error {
 	caseDoc, _ := svc.FindCaseByAdsCampaign(ctx, campaignID, orgID, ownerOrgID)
 	traceID := resolveAdsTraceID(caseDoc)
 
 	if campaignID == "" || adAccountID == "" || ownerOrgID.IsZero() {
-		reason := "Không hoàn thành đánh giá: thiếu campaignId hoặc adAccountId (hoặc org) — không thể ra quyết định tối ưu Ads. Kiểm tra payload sự kiện ads.context_ready."
+		reason := "Không thể đánh giá tối ưu quảng cáo: thiếu mã chiến dịch, mã tài khoản quảng cáo hoặc tổ chức. Kiểm tra nội dung sự kiện «ngữ cảnh Ads đã sẵn sàng» (ads.context_ready)."
 		publishAdsOptimizationLive(ownerOrgID, traceID, caseDoc, queueEvt, decisionlive.PhaseEmpty, decisionlive.SeverityWarn,
 			reason,
-			[]string{"Bắt buộc: campaignId, adAccountId, ownerOrganizationId hợp lệ trên envelope event."},
+			[]string{"Cần đủ: mã chiến dịch (campaign), mã tài khoản quảng cáo và tổ chức sở hữu trên envelope job."},
 			"Thiếu dữ liệu đầu vào", nil, campaignID, adAccountID)
 		closeAdsCaseOutcome(svc, ctx, caseDoc, aidecisionmodels.ClosureIncomplete, reason)
 		return nil
 	}
 
 	publishAdsOptimizationLive(ownerOrgID, traceID, caseDoc, queueEvt, decisionlive.PhaseAdsEvaluate, decisionlive.SeverityInfo,
-		"Đang đánh giá chiến dịch theo ACTION_RULE và metrics Intelligence…",
+		"Đang đánh giá chiến dịch theo quy tắc hành động và số liệu phân tích đã lưu…",
 		[]string{
-			"Nguồn: meta_campaigns.currentMetrics (cờ cảnh báo / lớp phân tích).",
-			"Bước tiếp: tính hành động đề xuất hoặc kết thúc nếu không có hành động.",
+			"Dữ liệu đối chiếu: bản tóm tắt số liệu chiến dịch trên hệ thống (cảnh báo, lớp phân tích).",
+			"Bước tiếp: chọn hành động đề xuất hoặc kết thúc nếu không có hành động phù hợp.",
 		},
 		"Bắt đầu đánh giá", nil, campaignID, adAccountID)
 
@@ -54,22 +55,22 @@ func RunAdsProposeFromContextReady(ctx context.Context, svc *aidecisionsvc.AIDec
 	}
 	currentMetrics := adssvc.GetCampaignCurrentMetrics(ctx, campaignsColl, campaignID, ownerOrgID)
 	if currentMetrics == nil {
-		reason := "Không hoàn thành đánh giá: không có metrics Intelligence trên campaign (currentMetrics rỗng) — không thể ra quyết định. Đồng bộ Meta/Ads Intelligence hoặc chờ roll-up."
+		reason := "Chưa có số liệu phân tích trên chiến dịch — không thể áp quy tắc. Hãy đồng bộ Meta / chờ job tính lại intelligence, rồi thử lại."
 		publishAdsOptimizationLive(ownerOrgID, traceID, caseDoc, queueEvt, decisionlive.PhaseEmpty, decisionlive.SeverityWarn,
 			reason,
-			[]string{			"Kiểm tra bản ghi meta_campaigns và trường intelligence cho campaign này."},
-			"Thiếu metrics", nil, campaignID, adAccountID)
+			[]string{"Kiểm tra bản ghi chiến dịch trên hệ thống và phần dữ liệu phân tích (intelligence) đã được cập nhật chưa."},
+			"Thiếu số liệu phân tích", nil, campaignID, adAccountID)
 		closeAdsCaseOutcome(svc, ctx, caseDoc, aidecisionmodels.ClosureIncomplete, reason)
 		return nil
 	}
 
 	actions, report := metasvc.ComputeFinalActionsFromCurrentMetrics(ctx, campaignID, adAccountID, ownerOrgID, currentMetrics)
 	if len(actions) == 0 {
-		bullets := []string{"ACTION_RULE đã chạy nhưng không có hành động đề xuất (không đạt ngưỡng / không có cờ kích hoạt)."}
+		bullets := []string{"Quy tắc đã chạy nhưng không chọn được hành động (chưa đạt ngưỡng hoặc chưa có điều kiện kích hoạt)."}
 		if report != nil {
-			bullets = append(bullets, fmt.Sprintf("Chi tiết rule: %v", report))
+			bullets = append(bullets, fmt.Sprintf("Chi tiết từ quy tắc: %v", report))
 		}
-		reason := "Không hoàn thành đề xuất từ rule: không có hành động nào được chọn sau khi đánh giá metrics (ACTION_RULE)."
+		reason := "Không tạo đề xuất: sau khi đối chiếu số liệu, không có hành động nào được quy tắc chọn."
 		publishAdsOptimizationLive(ownerOrgID, traceID, caseDoc, queueEvt, decisionlive.PhaseEmpty, decisionlive.SeverityWarn,
 			reason,
 			bullets,
@@ -83,10 +84,10 @@ func RunAdsProposeFromContextReady(ctx context.Context, svc *aidecisionsvc.AIDec
 
 	pendingInfo, pendingErr := adssvc.GetPendingProposalForCampaign(ctx, campaignID, ownerOrgID)
 	if pendingErr != nil {
-		reason := fmt.Sprintf("Lỗi khi đọc đề xuất chờ duyệt: %v — không thể hoàn tất pipeline Ads.", pendingErr)
+		reason := fmt.Sprintf("Lỗi khi đọc đề xuất đang chờ duyệt: %v — không thể tiếp tục luồng tối ưu Ads.", pendingErr)
 		publishAdsOptimizationLive(ownerOrgID, traceID, caseDoc, queueEvt, decisionlive.PhaseError, decisionlive.SeverityError,
 			reason,
-			[]string{"Thử lại sau khi kiểm tra DB approval / action_pending."},
+			[]string{"Kiểm tra kết nối DB và bảng lưu đề xuất chờ duyệt (approval)."},
 			"Lỗi hệ thống", nil, campaignID, adAccountID)
 		closeAdsCaseOutcome(svc, ctx, caseDoc, aidecisionmodels.ClosureFailed, reason)
 		return pendingErr
@@ -94,10 +95,10 @@ func RunAdsProposeFromContextReady(ctx context.Context, svc *aidecisionsvc.AIDec
 	hasPending := pendingInfo != nil
 	if hasPending && pendingInfo.ActionType == actionType && pendingInfo.RuleCode == ruleCode {
 		publishAdsOptimizationLive(ownerOrgID, traceID, caseDoc, queueEvt, decisionlive.PhaseDone, decisionlive.SeverityInfo,
-			"Đề xuất trùng với bản chờ duyệt — giữ nguyên, không tạo lại.",
+			"Đề xuất trùng với bản đang chờ duyệt — giữ nguyên, không tạo bản mới.",
 			[]string{
-				fmt.Sprintf("actionType=%s, ruleCode=%s.", actionType, ruleCode),
-				"Không cần thao tác thêm trên case.",
+				fmt.Sprintf("Loại hành động: %s — mã quy tắc: %s.", actionType, ruleCode),
+				"Không cần thao tác thêm trên hồ sơ xử lý.",
 			},
 			"Giữ nguyên đề xuất", nil, campaignID, adAccountID)
 		return nil
@@ -107,10 +108,10 @@ func RunAdsProposeFromContextReady(ctx context.Context, svc *aidecisionsvc.AIDec
 	}
 
 	if err := metasvc.PersistCampaignEvaluatedActions(ctx, campaignID, adAccountID, ownerOrgID, currentMetrics, actions, report); err != nil {
-		reason := fmt.Sprintf("Lỗi khi ghi kết quả đánh giá (persist): %v — pipeline Ads không hoàn tất.", err)
+		reason := fmt.Sprintf("Lỗi khi lưu kết quả đánh giá vào cơ sở dữ liệu: %v — luồng Ads dừng tại đây.", err)
 		publishAdsOptimizationLive(ownerOrgID, traceID, caseDoc, queueEvt, decisionlive.PhaseError, decisionlive.SeverityError,
 			reason,
-			[]string{"Kiểm tra meta_campaigns / quyền ghi DB."},
+			[]string{"Kiểm tra bản ghi chiến dịch và quyền ghi Mongo."},
 			"Lỗi ghi dữ liệu", nil, campaignID, adAccountID)
 		closeAdsCaseOutcome(svc, ctx, caseDoc, aidecisionmodels.ClosureFailed, reason)
 		return err
@@ -150,29 +151,29 @@ func RunAdsProposeFromContextReady(ctx context.Context, svc *aidecisionsvc.AIDec
 		Payload:      metricsPayload,
 	}, ownerOrgID, true)
 	if err != nil {
-		reasonFail := fmt.Sprintf("Lỗi khi chuẩn bị đề xuất duyệt: %v — không thể đưa vào hàng đợi.", err)
+		reasonFail := fmt.Sprintf("Lỗi khi chuẩn bị đề xuất chờ duyệt: %v — chưa thể xếp hàng bước tiếp theo.", err)
 		publishAdsOptimizationLive(ownerOrgID, traceID, caseDoc, queueEvt, decisionlive.PhaseError, decisionlive.SeverityError,
 			reasonFail,
-			[]string{"Kiểm tra payload metrics và cấu hình approval."},
+			[]string{"Kiểm tra dữ liệu số liệu gửi kèm và cấu hình bước duyệt (approval)."},
 			"Lỗi chuẩn bị đề xuất", nil, campaignID, adAccountID)
 		closeAdsCaseOutcome(svc, ctx, caseDoc, aidecisionmodels.ClosureFailed, reasonFail)
 		return fmt.Errorf("chuẩn bị propose sau context_ready: %w", err)
 	}
 
 	publishAdsOptimizationLive(ownerOrgID, traceID, caseDoc, queueEvt, decisionlive.PhasePropose, decisionlive.SeverityInfo,
-		fmt.Sprintf("Đã chọn đề xuất: %s (rule %s). Đang gửi vào hàng đợi duyệt…", actionType, ruleCode),
+		fmt.Sprintf("Đã chọn hành động đề xuất: %s (quy tắc %s). Đang xếp hàng bước duyệt…", actionType, ruleCode),
 		[]string{
-			"Hành động được tính từ ACTION_RULE trên metrics hiện tại.",
-			"Sự kiện tiếp theo: executor.propose_requested (domain=ads).",
+			"Hành động được tính từ quy tắc trên số liệu chiến dịch hiện tại.",
+			"Bước tiếp: hệ thống phát yêu cầu tạo đề xuất cho executor (miền Ads).",
 		},
 		"Tạo đề xuất", nil, campaignID, adAccountID)
 
 	eventID, err := aidecisionsvc.EmitAdsProposeRequest(ctx, inp, ownerOrgID, baseURL)
 	if err != nil {
-		reasonFail := fmt.Sprintf("Lỗi khi ghi queue đề xuất (EmitAdsProposeRequest): %v — đề xuất chưa vào hàng đợi.", err)
+		reasonFail := fmt.Sprintf("Lỗi khi ghi job yêu cầu đề xuất lên hàng đợi: %v — đề xuất chưa được xếp hàng.", err)
 		publishAdsOptimizationLive(ownerOrgID, traceID, caseDoc, queueEvt, decisionlive.PhaseError, decisionlive.SeverityError,
 			reasonFail,
-			[]string{"Kiểm tra decision_events_queue và worker AI Decision."},
+			[]string{"Kiểm tra collection hàng đợi sự kiện và worker AI Decision có đang chạy không."},
 			"Lỗi hàng đợi", nil, campaignID, adAccountID)
 		closeAdsCaseOutcome(svc, ctx, caseDoc, aidecisionmodels.ClosureFailed, reasonFail)
 		return err
@@ -191,12 +192,12 @@ func RunAdsProposeFromContextReady(ctx context.Context, svc *aidecisionsvc.AIDec
 	}
 
 	publishAdsOptimizationLive(ownerOrgID, traceID, caseDoc, queueEvt, decisionlive.PhaseDone, decisionlive.SeverityInfo,
-		"Đã xếp hàng đề xuất tối ưu Ads — chờ duyệt / thực thi.",
+		"Đã xếp hàng đề xuất tối ưu quảng cáo — chờ duyệt hoặc thực thi.",
 		[]string{
-			fmt.Sprintf("eventId queue đề xuất: %s", eventID),
-			"Case runtime đã đóng (closed_proposed) — Executor quản lý bước sau.",
+			fmt.Sprintf("Mã job đề xuất trên hàng đợi: %s", eventID),
+			"Hồ sơ runtime đã đóng ở trạng thái «đã đề xuất» — các bước sau do Executor xử lý.",
 		},
-		"Hoàn tất pipeline Ads", map[string]string{"proposeEmitEventId": eventID}, campaignID, adAccountID)
+		"Hoàn tất luồng Ads", map[string]string{"proposeEmitEventId": eventID}, campaignID, adAccountID)
 
 	return nil
 }
@@ -217,7 +218,7 @@ func resolveAdsTraceID(caseDoc *aidecisionmodels.DecisionCase) string {
 	return utility.GenerateUID(utility.UIDPrefixTrace)
 }
 
-// publishAdsOptimizationLive ghi timeline Ads — dùng livecopy (khung 3 bullet + refs envelope).
+// publishAdsOptimizationLive — Đẩy mốc timeline tối ưu quảng cáo (tóm tắt + gạch đầu dòng + tham chiếu job queue).
 func publishAdsOptimizationLive(ownerOrgID primitive.ObjectID, traceID string, caseDoc *aidecisionmodels.DecisionCase, queueEvt *aidecisionmodels.DecisionEvent, phase, severity, summary string, detailBullets []string, stepTitle string, extraRefs map[string]string, campaignID, adAccountID string) {
 	if ownerOrgID.IsZero() || traceID == "" {
 		return

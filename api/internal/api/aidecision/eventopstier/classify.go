@@ -2,7 +2,11 @@
 // Không import aidecisionsvc / worker để tránh import cycle (decisionlive → eventopstier → …).
 package eventopstier
 
-import "strings"
+import (
+	"strings"
+
+	"meta_commerce/internal/api/aidecision/eventtypes"
+)
 
 // Tier — mức “đáng xem” cho dashboard vận hành (ổn định cho API / JSON).
 const (
@@ -33,7 +37,6 @@ var pipelineEntityPrefixes = map[string]struct{}{
 	"conversation":        {},
 	"message":             {},
 	"order":               {},
-	"pc_order":            {}, // đơn từ nguồn PC (song song order POS)
 	"cix_analysis_result": {},
 	"crm_customer":        {},
 	"crm_note":            {},
@@ -41,38 +44,37 @@ var pipelineEntityPrefixes = map[string]struct{}{
 	"fb_customer":         {}, // hồ sơ khách FB — ngữ cảnh CI / bán hàng
 }
 
-// exactTier — ánh xạ tường minh (đồng bộ với consumer / emit; chuỗi literal tránh import cycle).
+// exactTier — ánh xạ tường minh (đồng bộ với eventtypes + consumer / emit).
 var exactTier = map[string]string{
 	// Quyết định trực tiếp
-	"aidecision.execute_requested": TierDecision,
-	"executor.propose_requested":   TierDecision,
-	"ads.propose_requested":        TierDecision,
+	eventtypes.AIDecisionExecuteRequested: TierDecision,
+	eventtypes.ExecutorProposeRequested:   TierDecision,
+	eventtypes.AdsProposeRequested:        TierDecision,
 
 	// Chuẩn bị / luồng vào quyết định
-	"conversation.intelligence_requested": TierPipeline,
-	"cix.analysis_requested":              TierPipeline,
-	"cix.analysis_completed":              TierPipeline,
-	"cix_analysis_result.inserted":          TierPipeline,
-	"cix_analysis_result.updated":           TierPipeline,
-	"customer.context_requested":            TierPipeline,
-	"customer.context_ready":                TierPipeline,
-	"order.flags_emitted":                   TierPipeline,
-	"order.intelligence_requested":          TierPipeline,
-	"order.recompute_requested":             TierPipeline,
-	"commerce.order_completed":              TierPipeline,
-	"conversation.message_inserted":         TierPipeline,
-	"message.batch_ready":                   TierPipeline,
-	"ads.context_requested":                 TierPipeline,
-	"ads.context_ready":                     TierPipeline,
+	eventtypes.CixAnalysisRequested:         TierPipeline,
+	eventtypes.CustomerContextRequested:     TierPipeline,
+	eventtypes.CustomerContextReady:         TierPipeline,
+	eventtypes.OrderIntelligenceRequested:   TierPipeline,
+	eventtypes.OrderRecomputeRequested:      TierPipeline,
+	eventtypes.OrderIntelRecomputed:         TierPipeline,
+	eventtypes.ConversationMessageInserted:  TierPipeline,
+	eventtypes.MessageBatchReady:            TierPipeline,
+	eventtypes.AdsContextRequested:          TierPipeline,
+	eventtypes.AdsContextReady:              TierPipeline,
 	// ads.updated — đổi cấu hình ads trong DB (thường batch) nhưng dẫn vào pipeline ads context / intel
-	"ads.updated": TierPipeline,
+	eventtypes.AdsUpdated: TierPipeline,
 
 	// Vận hành / nền
-	"crm.intelligence.compute_requested":            TierOperational,
-	"ads.intelligence.recompute_requested":           TierOperational,
-	"ads.intelligence.recalculate_all_requested":      TierOperational,
-	"meta_campaign.inserted": TierOperational,
-	"meta_campaign.updated":  TierOperational,
+	eventtypes.CrmIntelligenceComputeRequested:       TierOperational,
+	eventtypes.CrmIntelligenceRecomputeRequested:     TierOperational,
+	eventtypes.AdsIntelligenceRecomputeRequested:     TierOperational,
+	eventtypes.AdsIntelligenceRecalculateAllRequested: TierOperational,
+	eventtypes.MetaCampaignInserted:     TierOperational,
+	eventtypes.MetaCampaignUpdated:      TierOperational,
+	eventtypes.CampaignIntelRecomputed:  TierOperational,
+	eventtypes.CrmIntelRecomputed:       TierOperational,
+	eventtypes.CixIntelRecomputed:       TierOperational,
 	// Các prefix meta_*, pos_*, fb_page, fb_post, fb_message_item, webhook_log (*.inserted|*.updated)
 	// không nằm trong pipelineEntityPrefixes → ClassifyEventType xếp operational qua nhánh suffix (không cần lặp từng dòng).
 }

@@ -41,10 +41,10 @@
 | Hạng mục | Trạng thái | Ghi chú |
 |----------|------------|---------|
 | **Module** | ✅ Có | `api/internal/api/cix/` — router, handler, service, models |
-| **Collections** | ✅ Có | `cix_analysis_results`, `cix_pending_analysis` |
-| **Luồng** | ✅ Khép vòng | CIO event → OnCioEventInserted → EnqueueAnalysis → CIX worker → AnalyzeSession → ReceiveCixPayload → DecisionEngine.Execute → Propose/ProposeAndApproveAuto → Executor → Delivery |
+| **Collections** | ✅ Có | `cix_analysis_results`, **`cix_intel_compute`** (job; tên cũ trong doc: `cix_pending_analysis`) |
+| **Luồng** | ✅ Khép vòng | Queue AI Decision → enqueue **`cix_intel_compute`** → **CixIntelComputeWorker** → AnalyzeSession → **`cix_intel_recomputed`** (`analysisResultId`) → **ReceiveCixPayload** → **TryExecuteIfReady** / **execute_requested** → Execute → Propose → Executor → Delivery |
 | **Rule Engine** | ✅ Có | RULE_CIX_LAYER1_STAGE, LAYER2_STATE, LAYER2_ADJUST, LAYER3_SIGNALS, FLAGS, ACTIONS |
-| **Tích hợp** | ✅ Có | CIO (OnCioEventInserted), CRM (getCustomerContext), Decision (ReceiveCixPayload) |
+| **Tích hợp** | ✅ Có | Datachanged / orchestrate / HTTP → consumer enqueue job, CRM (getCustomerContext), Decision (**ReceiveCixPayload** qua event sau worker) |
 
 **Chi tiết:** Xem [PHUONG_AN_TRIEN_KHAI_CIX.md](./PHUONG_AN_TRIEN_KHAI_CIX.md) §2 Trạng Thái Hiện Tại (đã cập nhật).
 
@@ -171,7 +171,7 @@ CIO (✅)  →  CIX (✅)  →  AI Decision Engine (✅)  →  Executor → Deli
     |              |                    |                        └→ delivery.ExecuteActions
     |              |                    └→ Propose / ProposeAndApproveAuto
     |              └→ Rule Engine (✅), Customer (✅)
-    └→ cio_events → OnCioEventInserted → cix_pending_analysis
+    └→ (luồng hiện tại) queue AI Decision → **`cix_intel_compute`** → worker CIX
 ```
 
 **Luồng đã đủ để chạy:** CIO ingestion → CIX worker → ReceiveCixPayload → Execute → Executor → Delivery.

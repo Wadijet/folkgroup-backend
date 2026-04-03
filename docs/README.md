@@ -14,6 +14,7 @@ Chào mừng đến với tài liệu hệ thống FolkForm Backend. Tài liệu
 | **Domain** | [domain/domain-overview.md](domain/domain-overview.md) | Domain logic |
 | **API** | [api/api-overview.md](api/api-overview.md) | API surface |
 | **Conventions** | [conventions/backend-conventions.md](conventions/backend-conventions.md) | Quy ước backend |
+| **Luồng Ingress → Merge → Intel** | [05-development/KHUNG_LUONG_INGEST_MERGE_INTEL_CIO_AID_DOMAIN.md](05-development/KHUNG_LUONG_INGEST_MERGE_INTEL_CIO_AID_DOMAIN.md) | Khung CIO / Domain / AID cho mọi module |
 
 ---
 
@@ -77,7 +78,9 @@ Khi mở riêng repo backend, Cursor nên đọc theo thứ tự:
 - [Quy Trình Refactor Docs](05-development/QUY_TRINH_REFACTOR_DOCS.md) - Quy trình AI refactor tài liệu
 - [Quy Trình Refactor .cursor](05-development/QUY_TRINH_REFACTOR_CURSOR.md) - Refactor .cursor sau khi docs xong
 - [Cấu Trúc Code](05-development/cau-truc-code.md) - Cấu trúc và tổ chức code
-- **[Nguyên tắc CRUD → DataChanged → AI Decision](05-development/NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md)** — Một hook, một cửa side-effect; **đọc trước khi sửa luồng queue / ingest / sync**
+- **[Nguyên tắc CRUD → DataChanged → AI Decision](05-development/NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md)** — Một hook, một cửa side-effect; **hai luồng** (data change vs intelligence handoff); **đọc trước khi sửa luồng queue / ingest / sync**
+- **[Khung luồng Ingress → Merge → Intel (CIO · Domain · AID)](05-development/KHUNG_LUONG_INGEST_MERGE_INTEL_CIO_AID_DOMAIN.md)** — Mẫu thống nhất cho các module; CRM làm tham chiếu; checklist mở rộng nguồn
+- **[Phương án domain Order khớp khung](05-development/PHUONG_AN_DOMAIN_ORDER_KHOP_KHUNG_CIO_AID.md)** — Giai đoạn 0–3: ID/enrich, đa nguồn, registry AID; đối chiếu hiện trạng `pc_pos_orders` / `order_intel_compute`
 - **[Trung tâm chỉ huy AI Decision — ý tưởng & backend data](05-development/THIET_KE_TRUNG_TAM_CHI_HUY_AI_DECISION.md)** — Màn vận hành (phễu/KPI/feed), `GET org-live/metrics`, hợp đồng JSON, **`opsTier` trên feed live** (v1.8)
 
 ### 6. 🤖 AI Context & API Contract (Shared)
@@ -117,6 +120,8 @@ Khi mở riêng repo backend, Cursor nên đọc theo thứ tự:
 
 ## 🔄 Cập Nhật Gần Đây
 
+- ✅ **2026-04-02**: Thêm [PHUONG_AN_DOMAIN_ORDER_KHOP_KHUNG_CIO_AID.md](05-development/PHUONG_AN_DOMAIN_ORDER_KHOP_KHUNG_CIO_AID.md) — phương án chỉnh domain Order theo khung (giai đoạn 0–3).
+- ✅ **2026-04-02**: Thêm [KHUNG_LUONG_INGEST_MERGE_INTEL_CIO_AID_DOMAIN.md](05-development/KHUNG_LUONG_INGEST_MERGE_INTEL_CIO_AID_DOMAIN.md) — khung luồng thống nhất CIO / Domain / AID (Pha A–B–C), tham chiếu CRM, checklist module khác.
 - ✅ **2026-03-25**: Thêm [THIET_KE_TRUNG_TAM_CHI_HUY_AI_DECISION.md](05-development/THIET_KE_TRUNG_TAM_CHI_HUY_AI_DECISION.md) — thiết kế màn command center AI Decision và API metrics / WS aggregate (đề xuất).
 - ✅ **2026-03-18**: Rà soát tài liệu — CIX, AI Decision Engine đã triển khai đầy đủ; luồng CIO→CIX→Decision→Executor→Delivery đã khép vòng. Cập nhật RASOAT_MODULE_KHUNG_XUONG, PHUONG_AN_CIX/CIO/DECISION_BRAIN, `docs-shared/architecture/reviews/RA_SOAT_TRIEN_KHAI_VISION.md`.
 - ✅ **2026-03-24**: Thêm [NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md](05-development/NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md) — nguyên tắc hook / queue / side-effect một cửa; cập nhật `.cursor/rules`, module-map.

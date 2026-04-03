@@ -1,4 +1,10 @@
 // Package aidecisionsvc — Emit cix.analysis_requested (queue AI Decision).
+//
+// Quy ước EventSource (chuỗi xin/trả context): ghi đúng **module hoặc lớp phát event vào queue**.
+//   - aidecision — orchestrate/consumer AI Decision (xin CRM/CIX/Ads context nội bộ).
+//   - cix_api — HTTP handler CIX đưa yêu cầu phân tích vào queue.
+//   - crm / orderintel / meta_ads_intel — worker hoặc svc domain sau khi có payload (context_ready, flags, campaign_intel_recomputed, …).
+//   - datachanged / debounce — hook Mongo hoặc flush gom message.
 package aidecisionsvc
 
 import (
@@ -6,17 +12,25 @@ import (
 	"fmt"
 	"strings"
 
+	"meta_commerce/internal/api/aidecision/eventtypes"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// EventTypeCixAnalysisRequested — CixRequestWorker consume → EnqueueAnalysis → cix_pending_analysis.
-const EventTypeCixAnalysisRequested = "cix.analysis_requested"
+// EventTypeCixAnalysisRequested — AI Decision consumer xử lý → EnqueueAnalysis → cix_intel_compute (cùng mẫu CRM enqueue).
+const EventTypeCixAnalysisRequested = eventtypes.CixAnalysisRequested
+
+// EventSourceCixHTTP — event do API HTTP CIX phát vào queue (handler gọi EmitCixAnalysisRequested).
+const EventSourceCixHTTP = "cix_api"
+
+// EventSourceAIDecision — event do lớp AI Decision (orchestrate / consumer nội bộ) phát: xin context, bước pipeline.
+const EventSourceAIDecision = "aidecision"
 
 // EmitCixAnalysisRequested đưa yêu cầu phân tích CIX vào decision_events_queue.
-// Luồng: CixRequestWorker → EnqueueAnalysis → CixAnalysisWorker → AnalyzeSession (không gọi AnalyzeSession từ HTTP).
-func EmitCixAnalysisRequested(ctx context.Context, conversationID, customerID, channel string, ownerOrgID primitive.ObjectID, normalizedRecordUID, traceID, correlationID string) (eventID string, err error) {
+// eventSource: EventSourceCixHTTP khi gọi từ handler CIX; EventSourceAIDecision khi consumer bridge/orchestrate phát (không nhầm với HTTP).
+// Luồng: consumer → EnqueueAnalysis → WorkerCixIntelCompute (cix_intel_compute) → AnalyzeSession (không gọi AnalyzeSession từ HTTP).
+func EmitCixAnalysisRequested(ctx context.Context, conversationID, customerID, channel string, ownerOrgID primitive.ObjectID, normalizedRecordUID, traceID, correlationID, eventSource string) (eventID string, err error) {
 	if strings.TrimSpace(conversationID) == "" {
 		return "", fmt.Errorf("conversationId bắt buộc")
 	}
@@ -33,9 +47,13 @@ func EmitCixAnalysisRequested(ctx context.Context, conversationID, customerID, c
 	if strings.TrimSpace(normalizedRecordUID) != "" {
 		payload["normalizedRecordUid"] = normalizedRecordUID
 	}
+	src := strings.TrimSpace(eventSource)
+	if src == "" {
+		src = EventSourceAIDecision
+	}
 	res, err := svc.EmitEvent(ctx, &EmitEventInput{
 		EventType:     EventTypeCixAnalysisRequested,
-		EventSource:   "cix_api",
+		EventSource:   src,
 		EntityType:    "conversation",
 		EntityID:      conversationID,
 		OrgID:         ownerOrgID.Hex(),

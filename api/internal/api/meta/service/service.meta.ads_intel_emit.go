@@ -47,7 +47,7 @@ func emitCampaignIntelRecomputedAfterRecomputeJob(ctx context.Context, job *adsm
 	correlationID := utility.GenerateUID(utility.UIDPrefixCorrelation)
 	_, err := eventemit.EmitDecisionEvent(ctx, &eventemit.EmitInput{
 		EventType:     eventtypes.CampaignIntelRecomputed,
-		EventSource:   "meta_ads_intel",
+		EventSource:   eventtypes.EventSourceMetaAdsIntel,
 		EntityType:    "campaign",
 		EntityID:      campaignID,
 		OrgID:         orgID,

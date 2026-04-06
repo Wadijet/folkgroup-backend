@@ -4,6 +4,8 @@
 
 **Canonical:** Tài liệu local backend (`docs/`). Module map workspace-level: `docs-shared/modules/module-map.md`.
 
+**Cơ cấu chốt (AID + queue miền):** [co-cau-module-aid-va-domain-queue.md](co-cau-module-aid-va-domain-queue.md) — nhóm module A–F, `decision_events_queue` thuộc `aidecision`, queue/worker nặng theo từng domain, bảng `EventSource` khởi đầu.
+
 ---
 
 ## Các Module Chính (theo Router)
@@ -20,7 +22,11 @@
 | **pc** | `pc/router/routes.go` | Pancake (Pages, POS) | [api/api-overview](../api/api-overview.md) |
 | **webhook** | `webhook/router/routes.go` | Webhook endpoints | — |
 | **report** | `report/router/routes.go` | Definitions, snapshots, dirty; dirty từ datachanged qua Redis + `report_redis_touch_flush` | `service.report.redis_touch.go`, `internal/redisclient`, `worker/report_redis_touch_worker.go` |
-| **crm** | `crm/router/routes.go` | Customers, CRM pending ingest, bulk jobs, rebuild, recalculate | [docs-shared/ai-context/folkform/design/CRM_MODULE_DESIGN.md](../../docs-shared/ai-context/folkform/design/CRM_MODULE_DESIGN.md) |
+| **crm** | `crm/router/routes.go` | Customers, queue merge L1→L2 (`crm_pending_merge`), intel CRM, bulk, rebuild, recalculate | [docs-shared/ai-context/folkform/design/CRM_MODULE_DESIGN.md](../../docs-shared/ai-context/folkform/design/CRM_MODULE_DESIGN.md), [co-cau-module-aid-va-domain-queue.md](co-cau-module-aid-va-domain-queue.md) |
+| **order** | (nội bộ — sync/datachanged) | Đơn commerce, đồng bộ canonical; không có router riêng — gắn `pc`/datachanged | [co-cau-module-aid-va-domain-queue.md](co-cau-module-aid-va-domain-queue.md) |
+| **orderintel** | (nội bộ — worker + service) | Intelligence đơn, job `order_intel_compute` | [co-cau-module-aid-va-domain-queue.md](co-cau-module-aid-va-domain-queue.md) |
+| **conversationintel** | (nội bộ — CIX) | Intel hội thoại, `cix_intel_compute`, `conversationintel/datachanged` | [PHUONG_AN_TRIEN_KHAI_CIX](../05-development/PHUONG_AN_TRIEN_KHAI_CIX.md) |
+| **conversation** | (đang hình thành) | Mirror messaging — bổ sung router/luồng khi ổn định | [co-cau-module-aid-va-domain-queue.md](co-cau-module-aid-va-domain-queue.md) |
 | **notification** | `notification/router/routes.go` | Channels, templates, routing, trigger | [docs-shared/ai-context/folkform/notification-system.md](../../docs-shared/ai-context/folkform/notification-system.md) |
 | **cta** | `cta/router/routes.go` | CTA Library | — |
 | **delivery** | (nội bộ executor) | Handler send/execute dùng bởi executor | — |
@@ -42,10 +48,14 @@ api/
 │   ├── api/             # API layer (handler, service, router theo module)
 │   │   ├── auth/
 │   │   ├── ads/
-│   │   ├── aidecision/
+│   │   ├── aidecision/  # decision_events_queue, hooks, consumer
 │   │   ├── learning/
 │   │   ├── executor/
 │   │   ├── crm/
+│   │   ├── order/       # nội bộ — sync đơn / datachanged
+│   │   ├── orderintel/
+│   │   ├── conversation/
+│   │   ├── conversationintel/
 │   │   ├── cta/
 │   │   ├── delivery/
 │   │   ├── fb/
@@ -60,21 +70,27 @@ api/
 │   │   ├── ruleintel/
 │   │   ├── cio/
 │   │   ├── cix/
-│   │   ├── handler/    # Shared handlers
+│   │   ├── base/        # BaseService, DoSyncUpsert, EmitDataChanged
+│   │   ├── events/      # OnDataChanged, contract sự kiện persistence
+│   │   ├── decision/    # legacy — ưu tiên aidecision cho luồng mới
+│   │   ├── initsvc/
+│   │   ├── handler/     # Shared handlers
 │   │   ├── middleware/
-│   │   ├── router/     # routes.go, CRUD config
+│   │   ├── router/      # routes.go, CRUD config
 │   │   ├── dto/
 │   │   └── models/mongodb/
-│   ├── approval/       # Approval engine
-│   ├── delivery/      # Delivery logic
+│   ├── approval/        # Approval engine
+│   ├── delivery/        # Delivery logic
 │   ├── database/
 │   ├── global/
 │   ├── logger/
 │   ├── notifytrigger/
 │   ├── registry/
 │   ├── systemalert/
-│   └── worker/
+│   └── worker/          # Worker nặng — gắn owner module trong doc co-cau-module
 ```
+
+Chi tiết nhóm A–F và ranh giới AID: [co-cau-module-aid-va-domain-queue.md](co-cau-module-aid-va-domain-queue.md).
 
 ---
 
@@ -93,6 +109,7 @@ api/
 
 ## Related Docs
 
+- [Cơ cấu module — AID & queue miền](co-cau-module-aid-va-domain-queue.md)
 - [Kiến trúc tổng quan](../architecture/overview.md)
 - [Cấu trúc code](../05-development/cau-truc-code.md)
 - [API Overview](../api/api-overview.md)
@@ -100,6 +117,7 @@ api/
 
 ## Changelog
 
+- 2026-04-06: **Cơ cấu module chốt** — [co-cau-module-aid-va-domain-queue.md](co-cau-module-aid-va-domain-queue.md); bảng module bổ sung order, orderintel, conversation, conversationintel; CRM mô tả queue merge (thay pending ingest); cây thư mục bổ sung `base`, `events`, `decision` (legacy).
 - 2026-03-26: **Trace / correlation E2E** — NGUYEN_TAC **§9**; docs-shared **unified-data-contract v1.1 §2.5b**, vision **08 v7.7.2 §19**, **api-context 4.09**; cột ai-decision trỏ các mục trên.
 - 2026-03-24: **Nguyên tắc luồng datachanged** — tài liệu [NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md](../05-development/NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md) (một `OnDataChanged`, `applyDatachangedSideEffects` một cửa).
 - 2026-03-23: AI Decision — **live trace**: `traceId` khi enqueue; **GET /ai-decision/traces/:traceId/timeline** + WebSocket **/live** (`MetaAdAccount.Read`); xem [vision 08 §16](../../docs-shared/architecture/vision/08%20-%20ai-decision.md)

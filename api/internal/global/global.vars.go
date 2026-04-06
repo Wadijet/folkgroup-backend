@@ -87,10 +87,12 @@ type MongoDB_Auth_CollectionName struct {
 	CrmCustomers         string // crm_customers: khách đã merge
 	CrmActivityHistory  string // crm_activity_history: lịch sử hoạt động
 	CrmNotes            string // crm_notes: ghi chú khách
-	CrmPendingIngest    string // crm_pending_ingest: queue cho worker xử lý Merge/Ingest
+	CrmPendingMerge     string // crm_pending_merge: queue merge L1→L2 CRM (khác CIO ingest)
 	CrmBulkJobs string // crm_bulk_jobs: queue cho worker xử lý sync, backfill, recalculate
 	// CrmIntelCompute — quy ước chung với Ads/Order: collection MongoDB `{domain}_intel_compute` = chuỗi đăng ký worker Worker{Domain}IntelCompute.
 	CrmIntelCompute string // crm_intel_compute
+	// CrmCustomerIntelRuns — mỗi lần chạy intel khách (refresh/recalculate) thành công hoặc thất bại có document; L2 crm_customers.intel trỏ bản gần nhất.
+	CrmCustomerIntelRuns string // crm_customer_intel_runs
 
 	// Module Meta Ads (tiền tố meta_)
 	MetaAdAccounts  string // meta_ad_accounts: ad accounts (act_xxx)

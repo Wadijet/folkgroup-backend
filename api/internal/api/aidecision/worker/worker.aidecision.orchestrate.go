@@ -18,7 +18,7 @@ import (
 )
 
 // OrchestrateConversationSourceEvent — ResolveOrCreate case hội thoại + emit work request domain.
-// CRM ingest (queue crm_pending_ingest) đã được xếp trong applyDatachangedSideEffects (trước dispatch); intel CRM sau worker + crm.intelligence.recompute_requested.
+// Queue crm_pending_merge đã được xếp trong applyDatachangedSideEffects (trước dispatch); intel CRM sau CrmPendingMergeWorker + crm.intelligence.recompute_requested.
 func OrchestrateConversationSourceEvent(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent, skipHydrate bool) error {
 	if !skipHydrate {
 		svc.HydrateDatachangedPayload(ctx, evt)
@@ -110,7 +110,7 @@ func OrchestrateConversationSourceEvent(ctx context.Context, svc *aidecisionsvc.
 }
 
 // OrchestrateOrderSourceEvent — ResolveOrCreate case order_risk + enqueue Order Intelligence (domain worker).
-// CRM ingest (queue) đã xếp trong applyDatachangedSideEffects.
+// crm_pending_merge đã xếp trong applyDatachangedSideEffects.
 func OrchestrateOrderSourceEvent(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) error {
 	svc.HydrateDatachangedPayload(ctx, evt)
 

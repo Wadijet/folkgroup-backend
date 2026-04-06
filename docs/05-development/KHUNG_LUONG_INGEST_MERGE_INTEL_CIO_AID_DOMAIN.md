@@ -16,6 +16,63 @@ Tài liệu này cố định **một mẫu kiến trúc** để các module (CR
 
 **Đọc thêm (bắt buộc khi sửa luồng CRUD / hook / queue):** [NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md](./NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md).
 
+### 1.1 Chuẩn kiến trúc: Tách lớp tính toán (intel) khỏi document đồng bộ
+
+**Quyết định (chuẩn dự án):** Lớp **tính toán intelligence** (pipeline rule/LLM, snapshot nhiều lớp, chạy lại) **tách riêng** khỏi document **nghiệp vụ / đồng bộ** chính (mirror nguồn, aggregate sau merge, canonical conversation, …).
+
+- **Tách gồm:** queue job `{domain}_intel_compute` (consumer domain), **collection kết quả** chuyên trách khi cần nhiều phiên bản hoặc payload lớn (ví dụ CIX: `cix_analysis_results`), và event bàn giao AID (`*_intel_recomputed` hoặc tương đương, thường kèm id tham chiếu tới bản ghi kết quả).
+- **Không lấy** document thô hoặc canonical **làm nơi duy nhất** chứa toàn bộ output intel nếu cần lịch sử nhiều lần chạy, trace pipeline, audit — tránh phình schema đồng bộ, khó versioning, khó fan-in AID.
+
+**Bổ sung tùy chọn (không thay thế việc tách):**
+
+- **Denormalize nhẹ** lên aggregate cho đọc nhanh (UI, danh sách): ví dụ `currentMetrics.cix` trên `crm_customers` chỉ giữ tín hiệu tóm tắt sau CIX; sau này có thể có snapshot nhỏ trên document canonical hội thoại — luôn nên kèm tham chiếu (`traceId`, id bản ghi intel đầy đủ khi cần join).
+- **Timeline người dùng** có thể dùng **activity** (`crm_activity_history` với `Snapshot` tại `activityAt`) — đó là lịch sử hoạt động nghiệp vụ, **khác** với việc “gộp toàn bộ intel vào một document sync”.
+
+| Cách tiếp cận | Khi nào phù hợp |
+|---------------|------------------|
+| **Tách intel (chuẩn)** | Nhiều lần chạy, pipeline phức tạp, cần id kết quả cho AID, giảm coupling ingest ↔ phân tích |
+| **Gộp toàn bộ intel vào một document đồng bộ** | Chỉ khi output rất nhỏ, một phiên bản, không cần lịch sử — thường **không** áp cho CIX / intel CRM đầy đủ |
+
+### 1.2 L1 / L2 và định danh (mirror vs canonical)
+
+- **L1:** collection **mirror / thô** sau ingest — nguồn truth theo kênh, dùng để reconcile và làm **đầu vào** tạo L2.
+- **L2:** document **canonical / đã merge** trong hệ — **`uid`** và **`links`** chuẩn cho tương tác giữa module; có thể có **`links` L1→L1** trên mirror để merge suy ra **`links` L2→L2**.
+- **Bốn lớp field** (`_id`, `uid`, `sourceIds`, `links`) là **khung chung**; trên L1 và L2 **kỳ vọng khác nhau** (xem [unified-data-contract.md](../../docs-shared/architecture/data-contract/unified-data-contract.md) §1.7, [HUONG_DAN_IDENTITY_LINKS.md](./HUONG_DAN_IDENTITY_LINKS.md) mục 2.1).
+
+### 1.3 Chuẩn «luôn lưu» intelligence (persist có kiểm soát)
+
+**Mục tiêu:** Mỗi lần pipeline intel **kết thúc** (thành công hoặc thất bại sau cùng của một job/run) phải để lại **dữ liệu có thể truy vết** — không chỉ cập nhật «trong đầu» worker rồi mất khi crash, và không chỉ dựa vào log text.
+
+**Hai lớp lưu (bắt buộc xác định rõ theo miền):**
+
+| Lớp | Vai trò | Ghi chú |
+|-----|---------|--------|
+| **A — Bản ghi kết quả / lần chạy** | Lịch sử nhiều phiên bản, audit, so sánh trước–sau, debug AID | Collection riêng (vd. `cix_analysis_results`, hoặc `crm_customer_intel_runs` nếu bổ sung), **một document mỗi lần chạy có ý nghĩa** hoặc mỗi job terminal |
+| **B — Read model trên canonical / aggregate** | UI, sort, context packet, đọc nhanh | Chỉ **tóm tắt / denormalize**; luôn có thể truy ngược **A** qua `lastIntelResultId` / `intelRunUid` / `parentJobId` (theo data contract) |
+
+**Quy tắc chung (khuyến nghị tối thiểu trên document lớp A):**
+
+- Khóa nghiệp vụ: `ownerOrganizationId`, khóa canonical miền (`unifiedId`, `orderUid`, `conversationId`, … — thống nhất từng domain).
+- Thời gian: `computedAt` / `failedAt`.
+- Trạng thái: `status` (`success` | `failed` | `skipped` khi idempotent noop có ghi nhận).
+- Liên kết: `parentJobId` / `parentDecisionEventId` / `traceId` (tuỳ miền đã có).
+- **Thành công:** `outputSummary` hoặc full `output` (nếu kích thước cho phép); nếu payload lớn → lưu pointer (file/grid) **nhưng vẫn có** dòng meta trên A.
+- **Thất bại:** `errorCode`, `errorMessage` tóm tắt; job queue (`*_intel_compute`) giữ `processError` / retry như hiện tại **không thay thế** bản ghi A nếu cần báo cáo lịch sử lỗi.
+
+**Hiện trạng từng miền (định hướng chỉnh cho khớp chuẩn):**
+
+- **CIX:** Đã có collection kết quả (`cix_analysis_results`) + event fan-in AID — **mẫu chuẩn lớp A**.
+- **CRM customer intel:** Nhiều đường cập nhật `currentMetrics` / `Recalculate*` trên `crm_customers` + activity snapshot; **job** `crm_intel_compute` ghi lỗi trên job. **Gap:** chưa có **lớp A thống nhất** «mỗi lần refresh/recalculate thành công = một bản ghi kết quả» — đề xuất triển khai dần collection `crm_customer_intel_runs` (hoặc tên theo `uid-field-naming`) và mọi `RunCrmIntelComputeJob` / `RecalculateCustomerFromAllSources` (khi coi là intel) **insert** một dòng + cập nhật pointer trên `crm_customers`.
+- **Order intel / Meta ads intel:** Giữ pattern job + collection intel hiện có; bảo đảm mỗi run terminal có **dấu vết** tương đương (meta đã có nhánh `meta_ads_intel` / debounce — rà lại có đủ meta run khi cần audit).
+
+**Không làm:** Gộp toàn bộ chuỗi output LLM/rule chỉ vào một field sâu trên document đồng bộ **mà không** có bản ghi lớp A khi miền đã quy ước cần lịch sử (trái mục 1.1).
+
+**Pha triển khai đề xuất (CRM làm pilot):**
+
+1. **P0 — Worker chỉ:** Sau `RunCrmIntelComputeJob` thành công (và tùy chọn sau recalculate API nặng): insert `crm_customer_intel_runs` + set `crm_customers.intel.lastRunId` + `lastComputedAt`.
+2. **P1 — API đọc:** Endpoint hoặc field profile «lịch sử intel» đọc từ collection A (phân trang).
+3. **P2 — Thống nhất:** Mọi đường vào intel (datachanged, merge, API rebuild) đều đi qua **cùng** hàm «finalize intel» để không sót persist.
+
 ---
 
 ## 2. Mẫu ba pha (chuẩn hướng dẫn)
@@ -23,12 +80,12 @@ Tài liệu này cố định **một mẫu kiến trúc** để các module (CR
 ### Pha A — Dữ liệu thô vào DB + DataChanged
 
 1. Nguồn ngoài → (tuỳ chọn CIO) → **Service domain** → **Upsert** vào **collection mirror / thô**.
-2. Base layer / hook → **`events.EmitDataChanged`** (theo policy collection: ghi `decision_events_queue` hay không — xem `aidecision/hooks/datachanged_emit_per_collection.go`, `source_sync_registry.go`).
+2. Base layer / hook → **`events.EmitDataChanged`** (theo policy collection: ghi `decision_events_queue` hay không — xem `aidecision/datachangedemit/emit_policy.go`, `datachangedrouting` YAML `emit_to_decision_queue`, `hooks/datachanged_emit_filter.go`, `source_sync_registry.go`).
 3. Consumer AID → **`applyDatachangedSideEffects`** → **chỉ điều phối**: xếp **job nhẹ** cho domain (queue ingest, enqueue intel, debounce ads, …), **không** merge nặng tại đây.
 
 ### Pha B — Merge đa nguồn (nếu domain cần) + bàn giao “sẵn sàng tính intel”
 
-1. **Worker domain** đọc queue (ví dụ `crm_pending_ingest`).
+1. **Worker domain** đọc queue (ví dụ `crm_pending_merge` — merge L1→L2 CRM, khác CIO ingest).
 2. **Merge / touchpoint** vào **đối tượng thống nhất** trong domain (ví dụ `crm_customers` + `unifiedId`).
 3. Sau khi merge thành công → domain (hoặc worker) phát event vào AID kiểu **“yêu cầu tính lại intelligence”** (ví dụ `crm.intelligence.recompute_requested` → debounce → `crm_intel_compute`).
 
@@ -37,7 +94,7 @@ Tài liệu này cố định **một mẫu kiến trúc** để các module (CR
 ### Pha C — Tính intelligence + báo cáo về AID
 
 1. **Worker domain** chạy job intel (refresh metrics, recalculate, snapshot nhiều lớp — tuỳ domain).
-2. Ghi kết quả vào collection/domain model.
+2. Ghi kết quả vào **collection kết quả intel** (chuẩn — xem mục 1.1); chỉ **cập nhật có kiểm soát** lên document aggregate (mirror/canonical) khi cần **snapshot tóm tắt** cho UI.
 3. Phát event **intel đã cập nhật** (ví dụ `crm_intel_recomputed`) để AID: cập nhật case, context packet, rule, feed.
 
 **Hợp đồng ID / envelope / event:** Khi chạm payload queue, `sourceIds`, `links`, case — tuân [docs-shared/architecture/data-contract/unified-data-contract.md](../../docs-shared/architecture/data-contract/unified-data-contract.md) và [HUONG_DAN_IDENTITY_LINKS.md](./HUONG_DAN_IDENTITY_LINKS.md).
@@ -114,10 +171,10 @@ flowchart TB
 | Bước | Vị trí code (gợi ý) |
 |------|---------------------|
 | Điều phối CIO đa domain | `api/internal/api/cio/handler/handler.cio.ingest.go` |
-| Xếp job ingest từ datachanged | `api/internal/api/crm/datachanged/ingest.go` — `IngestFromDataChange` |
+| Xếp job merge queue từ datachanged | `api/internal/api/crm/datachanged/merge_from_datachanged.go` — `EnqueueCrmMergeFromDataChange` |
 | Consumer một cửa side-effect | `api/internal/api/aidecision/worker/worker.aidecision.datachanged_side_effects.go` — `applyDatachangedSideEffects` |
-| Worker merge | `api/internal/worker/crm_ingest_worker.go` → `crm/service/service.crm.ingest_apply.go` — `ApplyCrmIngestFromDocument` |
-| Sau merge → yêu cầu intel | `api/internal/api/crm/datachanged/notify_after_ingest.go` → `aidecision/crmqueue` — `EmitCrmIntelligenceRecomputeRequested` |
+| Worker merge | `api/internal/worker/crm_merge_worker.go` → `crm/service/service.crm.merge_apply.go` — `ApplyCrmMergeFromSourceDocument` |
+| Sau merge queue → yêu cầu intel | `api/internal/api/crm/datachanged/notify_after_crm_merge.go` → `aidecision/crmqueue` — `EmitCrmIntelligenceRecomputeRequested` |
 | Job intel | `api/internal/api/crm/service/service.crm.intel_compute.go` — `RunCrmIntelComputeJob`; worker `crm/worker/worker.crm.intel_compute.go` |
 | Báo intel xong cho AID | `api/internal/api/aidecision/intelrecomputed/`; case `service.aidecision.crm_intel_cases.go` |
 | Registry collection → prefix event | `api/internal/api/aidecision/hooks/source_sync_registry.go` |
@@ -147,6 +204,8 @@ Khi **mở rộng nguồn** (Shopee, TikTok, …): áp dụng **cùng Pha A**; *
 6. Intel xong: có event **bàn giao ngược** AID (case / rule) và payload tuân data contract?
 7. Cập nhật **`source_sync_registry.go`** (comment bảng) khi thêm collection sync quan trọng cho pipeline?
 8. **Bốn lớp ID:** Pha A đã có `sourceIds` (và `uid` nếu quy ước entity)? Pha B đã gộp map + canonical đúng [unified-data-contract](../../docs-shared/architecture/data-contract/unified-data-contract.md)? Payload AID / case không lộ `_id` ra contract công khai?
+9. **Intel:** Đã **tách** job + kết quả đầy đủ khỏi document mirror/sync (mục 1.1)? Mọi field intel trên aggregate chỉ là **tóm tắt / denormalize** có lý do (UI, sort), không thay thế collection kết quả khi cần lịch sử?
+10. **Persist intel (mục 1.3):** Mỗi lần chạy intel kết thúc có **bản ghi lớp A** hoặc lý do **skipped** có document; canonical có **pointer** tới lần chạy mới nhất?
 
 ---
 
@@ -159,13 +218,15 @@ Khi **mở rộng nguồn** (Shopee, TikTok, …): áp dụng **cùng Pha A**; *
 
 ## 8. Liên kết nhanh
 
+- [KHUNG_KHUON_MODULE_INTELLIGENCE.md](./KHUNG_KHUON_MODULE_INTELLIGENCE.md) — khuôn **bên trong** pipeline intel: raw / layer1–3 / flag, lưu A–B, snapshot & point-in-time (tham chiếu CRM)
 - [NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md](./NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md)
 - [THIET_KE_TRUNG_TAM_CHI_HUY_AI_DECISION.md](./THIET_KE_TRUNG_TAM_CHI_HUY_AI_DECISION.md)
 - [THIET_KE_MODULE_CIO.md](./THIET_KE_MODULE_CIO.md)
 - [HUONG_DAN_IDENTITY_LINKS.md](./HUONG_DAN_IDENTITY_LINKS.md) — `uid`, `unifiedId`, `links`, resolver
-- Unified data contract: [unified-data-contract.md](../../docs-shared/architecture/data-contract/unified-data-contract.md) — mục 1.5–1.6 (bốn lớp + entity đa nguồn)
+- Unified data contract: [unified-data-contract.md](../../docs-shared/architecture/data-contract/unified-data-contract.md) — mục 1.5–1.7 (bốn lớp + đa nguồn + L1/L2 persistence)
+- Tiền tố, tên field, event/queue: [uid-field-naming.md](../../docs-shared/architecture/data-contract/uid-field-naming.md)
 - Chi tiết model: [identity-links-model.md](../../docs-shared/architecture/data-contract/identity-links-model.md)
 
 ---
 
-*Tài liệu khung — cập nhật khi luồng domain lệch khỏi mẫu hoặc khi tách ingest/registry có cấu hình.*
+*Tài liệu khung — cập nhật 2026-04-06: mục 1.3 chuẩn persist intelligence; mục 1.1 tách lớp intel; mục 1.2 L1/L2 + định danh. Cập nhật tiếp khi luồng domain lệch khỏi mẫu hoặc khi tách ingest/registry có cấu hình.*

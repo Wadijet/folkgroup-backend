@@ -22,10 +22,10 @@ import (
 const EventTypeCixAnalysisRequested = eventtypes.CixAnalysisRequested
 
 // EventSourceCixHTTP — event do API HTTP CIX phát vào queue (handler gọi EmitCixAnalysisRequested).
-const EventSourceCixHTTP = "cix_api"
+const EventSourceCixHTTP = eventtypes.EventSourceCixHTTP
 
 // EventSourceAIDecision — event do lớp AI Decision (orchestrate / consumer nội bộ) phát: xin context, bước pipeline.
-const EventSourceAIDecision = "aidecision"
+const EventSourceAIDecision = eventtypes.EventSourceAIDecision
 
 // EmitCixAnalysisRequested đưa yêu cầu phân tích CIX vào decision_events_queue.
 // eventSource: EventSourceCixHTTP khi gọi từ handler CIX; EventSourceAIDecision khi consumer bridge/orchestrate phát (không nhầm với HTTP).

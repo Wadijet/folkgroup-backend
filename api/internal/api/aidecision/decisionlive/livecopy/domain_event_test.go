@@ -10,7 +10,7 @@ import (
 func TestDomainNarrativeFromQueueEvent_MetaCampaign(t *testing.T) {
 	evt := &aidecisionmodels.DecisionEvent{
 		EventType:   eventtypes.CampaignIntelRecomputed,
-		EventSource: "datachanged",
+		EventSource: eventtypes.EventSourceMetaAdsIntel,
 		Payload: map[string]interface{}{
 			"campaignId": "c1",
 		},
@@ -28,7 +28,7 @@ func TestBuildQueueConsumerEvent_Done(t *testing.T) {
 	evt := &aidecisionmodels.DecisionEvent{
 		EventID:     "evt_x",
 		EventType:   eventtypes.OrderUpdated,
-		EventSource: "datachanged",
+		EventSource: eventtypes.EventSourceDatachanged,
 	}
 	ev := BuildQueueConsumerEvent(evt, QueueMilestoneHandlerDone, nil, nil)
 	if ev.Phase == "" {

@@ -42,7 +42,7 @@ func NewClassificationRefreshWorker(interval time.Duration, batchSize int, mode 
 	}, nil
 }
 
-// Start chạy worker trong vòng lặp (cùng mẫu CrmIngestWorker: không dùng Ticker — tránh khi inactive phải chờ cả chu kỳ 24h mới kiểm tra lại).
+// Start chạy worker trong vòng lặp (cùng mẫu CrmPendingMergeWorker: không dùng Ticker — tránh khi inactive phải chờ cả chu kỳ 24h mới kiểm tra lại).
 func (w *ClassificationRefreshWorker) Start(ctx context.Context) {
 	log := logger.GetAppLogger()
 

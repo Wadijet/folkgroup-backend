@@ -31,9 +31,9 @@ func EmitAdsIntelligenceRecomputeRequested(ctx context.Context, objectType, obje
 	if strings.TrimSpace(recomputeMode) != "" {
 		payload["recomputeMode"] = recomputeMode
 	}
-	eventSource := "meta_hooks"
+	eventSource := eventtypes.EventSourceMetaHooks
 	if strings.TrimSpace(strings.ToLower(recomputeMode)) == "full" {
-		eventSource = "meta_api"
+		eventSource = eventtypes.EventSourceMetaAPI
 	}
 	res, err := svc.EmitEvent(ctx, &EmitEventInput{
 		EventType:   EventTypeAdsIntelligenceRecomputeRequested,
@@ -57,7 +57,7 @@ func EmitAdsIntelligenceRecalculateAllRequested(ctx context.Context, ownerOrgID 
 	svc := NewAIDecisionService()
 	res, err := svc.EmitEvent(ctx, &EmitEventInput{
 		EventType:   EventTypeAdsIntelligenceRecalculateAllRequested,
-		EventSource: "meta_api",
+		EventSource: eventtypes.EventSourceMetaAPI,
 		EntityType:  "organization",
 		EntityID:    ownerOrgID.Hex(),
 		OrgID:       ownerOrgID.Hex(),

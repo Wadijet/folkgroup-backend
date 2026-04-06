@@ -120,9 +120,10 @@ func initColNames() {
 	global.MongoDB_ColNames.CrmCustomers = "crm_customers"
 	global.MongoDB_ColNames.CrmActivityHistory = "crm_activity_history"
 	global.MongoDB_ColNames.CrmNotes = "crm_notes"
-	global.MongoDB_ColNames.CrmPendingIngest = "crm_pending_ingest"
+	global.MongoDB_ColNames.CrmPendingMerge = "crm_pending_merge"
 	global.MongoDB_ColNames.CrmBulkJobs = "crm_bulk_jobs"
 	global.MongoDB_ColNames.CrmIntelCompute = "crm_intel_compute"
+	global.MongoDB_ColNames.CrmCustomerIntelRuns = "crm_customer_intel_runs"
 
 	// Module Meta Ads
 	global.MongoDB_ColNames.MetaAdAccounts = "meta_ad_accounts"
@@ -276,9 +277,10 @@ func initDatabase_MongoDB() {
 	database.CreateCrmCustomerProfileIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmCustomers))
 	database.CreateCrmActivityIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmActivityHistory))
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmNotes), crmmodels.CrmNote{})
-	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmPendingIngest), crmmodels.CrmPendingIngest{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmPendingMerge), crmmodels.CrmPendingMerge{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmBulkJobs), crmmodels.CrmBulkJob{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmIntelCompute), crmmodels.CrmIntelComputeJob{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmCustomerIntelRuns), crmmodels.CrmCustomerIntelRun{})
 
 	// Module Meta Ads
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.MetaAdAccounts), metamodels.MetaAdAccount{})

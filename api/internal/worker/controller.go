@@ -33,7 +33,7 @@ type Priority int
 const (
 	// Order > Ads > Customer; trong từng nhóm Report ưu tiên hơn
 	PriorityCritical Priority = 1 // Report: report_dirty_ads, report_dirty_order, report_dirty_customer — Report ưu tiên nhất
-	PriorityHigh     Priority = 2 // Order: CrmIngest, Delivery Processor
+	PriorityHigh     Priority = 2 // Order: CrmPendingMerge, Delivery Processor
 	PriorityNormal   Priority = 3 // Ads: tất cả Ads workers
 	PriorityLow      Priority = 4 // Customer: CrmBulkWorker
 	PriorityLowest   Priority = 5 // Command Cleanup, Agent Cleanup, Classification Refresh

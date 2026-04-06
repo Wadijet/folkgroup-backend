@@ -1,4 +1,4 @@
-// Package datachanged — Sau khi CrmIngestWorker merge thành công: bắn event vào AID để debounce rồi xếp tính lại CRM intelligence.
+// Package datachanged — Sau khi CrmPendingMergeWorker merge L1→L2 thành công: emit AID để debounce rồi crm_intel_compute.
 package datachanged
 
 import (
@@ -16,16 +16,24 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 )
 
-// NotifyIntelRefreshAfterIngestIfNeeded — resolve unifiedId sau merge, emit crm.intelligence.recompute_requested (consumer AID debounce → crm_intel_compute).
-func NotifyIntelRefreshAfterIngestIfNeeded(ctx context.Context, item *crmmodels.CrmPendingIngest) error {
-	if item == nil || item.Document == nil || item.OwnerOrganizationID.IsZero() {
+// NotifyIntelRecomputeAfterCrmMergeIfNeeded — resolve unifiedId sau merge queue, emit crm.intelligence.recompute_requested.
+func NotifyIntelRecomputeAfterCrmMergeIfNeeded(ctx context.Context, item *crmmodels.CrmPendingMerge) error {
+	if item == nil || item.OwnerOrganizationID.IsZero() {
 		return nil
 	}
-	cn := strings.TrimSpace(item.CollectionName)
+	if len(item.SourceSnapshots) == 0 && item.Document == nil {
+		return nil
+	}
 	ownerOrgID := item.OwnerOrganizationID
-	doc := item.Document
+	sourceCollection := strings.TrimSpace(item.CollectionName)
+	if len(item.SourceCollections) > 0 {
+		sourceCollection = strings.Join(item.SourceCollections, ",")
+	}
 
-	customerID := extractCustomerIDFromPendingIngestDoc(cn, doc)
+	customerID := strings.TrimSpace(item.InboxCustomerId)
+	if customerID == "" && item.Document != nil {
+		customerID = extractCustomerIDFromPendingMergeDoc(strings.TrimSpace(item.CollectionName), item.Document)
+	}
 	if customerID == "" {
 		return nil
 	}
@@ -43,16 +51,16 @@ func NotifyIntelRefreshAfterIngestIfNeeded(ctx context.Context, item *crmmodels.
 	if !item.ID.IsZero() {
 		jobHex = item.ID.Hex()
 	}
-	_, err = crmqueue.EmitCrmIntelligenceRecomputeRequested(ctx, unifiedID, ownerOrgID, cn, jobHex)
+	_, err = crmqueue.EmitCrmIntelligenceRecomputeRequested(ctx, unifiedID, ownerOrgID, sourceCollection, jobHex)
 	if err != nil {
 		logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
-			"collection": cn, "unifiedId": unifiedID,
-		}).Warn("[CRM] Không emit crm.intelligence.recompute_requested sau ingest")
+			"collection": sourceCollection, "unifiedId": unifiedID,
+		}).Warn("[CRM] Không emit crm.intelligence.recompute_requested sau merge queue")
 	}
 	return err
 }
 
-func extractCustomerIDFromPendingIngestDoc(collectionName string, doc bson.M) string {
+func extractCustomerIDFromPendingMergeDoc(collectionName string, doc bson.M) string {
 	if doc == nil {
 		return ""
 	}

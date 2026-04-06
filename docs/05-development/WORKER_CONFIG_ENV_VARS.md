@@ -27,7 +27,7 @@ Cho phép chỉnh ngưỡng CPU/RAM và mức ưu tiên từng worker qua biến
       ...
     },
     "priorities": { "crm_bulk": 3 },
-    "workerPriorities": { "report_dirty_ads": 1, "report_dirty_order": 1, "report_dirty_customer": 1, "crm_ingest": 2, "crm_bulk": 4, ... },
+    "workerPriorities": { "report_dirty_ads": 1, "report_dirty_order": 1, "report_dirty_customer": 1, "crm_pending_merge": 2, "crm_bulk": 4, ... },
     "workerActive": { "report_dirty_ads": true, "report_dirty_customer": true, "crm_bulk": true, ... },
     "workerActiveOverrides": { "crm_bulk": false },
     "workerMetadata": { "report_dirty_ads": { "module": "report", "domain": "ads", "description": "..." }, ... },
@@ -38,7 +38,7 @@ Cho phép chỉnh ngưỡng CPU/RAM và mức ưu tiên từng worker qua biến
     },
     "reportScheduleOverrides": { "customer": { "interval": "24h", "batchSize": 10 } },
     "workerSchedules": {
-      "crm_ingest": { "interval": "30s", "batchSize": 50 },
+      "crm_pending_merge": { "interval": "30s", "batchSize": 50 },
       "crm_bulk": { "interval": "2m0s", "batchSize": 2 },
       "ads_execution": { "interval": "30s", "batchSize": 10 },
       "report_dirty_ads": { "interval": "2m0s", "batchSize": 20 },
@@ -83,7 +83,7 @@ Cho phép chỉnh ngưỡng CPU/RAM và mức ưu tiên từng worker qua biến
   },
   "reportSchedulesClear": ["order"],
   "workerSchedules": {
-    "crm_ingest": { "interval": "1m", "batchSize": 100 },
+    "crm_pending_merge": { "interval": "1m", "batchSize": 100 },
     "crm_bulk": { "interval": "5m", "batchSize": 5 },
     "report_dirty_customer": { "interval": "24h", "batchSize": 5 }
   },
@@ -209,7 +209,7 @@ API: `workerActive` trong PUT body — map worker_name → true/false.
 
 | Env | Mặc định | Mô tả |
 |-----|----------|-------|
-| `WORKER_<NAME>_INTERVAL` | (xem bảng) | Khoảng thời gian giữa các lần chạy. Ví dụ: `WORKER_CRM_INGEST_INTERVAL=1m` |
+| `WORKER_<NAME>_INTERVAL` | (xem bảng) | Khoảng thời gian giữa các lần chạy. Ví dụ: `WORKER_CRM_PENDING_MERGE_INTERVAL=1m` |
 | `WORKER_<NAME>_BATCH` | (xem bảng) | Số item mỗi batch. Ví dụ: `WORKER_CRM_BULK_BATCH=5` |
 
 API: `workerSchedules` trong PUT body — map worker_name → { interval, batchSize }. Thay đổi có hiệu lực ngay, không cần restart.
@@ -230,7 +230,7 @@ API: `workerRetentions` trong PUT body — map worker_name → retentionDays.
 
 API: `alertWebhookURL` trong PUT body — string. Rỗng = tắt.
 
-**Workers đã hỗ trợ config runtime (interval, batch):** crm_ingest, crm_bulk, notification_command_cleanup, ads_execution.
+**Workers đã hỗ trợ config runtime (interval, batch):** crm_pending_merge, crm_bulk, notification_command_cleanup, ads_execution.
 
 **Report workers (interval, batch qua reportSchedules hoặc workerSchedules):** report_dirty_ads, report_dirty_order, report_dirty_customer — mỗi worker độc lập, config riêng (priority, active, pool size). Thêm **report_redis_touch_flush** (quét Redis → MarkDirty) — interval qua `workerSchedules` hoặc env ở bảng Redis & báo cáo phía trên.
 
@@ -245,7 +245,7 @@ API: `alertWebhookURL` trong PUT body — string. Rỗng = tắt.
 |--------|---------|
 | `ads` | report_dirty_ads, ads_execution, ads_auto_propose, ads_circuit_breaker, ads_daily_scheduler, ads_pancake_heartbeat, ads_counterfactual |
 | `order` | report_dirty_order |
-| `customer` | report_dirty_customer, crm_ingest, crm_bulk, crm_classification_full, crm_classification_smart |
+| `customer` | report_dirty_customer, crm_pending_merge, crm_bulk, crm_classification_full, crm_classification_smart |
 | `notification` | notification_delivery_processor, notification_delivery_cleanup |
 | `system` | report_redis_touch_flush, notification_command_cleanup, notification_agent_command_cleanup, notification_agent_activity_cleanup |
 
@@ -264,7 +264,7 @@ API GET trả `workerMetadata` với field `domain` — dùng để nhóm/filter
 | `notification_command_cleanup` | notification | system | Dọn command cũ hết hạn | `WORKER_PRIORITY_NOTIFICATION_COMMAND_CLEANUP` | 4 (Low) |
 | `notification_agent_command_cleanup` | notification | system | Dọn agent command cũ hết hạn | `WORKER_PRIORITY_NOTIFICATION_AGENT_COMMAND_CLEANUP` | 4 (Low) |
 | `notification_agent_activity_cleanup` | notification | system | Dọn agent activity log cũ | `WORKER_PRIORITY_NOTIFICATION_AGENT_ACTIVITY_CLEANUP` | 4 (Low) |
-| `crm_ingest` | crm | customer | Đồng bộ dữ liệu customer từ agent vào hệ thống | `WORKER_PRIORITY_CRM_INGEST` | 2 (High) |
+| `crm_pending_merge` | crm | customer | Queue merge L1→L2 CRM (khác CIO ingest) | `WORKER_PRIORITY_CRM_PENDING_MERGE` | 2 (High) |
 | `crm_bulk` | crm | customer | Xử lý bulk job cập nhật customer hàng loạt | `WORKER_PRIORITY_CRM_BULK` | 4 (Low) |
 | `ads_execution` | ads | ads | Thực thi đề xuất quảng cáo đã duyệt | `WORKER_PRIORITY_ADS_EXECUTION` | 3 (Normal) |
 | `ads_auto_propose` | ads | aidecision | Auto propose (aidecision/adsautop → executor.propose_requested) | `WORKER_PRIORITY_ADS_AUTO_PROPOSE` | 3 (Normal) |
@@ -298,7 +298,7 @@ WORKER_POOL_SIZE_REPORT_DIRTY_CUSTOMER=4
 
 ### Debug mismatch — chỉ chạy crm_bulk (recalc)
 
-Để xác định lỗi visitor/engaged mismatch, tạm dừng tất cả job khác (report, crm_ingest, notification, ads):
+Để xác định lỗi visitor/engaged mismatch, tạm dừng tất cả job khác (report, crm_pending_merge, notification, ads):
 
 1. Thêm vào `development.env` (hoặc env tương ứng):
    - `WORKER_CPU_THRESHOLD_THROTTLE=1` — luôn Throttled (CPU ≥ 1%) → workers priority 5 skip
@@ -306,7 +306,7 @@ WORKER_POOL_SIZE_REPORT_DIRTY_CUSTOMER=4
 
 2. Restart server.
 
-3. Chỉ `crm_bulk` (recalc) chạy; report, crm_ingest, ... sẽ skip.
+3. Chỉ `crm_bulk` (recalc) chạy; report, crm_pending_merge, ... sẽ skip.
 
 4. **Lưu ý:** Webhook gọi API trực tiếp (Pancake, Meta...) vẫn có thể gọi `IngestOrderTouchpoint`. Nếu cần tắt hoàn toàn ingest, cần disable webhook ở nguồn.
 
@@ -329,6 +329,18 @@ Job được đánh dấu ưu tiên sẽ **bắt buộc chạy** mà không bị
 
 - **priority** (int): 1=critical, 2=high — item có priority 1 hoặc 2 được xử lý ngay không bị throttle.
 - Sort: FindPending đã sort theo priority asc (ưu tiên trước).
+
+---
+
+## 3b. AI Decision — log định tuyến datachanged (quan sát, không đổi hành vi)
+
+| Biến | Giá trị | Mô tả |
+|------|---------|--------|
+| `AI_DECISION_DATACHANGED_ROUTING_LOG` | `1` / `true` / `yes` | Log **Info** mỗi lần consumer áp side-effect datachanged: `routingConfigVersion`, `routingRuleId`, pipeline mirror + policy `Allow*` (mặc định chỉ **Debug** để giảm spam). |
+| — | (không set) | Chỉ log **Debug** — cần bật level debug cho logger consumer. |
+| `DATACHANGED_ROUTING_CONFIG` | Đường dẫn file YAML | Thay **toàn bộ** YAML định tuyến (không merge với embed). Nếu đọc/parse lỗi → dùng bản **embed** trong binary. Schema: `config_version`, `collection_overrides` — xem `api/config/datachanged_routing.example.yaml` và `api/internal/api/aidecision/datachangedrouting/routing.default.yaml`. |
+
+Code: `api/internal/api/aidecision/datachangedrouting/` — `Version` trong `version.go` tăng khi đổi bảng định tuyến; struct chung `routecontract.Decision` (tránh vòng import với `datachangedsidefx`).
 
 ---
 

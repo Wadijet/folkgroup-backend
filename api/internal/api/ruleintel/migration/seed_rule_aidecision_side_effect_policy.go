@@ -15,7 +15,7 @@ import (
 	"meta_commerce/internal/api/ruleintel/service"
 )
 
-// scriptDatachangedSideEffectPolicy — phân tầng urgency + số giây gom (ingest/report/refresh cùng cửa sổ theo mức).
+// scriptDatachangedSideEffectPolicy — phân tầng urgency + số giây gom (merge queue CRM / report / refresh cùng cửa sổ theo mức).
 var scriptDatachangedSideEffectPolicy = `function evaluate(ctx) {
   var L = ctx.layers || {};
   var dc = L.datachanged || {};
@@ -108,6 +108,7 @@ var scriptDatachangedSideEffectPolicy = `function evaluate(ctx) {
     output: {
       urgency: u,
       deferReportSec: sec,
+      deferCrmMergeQueueSec: sec,
       deferCrmIngestSec: sec,
       deferCrmRefreshSec: sec,
       reason: reason
@@ -150,12 +151,13 @@ func seedSideEffectOutput(ctx context.Context, systemOrgID primitive.ObjectID) e
 			"properties": map[string]interface{}{
 				"urgency":             map[string]interface{}{"type": "integer"},
 				"deferReportSec":      map[string]interface{}{"type": "integer"},
-				"deferCrmIngestSec":   map[string]interface{}{"type": "integer"},
-				"deferCrmRefreshSec":  map[string]interface{}{"type": "integer"},
+				"deferCrmMergeQueueSec": map[string]interface{}{"type": "integer"},
+				"deferCrmIngestSec":     map[string]interface{}{"type": "integer"},
+				"deferCrmRefreshSec":    map[string]interface{}{"type": "integer"},
 				"reason":              map[string]interface{}{"type": "string"},
 			},
 		},
-		RequiredFields: []string{"urgency", "deferReportSec", "deferCrmIngestSec", "deferCrmRefreshSec", "reason"},
+		RequiredFields: []string{"urgency", "deferReportSec", "deferCrmMergeQueueSec", "deferCrmIngestSec", "deferCrmRefreshSec", "reason"},
 	}
 	_, err = svc.Upsert(ctx, bson.M{"output_id": oc.OutputID, "output_version": oc.OutputVersion}, oc)
 	return err

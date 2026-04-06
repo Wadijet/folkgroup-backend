@@ -17,6 +17,8 @@ alwaysApply: true
 - **W3C Trace Context** — `w3cTraceId` (32 hex) neo với `traceId`, span trên timeline, `traceparent` (xem doc gốc **§2.5c** + api-context **4.10**).
 - **Case vs trace / audit / `DecisionLiveEvent.detailBullets`** — không 1-1 `decisionCaseId`↔`traceId`; list phiên nghiệp vụ; API read-only (xem **§2.5d** + api-context **4.11**).
 
+**Đặt tên hệ thống (`uid`, `links`, module, collection, worker, route, env):** [uid-field-naming.md](../../docs-shared/architecture/data-contract/uid-field-naming.md) — prefix **khớp `utility/uid.go`**; collection **khớp `global.vars.go` / init** khi thêm mới.
+
 ## 1. Bốn lớp định danh / liên kết — trọng tâm contract (§1.5)
 
 Mọi entity cần **phân tách đúng 4 lớp**, không gộp một field làm đủ vai trò:
@@ -31,6 +33,8 @@ Mọi entity cần **phân tách đúng 4 lớp**, không gộp một field làm
 **Một câu nhớ:** (1) chỉ DB nội bộ — (2) là mặt tiền — (3) là passport nguồn ngoài — (4) là đồ thị quan hệ.
 
 **Entity đa nguồn (§1.6):** bắt buộc có **(2) + (3)**; tra cứu thống nhất qua resolve (`ResolveUnifiedId` / `ResolveByAnyIdentifier` — pattern CRM/Auth trong doc).
+
+**Hai lớp persistence (§1.7):** **L1** = mirror/ingest (nguồn theo kênh); **L2** = canonical/đã merge (tương tác liên module). Cùng **bốn vai trò field** có thể dùng trên L1 và L2 nhưng kỳ vọng khác: **`uid` contract chính trên L2**; L1 có thể có **`links` L1→L1** để merge suy ra **`links` L2→L2**. `_id` L1 ≠ `_id` L2.
 
 **Lưu ý backend thực tế:** `OwnerOrganizationID` (`ObjectID`) thuộc **lớp (1)** cho tenant; nếu contract yêu cầu `org_id` **chuỗi công khai** (`org_*`), đó là **lớp (2)** — không tự động coi `.Hex()` của ObjectID là đủ thay `org_id` contract nếu doc quy định prefix.
 

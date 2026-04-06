@@ -74,7 +74,7 @@ func decisionCaseIDFromQueuePayload(evt *aidecisionmodels.DecisionEvent) string 
 // isDatachangedCustomerMirrorOnly — datachanged khách POS/FB/CRM: không có handler «bước chính» trên consumer;
 // merge CRM / báo cáo / ads chỉ chạy trong applyDatachangedSideEffects (mốc DATACHANGED_EFFECTS).
 func isDatachangedCustomerMirrorOnly(evt *aidecisionmodels.DecisionEvent) bool {
-	if evt == nil || evt.EventSource != "datachanged" {
+	if evt == nil || evt.EventSource != eventtypes.EventSourceDatachanged {
 		return false
 	}
 	et := strings.TrimSpace(evt.EventType)
@@ -180,13 +180,13 @@ func queueStructuredBullets(evt *aidecisionmodels.DecisionEvent, ms QueueMilesto
 	lineViệc := fmt.Sprintf("Việc đang làm: %s.", dn.StepTitle)
 	var lineNguồn string
 	switch evt.EventSource {
-	case "datachanged":
+	case eventtypes.EventSourceDatachanged:
 		lineNguồn = "Có thay đổi dữ liệu trên hệ thống vừa được ghi lại — các bước sau sẽ dựa trên bản mới nhất."
-	case "aidecision":
+	case eventtypes.EventSourceAIDecision:
 		lineNguồn = "Đây là bước tiếp theo trong luồng xử lý tự động (sau khi một bước trước hoàn tất)."
-	case "debounce":
+	case eventtypes.EventSourceDebounce:
 		lineNguồn = "Sau khi gom các cập nhật tin nhắn trong một khoảng thời gian ngắn."
-	case "orderintel", "cix_intel", "crm", "meta_ads_intel":
+	case eventtypes.EventSourceOrderIntel, eventtypes.EventSourceCixIntel, eventtypes.EventSourceCRM, eventtypes.EventSourceMetaAdsIntel:
 		lineNguồn = "Kết quả từ bước phân tích / đồng bộ chuyên sâu vừa sẵn sàng."
 	default:
 		if strings.TrimSpace(evt.EventSource) != "" {
@@ -241,7 +241,7 @@ func queueDetailSections(evt *aidecisionmodels.DecisionEvent, ms QueueMilestone,
 			"Hệ thống đã lấy yêu cầu từ hàng chờ và bắt đầu xử lý.",
 			"Thông tin kèm theo (đơn, khách, chiến dịch…) được đọc để làm đúng việc.",
 		}
-		if evt != nil && evt.EventSource == "datachanged" {
+		if evt != nil && evt.EventSource == eventtypes.EventSourceDatachanged {
 			steps = append(steps, "Nếu có thay đổi dữ liệu nguồn: có thể chạy trước các bước đồng bộ phụ (CRM, báo cáo, xếp hàng phân tích), rồi mới tới bước chính.")
 		} else {
 			steps = append(steps, "Tiếp theo là bước xử lý đúng với loại việc này.")
@@ -249,7 +249,7 @@ func queueDetailSections(evt *aidecisionmodels.DecisionEvent, ms QueueMilestone,
 	case QueueMilestoneDatachangedDone:
 		if isDatachangedCustomerMirrorOnly(evt) {
 			steps = []string{
-				"Với cập nhật khách POS / Facebook / CRM chỉ mirror: consumer xếp job vào crm_pending_ingest (CrmIngestWorker mới merge vào crm_customers).",
+				"Với cập nhật khách POS / Facebook / CRM chỉ mirror: consumer xếp job vào crm_pending_merge (CrmPendingMergeWorker mới merge vào crm_customers).",
 				"Sau đó consumer đóng job ở trạng thái «không có handler chính» — không phải lỗi.",
 			}
 		} else {
@@ -279,8 +279,8 @@ func queueDetailSections(evt *aidecisionmodels.DecisionEvent, ms QueueMilestone,
 	case QueueMilestoneNoHandler:
 		if isDatachangedCustomerMirrorOnly(evt) {
 			steps = []string{
-				"consumer_dispatch không đăng ký handler cho pos_customer.* / fb_customer.* / crm_customer.* — enqueue CRM ingest trong applyDatachangedSideEffects, merge thực tế ở CrmIngestWorker.",
-				"Nếu crm_customers vẫn trống: kiểm tra CrmIngestWorker và backlog crm_pending_ingest, log [CRM], ownerOrganizationId / customerId trên bản ghi nguồn.",
+				"consumer_dispatch không đăng ký handler cho pos_customer.* / fb_customer.* / crm_customer.* — enqueue crm_pending_merge trong applyDatachangedSideEffects, merge thực tế ở CrmPendingMergeWorker.",
+				"Nếu crm_customers vẫn trống: kiểm tra CrmPendingMergeWorker và backlog crm_pending_merge, log [CRM], ownerOrganizationId / customerId trên bản ghi nguồn.",
 			}
 		} else {
 			steps = []string{

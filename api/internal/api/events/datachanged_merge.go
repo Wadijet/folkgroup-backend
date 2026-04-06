@@ -29,7 +29,7 @@ func MergeRelevantDataKey(collectionName string) string {
 	}
 }
 
-// ExtractUpdatedAtFromDoc lấy updated_at (ms) từ document theo collection (crm_pending_ingest delta).
+// ExtractUpdatedAtFromDoc lấy updated_at (ms) từ document theo collection (queue crm_pending_merge / debug delta).
 func ExtractUpdatedAtFromDoc(collectionName string, doc interface{}) int64 {
 	if doc == nil {
 		return 0

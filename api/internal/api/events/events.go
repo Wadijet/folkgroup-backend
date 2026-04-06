@@ -1,6 +1,6 @@
 // Package events cung cấp cơ chế event trung tâm khi dữ liệu thay đổi qua CRUD.
 // Các service CRUD không cần override từng method — BaseServiceMongoImpl tự động phát event.
-// Vision L1: chỉ hook aidecision đăng ký OnDataChanged → decision_events_queue; consumer gọi applyDatachangedSideEffects (một cửa: queue CRM ingest / report / ads; intel CRM sau worker ingest).
+// Vision L1: chỉ hook aidecision đăng ký OnDataChanged → decision_events_queue; consumer gọi applyDatachangedSideEffects (một cửa: queue CRM merge / report / ads; intel CRM sau merge worker + recompute_requested).
 package events
 
 import (

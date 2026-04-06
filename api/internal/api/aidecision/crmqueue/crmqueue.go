@@ -52,7 +52,7 @@ func emitCrmIntelligenceCompute(ctx context.Context, operation string, ownerOrgI
 	}
 	res, err := eventemit.EmitDecisionEvent(ctx, &eventemit.EmitInput{
 		EventType:   EventTypeCrmIntelligenceComputeRequested,
-		EventSource: "crm",
+		EventSource: eventtypes.EventSourceCRM,
 		EntityType:  "crm_customer",
 		EntityID:    entID,
 		OrgID:       orgIDStr,
@@ -77,8 +77,8 @@ func EmitCrmIntelligenceRefreshRequested(ctx context.Context, unifiedId string, 
 	}, aidecisionmodels.EventLaneFast)
 }
 
-// EmitCrmIntelligenceRecomputeRequested — worker crm_pending_ingest sau merge thành công → queue AID (debounce → crm_intel_compute).
-func EmitCrmIntelligenceRecomputeRequested(ctx context.Context, unifiedID string, ownerOrgID primitive.ObjectID, sourceCollection, pendingIngestJobHex string) (string, error) {
+// EmitCrmIntelligenceRecomputeRequested — sau CrmPendingMergeWorker merge L1→L2 → queue AID (debounce → crm_intel_compute).
+func EmitCrmIntelligenceRecomputeRequested(ctx context.Context, unifiedID string, ownerOrgID primitive.ObjectID, sourceCollection, pendingMergeJobHex string) (string, error) {
 	unifiedID = strings.TrimSpace(unifiedID)
 	if unifiedID == "" || ownerOrgID.IsZero() {
 		return "", nil
@@ -90,12 +90,12 @@ func EmitCrmIntelligenceRecomputeRequested(ctx context.Context, unifiedID string
 	if strings.TrimSpace(sourceCollection) != "" {
 		payload["sourceCollection"] = strings.TrimSpace(sourceCollection)
 	}
-	if strings.TrimSpace(pendingIngestJobHex) != "" {
-		payload["pendingIngestJobId"] = strings.TrimSpace(pendingIngestJobHex)
+	if strings.TrimSpace(pendingMergeJobHex) != "" {
+		payload["pendingMergeJobId"] = strings.TrimSpace(pendingMergeJobHex)
 	}
 	res, err := eventemit.EmitDecisionEvent(ctx, &eventemit.EmitInput{
 		EventType:   EventTypeCrmIntelligenceRecomputeRequested,
-		EventSource: "crm_ingest",
+		EventSource: eventtypes.EventSourceCrmMergeQueue,
 		EntityType:  "crm_customer",
 		EntityID:    unifiedID,
 		OrgID:       ownerOrgID.Hex(),

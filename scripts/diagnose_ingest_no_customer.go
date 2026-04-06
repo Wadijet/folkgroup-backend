@@ -1,4 +1,4 @@
-// Script chẩn đoán crm_pending_ingest đã xử lý nhưng không tạo customer.
+// Script chẩn đoán crm_pending_merge đã xử lý nhưng không tạo customer.
 // Tìm các job processedAt có nhưng không tương ứng với crm_customers.
 // Chạy: go run scripts/diagnose_ingest_no_customer.go
 package main
@@ -70,13 +70,13 @@ func main() {
 	defer client.Disconnect(ctx)
 
 	db := client.Database(dbName)
-	ingestColl := db.Collection("crm_pending_ingest")
+	mergeColl := db.Collection("crm_pending_merge")
 	crmColl := db.Collection("crm_customers")
 
 	// Lấy tất cả ingest đã xử lý (processedAt != null)
 	filter := bson.M{"processedAt": bson.M{"$exists": true, "$ne": nil}}
 	opts := options.Find().SetSort(bson.D{{Key: "processedAt", Value: -1}}).SetLimit(100)
-	cursor, err := ingestColl.Find(ctx, filter, opts)
+	cursor, err := mergeColl.Find(ctx, filter, opts)
 	if err != nil {
 		log.Fatalf("Query lỗi: %v", err)
 	}
@@ -98,14 +98,14 @@ func main() {
 		log.Fatalf("Decode lỗi: %v", err)
 	}
 
-	fmt.Printf("=== CRM_PENDING_INGEST ĐÃ XỬ LÝ (tổng: %d) ===\n\n", len(list))
+	fmt.Printf("=== CRM_PENDING_MERGE ĐÃ XỬ LÝ (tổng: %d) ===\n\n", len(list))
 
 	noCustomerCount := 0
 	for i, item := range list {
 		reason := ""
 		customerIdFromDoc := ""
 
-		// collectionName có thể không có trong doc (EnqueueCrmIngest không set) — lấy từ businessKey
+		// collectionName có thể không có trong doc — lấy từ businessKey
 		collectionName := item.CollectionName
 		if collectionName == "" && len(item.BusinessKey) > 0 {
 			parts := splitFirst(item.BusinessKey, "|")

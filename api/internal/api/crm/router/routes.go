@@ -21,9 +21,9 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 	if err != nil {
 		return fmt.Errorf("tạo CrmNoteHandler: %w", err)
 	}
-	pendingIngestHandler, err := crmhdl.NewCrmPendingIngestHandler()
+	pendingMergeHandler, err := crmhdl.NewCrmPendingMergeHandler()
 	if err != nil {
-		return fmt.Errorf("tạo CrmPendingIngestHandler: %w", err)
+		return fmt.Errorf("tạo CrmPendingMergeHandler: %w", err)
 	}
 	bulkJobHandler, err := crmhdl.NewCrmBulkJobHandler()
 	if err != nil {
@@ -38,8 +38,8 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 	// Đăng ký trước các route /:unifiedId để tránh conflict.
 	r.RegisterCRUDRoutes(v1, "/customers", customerHandler, apirouter.ReadOnlyConfig, "Report")
 
-	// CRUD crm-pending-ingest (chỉ đọc) — queue Merge/Ingest, xem trạng thái job.
-	r.RegisterCRUDRoutes(v1, "/crm-pending-ingest", pendingIngestHandler, apirouter.ReadOnlyConfig, "Report")
+	// CRUD crm-pending-merge (chỉ đọc) — queue merge L1→L2 CRM (khác CIO ingest).
+	r.RegisterCRUDRoutes(v1, "/crm-pending-merge", pendingMergeHandler, apirouter.ReadOnlyConfig, "Report")
 
 	// CRUD crm-bulk-jobs — đọc + update-by-id (retry, isPriority). Queue sync/backfill/recalculate.
 	r.RegisterCRUDRoutes(v1, "/crm-bulk-jobs", bulkJobHandler, apirouter.CrmBulkJobConfig, "Report")

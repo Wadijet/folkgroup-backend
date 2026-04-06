@@ -34,6 +34,8 @@ api/
 
 ## 📝 Naming Conventions
 
+**Chuẩn đầy đủ (module, collection, `uid`, event, route):** [uid-field-naming.md](../../docs-shared/architecture/data-contract/uid-field-naming.md) mục 2.7–2.12.
+
 ### Files
 
 - Handler: `handler.<module>.<entity>.go`

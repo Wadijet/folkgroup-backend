@@ -42,7 +42,7 @@ func getRuleEngineForSideEffect() (*ruleintelsvc.RuleEngineService, error) {
 
 // ResolveDatachangedDeferWindowsViaRule chạy RULE_DATACHANGED_SIDE_EFFECT_POLICY; trả ok=true nếu parse output thành công.
 // SkipTrace mặc định (tránh đầy rule_execution_logs); bật AI_DECISION_SIDE_EFFECT_RULE_TRACE=1 để audit.
-func ResolveDatachangedDeferWindowsViaRule(ctx context.Context, evt *aidecisionmodels.DecisionEvent, src, op string) (ingest, report, refresh time.Duration, ok bool) {
+func ResolveDatachangedDeferWindowsViaRule(ctx context.Context, evt *aidecisionmodels.DecisionEvent, src, op string) (crmMergeQueue, report, refresh time.Duration, ok bool) {
 	if strings.TrimSpace(os.Getenv("AI_DECISION_SIDE_EFFECT_RULE_DISABLED")) == "1" {
 		return 0, 0, 0, false
 	}
@@ -100,7 +100,10 @@ func ResolveDatachangedDeferWindowsViaRule(ctx context.Context, evt *aidecisionm
 	}
 
 	dr := nonNegativeSecFromRule(m, "deferReportSec")
-	di := nonNegativeSecFromRule(m, "deferCrmIngestSec")
+	di := nonNegativeSecFromRule(m, "deferCrmMergeQueueSec")
+	if di < 0 {
+		di = nonNegativeSecFromRule(m, "deferCrmIngestSec")
+	}
 	df := nonNegativeSecFromRule(m, "deferCrmRefreshSec")
 	if dr < 0 || di < 0 || df < 0 {
 		return 0, 0, 0, false

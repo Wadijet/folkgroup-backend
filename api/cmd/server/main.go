@@ -462,7 +462,7 @@ func main() {
 	reg.Register(worker.WorkerReportRedisTouchFlush, worker.NewReportRedisTouchFlushWorker())
 
 	// CRM Ingest Worker
-	reg.Register(worker.WorkerCrmIngest, worker.NewCrmIngestWorker(30*time.Second, 50))
+	reg.Register(worker.WorkerCrmPendingMerge, worker.NewCrmPendingMergeWorker(30*time.Second, 50))
 
 	// CRM Intel Compute — poll crm_intel_compute (domain CRM; không tính trong consumer AI Decision)
 	reg.Register(worker.WorkerCrmIntelCompute, crmworker.NewCrmIntelComputeWorker(3*time.Second))

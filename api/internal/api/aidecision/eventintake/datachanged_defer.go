@@ -11,25 +11,28 @@
 // Fallback: phân tầng datachanged_business.go + env:
 //   - AI_DECISION_BUSINESS_DEFER_OPERATIONAL_SEC — cửa sổ gom cho mức “vận hành” (mặc định 90).
 //   - AI_DECISION_BUSINESS_DEFER_BACKGROUND_SEC — cửa sổ gom cho mức “nền” (mặc định 300).
-//   - AI_DECISION_DEFER_REPORT_SEC / DEFER_CRM_REFRESH_SEC / DEFER_CRM_INGEST_SEC — nếu **đặt trong env**
+//   - AI_DECISION_DEFER_REPORT_SEC / DEFER_CRM_REFRESH_SEC / DEFER_CRM_MERGE_QUEUE_SEC (hoặc legacy DEFER_CRM_INGEST_SEC) — nếu **đặt trong env**
 //     (kể cả =0) thì **ghi đè** chỉ kênh đó theo từng giá trị; không đặt thì dùng số theo mức nghiệp vụ.
 //
 // Mỗi lần có datachanged mới cho cùng (org, collection, id), deadline trailing = now + window.
+//
+// Lưu trữ: queuedebounce.Table (gom chung Phase 4).
 package eventintake
 
 import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
+
+	"meta_commerce/internal/queuedebounce"
 )
 
 // DeferChannel kênh side-effect (mỗi kênh có thể có override env riêng).
 type DeferChannel int
 
 const (
-	DeferChannelCRMIngest DeferChannel = iota
+	DeferChannelCrmMergeQueue DeferChannel = iota
 	DeferChannelReport
 	DeferChannelCRMRefresh
 )
@@ -40,7 +43,7 @@ type DeferredSideEffectKind string
 const (
 	DeferredKindReport            DeferredSideEffectKind = "report"
 	DeferredKindCrmRefresh        DeferredSideEffectKind = "crm_refresh"
-	DeferredKindCrmIngest         DeferredSideEffectKind = "crm_ingest"
+	DeferredKindCrmMergeQueue     DeferredSideEffectKind = "crm_merge_queue"
 	DeferredKindOrderIntelCompute DeferredSideEffectKind = "order_intel_compute"
 	DeferredKindCixIntelCompute   DeferredSideEffectKind = "cix_intel_compute"
 )
@@ -58,21 +61,12 @@ type deferEntityKey struct {
 }
 
 var (
-	deferSchedMu       sync.Mutex
-	reportDeferDue     map[deferEntityKey]time.Time
-	crmRefDeferDue     map[deferEntityKey]time.Time
-	crmIngDeferDue     map[deferEntityKey]time.Time
-	orderIntelDeferDue map[deferEntityKey]time.Time
-	cixIntelDeferDue   map[deferEntityKey]time.Time
+	reportDeferTable     = queuedebounce.NewTable[deferEntityKey]()
+	crmRefDeferTable     = queuedebounce.NewTable[deferEntityKey]()
+	crmMergeQDeferTable  = queuedebounce.NewTable[deferEntityKey]()
+	orderIntelDeferTable = queuedebounce.NewTable[deferEntityKey]()
+	cixIntelDeferTable   = queuedebounce.NewTable[deferEntityKey]()
 )
-
-func init() {
-	reportDeferDue = make(map[deferEntityKey]time.Time)
-	crmRefDeferDue = make(map[deferEntityKey]time.Time)
-	crmIngDeferDue = make(map[deferEntityKey]time.Time)
-	orderIntelDeferDue = make(map[deferEntityKey]time.Time)
-	cixIntelDeferDue = make(map[deferEntityKey]time.Time)
-}
 
 // deferSecForChannel: nếu env key có trong môi trường → dùng giá trị (0 = không trì hoãn kênh này).
 // Nếu không khai báo env → fallbackSec (theo mức nghiệp vụ).
@@ -112,7 +106,21 @@ func DeferWindowFor(u BusinessSideEffectUrgency, ch DeferChannel) time.Duration 
 		key = "AI_DECISION_DEFER_REPORT_SEC"
 	case DeferChannelCRMRefresh:
 		key = "AI_DECISION_DEFER_CRM_REFRESH_SEC"
-	case DeferChannelCRMIngest:
+	case DeferChannelCrmMergeQueue:
+		if raw, ok := os.LookupEnv("AI_DECISION_DEFER_CRM_MERGE_QUEUE_SEC"); ok {
+			s := strings.TrimSpace(raw)
+			if s == "" {
+				return 0
+			}
+			n, err := strconv.Atoi(s)
+			if err != nil || n < 0 {
+				return 0
+			}
+			if n <= 0 {
+				return 0
+			}
+			return time.Duration(n) * time.Second
+		}
 		key = "AI_DECISION_DEFER_CRM_INGEST_SEC"
 	default:
 		return 0
@@ -137,46 +145,37 @@ func ScheduleDeferredSideEffect(kind DeferredSideEffectKind, orgHex, coll, idHex
 		return
 	}
 	k := deferEntityKey{orgHex: orgHex, coll: coll, idHex: idHex}
-	due := time.Now().Add(window)
-
-	deferSchedMu.Lock()
-	defer deferSchedMu.Unlock()
 	switch kind {
 	case DeferredKindReport:
-		reportDeferDue[k] = due
+		reportDeferTable.Schedule(k, window)
 	case DeferredKindCrmRefresh:
-		crmRefDeferDue[k] = due
-	case DeferredKindCrmIngest:
-		crmIngDeferDue[k] = due
+		crmRefDeferTable.Schedule(k, window)
+	case DeferredKindCrmMergeQueue:
+		crmMergeQDeferTable.Schedule(k, window)
 	case DeferredKindOrderIntelCompute:
-		orderIntelDeferDue[k] = due
+		orderIntelDeferTable.Schedule(k, window)
 	case DeferredKindCixIntelCompute:
-		cixIntelDeferDue[k] = due
+		cixIntelDeferTable.Schedule(k, window)
 	}
 }
 
 // TakeDueDeferredSideEffectJobs lấy mọi job đã đến hạn và xóa khỏi lịch (gọi từ worker mỗi tick).
 func TakeDueDeferredSideEffectJobs(now time.Time) []DeferredSideEffectFlushJob {
-	deferSchedMu.Lock()
-	defer deferSchedMu.Unlock()
 	var out []DeferredSideEffectFlushJob
-	collect := func(m map[deferEntityKey]time.Time, kind DeferredSideEffectKind) {
-		for ek, due := range m {
-			if !now.Before(due) {
-				out = append(out, DeferredSideEffectFlushJob{
-					Kind:   kind,
-					OrgHex: ek.orgHex,
-					Coll:   ek.coll,
-					IDHex:  ek.idHex,
-				})
-				delete(m, ek)
-			}
+	appendDue := func(tab *queuedebounce.Table[deferEntityKey], kind DeferredSideEffectKind) {
+		for _, ek := range tab.TakeDue(now) {
+			out = append(out, DeferredSideEffectFlushJob{
+				Kind:   kind,
+				OrgHex: ek.orgHex,
+				Coll:   ek.coll,
+				IDHex:  ek.idHex,
+			})
 		}
 	}
-	collect(reportDeferDue, DeferredKindReport)
-	collect(crmRefDeferDue, DeferredKindCrmRefresh)
-	collect(crmIngDeferDue, DeferredKindCrmIngest)
-	collect(orderIntelDeferDue, DeferredKindOrderIntelCompute)
-	collect(cixIntelDeferDue, DeferredKindCixIntelCompute)
+	appendDue(reportDeferTable, DeferredKindReport)
+	appendDue(crmRefDeferTable, DeferredKindCrmRefresh)
+	appendDue(crmMergeQDeferTable, DeferredKindCrmMergeQueue)
+	appendDue(orderIntelDeferTable, DeferredKindOrderIntelCompute)
+	appendDue(cixIntelDeferTable, DeferredKindCixIntelCompute)
 	return out
 }

@@ -375,6 +375,6 @@ func HandleIngestCrmStub(c fiber.Ctx) error {
 		"code":    fiber.StatusNotImplemented,
 		"status":  "error",
 		"message": "CIO ingest CRM chưa triển khai — dùng CRM bulk / pending ingest",
-		"hint":    "POST /api/v1/crm-bulk-jobs, crm-pending-ingest, ...",
+		"hint":    "POST /api/v1/crm-bulk-jobs, crm-pending-merge, ...",
 	})
 }

@@ -11,10 +11,13 @@ Chào mừng đến với tài liệu hệ thống FolkForm Backend. Tài liệu
 | **AI Commerce OS** | [docs-shared/architecture/vision/00 - ai-commerce-os-platform-l1.md](../docs-shared/architecture/vision/00%20-%20ai-commerce-os-platform-l1.md) | Vision Platform L1 — toàn bộ hệ (đọc đầu) |
 | **Architecture** | [architecture/overview.md](architecture/overview.md) | Layers, flow request |
 | **Module Map** | [module-map/backend-module-map.md](module-map/backend-module-map.md) | Module → code, router |
+| **Cơ cấu module (AID + queue miền)** | [module-map/co-cau-module-aid-va-domain-queue.md](module-map/co-cau-module-aid-va-domain-queue.md) | Chốt nhóm A–F, `decision_events_queue`, `EventSource`, checklist thêm luồng |
 | **Domain** | [domain/domain-overview.md](domain/domain-overview.md) | Domain logic |
 | **API** | [api/api-overview.md](api/api-overview.md) | API surface |
 | **Conventions** | [conventions/backend-conventions.md](conventions/backend-conventions.md) | Quy ước backend |
-| **Luồng Ingress → Merge → Intel** | [05-development/KHUNG_LUONG_INGEST_MERGE_INTEL_CIO_AID_DOMAIN.md](05-development/KHUNG_LUONG_INGEST_MERGE_INTEL_CIO_AID_DOMAIN.md) | Khung CIO / Domain / AID cho mọi module |
+| **Luồng Ingress → Merge → Intel** | [05-development/KHUNG_LUONG_INGEST_MERGE_INTEL_CIO_AID_DOMAIN.md](05-development/KHUNG_LUONG_INGEST_MERGE_INTEL_CIO_AID_DOMAIN.md) | Khung CIO / Domain / AID; chuẩn tách lớp intel (mục 1.1) |
+| **Khuôn module Intelligence** | [05-development/KHUNG_KHUON_MODULE_INTELLIGENCE.md](05-development/KHUNG_KHUON_MODULE_INTELLIGENCE.md) | Raw / layer1–3 / flag; lưu A–B; lịch sử & snapshot theo thời điểm (tham chiếu CRM) |
+| **Đặt tên hệ thống** | [uid-field-naming.md](../docs-shared/architecture/data-contract/uid-field-naming.md) | Module, collection, `uid`, worker, route; khớp `uid.go` + `global.vars` |
 
 ---
 
@@ -58,6 +61,7 @@ Khi mở riêng repo backend, Cursor nên đọc theo thứ tự:
 
 - **[Tổng quan kiến trúc](architecture/overview.md)** — Entry point kiến trúc (layers, flow)
 - **[Bản đồ module backend](module-map/backend-module-map.md)** — Map module → code, router (⭐ bắt đầu khi implement feature)
+- **[Cơ cấu module — AID & queue miền](module-map/co-cau-module-aid-va-domain-queue.md)** — Event-driven: bus AID vs queue/worker domain, bảng `EventSource`
 - [02-architecture/core/tong-quan.md](02-architecture/core/tong-quan.md) - Kiến trúc cốt lõi
 - [docs-shared/architecture/vision/](../docs-shared/architecture/vision/) - Vision Platform L1, Customer Intelligence & AI Commerce (Phần 1, 2, 3)
 - [02-architecture/core/activity-framework.md](02-architecture/core/activity-framework.md) - Activity framework (event backbone)
@@ -75,11 +79,13 @@ Khi mở riêng repo backend, Cursor nên đọc theo thứ tự:
 ### 5. 💻 Phát Triển (Development)
 
 - **[Hướng dẫn Identity & Links](05-development/HUONG_DAN_IDENTITY_LINKS.md)** — Cách dùng uid, sourceIds, links; ưu tiên cấu trúc mới, fallback logic cũ
+- **[Quy ước đặt tên hệ thống (shared)](../docs-shared/architecture/data-contract/uid-field-naming.md)** — `uid`, module/package, file Go, **collection Mongo**, worker, route, env; khớp `utility/uid.go` + `global.vars.go`
 - [Quy Trình Refactor Docs](05-development/QUY_TRINH_REFACTOR_DOCS.md) - Quy trình AI refactor tài liệu
 - [Quy Trình Refactor .cursor](05-development/QUY_TRINH_REFACTOR_CURSOR.md) - Refactor .cursor sau khi docs xong
 - [Cấu Trúc Code](05-development/cau-truc-code.md) - Cấu trúc và tổ chức code
 - **[Nguyên tắc CRUD → DataChanged → AI Decision](05-development/NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md)** — Một hook, một cửa side-effect; **hai luồng** (data change vs intelligence handoff); **đọc trước khi sửa luồng queue / ingest / sync**
-- **[Khung luồng Ingress → Merge → Intel (CIO · Domain · AID)](05-development/KHUNG_LUONG_INGEST_MERGE_INTEL_CIO_AID_DOMAIN.md)** — Mẫu thống nhất cho các module; CRM làm tham chiếu; checklist mở rộng nguồn
+- **[Khung luồng Ingress → Merge → Intel (CIO · Domain · AID)](05-development/KHUNG_LUONG_INGEST_MERGE_INTEL_CIO_AID_DOMAIN.md)** — Mẫu thống nhất cho các module; CRM làm tham chiếu; **chuẩn tách lớp intel** (mục 1.1); checklist mở rộng nguồn
+- **[Khung khuôn module Intelligence](05-development/KHUNG_KHUON_MODULE_INTELLIGENCE.md)** — Nguyên tắc chung: hai trục layer (L1/L2 dữ liệu vs raw→layer3), lưu kết quả A/B, activity + point-in-time, checklist miền mới
 - **[Phương án domain Order khớp khung](05-development/PHUONG_AN_DOMAIN_ORDER_KHOP_KHUNG_CIO_AID.md)** — Giai đoạn 0–3: ID/enrich, đa nguồn, registry AID; đối chiếu hiện trạng `pc_pos_orders` / `order_intel_compute`
 - **[Trung tâm chỉ huy AI Decision — ý tưởng & backend data](05-development/THIET_KE_TRUNG_TAM_CHI_HUY_AI_DECISION.md)** — Màn vận hành (phễu/KPI/feed), `GET org-live/metrics`, hợp đồng JSON, **`opsTier` trên feed live** (v1.8)
 
@@ -120,6 +126,12 @@ Khi mở riêng repo backend, Cursor nên đọc theo thứ tự:
 
 ## 🔄 Cập Nhật Gần Đây
 
+- ✅ **2026-04-07**: Thêm [KHUNG_KHUON_MODULE_INTELLIGENCE.md](05-development/KHUNG_KHUON_MODULE_INTELLIGENCE.md) — khuôn mẫu intelligence dùng chung (raw/layer/flag, persist, lịch sử theo `activityAt`).
+- ✅ **2026-04-06 (tiếp 4):** [uid-field-naming.md](../docs-shared/architecture/data-contract/uid-field-naming.md) v1.4 — **§2.9.0** khung **3 chiều** (miền / vai trò persistence / thực thể) + thuật toán đặt tên; §2.9.2 đồng bộ theo khung.
+- ✅ **2026-04-06 (tiếp 3):** [uid-field-naming.md](../docs-shared/architecture/data-contract/uid-field-naming.md) v1.3 — **§2.9.1** bảng tiền tố collection (`auth_`, `fb_`, `crm_`, `decision_`, …) theo `init.go`; quy tắc collection mới.
+- ✅ **2026-04-06 (tiếp 2):** [uid-field-naming.md](../docs-shared/architecture/data-contract/uid-field-naming.md) v1.2 — thêm **§2.7–2.12:** module/package, file Go, **collection Mongo**, worker, route, env; [cau-truc-code](05-development/cau-truc-code.md) trỏ chéo.
+- ✅ **2026-04-06 (tiếp):** [uid-field-naming.md](../docs-shared/architecture/data-contract/uid-field-naming.md) v1.1 — thống nhất **tiền tố** (bảng khớp `utility/uid.go`), **khóa `links`**, JSON/BSON, `eventType`/queue/collection, L1/L2 đặt tên; [unified-data-contract.md](../docs-shared/architecture/data-contract/unified-data-contract.md) v1.5 trỏ doc này; [backend-conventions](conventions/backend-conventions.md) + Cursor [data-contract.md](../.cursor/rules/data-contract.md) cập nhật liên kết.
+- ✅ **2026-04-06**: [unified-data-contract.md](../docs-shared/architecture/data-contract/unified-data-contract.md) §1.7 + [identity-links-model.md](../docs-shared/architecture/data-contract/identity-links-model.md) §1.1 — **L1 mirror / L2 canonical**, bốn lớp field áp cả hai, links L1→L1 phục vụ merge sang L2. [HUONG_DAN_IDENTITY_LINKS.md](05-development/HUONG_DAN_IDENTITY_LINKS.md) mục 2.1; [KHUNG_LUONG_…](05-development/KHUNG_LUONG_INGEST_MERGE_INTEL_CIO_AID_DOMAIN.md) mục 1.1–1.2.
 - ✅ **2026-04-02**: Thêm [PHUONG_AN_DOMAIN_ORDER_KHOP_KHUNG_CIO_AID.md](05-development/PHUONG_AN_DOMAIN_ORDER_KHOP_KHUNG_CIO_AID.md) — phương án chỉnh domain Order theo khung (giai đoạn 0–3).
 - ✅ **2026-04-02**: Thêm [KHUNG_LUONG_INGEST_MERGE_INTEL_CIO_AID_DOMAIN.md](05-development/KHUNG_LUONG_INGEST_MERGE_INTEL_CIO_AID_DOMAIN.md) — khung luồng thống nhất CIO / Domain / AID (Pha A–B–C), tham chiếu CRM, checklist module khác.
 - ✅ **2026-03-25**: Thêm [THIET_KE_TRUNG_TAM_CHI_HUY_AI_DECISION.md](05-development/THIET_KE_TRUNG_TAM_CHI_HUY_AI_DECISION.md) — thiết kế màn command center AI Decision và API metrics / WS aggregate (đề xuất).

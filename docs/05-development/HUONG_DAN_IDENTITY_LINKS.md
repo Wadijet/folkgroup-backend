@@ -1,13 +1,14 @@
 # Hướng Dẫn Sử Dụng Identity & Links
 
-**Phiên bản:** 1.1  
+**Phiên bản:** 1.2  
 **Ngày:** 2026-03-17  
-**Cập nhật:** Thêm mục 3.6, 9.1 — CRM rà soát (lookup, filter, response)  
+**Cập nhật:** 2026-04-06 — mục 2.1 L1/L2; trỏ [uid-field-naming](../../docs-shared/architecture/data-contract/uid-field-naming.md) làm chuẩn tiền tố; [unified-data-contract](../../docs-shared/architecture/data-contract/unified-data-contract.md) §1.7  
+**Cập nhật trước:** mục 3.6, 9.1 — CRM rà soát (lookup, filter, response)  
 **Mục đích:** Hướng dẫn developer cách dùng ID và link — ưu tiên cấu trúc mới (4 lớp), fallback logic cũ.
 
 **Tham chiếu:**
 - [identity-links-model](../../docs-shared/architecture/data-contract/identity-links-model.md) — Spec chuẩn
-- [uid-field-naming](../../docs-shared/architecture/data-contract/uid-field-naming.md) — Prefix, naming
+- [uid-field-naming](../../docs-shared/architecture/data-contract/uid-field-naming.md) — **Bảng tiền tố (khớp `uid.go`), `links`, camelCase, event/queue/collection, L1/L2** — đọc trước khi đặt tên field mới
 - [LINK_SYSTEM_SPEC](../../docs-shared/ai-context/folkform/sample-data/LINK_SYSTEM_SPEC.md) — Config thực tế
 - [PHUONG_AN_TRIEN_KHAI_IDENTITY_LINKS.md](./PHUONG_AN_TRIEN_KHAI_IDENTITY_LINKS.md) — Phương án triển khai
 
@@ -35,6 +36,22 @@
 | **(2) Canonical** | `uid` | ID chuẩn hệ thống — public | `cust_a1b2c3d4e5f6` |
 | **(3) External IDs** | `sourceIds` | "Tôi là ai ở hệ ngoài" | `{pos: "uuid", fb: "page_psid"}` |
 | **(4) Links** | `links` | "Tôi nối tới ai" | `{customer: {uid: "cust_xxx", status: "resolved"}}` |
+
+### 2.1. Hai lớp document: L1 (mirror) và L2 (canonical)
+
+**Tách bạch với bảng trên:** bốn lớp là *loại field*; L1/L2 là *bản ghi mirror hay canonical*.
+
+| | **L1 — mirror / thô** | **L2 — canonical / đã merge** |
+|---|------------------------|-------------------------------|
+| **Vai trò** | Nguồn dữ liệu đồng bộ theo kênh; tham chiếu để tạo/cập nhật L2 | Thực thể trong hệ; tương tác API / event / module khác |
+| **`uid`** | Thường không có hoặc không dùng làm ID công khai chính | **Bắt buộc theo contract** khi entity đã canonical hóa (prefix `cust_`, `ord_`, …) |
+| **`sourceIds`** | Một nguồn hoặc field phẳng kiểu id nguồn | Gom đa nguồn sau merge hoặc 1:1 có `source` |
+| **`links`** | Có thể có **L1 → L1** (hoặc `externalRefs`) để giữ đúng quan hệ nguồn; merge dùng để suy ra L2 | **L2 → L2**, ưu tiên `uid` đích đã resolve |
+| **Nối L1↔L2** | L2 mang `source` + `sourceRecordMongoId` → `_id` L1 (1:1) hoặc resolver từ id nguồn | — |
+
+**Nguyên tắc code:** Join và payload **liên module** dùng **`uid` / `links` của L2**. Khi chỉ có id trên L1, resolve (CRM, v.v.) rồi mới dùng như contract.
+
+**Spec đầy đủ:** [unified-data-contract.md](../../docs-shared/architecture/data-contract/unified-data-contract.md) §1.7, [identity-links-model.md](../../docs-shared/architecture/data-contract/identity-links-model.md) §1.1.
 
 ---
 

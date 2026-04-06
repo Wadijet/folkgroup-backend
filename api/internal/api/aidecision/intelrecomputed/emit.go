@@ -55,7 +55,7 @@ func EmitCrmIntelRecomputed(ctx context.Context, ownerOrgID primitive.ObjectID, 
 	}
 	_, err := eventemit.EmitDecisionEvent(ctx, &eventemit.EmitInput{
 		EventType:     EventTypeCrmIntelRecomputed,
-		EventSource:   "crm_intel",
+		EventSource:   eventtypes.EventSourceCrmIntel,
 		EntityType:    "crm_customer",
 		EntityID:      entID,
 		OrgID:         orgHex,
@@ -113,7 +113,7 @@ func EmitOrderIntelRecomputed(ctx context.Context, ownerOrgID primitive.ObjectID
 	}
 	_, err := eventemit.EmitDecisionEvent(ctx, &eventemit.EmitInput{
 		EventType:     EventTypeOrderIntelRecomputed,
-		EventSource:   "order_intel",
+		EventSource:   eventtypes.EventSourceOrderIntel,
 		EntityType:    "order",
 		EntityID:      entID,
 		OrgID:         orgHex,
@@ -163,7 +163,7 @@ func EmitCixIntelRecomputed(ctx context.Context, ownerOrgID primitive.ObjectID, 
 	}
 	_, err := eventemit.EmitDecisionEvent(ctx, &eventemit.EmitInput{
 		EventType:     EventTypeCixIntelRecomputed,
-		EventSource:   "cix_intel",
+		EventSource:   eventtypes.EventSourceCixIntel,
 		EntityType:    "conversation",
 		EntityID:      entID,
 		OrgID:         orgHex,

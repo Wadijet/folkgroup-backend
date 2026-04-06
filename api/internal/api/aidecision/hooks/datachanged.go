@@ -12,6 +12,7 @@ package hooks
 import (
 	"context"
 
+	"meta_commerce/internal/api/aidecision/eventtypes"
 	aidecisionsvc "meta_commerce/internal/api/aidecision/service"
 	"meta_commerce/internal/api/events"
 	"meta_commerce/internal/utility"
@@ -110,7 +111,7 @@ func emitUnifiedSourceDataChanged(ctx context.Context, decSvc *aidecisionsvc.AID
 	correlationID := utility.GenerateUID(utility.UIDPrefixCorrelation)
 	_, _ = decSvc.EmitEvent(ctx, &aidecisionsvc.EmitEventInput{
 		EventType:     eventType,
-		EventSource:   "datachanged",
+		EventSource:   eventtypes.EventSourceDatachanged,
 		EntityType:    entityPrefix,
 		EntityID:      idHex,
 		OrgID:         ownerOrgID.Hex(),

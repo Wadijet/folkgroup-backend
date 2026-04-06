@@ -8,6 +8,7 @@ import (
 
 	"meta_commerce/internal/api/aidecision/decisionlive"
 	"meta_commerce/internal/api/aidecision/decisionlive/livecopy"
+	"meta_commerce/internal/api/aidecision/eventtypes"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 	aidecisionsvc "meta_commerce/internal/api/aidecision/service"
 
@@ -87,7 +88,7 @@ func publishQueueConsumerLifecycleEnd(ownerOrgID primitive.ObjectID, evt *aideci
 
 // publishQueueDatachangedEffectsDone — Mốc «đã xong bước chuẩn bị sau khi dữ liệu đổi» (chỉ EventSource = datachanged).
 func publishQueueDatachangedEffectsDone(ownerOrgID primitive.ObjectID, evt *aidecisionmodels.DecisionEvent) {
-	if evt == nil || ownerOrgID.IsZero() || evt.EventSource != "datachanged" {
+	if evt == nil || ownerOrgID.IsZero() || evt.EventSource != eventtypes.EventSourceDatachanged {
 		return
 	}
 	if shouldSkipConsumerLiveSpan(evt) {

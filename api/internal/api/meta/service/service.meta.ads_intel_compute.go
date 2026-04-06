@@ -128,7 +128,7 @@ func emitAdsContextReadyFromIntelJob(ctx context.Context, job *adsmodels.AdsInte
 	}
 	_, err := eventemit.EmitDecisionEvent(ctx, &eventemit.EmitInput{
 		EventType:     eventtypes.AdsContextReady,
-		EventSource:   "meta_ads_intel",
+		EventSource:   eventtypes.EventSourceMetaAdsIntel,
 		EntityType:    "ad_account",
 		EntityID:      entityID,
 		OrgID:         orgID,

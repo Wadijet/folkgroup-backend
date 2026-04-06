@@ -8,6 +8,7 @@ import (
 
 	"meta_commerce/internal/api/aidecision/decisionlive"
 	"meta_commerce/internal/api/aidecision/decisionlive/livecopy"
+	"meta_commerce/internal/api/aidecision/eventtypes"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 	"meta_commerce/internal/traceutil"
 	"meta_commerce/internal/utility"
@@ -60,7 +61,7 @@ func (s *AIDecisionService) EmitExecuteRequested(ctx context.Context, req *Execu
 	}
 	res, err := s.EmitEvent(ctx, &EmitEventInput{
 		EventType:     EventTypeExecuteRequested,
-		EventSource:   "aidecision",
+		EventSource:   eventtypes.EventSourceAIDecision,
 		EntityType:    "decision_execution",
 		EntityID:      entityID,
 		OrgID:         orgID,

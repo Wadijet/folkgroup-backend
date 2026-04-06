@@ -32,7 +32,7 @@ var defaultWorkerSchedules = map[string]struct {
 	WorkerCommandCleanup:      {1 * time.Minute, 300},
 	WorkerAgentCommandCleanup: {1 * time.Minute, 300},
 	WorkerAgentActivityCleanup: {1 * time.Hour, 1},
-	WorkerCrmIngest:           {30 * time.Second, 50},
+	WorkerCrmPendingMerge:     {30 * time.Second, 50},
 	WorkerCrmBulk:             {2 * time.Minute, 2},
 	WorkerAdsExecution:        {30 * time.Second, 10},
 	WorkerAdsAutoPropose:      {30 * time.Minute, 0},

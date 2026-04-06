@@ -31,7 +31,7 @@
 //	meta_ad_insights_daily_snapshots        meta_ad_insight_daily_snapshot  không (meta_insight_only)
 //	webhook_logs                            webhook_log               không (DatachangedEmitPerCollection)
 //
-// Cột “Ghi queue mặc định” = ShouldEmitDatachangedToDecisionQueue: map DatachangedEmitPerCollection (datachanged_emit_per_collection.go)
+// Cột “Ghi queue mặc định” = ShouldEmitDatachangedToDecisionQueue: datachangedemit.EmitPerCollection + YAML emit_to_decision_queue
 // nếu có key; không thì non-Meta → có, nhóm Meta → chỉ meta_ad_insights. Chi tiết: datachanged_emit_filter.go.
 package hooks
 

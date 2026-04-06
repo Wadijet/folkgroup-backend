@@ -21,7 +21,7 @@ const (
 	WorkerCommandCleanup           = "notification_command_cleanup"
 	WorkerAgentCommandCleanup      = "notification_agent_command_cleanup"
 	WorkerAgentActivityCleanup     = "notification_agent_activity_cleanup"
-	WorkerCrmIngest                = "crm_ingest"
+	WorkerCrmPendingMerge          = "crm_pending_merge"
 	WorkerCrmBulk                  = "crm_bulk"
 	WorkerAdsExecution             = "ads_execution"
 	WorkerAdsAutoPropose           = "ads_auto_propose"
@@ -64,7 +64,7 @@ var workerMetadataMap = map[string]WorkerMetadata{
 	WorkerCommandCleanup:           {Module: "notification", Domain: "system", Description: "Dọn command cũ hết hạn"},
 	WorkerAgentCommandCleanup:      {Module: "notification", Domain: "system", Description: "Dọn agent command cũ hết hạn"},
 	WorkerAgentActivityCleanup:     {Module: "notification", Domain: "system", Description: "Dọn agent activity log cũ"},
-	WorkerCrmIngest:                {Module: "crm", Domain: "customer", Description: "Đồng bộ dữ liệu customer từ agent vào hệ thống"},
+	WorkerCrmPendingMerge:          {Module: "crm", Domain: "customer", Description: "Queue merge L1→L2 khách hàng (crm_pending_merge)"},
 	WorkerCrmBulk:                  {Module: "crm", Domain: "customer", Description: "Xử lý bulk job cập nhật customer hàng loạt"},
 	WorkerAdsExecution:             {Module: "ads", Domain: "ads", Description: "Thực thi các đề xuất quảng cáo đã được duyệt"},
 	WorkerAdsAutoPropose:           {Module: "ads", Domain: "aidecision", Description: "Auto propose (aidecision/adsautop → executor.propose_requested); code AID, đăng ký cạnh worker ads"},
@@ -113,7 +113,7 @@ var defaultWorkerPriorities = map[string]Priority{
 	WorkerCommandCleanup:           PriorityLow,
 	WorkerAgentCommandCleanup:      PriorityLow,
 	WorkerAgentActivityCleanup:     PriorityLow,
-	WorkerCrmIngest:                PriorityHigh,
+	WorkerCrmPendingMerge:          PriorityHigh,
 	WorkerCrmBulk:                  PriorityLow,
 	WorkerAdsExecution:             PriorityNormal,
 	WorkerAdsAutoPropose:           PriorityNormal,
@@ -153,7 +153,7 @@ var (
 
 // SetPriorityOverride đặt override mức ưu tiên cho worker (runtime, qua API).
 // Giá trị 0 = xóa override, dùng lại env/mặc định.
-// Tên worker chuẩn hóa lowercase (report_dirty, crm_ingest, ...).
+// Tên worker chuẩn hóa lowercase (report_dirty, crm_pending_merge, ...).
 func SetPriorityOverride(workerName string, priority Priority) {
 	priorityOverridesMu.Lock()
 	defer priorityOverridesMu.Unlock()
@@ -171,7 +171,7 @@ var AllWorkerNames = []string{
 	WorkerReportRedisTouchFlush,
 	WorkerDelivery, WorkerDeliveryCleanup,
 	WorkerCommandCleanup, WorkerAgentCommandCleanup, WorkerAgentActivityCleanup,
-	WorkerCrmIngest, WorkerCrmBulk,
+	WorkerCrmPendingMerge, WorkerCrmBulk,
 	WorkerAdsExecution, WorkerAdsAutoPropose, WorkerAdsCircuitBreaker,
 	WorkerAdsDailyScheduler, WorkerAdsPancakeHeartbeat, WorkerAdsCounterfactual,
 	WorkerClassificationFull, WorkerClassificationSmart,
@@ -384,11 +384,11 @@ func GetAllWorkerPoolSizes() map[string]int {
 
 // GetPriority trả về mức ưu tiên cho worker. Ưu tiên: API override > env > mặc định.
 //
-// Env: WORKER_PRIORITY_<NAME>=1|2|3|4|5 (NAME dạng REPORT_DIRTY, CRM_INGEST...)
+// Env: WORKER_PRIORITY_<NAME>=1|2|3|4|5 (NAME dạng REPORT_DIRTY, CRM_PENDING_MERGE...)
 // API: SetPriorityOverride (runtime)
 //
 // Tham số:
-//   - workerName: tên worker (report_dirty, crm_ingest, ...)
+//   - workerName: tên worker (report_dirty, crm_pending_merge, ...)
 //   - defaultPriority: mặc định nếu không có trong map và không có env
 //
 // Trả về: Priority (1=Critical, 2=High, 3=Normal, 4=Low, 5=Lowest)
@@ -401,7 +401,7 @@ func GetPriority(workerName string, defaultPriority Priority) Priority {
 		return p
 	}
 	priorityOverridesMu.RUnlock()
-	// 2. Override từ env (WORKER_PRIORITY_REPORT_DIRTY, WORKER_PRIORITY_CRM_INGEST...)
+	// 2. Override từ env (WORKER_PRIORITY_REPORT_DIRTY, WORKER_PRIORITY_CRM_PENDING_MERGE...)
 	envKey := "WORKER_PRIORITY_" + strings.ToUpper(canonical)
 	if v := os.Getenv(envKey); v != "" {
 		n, err := strconv.Atoi(strings.TrimSpace(v))

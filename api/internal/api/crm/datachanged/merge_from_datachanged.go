@@ -1,5 +1,4 @@
-// Package datachanged — Miền CRM: mọi ingest sau datachanged chỉ ghi crm_pending_ingest; CrmIngestWorker merge rồi emit crm.intelligence.recompute_requested.
-// Consumer AI Decision không gọi merge đồng bộ tại đây.
+// Package datachanged — Sau datachanged: xếp job vào crm_pending_merge (merge L1→L2; khác CIO ingest).
 package datachanged
 
 import (
@@ -11,8 +10,8 @@ import (
 	"meta_commerce/internal/logger"
 )
 
-// IngestFromDataChange xếp job vào crm_pending_ingest (khách POS/FB, đơn, hội thoại, ghi chú).
-func IngestFromDataChange(ctx context.Context, e events.DataChangeEvent) {
+// EnqueueCrmMergeFromDataChange ghi job vào crm_pending_merge (khách POS/FB, đơn, hội thoại, ghi chú).
+func EnqueueCrmMergeFromDataChange(ctx context.Context, e events.DataChangeEvent) {
 	if e.Document == nil {
 		return
 	}
@@ -27,11 +26,11 @@ func IngestFromDataChange(ctx context.Context, e events.DataChangeEvent) {
 		global.MongoDB_ColNames.PcPosOrders,
 		global.MongoDB_ColNames.FbConvesations,
 		global.MongoDB_ColNames.CrmNotes:
-		if err := crmvc.EnqueueCrmIngest(ctx, e.CollectionName, e.Operation, e.Document, e.PreviousDocument, ownerOrgID); err != nil {
+		if err := crmvc.EnqueueCrmPendingMerge(ctx, e.CollectionName, e.Operation, e.Document, e.PreviousDocument, ownerOrgID); err != nil {
 			logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
 				"collection": e.CollectionName,
 				"operation":  e.Operation,
-			}).Warn("[CRM] Không thể ghi vào queue crm_pending_ingest")
+			}).Warn("[CRM] Không thể ghi vào queue crm_pending_merge")
 		}
 	default:
 		return

@@ -1,4 +1,4 @@
-// Package worker — Điều phối datachanged: một cửa gọi miền (CRM / báo cáo / Meta / Order / CIX) — không chứa logic đồng bộ hay tính toán nặng.
+// Package worker — Điều phối datachanged: một cửa build ApplyContext + datachangedsidefx.Run; logic enqueue từng miền nằm trong */datachanged/sidefx_register.go.
 package worker
 
 import (
@@ -7,15 +7,18 @@ import (
 	"time"
 
 	"meta_commerce/internal/api/aidecision/crmqueue"
+	"meta_commerce/internal/api/aidecision/datachangedrouting"
+	"meta_commerce/internal/api/aidecision/datachangedsidefx"
 	"meta_commerce/internal/api/aidecision/eventintake"
+	"meta_commerce/internal/api/aidecision/eventtypes"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 	aidecisionsvc "meta_commerce/internal/api/aidecision/service"
 	cixdec "meta_commerce/internal/api/conversationintel/datachanged"
 	crmdec "meta_commerce/internal/api/crm/datachanged"
-	orderdatachanged "meta_commerce/internal/api/order/datachanged"
 	crmvc "meta_commerce/internal/api/crm/service"
 	"meta_commerce/internal/api/events"
-	metadec "meta_commerce/internal/api/meta/datachanged"
+	_ "meta_commerce/internal/api/meta/datachanged" // sidefx_register: meta_ads_profile
+	orderdatachanged "meta_commerce/internal/api/order/datachanged"
 	orderinteldec "meta_commerce/internal/api/orderintel/datachanged"
 	rptdec "meta_commerce/internal/api/report/datachanged"
 	"meta_commerce/internal/global"
@@ -61,9 +64,9 @@ func buildDataChangeEventFromSource(ctx context.Context, src, idHex, op string) 
 	}, true
 }
 
-// applyDatachangedSideEffects — chỉ điều phối: policy/debounce → CRM ingest chỉ queue; intel CRM sau ingest worker + crm.intelligence.recompute_requested.
+// applyDatachangedSideEffects — chỉ điều phối: policy/debounce → chỉ xếp crm_pending_merge; intel CRM sau merge worker + crm.intelligence.recompute_requested.
 func applyDatachangedSideEffects(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) error {
-	if evt == nil || evt.Payload == nil || evt.EventSource != "datachanged" {
+	if evt == nil || evt.Payload == nil || evt.EventSource != eventtypes.EventSourceDatachanged {
 		return nil
 	}
 	if svc != nil {
@@ -102,10 +105,13 @@ func applyDatachangedSideEffects(ctx context.Context, svc *aidecisionsvc.AIDecis
 		orgHex = evt.OwnerOrganizationID.Hex()
 	}
 	dec := eventintake.EvaluateDatachangedSideEffects(evt, src, idHex, orgHex)
+	route := datachangedrouting.Resolve(src)
+	datachangedrouting.LogApplied(ctx, evt, orgHex, dec, route)
+
 	ingestWin, reportWin, refreshWin, ruleOK := eventintake.ResolveDatachangedDeferWindowsViaRule(ctx, evt, src, op)
 	if !ruleOK {
 		urgency := eventintake.ClassifyDatachangedBusinessUrgency(evt, src, op)
-		ingestWin = eventintake.DeferWindowFor(urgency, eventintake.DeferChannelCRMIngest)
+		ingestWin = eventintake.DeferWindowFor(urgency, eventintake.DeferChannelCrmMergeQueue)
 		reportWin = eventintake.DeferWindowFor(urgency, eventintake.DeferChannelReport)
 		refreshWin = eventintake.DeferWindowFor(urgency, eventintake.DeferChannelCRMRefresh)
 	}
@@ -117,61 +123,37 @@ func applyDatachangedSideEffects(ctx context.Context, svc *aidecisionsvc.AIDecis
 		}
 	}
 
-	if dec.AllowCRMIngest {
-		if ingestWin > 0 {
-			eventintake.ScheduleDeferredSideEffect(eventintake.DeferredKindCrmIngest, orgHex, src, idHex, ingestWin)
-		} else {
-			crmdec.IngestFromDataChange(ctx, e)
-		}
-	}
-
-	if dec.AllowReport {
-		if reportWin > 0 {
-			eventintake.ScheduleDeferredSideEffect(eventintake.DeferredKindReport, orgHex, src, idHex, reportWin)
-		} else {
-			rptdec.RecordTouchFromDataChange(ctx, e)
-		}
-	}
-
-	if dec.AllowAds {
-		metadec.ProcessAdsProfileFromDataChange(ctx, e)
-	}
-
+	cixIntelDefer := time.Duration(0)
 	if src == global.MongoDB_ColNames.FbMessageItems {
 		var rawMsg bson.M
 		if m, ok := e.Document.(bson.M); ok {
 			rawMsg = m
 		}
-		cixWin := cixIntelDeferWindow(evt, rawMsg)
-		if cixWin <= 0 {
-			if err := cixdec.EnqueueCixComputeFromDataChange(ctx, e, idHex); err != nil {
-				logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
-					"eventId": evt.EventID, "orgHex": orgHex, "sourceCollection": src,
-				}).Warn("📋 [CIX_INTEL] Không xếp job cix_intel_compute từ fb_message_items datachanged")
-			}
-		} else {
-			eventintake.ScheduleDeferredSideEffect(eventintake.DeferredKindCixIntelCompute, orgHex, src, idHex, cixWin)
-		}
+		cixIntelDefer = cixIntelDeferWindow(evt, rawMsg)
 	}
-
+	orderIntelDefer := time.Duration(0)
 	if src == global.MongoDB_ColNames.PcPosOrders {
-		oWin := orderIntelDeferWindow(evt, src, op)
-		if oWin <= 0 {
-			if err := orderinteldec.EnqueueIntelligenceFromParentEvent(ctx, evt); err != nil {
-				logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
-					"eventId": evt.EventID, "orgHex": orgHex,
-				}).Warn("📋 [ORDER_INTEL] Không xếp job order_intel_compute từ pc_pos_orders datachanged")
-			}
-		} else {
-			eventintake.ScheduleDeferredSideEffect(eventintake.DeferredKindOrderIntelCompute, orgHex, src, idHex, oWin)
-		}
+		orderIntelDefer = orderIntelDeferWindow(evt, src, op)
 	}
 
-	if refreshWin > 0 {
-		eventintake.ScheduleDeferredSideEffect(eventintake.DeferredKindCrmRefresh, orgHex, src, idHex, refreshWin)
-		return nil
+	ac := &datachangedsidefx.ApplyContext{
+		Ctx:             ctx,
+		Evt:             evt,
+		E:               e,
+		Src:             src,
+		Op:              op,
+		IDHex:           idHex,
+		OrgHex:          orgHex,
+		Dec:             dec,
+		Route:           route,
+		IngestWin:       ingestWin,
+		ReportWin:       reportWin,
+		RefreshWin:      refreshWin,
+		CixIntelDefer:   cixIntelDefer,
+		OrderIntelDefer: orderIntelDefer,
 	}
-	// Tính lại CRM intelligence: không enqueue trực tiếp từ đây — chỉ sau CrmIngestWorker (crm.intelligence.recompute_requested + debounce consumer).
+	datachangedsidefx.Run(ac)
+	// Tính lại CRM intelligence: không enqueue trực tiếp từ đây — chỉ sau CrmPendingMergeWorker (crm.intelligence.recompute_requested + debounce consumer).
 	return nil
 }
 
@@ -244,7 +226,7 @@ func flushDeferredDatachangedSideEffects(ctx context.Context, svc *aidecisionsvc
 			continue
 		}
 		evt := &aidecisionmodels.DecisionEvent{
-			EventSource:         "datachanged",
+			EventSource:         eventtypes.EventSourceDatachanged,
 			OrgID:               j.OrgHex,
 			OwnerOrganizationID: ownerOID,
 			Payload: map[string]interface{}{
@@ -263,8 +245,8 @@ func flushDeferredDatachangedSideEffects(ctx context.Context, svc *aidecisionsvc
 		switch j.Kind {
 		case eventintake.DeferredKindReport:
 			rptdec.RecordTouchFromDataChange(ctx, e)
-		case eventintake.DeferredKindCrmIngest:
-			crmdec.IngestFromDataChange(ctx, e)
+		case eventintake.DeferredKindCrmMergeQueue:
+			crmdec.EnqueueCrmMergeFromDataChange(ctx, e)
 		case eventintake.DeferredKindCrmRefresh:
 			uid := resolveUnifiedIDForCrmIntelRecompute(ctx, ownerOID, evt.Payload)
 			if uid != "" {

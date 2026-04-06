@@ -19,6 +19,7 @@ import (
 	"meta_commerce/internal/api/aidecision/crmqueue"
 	"meta_commerce/internal/api/aidecision/decisionlive"
 	"meta_commerce/internal/api/aidecision/eventintake"
+	"meta_commerce/internal/api/aidecision/eventtypes"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 	aidecisionsvc "meta_commerce/internal/api/aidecision/service"
 	cixsvc "meta_commerce/internal/api/cix/service"
@@ -330,8 +331,8 @@ func processEvent(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt
 	if evt == nil {
 		return aidecisionmodels.ConsumerCompletionKindProcessed, nil
 	}
-	// Vision L1: side-effect từ CRUD (CRM pending ingest, Report MarkDirty, Ads debounce) chỉ chạy trong consumer sau event datachanged.
-	if evt.EventSource == "datachanged" {
+	// Vision L1: side-effect từ CRUD (queue crm_pending_merge, Report MarkDirty, Ads debounce) chỉ chạy trong consumer sau event datachanged.
+	if evt.EventSource == eventtypes.EventSourceDatachanged {
 		_ = applyDatachangedSideEffects(ctx, svc, evt)
 		publishQueueDatachangedEffectsDone(ownerOrgIDFromDecisionEvent(evt), evt)
 	}

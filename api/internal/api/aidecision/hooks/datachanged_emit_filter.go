@@ -1,7 +1,6 @@
 // Package hooks — Bộ lọc: collection đăng ký source_sync_registry; chỉ một số collection ghi decision_events_queue.
 //
-// Cấu hình duy nhất: map DatachangedEmitPerCollection (datachanged_emit_per_collection.go) — key có trong map thì dùng giá trị bool.
-// Collection không có trong map: non-Meta → emit; nhóm Meta Marketing → chỉ meta_ad_insights (cố định trong code).
+// Thứ tự: ghi đè YAML emit_to_decision_queue (datachangedrouting) nếu có; không thì mặc định datachangedemit (map + Meta).
 //
 // campaign_intel_recomputed → AI Decision từ worker sau recompute (meta_ads_intel).
 package hooks
@@ -9,34 +8,26 @@ package hooks
 import (
 	"strings"
 
-	"meta_commerce/internal/global"
+	"meta_commerce/internal/api/aidecision/datachangedemit"
+	"meta_commerce/internal/api/aidecision/datachangedrouting"
 )
+
+// DatachangedEmitPerCollection trỏ cùng map với datachangedemit.EmitPerCollection (chỉnh map ở một nơi).
+var DatachangedEmitPerCollection = datachangedemit.EmitPerCollection
 
 // ShouldEmitDatachangedToDecisionQueue quyết định sau OnDataChanged có gọi EmitEvent → decision_events_queue hay không.
 func ShouldEmitDatachangedToDecisionQueue(collectionName string) bool {
-	collectionName = strings.TrimSpace(collectionName)
-	if collectionName == "" {
+	c := strings.TrimSpace(collectionName)
+	if c == "" {
 		return false
 	}
-	if DatachangedEmitPerCollection != nil {
-		if v, ok := DatachangedEmitPerCollection[collectionName]; ok {
-			return v
-		}
+	if v, ok := datachangedrouting.EmitToQueueFromYAML(c); ok {
+		return v
 	}
-	if isMetaAdsSyncedCollection(collectionName) {
-		c := global.MongoDB_ColNames
-		return collectionName == c.MetaAdInsights
-	}
-	return true
+	return datachangedemit.DefaultShouldEmitToDecisionQueue(c)
 }
 
-// isMetaAdsSyncedCollection các collection Meta Marketing trong registry (đồng bộ API / snapshot).
-func isMetaAdsSyncedCollection(name string) bool {
-	c := global.MongoDB_ColNames
-	switch name {
-	case c.MetaAdAccounts, c.MetaCampaigns, c.MetaAdSets, c.MetaAds, c.MetaAdInsights, c.MetaAdInsightsDailySnapshots:
-		return true
-	default:
-		return false
-	}
+// IsMetaAdsSyncedCollection — true nếu collection thuộc nhóm Meta Marketing đồng bộ (định tuyến, doc, test).
+func IsMetaAdsSyncedCollection(name string) bool {
+	return datachangedemit.IsMetaAdsSyncedCollection(name)
 }

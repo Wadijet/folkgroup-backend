@@ -8,6 +8,7 @@ import (
 	"context"
 	"strings"
 
+	"meta_commerce/internal/api/aidecision/eventtypes"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 	"meta_commerce/internal/global"
 
@@ -18,7 +19,7 @@ import (
 // HydrateDatachangedPayload đọc bản ghi nguồn và merge vào evt.Payload (không ghi đè field đã có và khác rỗng).
 // Luôn trả về nil — không làm fail consumer khi doc không còn.
 func (s *AIDecisionService) HydrateDatachangedPayload(ctx context.Context, evt *aidecisionmodels.DecisionEvent) {
-	if evt == nil || evt.EventSource != "datachanged" || evt.Payload == nil {
+	if evt == nil || evt.EventSource != eventtypes.EventSourceDatachanged || evt.Payload == nil {
 		return
 	}
 	p := evt.Payload

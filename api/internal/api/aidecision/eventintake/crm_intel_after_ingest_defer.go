@@ -1,13 +1,15 @@
-// Package eventintake — Trì hoãn trailing yêu cầu tính lại CRM intelligence sau ingest worker (gom theo org + unifiedId).
+// Package eventintake — CRM intel sau ingest: debounce theo org + unifiedId (trailing, in-process).
 // Cùng mô hình bộ nhớ process-local với ScheduleDeferredSideEffect (datachanged_defer.go).
+// Lưu trữ: queuedebounce.MetaTable (Phase 4).
 package eventintake
 
 import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
+
+	"meta_commerce/internal/queuedebounce"
 )
 
 // CrmIntelAfterIngestFlushJob — một cặp org + unifiedId đến hạn, consumer sẽ xếp job crm_intel_compute (refresh).
@@ -38,20 +40,31 @@ func CrmIntelAfterIngestDebounceWindow() time.Duration {
 }
 
 type crmIntelAfterIngestKey struct {
-	orgHex, unifiedID string
+	orgHex    string
+	unifiedID string
 }
 
-type crmIntelAfterIngestSlot struct {
-	due           time.Time
+type crmIntelAfterIngestTrace struct {
 	traceID       string
 	correlationID string
 	parentEventID string
 }
 
-var (
-	crmIntelAfterIngestMu    sync.Mutex
-	crmIntelAfterIngestSlots = make(map[crmIntelAfterIngestKey]*crmIntelAfterIngestSlot)
-)
+func mergeCrmIntelAfterIngestTrace(prev, next crmIntelAfterIngestTrace) crmIntelAfterIngestTrace {
+	out := prev
+	if s := strings.TrimSpace(next.traceID); s != "" {
+		out.traceID = s
+	}
+	if s := strings.TrimSpace(next.correlationID); s != "" {
+		out.correlationID = s
+	}
+	if s := strings.TrimSpace(next.parentEventID); s != "" {
+		out.parentEventID = s
+	}
+	return out
+}
+
+var crmIntelAfterIngestDebouncer = queuedebounce.NewMetaTable[crmIntelAfterIngestKey, crmIntelAfterIngestTrace](mergeCrmIntelAfterIngestTrace)
 
 // ScheduleCrmIntelligenceRecomputeDebounce — trailing debounce sau crm.intelligence.recompute_requested: mỗi lần gọi cùng (org, unifiedId) → due = now + window.
 func ScheduleCrmIntelligenceRecomputeDebounce(orgHex, unifiedID string, window time.Duration, traceID, correlationID, parentEventID string) {
@@ -67,44 +80,29 @@ func ScheduleCrmIntelligenceRecomputeDebounce(orgHex, unifiedID string, window t
 		return
 	}
 	k := crmIntelAfterIngestKey{orgHex: orgHex, unifiedID: unifiedID}
-	due := time.Now().Add(window)
-
-	crmIntelAfterIngestMu.Lock()
-	defer crmIntelAfterIngestMu.Unlock()
-	slot := crmIntelAfterIngestSlots[k]
-	if slot == nil {
-		slot = &crmIntelAfterIngestSlot{}
-		crmIntelAfterIngestSlots[k] = slot
+	meta := crmIntelAfterIngestTrace{
+		traceID:       traceID,
+		correlationID: correlationID,
+		parentEventID: parentEventID,
 	}
-	slot.due = due
-	if strings.TrimSpace(traceID) != "" {
-		slot.traceID = strings.TrimSpace(traceID)
-	}
-	if strings.TrimSpace(correlationID) != "" {
-		slot.correlationID = strings.TrimSpace(correlationID)
-	}
-	if strings.TrimSpace(parentEventID) != "" {
-		slot.parentEventID = strings.TrimSpace(parentEventID)
-	}
+	crmIntelAfterIngestDebouncer.Schedule(k, window, meta)
 }
 
 // TakeDueCrmIntelAfterIngestJobs — lấy job đã đến hạn và xóa khỏi lịch.
 func TakeDueCrmIntelAfterIngestJobs(now time.Time) []CrmIntelAfterIngestFlushJob {
-	crmIntelAfterIngestMu.Lock()
-	defer crmIntelAfterIngestMu.Unlock()
-	var out []CrmIntelAfterIngestFlushJob
-	for k, slot := range crmIntelAfterIngestSlots {
-		if slot == nil || now.Before(slot.due) {
-			continue
-		}
+	entries := crmIntelAfterIngestDebouncer.TakeDue(now)
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make([]CrmIntelAfterIngestFlushJob, 0, len(entries))
+	for _, e := range entries {
 		out = append(out, CrmIntelAfterIngestFlushJob{
-			OrgHex:        k.orgHex,
-			UnifiedID:     k.unifiedID,
-			TraceID:       slot.traceID,
-			CorrelationID: slot.correlationID,
-			ParentEventID: slot.parentEventID,
+			OrgHex:        e.Key.orgHex,
+			UnifiedID:     e.Key.unifiedID,
+			TraceID:       e.Meta.traceID,
+			CorrelationID: e.Meta.correlationID,
+			ParentEventID: e.Meta.parentEventID,
 		})
-		delete(crmIntelAfterIngestSlots, k)
 	}
 	return out
 }

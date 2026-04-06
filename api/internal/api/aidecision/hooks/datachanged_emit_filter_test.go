@@ -3,6 +3,7 @@ package hooks
 import (
 	"testing"
 
+	"meta_commerce/internal/api/aidecision/datachangedemit"
 	"meta_commerce/internal/global"
 )
 
@@ -10,11 +11,11 @@ func TestShouldEmitDatachangedToDecisionQueue_mapOverride(t *testing.T) {
 	global.MongoDB_ColNames.MetaAdInsights = "meta_ad_insights"
 	global.MongoDB_ColNames.MetaCampaigns = "meta_campaigns"
 	global.MongoDB_ColNames.FbConvesations = "fb_conversations"
-	saved := DatachangedEmitPerCollection
+	saved := datachangedemit.EmitPerCollection
 	t.Cleanup(func() {
-		DatachangedEmitPerCollection = saved
+		datachangedemit.EmitPerCollection = saved
 	})
-	DatachangedEmitPerCollection = map[string]bool{
+	datachangedemit.EmitPerCollection = map[string]bool{
 		"meta_campaigns":   true,
 		"fb_conversations": false,
 	}
@@ -29,11 +30,11 @@ func TestShouldEmitDatachangedToDecisionQueue_mapOverride(t *testing.T) {
 func TestShouldEmitDatachangedToDecisionQueue_metaInsightOnlyDefault(t *testing.T) {
 	global.MongoDB_ColNames.MetaAdInsights = "meta_ad_insights"
 	global.MongoDB_ColNames.MetaCampaigns = "meta_campaigns"
-	saved := DatachangedEmitPerCollection
+	saved := datachangedemit.EmitPerCollection
 	t.Cleanup(func() {
-		DatachangedEmitPerCollection = saved
+		datachangedemit.EmitPerCollection = saved
 	})
-	DatachangedEmitPerCollection = nil
+	datachangedemit.EmitPerCollection = nil
 	if ShouldEmitDatachangedToDecisionQueue("meta_campaigns") {
 		t.Fatal("mặc định Meta (không trong map) chỉ insight emit")
 	}
@@ -44,11 +45,11 @@ func TestShouldEmitDatachangedToDecisionQueue_metaInsightOnlyDefault(t *testing.
 
 func TestShouldEmitDatachangedToDecisionQueue_nonMetaDefaultTrue(t *testing.T) {
 	global.MongoDB_ColNames.MetaAdInsights = "meta_ad_insights"
-	saved := DatachangedEmitPerCollection
+	saved := datachangedemit.EmitPerCollection
 	t.Cleanup(func() {
-		DatachangedEmitPerCollection = saved
+		datachangedemit.EmitPerCollection = saved
 	})
-	DatachangedEmitPerCollection = nil
+	datachangedemit.EmitPerCollection = nil
 	if !ShouldEmitDatachangedToDecisionQueue("pc_pos_orders") {
 		t.Fatal("non-Meta không trong map phải emit")
 	}

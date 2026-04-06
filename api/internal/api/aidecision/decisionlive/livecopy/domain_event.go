@@ -147,8 +147,8 @@ func DomainNarrativeFromQueueEvent(evt *aidecisionmodels.DecisionEvent) DomainNa
 	if src != "" {
 		srcLabel := src
 		srcMap := map[string]string{
-			"datachanged":   "sau khi dữ liệu đổi",
-			"aidecision":    "từ luồng AI Decision",
+			eventtypes.EventSourceDatachanged: "sau khi dữ liệu đổi",
+			eventtypes.EventSourceAIDecision:  "từ luồng AI Decision",
 		}
 		if v, ok := srcMap[src]; ok {
 			srcLabel = v

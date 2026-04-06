@@ -54,7 +54,7 @@
 
 **Hướng B — Queue riêng `order_pending_enrich` (khi enrich nặng hoặc cần retry):**
 
-- Giống tinh thần `crm_pending_ingest` nhưng **chỉ** chuẩn hóa một document đơn (không merge nhiều nguồn).
+- Giống tinh thần `crm_pending_merge` nhưng **chỉ** chuẩn hóa một document đơn (không merge nhiều nguồn).
 - Sau enrich thành công → emit event yêu cầu intel (hoặc xếp thẳng `order_intel_compute`).
 
 **Khuyến nghị:** Bắt đầu **Hướng A (in-memory)**; chỉ tách queue khi đo được latency / retry cần thiết.
@@ -93,7 +93,7 @@
 ## 4. Việc **không** nên làm sớm
 
 - **Không** chuyển `ComputeSnapshot` vào consumer AID — đã thống nhất tính tại worker domain.
-- **Không** tạo `order_pending_ingest` trùng lặp với CRM: merge **khách** vẫn là `crm_pending_ingest`; queue order chỉ cho **materialize đơn canonical** khi thật sự đa nguồn.
+- **Không** tạo `order_pending_ingest` trùng lặp với CRM: merge **khách** vẫn là `crm_pending_merge`; queue order chỉ cho **materialize đơn canonical** khi thật sự đa nguồn.
 - **Không** leak `_id` Mongo ra payload công khai; giữ `orderUid` / `uid` trong event (đúng [mục 2.1 khung](./KHUNG_LUONG_INGEST_MERGE_INTEL_CIO_AID_DOMAIN.md)).
 
 ---

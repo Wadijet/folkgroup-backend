@@ -171,7 +171,7 @@ func buildCustomerContextPayload(c *crmmodels.CrmCustomer) map[string]interface{
 func emitCustomerContextReady(ctx context.Context, decSvc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent, convID, custID, channel string, ownerOrgID primitive.ObjectID, customerPayload map[string]interface{}) error {
 	_, err := decSvc.EmitEvent(ctx, &aidecisionsvc.EmitEventInput{
 		EventType:   eventtypes.CustomerContextReady,
-		EventSource: "crm",
+		EventSource: eventtypes.EventSourceCRM,
 		EntityType:  "customer",
 		EntityID:    custID,
 		OrgID:       evt.OrgID,

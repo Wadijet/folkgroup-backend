@@ -1,0 +1,16 @@
+# Sao chép thành file thật (vd. datachanged_routing.yaml) và đặt:
+#   DATACHANGED_ROUTING_CONFIG=<đường_dẫn_tuyệt_đối>
+# Bản embed trong binary luôn có; file ngoài thay thế toàn bộ nội dung YAML khi đọc được.
+
+config_version: "v1-2026-04-06"
+
+collection_overrides: {}
+  # Ví dụ:
+  # "meta_campaigns":
+  #   emit_to_decision_queue: true
+  #   crm_pending_merge: false
+  #   report_touch: true
+  #   ads_profile: true
+  #   cix_intel: false
+  #   order_intel: false
+  #   crm_intel_refresh_defer: true

@@ -4,6 +4,8 @@
 
 **Nguồn vision:** `docs/architecture/vision/` (workspace docs)
 
+> **Ghi chú 2026-04-07:** Ký hiệu **Raw→L1→L2→L3** trong báo cáo này = **pipeline rule CIX**, không phải mirror/canonical **L1-persist/L2-persist**. Xem `docs/05-development/KHUNG_KHUON_MODULE_INTELLIGENCE.md` mục 0.
+
 ---
 
 ## 1. Tổng Quan Trạng Thái

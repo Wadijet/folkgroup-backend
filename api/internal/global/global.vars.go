@@ -91,7 +91,7 @@ type MongoDB_Auth_CollectionName struct {
 	CrmBulkJobs string // crm_bulk_jobs: queue cho worker xử lý sync, backfill, recalculate
 	// CrmIntelCompute — quy ước chung với Ads/Order: collection MongoDB `{domain}_intel_compute` = chuỗi đăng ký worker Worker{Domain}IntelCompute.
 	CrmIntelCompute string // crm_intel_compute
-	// CrmCustomerIntelRuns — mỗi lần chạy intel khách (refresh/recalculate) thành công hoặc thất bại có document; L2 crm_customers.intel trỏ bản gần nhất.
+	// CrmCustomerIntelRuns — mỗi lần chạy intel khách (job/API) thành công hoặc thất bại có ý nghĩa: một document lịch sử; crm_customers giữ pointer mới nhất.
 	CrmCustomerIntelRuns string // crm_customer_intel_runs
 
 	// Module Meta Ads (tiền tố meta_)
@@ -134,6 +134,8 @@ type MongoDB_Auth_CollectionName struct {
 	// Module Recompute Debounce Queue — theo dõi giảm chấn tính lại theo entity (dùng chung multi-domain)
 	RecomputeDebounceQueue string // decision_recompute_debounce_queue: hàng đợi giảm chấn trước queue domain
 	AdsIntelCompute string // ads_intel_compute — job ApplyAdsIntelligenceRecompute / RecalculateAll
+	// AdsMetaIntelRuns — lớp A: mỗi lần worker ads_intel_compute kết thúc; meta_campaigns giữ pointer khi recompute_one + có campaign.
+	AdsMetaIntelRuns string // ads_meta_intel_runs
 
 	// Module Decision Brain — Learning memory cho AI Commerce
 	LearningCases   string // learning_cases: ký ức học tập — 1 case per action, sau outcome (PLATFORM_L1)
@@ -147,12 +149,14 @@ type MongoDB_Auth_CollectionName struct {
 	RuleExecutionLogs    string // rule_execution_logs: Execution Trace
 
 	// Module CIX — Contextual Conversation Intelligence
-	CixAnalysisResults string // cix_analysis_results: kết quả phân tích hội thoại Raw→L1→L2→L3→Flag→Action
+	CixAnalysisResults string // cix_analysis_results: lớp A mỗi lần chạy (success/failed), rawFacts tóm tắt, parentJobId, causalOrderingAt, sequence
 	CixIntelCompute    string // cix_intel_compute: job phân tích (CIO → enqueue; WorkerCixIntelCompute), cùng quy ước *_intel_compute
 
 	// Module Order Intelligence — Vision 07 (Raw→L1→L2→L3→Flags per order)
 	OrderIntelligenceSnapshots string // order_intelligence_snapshots: snapshot theo đơn (upsert theo orderUid + org)
-	OrderIntelCompute string // order_intel_compute — worker tính Raw→L3→Flags, không tính trong consumer AI Decision
+	OrderIntelCompute          string // order_intel_compute — worker tính Raw→L3→Flags, không tính trong consumer AI Decision
+	// OrderIntelRuns — lớp A: mỗi lần worker kết thúc (thành công/thất bại); commerce_orders giữ pointer mới nhất.
+	OrderIntelRuns string // order_intel_runs
 
 	// Module AI Decision — Event & Decision Case (PLATFORM_L1_EVENT_DECISION_SUPPLEMENT)
 	DecisionEventsQueue   string // decision_events_queue: hàng đợi event chờ AI Decision xử lý

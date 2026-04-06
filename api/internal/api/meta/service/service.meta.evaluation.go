@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	adsadaptive "meta_commerce/internal/api/ads/adaptive"
-	adsconfig "meta_commerce/internal/api/ads/config"
+	adsadaptive "meta_commerce/internal/api/ads_meta/adaptive"
+	adsconfig "meta_commerce/internal/api/ads_meta/config"
 	"meta_commerce/internal/api/events"
 	"meta_commerce/internal/api/meta/models"
 	"meta_commerce/internal/common/activity"

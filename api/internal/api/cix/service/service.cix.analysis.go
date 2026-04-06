@@ -32,6 +32,29 @@ type CixAnalysisService struct {
 	*basesvc.BaseServiceMongoImpl[cixmodels.CixAnalysisResult]
 }
 
+// AnalyzeSessionParams tham số phân tích session — truyền từ worker cix_intel_compute (job + envelope).
+type AnalyzeSessionParams struct {
+	SessionUid          string
+	CustomerUid         string
+	OwnerOrganizationID primitive.ObjectID
+	ParentJobID         primitive.ObjectID
+	TraceID             string
+	CorrelationID       string
+	CausalOrderingAtMs  int64
+}
+
+// CixTerminalFailureInput ghi bản ghi lớp A khi pipeline CIX lỗi sau hết retry.
+type CixTerminalFailureInput struct {
+	OwnerOrganizationID primitive.ObjectID
+	SessionUid          string
+	CustomerUid         string
+	ParentJobID         primitive.ObjectID
+	TraceID             string
+	CorrelationID       string
+	CausalOrderingAtMs  int64
+	Err                 error
+}
+
 // NewCixAnalysisService tạo service mới.
 func NewCixAnalysisService() (*CixAnalysisService, error) {
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CixAnalysisResults)
@@ -84,6 +107,32 @@ func (s *CixAnalysisService) getConversationTurns(ctx context.Context, conversat
 		})
 	}
 	return turns, nil
+}
+
+// buildCixRawFacts tóm tắt turns cho lưu lớp A (không lưu nội dung tin).
+func buildCixRawFacts(turns []map[string]interface{}) cixmodels.CixRawFacts {
+	if len(turns) == 0 {
+		return cixmodels.CixRawFacts{}
+	}
+	f := cixmodels.CixRawFacts{TurnCount: len(turns)}
+	for i, t := range turns {
+		ts, _ := t["timestamp"].(int64)
+		if ts == 0 {
+			if tf, ok := t["timestamp"].(float64); ok {
+				ts = int64(tf)
+			}
+		}
+		if ts == 0 {
+			continue
+		}
+		if i == 0 || f.FirstMsgAt == 0 || ts < f.FirstMsgAt {
+			f.FirstMsgAt = ts
+		}
+		if ts > f.LastMsgAt {
+			f.LastMsgAt = ts
+		}
+	}
+	return f
 }
 
 // getCustomerContext lấy context khách từ CRM (valueTier, journeyStage, lifecycleStage).
@@ -333,18 +382,27 @@ func getStr(m map[string]interface{}, key string) string {
 	return ""
 }
 
-// AnalyzeSession phân tích session — đọc conversation, customer context, chạy Rule Engine.
-// sessionUid: conversationId (Messenger 1 conv = 1 session). customerUid: customerId hoặc uid.
+// AnalyzeSession phân tích session (không có job — tương thích gọi cũ).
 func (s *CixAnalysisService) AnalyzeSession(ctx context.Context, sessionUid, customerUid string, ownerOrgID primitive.ObjectID) (*cixmodels.CixAnalysisResult, error) {
-	now := time.Now().UnixMilli()
-	conversationId := sessionUid
+	return s.AnalyzeSessionWithParams(ctx, AnalyzeSessionParams{
+		SessionUid:          sessionUid,
+		CustomerUid:         customerUid,
+		OwnerOrganizationID: ownerOrgID,
+	})
+}
 
-	turns, _ := s.getConversationTurns(ctx, conversationId, ownerOrgID)
-	customerCtx := s.getCustomerContext(ctx, customerUid, ownerOrgID)
+// AnalyzeSessionWithParams đọc hội thoại, chạy pipeline, ghi lớp A + cập nhật lớp B trên CRM khi có khách.
+func (s *CixAnalysisService) AnalyzeSessionWithParams(ctx context.Context, p AnalyzeSessionParams) (*cixmodels.CixAnalysisResult, error) {
+	now := time.Now().UnixMilli()
+	conversationID := p.SessionUid
+	ownerOrgID := p.OwnerOrganizationID
+
+	turns, _ := s.getConversationTurns(ctx, conversationID, ownerOrgID)
+	customerCtx := s.getCustomerContext(ctx, p.CustomerUid, ownerOrgID)
 
 	raw := map[string]interface{}{
-		"turns":       turns,
-		"turnCount":   len(turns),
+		"turns":     turns,
+		"turnCount": len(turns),
 	}
 
 	result, err := s.runPipeline(ctx, raw, customerCtx, ownerOrgID)
@@ -352,44 +410,119 @@ func (s *CixAnalysisService) AnalyzeSession(ctx context.Context, sessionUid, cus
 		return nil, err
 	}
 
+	causal := p.CausalOrderingAtMs
+	if causal <= 0 {
+		causal = now
+	}
+
+	var seq int64
+	if p.CustomerUid != "" {
+		crmSvc, cerr := crmvc.NewCrmCustomerService()
+		if cerr == nil && crmSvc != nil {
+			if bumped, berr := crmSvc.BumpCixIntelSequence(ctx, p.CustomerUid, ownerOrgID); berr == nil {
+				seq = bumped
+			}
+		}
+	}
+
 	result.ID = primitive.NewObjectID()
 	result.OwnerOrganizationID = ownerOrgID
-	result.SessionUid = sessionUid
-	result.CustomerUid = customerUid
+	result.SessionUid = p.SessionUid
+	result.CustomerUid = p.CustomerUid
+	result.CorrelationID = strings.TrimSpace(p.CorrelationID)
+	if strings.TrimSpace(p.TraceID) != "" && result.TraceID == "" {
+		result.TraceID = strings.TrimSpace(p.TraceID)
+	}
+	result.Status = cixmodels.CixAnalysisStatusSuccess
+	result.ComputedAt = now
 	result.CreatedAt = now
+	result.ParentJobID = p.ParentJobID
+	result.CausalOrderingAt = causal
+	result.CixIntelSequence = seq
+	result.RawFacts = buildCixRawFacts(turns)
 
 	_, err = s.InsertOne(ctx, *result)
 	if err != nil {
 		return nil, err
 	}
 
-	// Làm giàu profile CRM với Layer 3 signals (buyingIntent, sentiment, objectionLevel).
-	if customerUid != "" {
+	if p.CustomerUid != "" {
 		crmSvc, _ := crmvc.NewCrmCustomerService()
 		if crmSvc != nil {
-			_ = crmSvc.OnCixSignalUpdate(ctx, customerUid, ownerOrgID,
-				result.Layer3.BuyingIntent, result.Layer3.Sentiment, result.Layer3.ObjectionLevel,
-				result.TraceID)
+			_ = crmSvc.ApplyCixIntelReadModel(ctx, p.CustomerUid, ownerOrgID, crmvc.CixIntelReadModelInput{
+				BuyingIntent:      result.Layer3.BuyingIntent,
+				Sentiment:         result.Layer3.Sentiment,
+				ObjectionLevel:    result.Layer3.ObjectionLevel,
+				TraceID:           result.TraceID,
+				LastAnalysisID:    result.ID,
+				ComputedAtMs:      now,
+				CausalOrderingAt:  causal,
+				CixIntelSequence:  seq,
+			})
 		}
 	}
 
-	// Fan-in AID: worker cix_intel_compute emit cix_intel_recomputed (payload analysisResultId) → ReceiveCixPayload.
-	// Collection cix_analysis_results không bắn datachanged vào decision queue (tránh trùng luồng).
+	// Timeline CRM (khung intelligence mục 4): metricsSnapshot + activityAt theo causal/computed.
+	logCixIntelActivityAfterSuccess(ctx, ownerOrgID, p.CustomerUid, p.SessionUid, result, causal)
 
 	return result, nil
 }
 
-// FindBySessionUid tìm kết quả phân tích theo session.
+// InsertTerminalFailure ghi bản ghi cix_analysis_results trạng thái failed (sau hết retry job).
+func (s *CixAnalysisService) InsertTerminalFailure(ctx context.Context, in CixTerminalFailureInput) (*cixmodels.CixAnalysisResult, error) {
+	now := time.Now().UnixMilli()
+	causal := in.CausalOrderingAtMs
+	if causal <= 0 {
+		causal = now
+	}
+	msg := ""
+	if in.Err != nil {
+		msg = in.Err.Error()
+	}
+	doc := cixmodels.CixAnalysisResult{
+		ID:                  primitive.NewObjectID(),
+		OwnerOrganizationID: in.OwnerOrganizationID,
+		SessionUid:          in.SessionUid,
+		CustomerUid:         in.CustomerUid,
+		TraceID:             strings.TrimSpace(in.TraceID),
+		CorrelationID:       strings.TrimSpace(in.CorrelationID),
+		Status:              cixmodels.CixAnalysisStatusFailed,
+		FailedAt:            now,
+		CreatedAt:           now,
+		ComputedAt:          0,
+		ErrorCode:           "cix_pipeline_error",
+		ErrorMessage:        msg,
+		ParentJobID:         in.ParentJobID,
+		CausalOrderingAt:    causal,
+		ActionSuggestions:   []string{},
+	}
+	_, err := s.InsertOne(ctx, doc)
+	if err != nil {
+		return nil, err
+	}
+	logCixIntelActivityAfterFailure(ctx, in.OwnerOrganizationID, in.CustomerUid, in.SessionUid, &doc, causal)
+	return &doc, nil
+}
+
+// FindBySessionUid tìm kết quả phân tích mới nhất theo session (sort createdAt giảm dần).
 func (s *CixAnalysisService) FindBySessionUid(ctx context.Context, sessionUid string, ownerOrgID primitive.ObjectID) (*cixmodels.CixAnalysisResult, error) {
 	filter := bson.M{
 		"sessionUid":          sessionUid,
 		"ownerOrganizationId": ownerOrgID,
 	}
-	result, err := s.FindOne(ctx, filter, nil)
+	opts := options.FindOne().SetSort(bson.D{{Key: "createdAt", Value: -1}})
+	result, err := s.FindOne(ctx, filter, opts)
 	if err != nil {
 		return nil, err
 	}
 	return &result, nil
+}
+
+func parentJobHex(id primitive.ObjectID) string {
+	if id.IsZero() {
+		return ""
+	}
+	return id.Hex()
 }
 
 // ToCixAnalysisResponse chuyển CixAnalysisResult sang DTO response.
@@ -399,9 +532,23 @@ func ToCixAnalysisResponse(r *cixmodels.CixAnalysisResult) *cixdto.CixAnalysisRe
 	}
 	resp := &cixdto.CixAnalysisResponse{
 		ID:                   r.ID.Hex(),
-		SessionUid:         r.SessionUid,
+		SessionUid:           r.SessionUid,
 		CustomerUid:          r.CustomerUid,
 		TraceID:              r.TraceID,
+		CorrelationID:        r.CorrelationID,
+		Status:               r.Status,
+		ComputedAt:           r.ComputedAt,
+		FailedAt:             r.FailedAt,
+		ErrorCode:            r.ErrorCode,
+		ErrorMessage:         r.ErrorMessage,
+		ParentJobID:          parentJobHex(r.ParentJobID),
+		CausalOrderingAt:     r.CausalOrderingAt,
+		CixIntelSequence:     r.CixIntelSequence,
+		RawFacts: cixdto.CixRawFactsDTO{
+			TurnCount:  r.RawFacts.TurnCount,
+			FirstMsgAt: r.RawFacts.FirstMsgAt,
+			LastMsgAt:  r.RawFacts.LastMsgAt,
+		},
 		PipelineRuleTraceIDs: r.PipelineRuleTraceIDs,
 		Layer1:               cixdto.CixLayer1DTO{Stage: r.Layer1.Stage},
 		Layer2: cixdto.CixLayer2DTO{

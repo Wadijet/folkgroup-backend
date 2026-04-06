@@ -12,7 +12,7 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/requestid"
 	"meta_commerce/config"
 
-	adsrouter "meta_commerce/internal/api/ads/router"
+	adsrouter "meta_commerce/internal/api/ads_meta/router"
 	agentrouter "meta_commerce/internal/api/agent/router"
 	airouter "meta_commerce/internal/api/ai/router"
 	aidecisionrouter "meta_commerce/internal/api/aidecision/router"

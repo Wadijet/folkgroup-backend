@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"meta_commerce/internal/api/aidecision/adsautop"
-	adssvc "meta_commerce/internal/api/ads/service"
+	adssvc "meta_commerce/internal/api/ads_meta/service"
 	"meta_commerce/internal/logger"
 	coreworker "meta_commerce/internal/worker"
 )

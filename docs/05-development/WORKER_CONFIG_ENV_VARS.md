@@ -264,7 +264,7 @@ API GET trả `workerMetadata` với field `domain` — dùng để nhóm/filter
 | `notification_command_cleanup` | notification | system | Dọn command cũ hết hạn | `WORKER_PRIORITY_NOTIFICATION_COMMAND_CLEANUP` | 4 (Low) |
 | `notification_agent_command_cleanup` | notification | system | Dọn agent command cũ hết hạn | `WORKER_PRIORITY_NOTIFICATION_AGENT_COMMAND_CLEANUP` | 4 (Low) |
 | `notification_agent_activity_cleanup` | notification | system | Dọn agent activity log cũ | `WORKER_PRIORITY_NOTIFICATION_AGENT_ACTIVITY_CLEANUP` | 4 (Low) |
-| `crm_pending_merge` | crm | customer | Queue merge L1→L2 CRM (khác CIO ingest) | `WORKER_PRIORITY_CRM_PENDING_MERGE` | 2 (High) |
+| `crm_pending_merge` | crm | customer | Queue merge **mirror→canonical** CRM (khác CIO ingest) | `WORKER_PRIORITY_CRM_PENDING_MERGE` | 2 (High) |
 | `crm_bulk` | crm | customer | Xử lý bulk job cập nhật customer hàng loạt | `WORKER_PRIORITY_CRM_BULK` | 4 (Low) |
 | `ads_execution` | ads | ads | Thực thi đề xuất quảng cáo đã duyệt | `WORKER_PRIORITY_ADS_EXECUTION` | 3 (Normal) |
 | `ads_auto_propose` | ads | aidecision | Auto propose (aidecision/adsautop → executor.propose_requested) | `WORKER_PRIORITY_ADS_AUTO_PROPOSE` | 3 (Normal) |

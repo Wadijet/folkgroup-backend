@@ -51,7 +51,12 @@ func NotifyIntelRecomputeAfterCrmMergeIfNeeded(ctx context.Context, item *crmmod
 	if !item.ID.IsZero() {
 		jobHex = item.ID.Hex()
 	}
-	_, err = crmqueue.EmitCrmIntelligenceRecomputeRequested(ctx, unifiedID, ownerOrgID, sourceCollection, jobHex)
+	causalMs := item.UpdatedAtNew
+	if causalMs <= 0 && item.CreatedAt > 0 {
+		// createdAt trong queue thường là Unix giây (EnqueueCrmPendingMerge)
+		causalMs = item.CreatedAt * 1000
+	}
+	_, err = crmqueue.EmitCrmIntelligenceRecomputeRequested(ctx, unifiedID, ownerOrgID, sourceCollection, jobHex, causalMs)
 	if err != nil {
 		logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
 			"collection": sourceCollection, "unifiedId": unifiedID,

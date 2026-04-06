@@ -4,6 +4,8 @@
 
 **Nguồn:** Vision `docs/architecture/vision/`, Code `api/internal/api/`, `api/pkg/approval`, `api/internal/executors/`
 
+> **Ghi chú 2026-04-07:** **Raw→L1→L2→L3** trong bảng dưới = **pipeline rule CIX**; **L1-persist/L2-persist** = mirror/canonical (data contract). `docs/05-development/KHUNG_KHUON_MODULE_INTELLIGENCE.md` mục 0.
+
 ---
 
 ## 1. Module CIO — Customer Interaction Orchestrator

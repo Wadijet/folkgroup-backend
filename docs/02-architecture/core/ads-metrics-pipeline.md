@@ -1,6 +1,8 @@
 # Ads Metrics Pipeline — Raw → Layer1 → Layer2 → Layer3 → Flag → Action
 
-**Mục đích:** Tài liệu mô tả pipeline biến đổi dữ liệu Meta Ads từ raw đến action, trích xuất từ codebase.
+**Mục đích:** Tài liệu mô tả pipeline biến đổi dữ liệu **Meta Ads** từ raw đến action, trích xuất từ codebase.
+
+> **Phạm vi tên gọi:** **Layer 1 / 2 / 3** ở đây là **tầng metric Ads** (`computeLayer1/2/3` trong code), **chỉ áp dụng miền Ads/Meta**. **Không** phải **mirror/canonical (L1-persist/L2-persist)**, **không** phải **pipeline rule CIX** L1→L2→L3, **không** phải trường BSON CRM `layer1`/`layer2`. Xem [KHUNG_KHUON_MODULE_INTELLIGENCE.md](../../05-development/KHUNG_KHUON_MODULE_INTELLIGENCE.md) mục 0.
 
 **Liên quan:** [Rule Intelligence](rule-intelligence.md), [FolkForm AI Agent Master Rules v4.1](../../../docs-shared/ai-context/folkform/design/ads-intelligence/FolkForm%20AI%20Agent%20Master%20Rules%20v4.1.md)
 

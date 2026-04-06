@@ -11,7 +11,7 @@
 ## 1. Nguyên tắc chốt (ba lớp trách nhiệm)
 
 1. **Miền nghiệp vụ** (`api/internal/api/<module>/`) — sở hữu model, service/CRUD, **queue và worker của chính miền** (collection job, batch, retry), và **phát event handoff** sau khi worker xong (payload theo data contract).
-2. **Điều phối (AID)** — package `aidecision` sở hữu **`decision_events_queue`**, đăng ký **`RegisterAIDecisionOnDataChanged`**, chạy **`applyDatachangedSideEffects`** (một cửa side-effect sau datachanged) và **`dispatchConsumerEvent`**; **không** là nơi chứa logic merge L1→L2 hay tính intel nặng của từng miền.
+2. **Điều phối (AID)** — package `aidecision` sở hữu **`decision_events_queue`**, đăng ký **`RegisterAIDecisionOnDataChanged`**, chạy **`applyDatachangedSideEffects`** (một cửa side-effect sau datachanged) và **`dispatchConsumerEvent`**; **không** là nơi chứa logic merge **mirror→canonical (L1-persist→L2-persist)** hay tính intel nặng của từng miền.
 3. **Nền tảng** — `base`, `events`, `global`, `database`, `models/mongodb`, `dto`, `middleware`, `router` — không gắn một bounded context nghiệp vụ cụ thể.
 
 **Worker thực thi nặng** nằm tại `api/internal/worker/*.go` nhưng trong tài liệu và review PR cần ghi rõ **module sở hữu** (owner) tương ứng để không lạc ranh giới.
@@ -78,7 +78,7 @@ Mỗi dòng là một **bounded context**; mở rộng feature ưu tiên giữ l
 
 | Module | Vai trò | Queue / worker điển hình (tham chiếu code) |
 |--------|---------|---------------------------------------------|
-| **crm** | Khách L2, merge L1→L2, bulk, intel CRM | `crm_pending_merge`, `crm_intel_compute`, … |
+| **crm** | Khách canonical (L2-persist), merge mirror→canonical, bulk, intel CRM | `crm_pending_merge`, `crm_intel_compute`, … |
 | **order** | Đơn, đồng bộ canonical commerce | Datachanged qua `order/datachanged`; phối hợp orderintel |
 | **orderintel** | Intelligence đơn | `order_intel_compute` |
 | **meta** | Ads profile, enqueue intel Meta | `ads_intel_compute`, debounce campaign, … |
@@ -147,7 +147,7 @@ Giá trị dùng trên envelope queue; **không** tự thêm string tùy tiện 
 | `aidecision` | Điều phối nội bộ (orchestrate, context_requested, execute_requested, …) |
 | `cix_api` | HTTP CIX đưa yêu cầu vào queue |
 | `crm` | Handoff / job CRM (intel compute, context_ready, …) |
-| `crm_merge_queue` | Sau merge L1→L2 — payload gắn job merge (vd. `pendingMergeJobId`) |
+| `crm_merge_queue` | Sau merge mirror→canonical — payload gắn job merge (vd. `pendingMergeJobId`) |
 | `crm_intel` | Worker CRM intel phát (vd. `crm_intel_recomputed`) |
 | `meta_ads_intel` | Worker intel Meta / emit campaign sau recompute |
 | `meta_api` | API / batch Meta (vd. `ads.intelligence.recalculate_all_requested`) |

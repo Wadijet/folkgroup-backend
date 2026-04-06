@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 
-	adsMigration "meta_commerce/internal/api/ads/migration"
+	adsMigration "meta_commerce/internal/api/ads_meta/migration"
 	basesvc "meta_commerce/internal/api/base/service"
 	aidecisionsvc "meta_commerce/internal/api/aidecision/service"
 	"meta_commerce/internal/api/initsvc"

@@ -18,6 +18,8 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // CrmCustomerService xử lý logic khách hàng unified.
@@ -74,28 +76,77 @@ func (s *CrmCustomerService) tryMergeFromSource(ctx context.Context, customerId 
 	return false
 }
 
-// OnCixSignalUpdate cập nhật Layer 3 signals (buyingIntent, sentiment) từ CIX vào crm_customers.
-// Làm giàu profile — psychographic tags, intent signals. Lưu trong currentMetrics.cix.
-func (s *CrmCustomerService) OnCixSignalUpdate(ctx context.Context, customerUid string, ownerOrgID primitive.ObjectID, buyingIntent, sentiment, objectionLevel string, traceID string) error {
+// CixIntelReadModelInput — lớp B (read model) sau khi CIX terminal thành công; đồng bộ khung intelligence mục 3.
+type CixIntelReadModelInput struct {
+	BuyingIntent       string
+	Sentiment          string
+	ObjectionLevel     string
+	TraceID            string
+	LastAnalysisID     primitive.ObjectID
+	ComputedAtMs       int64
+	CausalOrderingAt   int64
+	CixIntelSequence   int64
+}
+
+// BumpCixIntelSequence tăng cixIntelSequence trên crm_customers và trả giá trị mới (trước khi Insert cix_analysis_results).
+func (s *CrmCustomerService) BumpCixIntelSequence(ctx context.Context, customerUid string, ownerOrgID primitive.ObjectID) (int64, error) {
+	if customerUid == "" || ownerOrgID.IsZero() {
+		return 0, mongo.ErrNoDocuments
+	}
+	filter := buildCustomerFilterByIdOrUid(customerUid, ownerOrgID)
+	var out crmmodels.CrmCustomer
+	err := s.Collection().FindOneAndUpdate(ctx, filter, bson.M{"$inc": bson.M{"cixIntelSequence": 1}},
+		options.FindOneAndUpdate().SetReturnDocument(options.After)).Decode(&out)
+	if err != nil {
+		return 0, err
+	}
+	return out.CixIntelSequence, nil
+}
+
+// ApplyCixIntelReadModel cập nhật currentMetrics.cix + con trỏ tới bản ghi lớp A (cix_analysis_results).
+func (s *CrmCustomerService) ApplyCixIntelReadModel(ctx context.Context, customerUid string, ownerOrgID primitive.ObjectID, in CixIntelReadModelInput) error {
 	if customerUid == "" {
 		return nil
 	}
 	now := time.Now().UnixMilli()
-	update := bson.M{
-		"$set": bson.M{
-			"currentMetrics.cix": bson.M{
-				"buyingIntent":   buyingIntent,
-				"sentiment":      sentiment,
-				"objectionLevel": objectionLevel,
-				"updatedAt":      now,
-				"traceId":        traceID,
-			},
-			"updatedAt": now,
-		},
+	cixBlock := bson.M{
+		"buyingIntent":   in.BuyingIntent,
+		"sentiment":      in.Sentiment,
+		"objectionLevel": in.ObjectionLevel,
+		"updatedAt":      now,
+		"traceId":        in.TraceID,
+	}
+	if !in.LastAnalysisID.IsZero() {
+		cixBlock["lastAnalysisId"] = in.LastAnalysisID.Hex()
+		cixBlock["lastComputedAt"] = in.ComputedAtMs
+	}
+	if in.CausalOrderingAt > 0 {
+		cixBlock["causalOrderingAt"] = in.CausalOrderingAt
+	}
+	if in.CixIntelSequence > 0 {
+		cixBlock["cixIntelSequence"] = in.CixIntelSequence
+	}
+	set := bson.M{
+		"currentMetrics.cix": cixBlock,
+		"updatedAt":          now,
+	}
+	if !in.LastAnalysisID.IsZero() {
+		set["cixIntelLastResultId"] = in.LastAnalysisID
+		set["cixIntelLastComputedAt"] = in.ComputedAtMs
 	}
 	filter := buildCustomerFilterByIdOrUid(customerUid, ownerOrgID)
-	_, err := s.Collection().UpdateOne(ctx, filter, update)
+	_, err := s.Collection().UpdateOne(ctx, filter, bson.M{"$set": set})
 	return err
+}
+
+// OnCixSignalUpdate giữ tương thích: chỉ cập nhật tín hiệu L3 (không bump sequence / pointer — dùng ApplyCixIntelReadModel trong luồng worker đầy đủ).
+func (s *CrmCustomerService) OnCixSignalUpdate(ctx context.Context, customerUid string, ownerOrgID primitive.ObjectID, buyingIntent, sentiment, objectionLevel string, traceID string) error {
+	return s.ApplyCixIntelReadModel(ctx, customerUid, ownerOrgID, CixIntelReadModelInput{
+		BuyingIntent:   buyingIntent,
+		Sentiment:      sentiment,
+		ObjectionLevel: objectionLevel,
+		TraceID:        traceID,
+	})
 }
 
 // buildCustomerFilterByIdOrUid tạo filter lookup customer theo uid hoặc unifiedId (ưu tiên mới, fallback cũ).

@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"time"
 
-	adsadaptive "meta_commerce/internal/api/ads/adaptive"
-	adsconfig "meta_commerce/internal/api/ads/config"
-	adsmodels "meta_commerce/internal/api/ads/models"
+	adsadaptive "meta_commerce/internal/api/ads_meta/adaptive"
+	adsconfig "meta_commerce/internal/api/ads_meta/config"
+	adsmodels "meta_commerce/internal/api/ads_meta/models"
 	ruleintelmodels "meta_commerce/internal/api/ruleintel/models"
 	ruleintelsvc "meta_commerce/internal/api/ruleintel/service"
 

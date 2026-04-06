@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	crmqueue "meta_commerce/internal/api/aidecision/crmqueue"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 	orderintelmodels "meta_commerce/internal/api/orderintel/models"
 	"meta_commerce/internal/global"
@@ -49,6 +50,12 @@ func EnqueueOrderIntelligenceFromParent(ctx context.Context, parent *aidecisionm
 		ParentEventID:       parent.EventID,
 		ParentEventType:     parent.EventType,
 		Source:              "aidecision_order",
+	}
+	if parent.Payload != nil {
+		job.CausalOrderingAtMs = crmqueue.ExtractCausalOrderingAtMs(parent.Payload)
+	}
+	if job.CausalOrderingAtMs <= 0 {
+		job.CausalOrderingAtMs = time.Now().UnixMilli()
 	}
 	if orderUid == "" {
 		job.MongoRecordIdHex = mongoHex
@@ -120,6 +127,12 @@ func enqueueFromGenericAIDecisionPayload(ctx context.Context, evt *aidecisionmod
 		ParentEventType:     parentEType,
 		Source:              source,
 	}
+	if evt.Payload != nil {
+		job.CausalOrderingAtMs = crmqueue.ExtractCausalOrderingAtMs(evt.Payload)
+	}
+	if job.CausalOrderingAtMs <= 0 {
+		job.CausalOrderingAtMs = time.Now().UnixMilli()
+	}
 	if job.OrderUid == "" {
 		job.MongoRecordIdHex = mongoHex
 	}
@@ -142,16 +155,17 @@ func upsertOrderIntelComputeJob(ctx context.Context, job *orderintelmodels.Order
 		filter["mongoRecordIdHex"] = job.MongoRecordIdHex
 	}
 	set := bson.M{
-		"orgId":             job.OrgID,
-		"traceId":           job.TraceID,
-		"correlationId":     job.CorrelationID,
-		"parentEventId":     job.ParentEventID,
-		"parentEventType":   job.ParentEventType,
-		"source":            job.Source,
-		"normalizedRecordUid": job.NormalizedRecordUid,
-		"processedAt":       nil,
-		"processError":      "",
-		"retryCount":        0,
+		"orgId":                 job.OrgID,
+		"traceId":               job.TraceID,
+		"correlationId":         job.CorrelationID,
+		"parentEventId":         job.ParentEventID,
+		"parentEventType":       job.ParentEventType,
+		"source":                job.Source,
+		"normalizedRecordUid":     job.NormalizedRecordUid,
+		"causalOrderingAtMs":    job.CausalOrderingAtMs,
+		"processedAt":           nil,
+		"processError":          "",
+		"retryCount":            0,
 	}
 	update := bson.M{
 		"$set": set,

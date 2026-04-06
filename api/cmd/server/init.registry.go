@@ -75,11 +75,11 @@ func InitCollections(client *mongo.Client, cfg *config.Configuration) error {
 		"meta_ad_accounts", "meta_campaigns", "meta_adsets", "meta_ads", "meta_ad_insights", "meta_ad_insights_daily_snapshots",
 		"action_pending_approval", "approval_mode_config", "ads_approval_config", "ads_activity_history", "ads_meta_config", "ads_metric_definitions", "ads_camp_thresholds",
 		"ads_kill_snapshots", "ads_counterfactual_outcomes", "ads_self_competition_state",
-		"ads_campaign_hourly", "ads_camp_peak_profiles", "ads_throttle_state", "decision_recompute_debounce_queue", "ads_intel_compute",
+		"ads_campaign_hourly", "ads_camp_peak_profiles", "ads_throttle_state", "decision_recompute_debounce_queue", "ads_intel_compute", "ads_meta_intel_runs",
 		"learning_cases", "rule_suggestions",
 		"rule_definitions", "rule_logic_definitions", "rule_param_sets", "rule_output_definitions", "rule_execution_logs",
 		"cix_analysis_results", "cix_intel_compute",
-		"order_intelligence_snapshots", "order_intel_compute",
+		"order_intelligence_snapshots", "order_intel_compute", "order_intel_runs",
 		"decision_events_queue", "decision_cases_runtime", "decision_debounce_state", "decision_routing_rules", "decision_context_policy_overrides",
 		"decision_org_live_events"}
 

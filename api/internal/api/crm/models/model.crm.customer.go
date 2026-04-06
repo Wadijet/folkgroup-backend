@@ -98,6 +98,20 @@ type CrmCustomer struct {
 	// Luôn mới nhất — phục vụ phân tích, thống kê real-time. Cập nhật cùng lúc với scalars qua hooks/merge.
 	CurrentMetrics map[string]interface{} `json:"currentMetrics,omitempty" bson:"currentMetrics,omitempty"`
 
+	// IntelLastRunId — _id document crm_customer_intel_runs mới nhất (lớp lịch sử); rỗng nếu chưa từng persist.
+	IntelLastRunId primitive.ObjectID `json:"intelLastRunId,omitempty" bson:"intelLastRunId,omitempty"`
+	// IntelLastComputedAt — unix ms khớp CrmCustomerIntelRun.computedAt của lần chạy mới nhất.
+	IntelLastComputedAt int64 `json:"intelLastComputedAt,omitempty" bson:"intelLastComputedAt,omitempty"`
+	// IntelSequence — tăng $inc mỗi lần ghi run intel thành công cho khách này; dùng tie-break sort lịch sử với causalOrderingAt.
+	IntelSequence int64 `json:"intelSequence,omitempty" bson:"intelSequence,omitempty"`
+
+	// CixIntelLastResultId — _id bản ghi cix_analysis_results (lớp A CIX) mới nhất đã áp dụng read model.
+	CixIntelLastResultId primitive.ObjectID `json:"cixIntelLastResultId,omitempty" bson:"cixIntelLastResultId,omitempty"`
+	// CixIntelLastComputedAt — unix ms khớp CixAnalysisResult.computedAt của lần CIX mới nhất.
+	CixIntelLastComputedAt int64 `json:"cixIntelLastComputedAt,omitempty" bson:"cixIntelLastComputedAt,omitempty"`
+	// CixIntelSequence — tăng $inc mỗi lần CIX terminal thành công cho khách; tie-break với causalOrderingAt trên cix_analysis_results.
+	CixIntelSequence int64 `json:"cixIntelSequence,omitempty" bson:"cixIntelSequence,omitempty"`
+
 	// Phân loại hiện tại (cập nhật cùng lúc với metrics qua hooks).
 	// Dùng cho filter/sort dashboard; activity history giữ snapshot lịch sử theo từng sự kiện.
 	ValueTier      string `json:"valueTier,omitempty" bson:"valueTier,omitempty" index:"single:1,compound:crm_customer_org_value"`             // top|high|medium|low|new

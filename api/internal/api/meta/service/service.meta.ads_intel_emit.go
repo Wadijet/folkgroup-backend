@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	adsmodels "meta_commerce/internal/api/ads/models"
+	adsmodels "meta_commerce/internal/api/ads_meta/models"
 	"meta_commerce/internal/api/aidecision/eventemit"
 	"meta_commerce/internal/api/aidecision/eventtypes"
 	"meta_commerce/internal/global"

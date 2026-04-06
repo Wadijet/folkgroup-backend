@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"meta_commerce/config"
-	adsconfig "meta_commerce/internal/api/ads/config"
-	adssvc "meta_commerce/internal/api/ads/service"
-	adsmodels "meta_commerce/internal/api/ads/models"
+	adsconfig "meta_commerce/internal/api/ads_meta/config"
+	adssvc "meta_commerce/internal/api/ads_meta/service"
+	adsmodels "meta_commerce/internal/api/ads_meta/models"
 	"meta_commerce/internal/global"
 	metasvc "meta_commerce/internal/api/meta/service"
 

@@ -25,6 +25,26 @@ func stringField(m bson.M, k string) string {
 	return s
 }
 
+// int64Field đọc trường số từ BSON (insertedAt / createdAt) cho causalOrderingAtMs.
+func int64Field(m bson.M, k string) int64 {
+	v, ok := m[k]
+	if !ok || v == nil {
+		return 0
+	}
+	switch t := v.(type) {
+	case int64:
+		return t
+	case int:
+		return int64(t)
+	case int32:
+		return int64(t)
+	case float64:
+		return int64(t)
+	default:
+		return 0
+	}
+}
+
 func resolveCustomerIDForConversation(ctx context.Context, conversationID string, ownerOrgID primitive.ObjectID) string {
 	conversationID = strings.TrimSpace(conversationID)
 	if conversationID == "" || ownerOrgID.IsZero() {
@@ -72,11 +92,16 @@ func EnqueueCixIntelComputeFromDatachanged(ctx context.Context, e events.DataCha
 	if err != nil {
 		return err
 	}
+	causal := int64Field(raw, "insertedAt")
+	if causal <= 0 {
+		causal = int64Field(raw, "createdAt")
+	}
 	return svc.EnqueueAnalysis(ctx, cixsvc.EnqueueAnalysisInput{
 		ConversationID:      convID,
 		CustomerID:          customerID,
 		Channel:             "messenger",
 		CioEventUid:         strings.TrimSpace(normalizedRecordUid),
 		OwnerOrganizationID: ownerOrgID,
+		CausalOrderingAtMs:  causal,
 	})
 }

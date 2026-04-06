@@ -205,6 +205,9 @@ func flushCrmIntelAfterIngestDue(ctx context.Context) {
 			"unifiedId":     unified,
 			"ownerOrgIdHex": ownerOID.Hex(),
 		}
+		if j.CausalOrderingAtMs > 0 {
+			payload[crmqueue.PayloadKeyCausalOrderingAtMs] = j.CausalOrderingAtMs
+		}
 		if err := crmvc.EnqueueCrmIntelComputeFromDecisionEvent(ctx, parentID, ownerOID, payload); err != nil {
 			logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
 				"orgHex": j.OrgHex, "unifiedId": unified,
@@ -250,7 +253,11 @@ func flushDeferredDatachangedSideEffects(ctx context.Context, svc *aidecisionsvc
 		case eventintake.DeferredKindCrmRefresh:
 			uid := resolveUnifiedIDForCrmIntelRecompute(ctx, ownerOID, evt.Payload)
 			if uid != "" {
-				if _, err := crmqueue.EmitCrmIntelligenceRecomputeRequested(ctx, uid, ownerOID, j.Coll, ""); err != nil {
+				causalMs := events.ExtractUpdatedAtFromDoc(j.Coll, e.Document)
+				if causalMs <= 0 {
+					causalMs = time.Now().UnixMilli()
+				}
+				if _, err := crmqueue.EmitCrmIntelligenceRecomputeRequested(ctx, uid, ownerOID, j.Coll, "", causalMs); err != nil {
 					logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
 						"orgHex": j.OrgHex, "coll": j.Coll, "unifiedId": uid,
 					}).Warn("📋 [CRM] Flush defer CRM refresh: không emit crm.intelligence.recompute_requested")

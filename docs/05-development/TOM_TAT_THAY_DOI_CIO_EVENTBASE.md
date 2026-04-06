@@ -1,6 +1,7 @@
 # Tổng Hợp Thay Đổi CIO Eventbase
 
 **Ngày:** 2026-03-18  
+**Cập nhật:** 2026-04-07 — danh pháp CIO-T1/T2/T3 (thay A/B/C).  
 **Nguồn:** [DE_XUAT_NANG_CAP_CIO_EVENTBASE.md](./DE_XUAT_NANG_CAP_CIO_EVENTBASE.md)
 
 ---
@@ -10,7 +11,7 @@
 | Hạng mục | Thay đổi |
 |----------|----------|
 | **Định nghĩa** | Eventbase = `cio_events` — event stream **có chọn lọc**, chỉ lưu event thuộc interaction ledger |
-| **Quy tắc lọc** | 3 lớp A/B/C — không lưu pure domain compute (LTV, ads score, rule batch) |
+| **Quy tắc lọc** | CIO-T1/T2/T3 + loại trừ tính toán domain thuần — không lưu pure domain compute (LTV, ads score, rule batch). Xem [KHUNG_KHUON_MODULE_INTELLIGENCE.md](./KHUNG_KHUON_MODULE_INTELLIGENCE.md) mục 0 |
 | **Ref model** | 3 tầng: causedBy, links, resultRefs — pointer + snapshot nhỏ, không store full result |
 | **Schema mở rộng** | eventCategory, eventScope, domain, tags, causedBy, resultRefs, statusSnapshot |
 | **Luồng mới** | Order inject (pc_pos_orders → cio_events), touchpoint_triggered |
@@ -18,13 +19,14 @@
 
 ---
 
-## 2. Quy Tắc Lọc Event (3 Lớp)
+## 2. Quy Tắc Lọc Event (CIO-T1 / CIO-T2 / CIO-T3)
 
-| Lớp | Mô tả | Lưu CIO? |
-|-----|-------|-----------|
-| **A. Interaction** | message, conversation, order, touchpoint | ✅ |
-| **B. Interaction-adjacent** | agent_assigned, delivery_failed, conversation_viewed | ✅ |
-| **C. Pure domain compute** | ltv_recomputed, ads_scored, rule_batch_evaluated | ❌ |
+| Mã | Mô tả | Lưu CIO? |
+|----|-------|-----------|
+| **CIO-T1** | Tương tác trực tiếp — message, conversation, touchpoint | ✅ |
+| **CIO-T2** | Business gắn khách — order, payment, … | ✅ |
+| **CIO-T3** | Nội bộ kề timeline (có điều kiện) — agent_assigned, delivery_failed, conversation_viewed | ✅ |
+| *(loại trừ)* | Tính toán domain thuần — ltv_recomputed, ads_scored, rule_batch_evaluated | ❌ |
 
 **2 câu hỏi trước ingest:** (1) Gắn customer/session/thread? (2) Mất audit nếu không lưu? → Có/Có = lưu.
 

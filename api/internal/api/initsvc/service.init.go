@@ -508,7 +508,7 @@ var InitialPermissions = []authmodels.Permission{
 	{Name: "CIO.Write", Describe: "Quyền tạo và thực thi touchpoint CIO", Group: "CIO", Category: "CIO"},
 
 	// ==================================== CIX MODULE (Contextual Conversation Intelligence) ===========================================
-	{Name: "CIX.Read", Describe: "Quyền xem kết quả phân tích hội thoại CIX", Group: "CIX", Category: "CIX"},
+	{Name: "CIX.Read", Describe: "Quyền xem kết quả và lịch sử phân tích hội thoại CIX (analysis / analysis-runs)", Group: "CIX", Category: "CIX"},
 	{Name: "CIX.Analyze", Describe: "Quyền gọi phân tích hội thoại CIX", Group: "CIX", Category: "CIX"},
 
 	// ==================================== RULE INTELLIGENCE MODULE ===========================================

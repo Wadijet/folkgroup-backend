@@ -5,6 +5,7 @@ package crmqueue
 import (
 	"context"
 	"strings"
+	"time"
 
 	"meta_commerce/internal/api/aidecision/eventemit"
 	"meta_commerce/internal/api/aidecision/eventtypes"
@@ -20,6 +21,32 @@ const EventTypeCrmIntelligenceComputeRequested = eventtypes.CrmIntelligenceCompu
 // EventTypeCrmIntelligenceRecomputeRequested — yêu cầu tính lại CRM intelligence (cùng dạng tên với ads.intelligence.recompute_requested).
 // Sau ingest worker: consumer AID debounce theo unifiedId rồi xếp crm_intel_compute (refresh).
 const EventTypeCrmIntelligenceRecomputeRequested = eventtypes.CrmIntelligenceRecomputeRequested
+
+// PayloadKeyCausalOrderingAtMs — unix ms của thay đổi nguồn (L1 / merge); copy vào job crm_intel_compute để sort lịch sử intel đúng thứ tự nghiệp vụ khi sự kiện không FIFO.
+const PayloadKeyCausalOrderingAtMs = "causalOrderingAtMs"
+
+// ExtractCausalOrderingAtMs đọc causalOrderingAtMs từ payload event/job (JSON/BSON có thể là float64).
+func ExtractCausalOrderingAtMs(m map[string]interface{}) int64 {
+	if m == nil {
+		return 0
+	}
+	v, ok := m[PayloadKeyCausalOrderingAtMs]
+	if !ok || v == nil {
+		return 0
+	}
+	switch t := v.(type) {
+	case int64:
+		return t
+	case int:
+		return int64(t)
+	case int32:
+		return int64(t)
+	case float64:
+		return int64(t)
+	default:
+		return 0
+	}
+}
 
 // CrmComputeOperation — giá trị payload "operation".
 const (
@@ -38,6 +65,10 @@ func emitCrmIntelligenceCompute(ctx context.Context, operation string, ownerOrgI
 		payload = map[string]interface{}{}
 	}
 	payload["operation"] = operation
+	// Mốc nghiệp vụ cho lịch sử intel: nếu caller chưa set (merge/defer đã set riêng), dùng thời điểm emit (API/bulk/refresh).
+	if ExtractCausalOrderingAtMs(payload) <= 0 {
+		payload[PayloadKeyCausalOrderingAtMs] = time.Now().UnixMilli()
+	}
 	orgIDStr := "system"
 	if !ownerOrgID.IsZero() {
 		orgIDStr = ownerOrgID.Hex()
@@ -78,7 +109,8 @@ func EmitCrmIntelligenceRefreshRequested(ctx context.Context, unifiedId string, 
 }
 
 // EmitCrmIntelligenceRecomputeRequested — sau CrmPendingMergeWorker merge L1→L2 → queue AID (debounce → crm_intel_compute).
-func EmitCrmIntelligenceRecomputeRequested(ctx context.Context, unifiedID string, ownerOrgID primitive.ObjectID, sourceCollection, pendingMergeJobHex string) (string, error) {
+// causalOrderingAtMs: thời điểm nghiệp vụ (thường updatedAt nguồn L1 ms); 0 = không gửi (worker dùng mặc định khi persist).
+func EmitCrmIntelligenceRecomputeRequested(ctx context.Context, unifiedID string, ownerOrgID primitive.ObjectID, sourceCollection, pendingMergeJobHex string, causalOrderingAtMs int64) (string, error) {
 	unifiedID = strings.TrimSpace(unifiedID)
 	if unifiedID == "" || ownerOrgID.IsZero() {
 		return "", nil
@@ -86,6 +118,9 @@ func EmitCrmIntelligenceRecomputeRequested(ctx context.Context, unifiedID string
 	payload := map[string]interface{}{
 		"unifiedId":     unifiedID,
 		"ownerOrgIdHex": ownerOrgID.Hex(),
+	}
+	if causalOrderingAtMs > 0 {
+		payload[PayloadKeyCausalOrderingAtMs] = causalOrderingAtMs
 	}
 	if strings.TrimSpace(sourceCollection) != "" {
 		payload["sourceCollection"] = strings.TrimSpace(sourceCollection)

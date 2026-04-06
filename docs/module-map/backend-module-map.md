@@ -22,7 +22,7 @@
 | **pc** | `pc/router/routes.go` | Pancake (Pages, POS) | [api/api-overview](../api/api-overview.md) |
 | **webhook** | `webhook/router/routes.go` | Webhook endpoints | — |
 | **report** | `report/router/routes.go` | Definitions, snapshots, dirty; dirty từ datachanged qua Redis + `report_redis_touch_flush` | `service.report.redis_touch.go`, `internal/redisclient`, `worker/report_redis_touch_worker.go` |
-| **crm** | `crm/router/routes.go` | Customers, queue merge L1→L2 (`crm_pending_merge`), intel CRM, bulk, rebuild, recalculate | [docs-shared/ai-context/folkform/design/CRM_MODULE_DESIGN.md](../../docs-shared/ai-context/folkform/design/CRM_MODULE_DESIGN.md), [co-cau-module-aid-va-domain-queue.md](co-cau-module-aid-va-domain-queue.md) |
+| **crm** | `crm/router/routes.go` | Customers, queue merge **mirror→canonical** (`crm_pending_merge`), intel CRM, bulk, rebuild, recalculate | [docs-shared/ai-context/folkform/design/CRM_MODULE_DESIGN.md](../../docs-shared/ai-context/folkform/design/CRM_MODULE_DESIGN.md), [co-cau-module-aid-va-domain-queue.md](co-cau-module-aid-va-domain-queue.md) |
 | **order** | (nội bộ — sync/datachanged) | Đơn commerce, đồng bộ canonical; không có router riêng — gắn `pc`/datachanged | [co-cau-module-aid-va-domain-queue.md](co-cau-module-aid-va-domain-queue.md) |
 | **orderintel** | (nội bộ — worker + service) | Intelligence đơn, job `order_intel_compute` | [co-cau-module-aid-va-domain-queue.md](co-cau-module-aid-va-domain-queue.md) |
 | **conversationintel** | (nội bộ — CIX) | Intel hội thoại, `cix_intel_compute`, `conversationintel/datachanged` | [PHUONG_AN_TRIEN_KHAI_CIX](../05-development/PHUONG_AN_TRIEN_KHAI_CIX.md) |
@@ -35,7 +35,7 @@
 | **ai** | `ai/router/routes.go` | AI workflows, steps, prompts, provider profiles | — |
 | **ruleintel** | `ruleintel/router/routes.go` | Rule Intelligence — Rule Engine, run, logs (trace_id), definition, logic, param-set, output-contract | [02-architecture/core/rule-intelligence](../02-architecture/core/rule-intelligence.md) |
 | **cio** | `cio/router/routes.go` | Customer Interaction Orchestrator — hub điều phối đa kênh, routing AI vs Human | [05-development/THIET_KE_MODULE_CIO](../05-development/THIET_KE_MODULE_CIO.md) |
-| **cix** | `cix/router/routes.go` | Contextual Conversation Intelligence — Raw→L1→L2→L3→Flag→Action, CIO→CIX→Decision→Executor | [PHUONG_AN_TRIEN_KHAI_CIX](../05-development/PHUONG_AN_TRIEN_KHAI_CIX.md) |
+| **cix** | `cix/router/routes.go` | Contextual Conversation Intelligence — **pipeline rule CIX** Raw→L1→L2→L3→Flag→Action (*bước rule; không phải L1-persist*), CIO→CIX→Decision→Executor | [PHUONG_AN_TRIEN_KHAI_CIX](../05-development/PHUONG_AN_TRIEN_KHAI_CIX.md) |
 
 ---
 

@@ -53,6 +53,9 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 	// POST /customers/:unifiedId/recalculate — cập nhật toàn bộ thông tin khách từ tất cả nguồn
 	apirouter.RegisterRouteWithMiddleware(v1, "/customers", "POST", "/:unifiedId/recalculate", middlewares, customerHandler.HandleRecalculateCustomer)
 
+	// GET /customers/:unifiedId/intel-runs — lịch sử intel (crm_customer_intel_runs), phân trang
+	apirouter.RegisterRouteWithMiddleware(v1, "/customers", "GET", "/:unifiedId/intel-runs", middlewares, customerHandler.HandleListIntelRuns)
+
 	// GET /customers/:unifiedId/profile
 	apirouter.RegisterRouteWithMiddleware(v1, "/customers", "GET", "/:unifiedId/profile", middlewares, customerHandler.HandleGetProfile)
 

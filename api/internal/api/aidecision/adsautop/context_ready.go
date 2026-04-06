@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	adssvc "meta_commerce/internal/api/ads/service"
+	adssvc "meta_commerce/internal/api/ads_meta/service"
 	"meta_commerce/internal/api/aidecision/decisionlive"
 	"meta_commerce/internal/api/aidecision/decisionlive/livecopy"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"

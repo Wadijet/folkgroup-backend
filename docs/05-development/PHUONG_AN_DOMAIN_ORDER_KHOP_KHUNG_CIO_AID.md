@@ -10,13 +10,13 @@
 
 ## 1. Hiện trạng (đối chiếu khung)
 
-| Pha | Khung chung | Order hiện tại | Ghi chú |
-|-----|-------------|----------------|---------|
-| **A — Thô + DataChanged** | Ghi collection mirror → `EmitDataChanged` → AID điều phối | ✅ CIO / sync → `pc_pos_orders` → event `order.*` → `applyDatachangedSideEffects` → enqueue `order_intel_compute` | Khớp |
-| **B — Merge / chuẩn hóa đa nguồn** | Worker domain gộp nhiều nguồn → một aggregate | ⚠️ **Chưa có** — chỉ một collection `pc_pos_orders`; intel đọc thẳng document | Chấp nhận được **khi chỉ có Pancake POS**; **chưa** sẵn sàng đa nền tảng |
-| **C — Intelligence + báo AID** | Worker domain tính → emit `*_recomputed` | ✅ `RunOrderIntelComputeJob` → `order_intel_recomputed` | Khớp |
+| Pha ingress | Khung chung | Order hiện tại | Ghi chú |
+|-------------|-------------|----------------|---------|
+| **Pha ghi thô** | Ghi collection mirror → `EmitDataChanged` → AID điều phối | ✅ CIO / sync → `pc_pos_orders` → event `order.*` → `applyDatachangedSideEffects` → enqueue `order_intel_compute` | Khớp |
+| **Pha merge** | Worker domain gộp nhiều nguồn → một aggregate | ⚠️ **Chưa có** — chỉ một collection `pc_pos_orders`; intel đọc thẳng document | Chấp nhận được **khi chỉ có Pancake POS**; **chưa** sẵn sàng đa nền tảng |
+| **Pha intel** | Worker domain tính → emit `*_recomputed` | ✅ `RunOrderIntelComputeJob` → `order_intel_recomputed` | Khớp |
 
-**Identity trên đơn:** Model `PcPosOrder` đã có `uid` (`ord_*`), `sourceIds`, `links` — **Pha A đã gần đúng contract** nếu mọi đường sync (CIO `domain=order`, webhook…) **luôn** điền đủ qua helper upsert (xem [HUONG_DAN_IDENTITY_LINKS.md](./HUONG_DAN_IDENTITY_LINKS.md)).
+**Identity trên đơn:** Model `PcPosOrder` đã có `uid` (`ord_*`), `sourceIds`, `links` — **Pha ghi thô đã gần đúng contract** nếu mọi đường sync (CIO `domain=order`, webhook…) **luôn** điền đủ qua helper upsert (xem [HUONG_DAN_IDENTITY_LINKS.md](./HUONG_DAN_IDENTITY_LINKS.md)).
 
 ---
 
@@ -30,7 +30,7 @@
 
 ## 3. Phương án theo giai đoạn (đề xuất triển khai)
 
-### Giai đoạn 0 — Cứng hóa Pha A + ID (ít rủi ro, nên làm trước)
+### Giai đoạn 0 — Cứng hóa Pha ghi thô + ID (ít rủi ro, nên làm trước)
 
 - **Rà soát mọi đường ghi `pc_pos_orders`:** sau `SyncUpsert` / CRUD, bảo đảm:
   - `uid` (`ord_*`) luôn có khi tạo mới (idempotent theo `sourceIds.pos` + `ownerOrganizationId` nếu đã quy ước).
@@ -43,7 +43,7 @@
 
 ---
 
-### Giai đoạn 1 — “Pha B nhẹ”: enrich / chuẩn bị context trước khi tính snapshot (tùy nhu cầu)
+### Giai đoạn 1 — “Pha merge nhẹ”: enrich / chuẩn bị context trước khi tính snapshot (tùy nhu cầu)
 
 **Mục tiêu:** Không nhất thiết tách collection mới; cải thiện **chất lượng input** cho `ComputeSnapshot` (customer canonical, conversation id thống nhất).
 
@@ -74,10 +74,10 @@
 
 **Luồng khớp khung:**
 
-1. Pha A: mỗi nguồn ghi collection mirror + `EmitDataChanged`.
-2. Pha B: `IngestFromDataChange` (package `order` hoặc `order/datachanged`) enqueue `order_pending_ingest` → worker `ApplyOrderIngestFromDocument` switch theo `collectionName` → ghi **một** bản canonical.
+1. Pha ghi thô: mỗi nguồn ghi collection mirror + `EmitDataChanged`.
+2. Pha merge: `IngestFromDataChange` (package `order` hoặc `order/datachanged`) enqueue `order_pending_ingest` → worker `ApplyOrderIngestFromDocument` switch theo `collectionName` → ghi **một** bản canonical.
 3. Sau ingest: `NotifyOrderIntelIfNeeded` → event/debounce → `order_intel_compute` (tương tự CRM `recompute_requested`).
-4. Pha C: không đổi — vẫn `RunOrderIntelComputeJob` đọc **chỉ** canonical.
+4. Pha intel: không đổi — vẫn `RunOrderIntelComputeJob` đọc **chỉ** canonical.
 
 **AID:** Mở rộng `applyDatachangedSideEffects` bằng **danh sách collection** hoặc **registry** (“collection → enqueue order ingest / order intel”) thay vì so sánh chuỗi một collection.
 

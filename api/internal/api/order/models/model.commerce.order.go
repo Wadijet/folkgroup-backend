@@ -35,4 +35,11 @@ type CommerceOrder struct {
 
 	CreatedAt int64 `json:"createdAt" bson:"createdAt"`
 	UpdatedAt int64 `json:"updatedAt" bson:"updatedAt"`
+
+	// IntelLastRunId — _id document order_intel_runs mới nhất (lớp lịch sử A).
+	IntelLastRunId primitive.ObjectID `json:"intelLastRunId,omitempty" bson:"intelLastRunId,omitempty"`
+	// IntelLastComputedAt — unix ms khớp OrderIntelRun.computedAt của lần chạy mới nhất.
+	IntelLastComputedAt int64 `json:"intelLastComputedAt,omitempty" bson:"intelLastComputedAt,omitempty"`
+	// IntelSequence — $inc mỗi lần ghi run intel thành công; tie-break sort lịch sử với causalOrderingAt.
+	IntelSequence int64 `json:"intelSequence,omitempty" bson:"intelSequence,omitempty"`
 }

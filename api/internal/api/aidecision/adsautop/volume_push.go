@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	adsconfig "meta_commerce/internal/api/ads/config"
-	adssvc "meta_commerce/internal/api/ads/service"
+	adsconfig "meta_commerce/internal/api/ads_meta/config"
+	adssvc "meta_commerce/internal/api/ads_meta/service"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/logger"
 

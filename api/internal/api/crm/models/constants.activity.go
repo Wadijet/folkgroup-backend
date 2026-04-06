@@ -19,6 +19,7 @@ var ActivityTypeToDomain = map[string]string{
 	"order_created": ActivityDomainOrder, "order_completed": ActivityDomainOrder,
 	"order_cancelled": ActivityDomainOrder, "order_refunded": ActivityDomainOrder,
 	"conversation_started": ActivityDomainConversation, "message_received": ActivityDomainConversation, "message_sent": ActivityDomainConversation,
+	"cix_conversation_intel": ActivityDomainConversation, "cix_conversation_intel_failed": ActivityDomainConversation,
 	"note_added": ActivityDomainNote, "note_updated": ActivityDomainNote, "note_deleted": ActivityDomainNote,
 	"profile_viewed": ActivityDomainProfile, "profile_updated": ActivityDomainProfile,
 	"customer_merged": ActivityDomainCustomer, "customer_updated": ActivityDomainCustomer, "customer_created": ActivityDomainCustomer,

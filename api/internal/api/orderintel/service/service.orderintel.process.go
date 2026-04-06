@@ -15,6 +15,7 @@ import (
 	pcmodels "meta_commerce/internal/api/pc/models"
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
+	"meta_commerce/internal/logger"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -28,24 +29,38 @@ func RunOrderIntelComputeJob(ctx context.Context, job *orderintelmodels.OrderInt
 		return nil
 	}
 	ownerOrgID := job.OwnerOrganizationID
+	now := time.Now().UnixMilli()
 	view, err := loadOrderForJob(ctx, job)
 	if err != nil {
+		_, _ = persistOrderIntelAfterJob(ctx, job, nil, nil, orderintelmodels.OrderIntelRaw{EvaluatedAtMs: now}, err, now)
 		return err
 	}
 	if view == nil {
 		return nil
 	}
 
-	now := time.Now().UnixMilli()
+	raw := BuildOrderIntelRaw(view, now)
 	snap := ComputeSnapshot(view, now)
 	if snap == nil {
 		return nil
 	}
+	snap.Raw = raw
+	snap.LastIntelRunId = primitive.NilObjectID
 
 	prev, _ := findPreviousSnapshot(ctx, snap)
 
 	if err := upsertSnapshot(ctx, snap); err != nil {
 		return err
+	}
+
+	runID, perr := persistOrderIntelAfterJob(ctx, job, view, snap, raw, nil, now)
+	if perr != nil {
+		return perr
+	}
+	if !runID.IsZero() {
+		if uerr := patchSnapshotLastIntelRunID(ctx, snap, runID); uerr != nil {
+			logger.GetAppLogger().WithError(uerr).WithField("runId", runID.Hex()).Warn("📋 [ORDER_INTEL] Không gắn lastIntelRunId lên order_intelligence_snapshots")
+		}
 	}
 
 	flagsChanged := prev == nil || !stringSliceEqual(prev.Flags, snap.Flags)
@@ -83,6 +98,9 @@ func RunOrderIntelComputeJob(ctx context.Context, job *orderintelmodels.OrderInt
 		"pancakeOrderMongoId":      pancakeHex,
 		"sourceEventId":            job.ID.Hex(),
 		"sourceEventType":          "order_intel.domain_job",
+	}
+	if !runID.IsZero() {
+		extras["lastIntelRunId"] = runID.Hex()
 	}
 
 	return intelrecomputed.EmitOrderIntelRecomputed(ctx, ownerOrgID, job.ID.Hex(), snap.OrderUid, snap.Trace.CustomerID, snap.Trace.ConversationID, job.ParentEventID, job.ParentEventType, job.TraceID, job.CorrelationID, extras)
@@ -256,6 +274,7 @@ func upsertSnapshot(ctx context.Context, snap *orderintelmodels.OrderIntelligenc
 	}
 	setDoc := bson.M{
 		"orderId":   snap.OrderID,
+		"raw":       snap.Raw,
 		"layer1":    snap.Layer1,
 		"layer2":    snap.Layer2,
 		"layer3":    snap.Layer3,
@@ -268,11 +287,34 @@ func upsertSnapshot(ctx context.Context, snap *orderintelmodels.OrderIntelligenc
 	} else {
 		setDoc["orderUid"] = ""
 	}
+	if !snap.LastIntelRunId.IsZero() {
+		setDoc["lastIntelRunId"] = snap.LastIntelRunId
+	}
 	update := bson.M{
 		"$set":         setDoc,
 		"$setOnInsert": bson.M{"createdAt": now},
 	}
+	if snap.LastIntelRunId.IsZero() {
+		update["$unset"] = bson.M{"lastIntelRunId": ""}
+	}
 	_, err := coll.UpdateOne(ctx, filter, update, options.Update().SetUpsert(true))
+	return err
+}
+
+// patchSnapshotLastIntelRunID gắn pointer lớp A lên read model B sau khi insert order_intel_runs.
+func patchSnapshotLastIntelRunID(ctx context.Context, snap *orderintelmodels.OrderIntelligenceSnapshot, runID primitive.ObjectID) error {
+	if snap == nil || runID.IsZero() {
+		return nil
+	}
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderIntelligenceSnapshots)
+	if !ok {
+		return fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.OrderIntelligenceSnapshots, common.ErrNotFound)
+	}
+	filter := snapshotUpsertFilter(snap)
+	if filter == nil {
+		return fmt.Errorf("snapshot order intelligence: thiếu khóa lưu")
+	}
+	_, err := coll.UpdateOne(ctx, filter, bson.M{"$set": bson.M{"lastIntelRunId": runID}})
 	return err
 }
 

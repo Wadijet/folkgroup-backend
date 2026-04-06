@@ -17,7 +17,7 @@
 
 ## Định danh, tiền tố `uid`, tên field API
 
-- **Một nguồn chuẩn (shared):** [uid-field-naming.md](../../docs-shared/architecture/data-contract/uid-field-naming.md) — prefix `uid` (`utility/uid.go`), **tên module/package**, **file/service**, **collection** (`global.vars.go`), worker, route, env; khóa `links`, camelCase JSON; L1/L2.
+- **Một nguồn chuẩn (shared):** [uid-field-naming.md](../../docs-shared/architecture/data-contract/uid-field-naming.md) — prefix `uid` (`utility/uid.go`), **tên module/package**, **file/service**, **collection** (`global.vars.go`), worker, route, env; khóa `links`, camelCase JSON; **mirror/canonical (L1-persist/L2-persist)** — phân biệt doc [KHUNG_KHUON_MODULE_INTELLIGENCE.md](../05-development/KHUNG_KHUON_MODULE_INTELLIGENCE.md) mục 0.
 - **Hợp đồng tổng:** [unified-data-contract.md](../../docs-shared/architecture/data-contract/unified-data-contract.md).
 - **Thực hành CRM / resolver:** [HUONG_DAN_IDENTITY_LINKS.md](../05-development/HUONG_DAN_IDENTITY_LINKS.md).
 

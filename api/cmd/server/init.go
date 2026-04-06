@@ -10,7 +10,7 @@ import (
 	authmodels "meta_commerce/internal/api/auth/models"
 	contentmodels "meta_commerce/internal/api/content/models"
 	crmmodels "meta_commerce/internal/api/crm/models"
-	adsmodels "meta_commerce/internal/api/ads/models"
+	adsmodels "meta_commerce/internal/api/ads_meta/models"
 	metamodels "meta_commerce/internal/api/meta/models"
 	ctamodels "meta_commerce/internal/api/cta/models"
 	deliverymodels "meta_commerce/internal/api/delivery/models"
@@ -146,6 +146,7 @@ func initColNames() {
 	global.MongoDB_ColNames.AdsThrottleState = "ads_throttle_state"
 	global.MongoDB_ColNames.RecomputeDebounceQueue = "decision_recompute_debounce_queue"
 	global.MongoDB_ColNames.AdsIntelCompute = "ads_intel_compute"
+	global.MongoDB_ColNames.AdsMetaIntelRuns = "ads_meta_intel_runs"
 	global.MongoDB_ColNames.LearningCases = "learning_cases"
 	global.MongoDB_ColNames.RuleSuggestions = "rule_suggestions"
 
@@ -163,6 +164,7 @@ func initColNames() {
 	// Module Order Intelligence — Vision 07
 	global.MongoDB_ColNames.OrderIntelligenceSnapshots = "order_intelligence_snapshots"
 	global.MongoDB_ColNames.OrderIntelCompute = "order_intel_compute"
+	global.MongoDB_ColNames.OrderIntelRuns = "order_intel_runs"
 
 	// Module AI Decision — Event & Decision Case (PLATFORM_L1_EVENT_DECISION_SUPPLEMENT)
 	global.MongoDB_ColNames.DecisionEventsQueue = "decision_events_queue"
@@ -303,6 +305,7 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsThrottleState), adsmodels.AdsThrottleState{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.RecomputeDebounceQueue), metamodels.RecomputeDebounceQueue{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsIntelCompute), adsmodels.AdsIntelComputeJob{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AdsMetaIntelRuns), adsmodels.AdsMetaIntelRun{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.LearningCases), learningmodels.LearningCase{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.RuleSuggestions), learningmodels.RuleSuggestion{})
 
@@ -320,6 +323,7 @@ func initDatabase_MongoDB() {
 	// Module Order Intelligence
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.OrderIntelligenceSnapshots), orderintelmodels.OrderIntelligenceSnapshot{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.OrderIntelCompute), orderintelmodels.OrderIntelComputeJob{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.OrderIntelRuns), orderintelmodels.OrderIntelRun{})
 
 	// Module AI Decision — Event & Decision Case
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DecisionEventsQueue), aidecisionmodels.DecisionEvent{})

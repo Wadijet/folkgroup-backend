@@ -21,5 +21,7 @@ type OrderIntelComputeJob struct {
 	ProcessedAt         *int64             `json:"processedAt,omitempty" bson:"processedAt,omitempty" index:"single:1,compound:order_intel_compute_poll"`
 	ProcessError        string             `json:"processError,omitempty" bson:"processError,omitempty"`
 	RetryCount          int                `json:"retryCount" bson:"retryCount"`
+	// CausalOrderingAtMs — copy từ payload event (causalOrderingAtMs) hoặc gán lúc enqueue; sort lịch sử intel đơn.
+	CausalOrderingAtMs  int64              `json:"causalOrderingAtMs,omitempty" bson:"causalOrderingAtMs,omitempty"`
 	CreatedAt           int64              `json:"createdAt" bson:"createdAt" index:"single:1,compound:order_intel_compute_poll,order:1"`
 }

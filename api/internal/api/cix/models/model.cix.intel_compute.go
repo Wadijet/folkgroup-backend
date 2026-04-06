@@ -13,6 +13,13 @@ type CixIntelComputeJob struct {
 	Channel             string             `json:"channel" bson:"channel"`
 	CioEventUid         string             `json:"cioEventUid" bson:"cioEventUid"`
 	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:cix_intel_compute_poll"`
+	// TraceID / CorrelationID — copy từ envelope AI Decision (vào AnalyzeSession / lớp A).
+	TraceID       string `json:"traceId,omitempty" bson:"traceId,omitempty"`
+	CorrelationID string `json:"correlationId,omitempty" bson:"correlationId,omitempty"`
+	// CausalOrderingAtMs — mốc nghiệp vụ (unix ms), đồng tên payload CRM causalOrderingAtMs.
+	CausalOrderingAtMs int64 `json:"causalOrderingAtMs,omitempty" bson:"causalOrderingAtMs,omitempty"`
+	// DecisionEventID — eventId decision_events_queue đã enqueue job (audit).
+	DecisionEventID string `json:"decisionEventId,omitempty" bson:"decisionEventId,omitempty"`
 	ProcessedAt         *int64             `json:"processedAt,omitempty" bson:"processedAt,omitempty" index:"single:1,compound:cix_intel_compute_poll"`
 	ProcessError        string             `json:"processError,omitempty" bson:"processError,omitempty"`
 	RetryCount          int                `json:"retryCount" bson:"retryCount"`

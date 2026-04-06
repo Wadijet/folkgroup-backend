@@ -4,6 +4,7 @@ package crmhdl
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,8 +23,9 @@ import (
 // CrmCustomerHandler xử lý API profile khách hàng và CRUD (find, find-one, find-by-id, find-with-pagination, count).
 type CrmCustomerHandler struct {
 	*basehdl.BaseHandler[crmmodels.CrmCustomer, crmdto.CrmCustomerCreateInput, crmdto.CrmCustomerUpdateInput]
-	CustomerService *crmvc.CrmCustomerService
-	BulkJobService  *crmvc.CrmBulkJobService
+	CustomerService   *crmvc.CrmCustomerService
+	BulkJobService    *crmvc.CrmBulkJobService
+	IntelRunService   *crmvc.CrmCustomerIntelRunService
 }
 
 // NewCrmCustomerHandler tạo CrmCustomerHandler mới.
@@ -36,10 +38,15 @@ func NewCrmCustomerHandler() (*CrmCustomerHandler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("tạo CrmBulkJobService: %w", err)
 	}
+	intelRunSvc, err := crmvc.NewCrmCustomerIntelRunService()
+	if err != nil {
+		return nil, fmt.Errorf("tạo CrmCustomerIntelRunService: %w", err)
+	}
 	hdl := &CrmCustomerHandler{
-		BaseHandler:      basehdl.NewBaseHandler[crmmodels.CrmCustomer, crmdto.CrmCustomerCreateInput, crmdto.CrmCustomerUpdateInput](svc.BaseServiceMongoImpl),
-		CustomerService:  svc,
-		BulkJobService:   bulkJobSvc,
+		BaseHandler:     basehdl.NewBaseHandler[crmmodels.CrmCustomer, crmdto.CrmCustomerCreateInput, crmdto.CrmCustomerUpdateInput](svc.BaseServiceMongoImpl),
+		CustomerService: svc,
+		BulkJobService:  bulkJobSvc,
+		IntelRunService: intelRunSvc,
 	}
 	// Filter cho CRUD: cho phép filter theo classification và unifiedId (dashboard, bảng khách).
 	hdl.SetFilterOptions(basehdl.FilterOptions{
@@ -225,6 +232,91 @@ func (h *CrmCustomerHandler) HandleRecalculateCustomer(c fiber.Ctx) error {
 		})
 		return nil
 	})
+}
+
+// HandleListIntelRuns xử lý GET /customers/:unifiedId/intel-runs — phân trang lịch sử intel (crm_customer_intel_runs).
+// Query: page (mặc 1), limit (mặc 20, tối đa 100), newestFirst (mặc true — mới theo causal/sequence lên trước).
+func (h *CrmCustomerHandler) HandleListIntelRuns(c fiber.Ctx) error {
+	return basehdl.SafeHandlerWrapper(c, func() error {
+		unifiedId := c.Params("unifiedId")
+		if unifiedId == "" {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationInput.Code, "message": "Thiếu unifiedId", "status": "error",
+			})
+			return nil
+		}
+		orgID := getActiveOrganizationID(c)
+		if orgID == nil || orgID.IsZero() {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationInput.Code, "message": "Vui lòng chọn tổ chức (active organization)", "status": "error",
+			})
+			return nil
+		}
+		page, _ := strconv.ParseInt(c.Query("page", "1"), 10, 64)
+		if page < 1 {
+			page = 1
+		}
+		limit, _ := strconv.ParseInt(c.Query("limit", "20"), 10, 64)
+		if limit <= 0 {
+			limit = 20
+		}
+		if limit > 100 {
+			limit = 100
+		}
+		newestFirst := true
+		switch strings.ToLower(strings.TrimSpace(c.Query("newestFirst", "true"))) {
+		case "false", "0", "no":
+			newestFirst = false
+		}
+
+		res, err := h.IntelRunService.ListIntelRunsByUnifiedID(c.Context(), *orgID, unifiedId, page, limit, newestFirst)
+		if err != nil {
+			c.Status(common.StatusBadRequest).JSON(fiber.Map{
+				"code": common.ErrCodeValidationInput.Code, "message": err.Error(), "status": "error",
+			})
+			return nil
+		}
+		items := make([]crmdto.CrmCustomerIntelRunListItem, 0, len(res.Items))
+		for _, r := range res.Items {
+			items = append(items, mapCrmIntelRunToListItem(r))
+		}
+		c.Status(common.StatusOK).JSON(fiber.Map{
+			"code":    common.StatusOK,
+			"message": "Thành công",
+			"data": fiber.Map{
+				"page":       res.Page,
+				"limit":      res.Limit,
+				"itemCount":  res.ItemCount,
+				"total":      res.Total,
+				"totalPage":  res.TotalPage,
+				"items":      items,
+				"unifiedId":  unifiedId,
+				"newestFirst": newestFirst,
+			},
+			"status": "success",
+		})
+		return nil
+	})
+}
+
+func mapCrmIntelRunToListItem(r crmmodels.CrmCustomerIntelRun) crmdto.CrmCustomerIntelRunListItem {
+	item := crmdto.CrmCustomerIntelRunListItem{
+		Id:                    r.ID.Hex(),
+		Operation:             r.Operation,
+		Status:                r.Status,
+		ComputedAt:            r.ComputedAt,
+		CausalOrderingAt:      r.CausalOrderingAt,
+		IntelSequence:         r.IntelSequence,
+		ErrorMessage:          r.ErrorMessage,
+		ParentDecisionEventId: r.ParentDecisionEventID,
+	}
+	if !r.ParentIntelJobID.IsZero() {
+		item.ParentIntelJobId = r.ParentIntelJobID.Hex()
+	}
+	if len(r.MetricsSummary) > 0 {
+		item.MetricsSummary = map[string]interface{}(r.MetricsSummary)
+	}
+	return item
 }
 
 // HandleGetProfile xử lý GET /customers/:unifiedId/profile.

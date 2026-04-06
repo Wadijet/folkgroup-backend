@@ -10,13 +10,16 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
+	"meta_commerce/internal/api/aidecision/intelrecomputed"
 	cixmodels "meta_commerce/internal/api/cix/models"
 	cixsvc "meta_commerce/internal/api/cix/service"
-	"meta_commerce/internal/api/aidecision/intelrecomputed"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/logger"
 	"meta_commerce/internal/worker"
 )
+
+// cixIntelComputeMaxRetries số lần thử lại trước khi ghi bản ghi lớp A failed và đóng job.
+const cixIntelComputeMaxRetries = 8
 
 // CixIntelComputeWorker worker poll cix_intel_compute, gọi AnalyzeSession.
 type CixIntelComputeWorker struct {
@@ -107,20 +110,60 @@ func (w *CixIntelComputeWorker) Start(ctx context.Context) {
 
 			now := time.Now().UnixMilli()
 			for _, job := range jobs {
-				result, err := analysisSvc.AnalyzeSession(ctx, job.ConversationID, job.CustomerID, job.OwnerOrganizationID)
-				update := bson.M{"$set": bson.M{"processedAt": now}}
+				result, err := analysisSvc.AnalyzeSessionWithParams(ctx, cixsvc.AnalyzeSessionParams{
+					SessionUid:          job.ConversationID,
+					CustomerUid:         job.CustomerID,
+					OwnerOrganizationID: job.OwnerOrganizationID,
+					ParentJobID:         job.ID,
+					TraceID:             job.TraceID,
+					CorrelationID:       job.CorrelationID,
+					CausalOrderingAtMs:  job.CausalOrderingAtMs,
+				})
 				if err != nil {
-					update["$set"].(bson.M)["processError"] = err.Error()
-					update["$inc"] = bson.M{"retryCount": 1}
-				} else {
-					analysisHex := ""
-					if result != nil {
-						analysisHex = result.ID.Hex()
+					newRetry := job.RetryCount + 1
+					if newRetry >= cixIntelComputeMaxRetries {
+						failDoc, insErr := analysisSvc.InsertTerminalFailure(ctx, cixsvc.CixTerminalFailureInput{
+							OwnerOrganizationID: job.OwnerOrganizationID,
+							SessionUid:          job.ConversationID,
+							CustomerUid:         job.CustomerID,
+							ParentJobID:         job.ID,
+							TraceID:             job.TraceID,
+							CorrelationID:       job.CorrelationID,
+							CausalOrderingAtMs:  job.CausalOrderingAtMs,
+							Err:                 err,
+						})
+						analysisHex := ""
+						if insErr == nil && failDoc != nil {
+							analysisHex = failDoc.ID.Hex()
+						}
+						_ = intelrecomputed.EmitCixIntelRecomputed(ctx, job.OwnerOrganizationID, job.ID.Hex(), job.ConversationID, job.CustomerID, job.Channel, job.CioEventUid, analysisHex)
+						_, _ = coll.UpdateOne(ctx, bson.M{"_id": job.ID}, bson.M{
+							"$set": bson.M{
+								"processedAt":  now,
+								"processError": err.Error(),
+								"retryCount":   newRetry,
+							},
+						})
+					} else {
+						_, _ = coll.UpdateOne(ctx, bson.M{"_id": job.ID}, bson.M{
+							"$set": bson.M{"processError": err.Error()},
+							"$inc": bson.M{"retryCount": 1},
+						})
 					}
-					// Sau khi phân tích CIX xong — một event: fan-in AID qua analysisResultId (không dùng datachanged cix_analysis_result).
-					_ = intelrecomputed.EmitCixIntelRecomputed(ctx, job.OwnerOrganizationID, job.ID.Hex(), job.ConversationID, job.CustomerID, job.Channel, job.CioEventUid, analysisHex)
+					continue
 				}
-				_, _ = coll.UpdateOne(ctx, bson.M{"_id": job.ID}, update)
+				analysisHex := ""
+				if result != nil {
+					analysisHex = result.ID.Hex()
+				}
+				_ = intelrecomputed.EmitCixIntelRecomputed(ctx, job.OwnerOrganizationID, job.ID.Hex(), job.ConversationID, job.CustomerID, job.Channel, job.CioEventUid, analysisHex)
+				_, _ = coll.UpdateOne(ctx, bson.M{"_id": job.ID}, bson.M{
+					"$set": bson.M{
+						"processedAt":  now,
+						"processError": "",
+						"retryCount":   0,
+					},
+				})
 			}
 		}()
 	}

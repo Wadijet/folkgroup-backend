@@ -11,7 +11,7 @@
 
 | Tài liệu | Nội dung chính |
 |----------|----------------|
-| **00 - ai-commerce-os-platform-l1.md** | Flow canonical: Raw→L1→L2→L3→Decision Events→AI Decision→Action→Executor→Learning Engine. Nguyên tắc: Flags ⊂ Decision Events; AI Decision = event-driven; Decision ≠ Execution; Learning ≠ Decision |
+| **00 - ai-commerce-os-platform-l1.md** | Flow vision (tầng nền tảng — tên file “l1” là **vision layer**, **không** phải mirror L1-persist): Raw→…→Decision Events→AI Decision→Action→Executor→Learning Engine. Nguyên tắc: Flags ⊂ Decision Events; AI Decision = event-driven; Decision ≠ Execution; Learning ≠ Decision. Chi tiết phân biệt thuật ngữ: [KHUNG_KHUON_MODULE_INTELLIGENCE.md](./KHUNG_KHUON_MODULE_INTELLIGENCE.md) mục 0 |
 | **07 - ai-decision.md** | AI Decision 3 lớp: Event Intake → Context Aggregation → Decision Core. Không approval, không execution. Output: 1 Action entity duy nhất |
 | **08 - executor.md** | Executor 7 sub-layer: Intake→Validation→Policy/Approval→Dispatch→Monitoring→Outcome→Learning Handoff. Approval modes: manual_required, auto_by_rule, ai_recommend, fully_auto |
 | **11 - learning-engine.md** | Learning Engine: chỉ học khi lifecycle kết thúc. Không tham gia runtime |

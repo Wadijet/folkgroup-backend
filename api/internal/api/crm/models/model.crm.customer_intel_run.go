@@ -1,41 +1,41 @@
-// Package models — Lưu từng lần chạy intelligence khách (lớp A); crm_customers.intel trỏ bản gần nhất (lớp B).
+// Package models — Mỗi lần chạy intel khách (job crm_intel_compute): một document lịch sử;
+// crm_customers giữ kết quả mới nhất + intelLastRunId / intelLastComputedAt.
 package models
 
 import (
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-const (
-	// CrmCustomerIntelScopePerCustomer — một khách cụ thể.
-	CrmCustomerIntelScopePerCustomer = "per_customer"
-	// CrmCustomerIntelScopeBatchJob — một job xử lý nhiều khách / toàn org (không cập nhật intel trên từng customer).
-	CrmCustomerIntelScopeBatchJob = "batch_job"
-)
-
-const (
-	CrmCustomerIntelStatusSuccess = "success"
-	CrmCustomerIntelStatusFailed  = "failed"
-)
-
-// CrmCustomerIntelRun — một lần chạy refresh/recalculate/classification batch (audit, lịch sử).
+// CrmCustomerIntelRun — lịch sử một lần tính/refresh intelligence (một khách hoặc job đa khách).
+// MultiCustomerJob: recalculate_all, batch, classification_refresh, … — không cập nhật intelLastRunId từng khách.
 type CrmCustomerIntelRun struct {
 	ID primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"`
 
-	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:crm_cust_intel_org_uid,compound:crm_cust_intel_org_time,order:1"`
+	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1"`
+	UnifiedID           string             `json:"unifiedId,omitempty" bson:"unifiedId,omitempty" index:"single:1"`
+	CustomerMongoID     primitive.ObjectID `json:"customerMongoId,omitempty" bson:"customerMongoId,omitempty"`
 
-	// UnifiedId — rỗng khi scope = batch_job (tổng hợp một job).
-	UnifiedId string `json:"unifiedId,omitempty" bson:"unifiedId,omitempty" index:"single:1,compound:crm_cust_intel_org_uid,order:2"`
+	Operation string `json:"operation" bson:"operation"`
+	Status    string `json:"status" bson:"status"` // success | failed
 
-	Scope     string `json:"scope" bson:"scope"`         // per_customer | batch_job
-	Operation string `json:"operation" bson:"operation"` // refresh | recalculate_one | recalculate_all | …
-	Status    string `json:"status" bson:"status"`     // success | failed
+	ParentIntelJobID      primitive.ObjectID `json:"parentIntelJobId,omitempty" bson:"parentIntelJobId,omitempty"`
+	ParentDecisionEventID string             `json:"parentDecisionEventId,omitempty" bson:"parentDecisionEventId,omitempty"`
 
-	ComputedAt int64 `json:"computedAt" bson:"computedAt" index:"single:-1,compound:crm_cust_intel_org_time,order:-1"`
+	ComputedAt   int64  `json:"computedAt" bson:"computedAt" index:"single:-1"`
+	// CausalOrderingAt — unix ms của thay đổi nguồn (merge/datachanged); sort lịch sử theo nghiệp vụ, không phụ thuộc thứ tự worker.
+	CausalOrderingAt int64 `json:"causalOrderingAt,omitempty" bson:"causalOrderingAt,omitempty"`
+	// IntelSequence — số thứ tự monotonic trên crm_customers sau mỗi lần persist thành công một khách; tie-break khi CausalOrderingAt trùng.
+	IntelSequence int64 `json:"intelSequence,omitempty" bson:"intelSequence,omitempty"`
 
-	ParentJobHex          string `json:"parentJobHex,omitempty" bson:"parentJobHex,omitempty"`
-	ParentDecisionEventID string `json:"parentDecisionEventId,omitempty" bson:"parentDecisionEventId,omitempty"`
-	Trigger               string `json:"trigger,omitempty" bson:"trigger,omitempty"` // crm_intel_compute_job
+	ErrorMessage string `json:"errorMessage,omitempty" bson:"errorMessage,omitempty"`
 
-	OutputSummary map[string]interface{} `json:"outputSummary,omitempty" bson:"outputSummary,omitempty"`
-	ErrorMessage  string                 `json:"errorMessage,omitempty" bson:"errorMessage,omitempty"`
+	// MetricsSummary — tóm tắt sau lần chạy (audit; không nhân đôi full currentMetrics).
+	MetricsSummary bson.M `json:"metricsSummary,omitempty" bson:"metricsSummary,omitempty"`
+
+	MultiCustomerJob     bool   `json:"multiCustomerJob,omitempty" bson:"multiCustomerJob,omitempty"`
+	TotalProcessed       int    `json:"totalProcessed,omitempty" bson:"totalProcessed,omitempty"`
+	TotalFailed          int    `json:"totalFailed,omitempty" bson:"totalFailed,omitempty"`
+	OrgCount             int    `json:"orgCount,omitempty" bson:"orgCount,omitempty"`
+	ClassificationMode   string `json:"classificationMode,omitempty" bson:"classificationMode,omitempty"`
 }

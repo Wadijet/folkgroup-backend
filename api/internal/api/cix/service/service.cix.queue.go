@@ -4,9 +4,11 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	cixmodels "meta_commerce/internal/api/cix/models"
+	crmqueue "meta_commerce/internal/api/aidecision/crmqueue"
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
 
@@ -40,6 +42,10 @@ type EnqueueAnalysisInput struct {
 	Channel              string
 	CioEventUid          string
 	OwnerOrganizationID  primitive.ObjectID
+	TraceID              string
+	CorrelationID        string
+	CausalOrderingAtMs   int64
+	DecisionEventID      string
 }
 
 // EnqueueAnalysis thêm job vào cix_intel_compute (upsert theo conversationId).
@@ -49,12 +55,20 @@ func (s *CixQueueService) EnqueueAnalysis(ctx context.Context, input EnqueueAnal
 		return nil
 	}
 	now := time.Now().UnixMilli()
+	causal := input.CausalOrderingAtMs
+	if causal <= 0 {
+		causal = now
+	}
 	job := cixmodels.CixIntelComputeJob{
 		ConversationID:      input.ConversationID,
 		CustomerID:          input.CustomerID,
 		Channel:             input.Channel,
 		CioEventUid:         input.CioEventUid,
 		OwnerOrganizationID: input.OwnerOrganizationID,
+		TraceID:             strings.TrimSpace(input.TraceID),
+		CorrelationID:       strings.TrimSpace(input.CorrelationID),
+		CausalOrderingAtMs:  causal,
+		DecisionEventID:     strings.TrimSpace(input.DecisionEventID),
 		ProcessedAt:         nil,
 		RetryCount:          0,
 		CreatedAt:           now,
@@ -68,6 +82,10 @@ func (s *CixQueueService) EnqueueAnalysis(ctx context.Context, input EnqueueAnal
 			"customerId":    job.CustomerID,
 			"channel":       job.Channel,
 			"cioEventUid":   job.CioEventUid,
+			crmqueue.PayloadKeyCausalOrderingAtMs: causal,
+			"traceId":       job.TraceID,
+			"correlationId": job.CorrelationID,
+			"decisionEventId": job.DecisionEventID,
 			"processedAt":  nil,
 			"processError":  "",
 			"retryCount":   job.RetryCount,

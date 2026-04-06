@@ -3,6 +3,8 @@ package handler
 
 import (
 	"errors"
+	"strconv"
+	"strings"
 
 	"github.com/gofiber/fiber/v3"
 
@@ -47,16 +49,26 @@ func toResponseMap(r *cixdto.CixAnalysisResponse) fiber.Map {
 		return nil
 	}
 	return fiber.Map{
-		"id":                r.ID,
-		"sessionUid":        r.SessionUid,
-		"customerUid":       r.CustomerUid,
-		"traceId":           r.TraceID,
-		"layer1":            r.Layer1,
-		"layer2":            r.Layer2,
-		"layer3":            r.Layer3,
-		"flags":             r.Flags,
-		"actionSuggestions": r.ActionSuggestions,
-		"createdAt":         r.CreatedAt,
+		"id":                 r.ID,
+		"sessionUid":         r.SessionUid,
+		"customerUid":        r.CustomerUid,
+		"traceId":            r.TraceID,
+		"correlationId":      r.CorrelationID,
+		"status":             r.Status,
+		"computedAt":         r.ComputedAt,
+		"failedAt":           r.FailedAt,
+		"errorCode":          r.ErrorCode,
+		"errorMessage":       r.ErrorMessage,
+		"parentJobId":        r.ParentJobID,
+		"causalOrderingAt":   r.CausalOrderingAt,
+		"cixIntelSequence":   r.CixIntelSequence,
+		"rawFacts":           r.RawFacts,
+		"layer1":             r.Layer1,
+		"layer2":             r.Layer2,
+		"layer3":             r.Layer3,
+		"flags":              r.Flags,
+		"actionSuggestions":  r.ActionSuggestions,
+		"createdAt":          r.CreatedAt,
 	}
 }
 
@@ -135,6 +147,72 @@ func (h *CixAnalysisHandler) HandleGetAnalysisBySession(c fiber.Ctx) error {
 	resp := cixsvc.ToCixAnalysisResponse(result)
 	c.Status(common.StatusOK).JSON(fiber.Map{
 		"code": "0", "message": "OK", "data": toResponseMap(resp), "status": "success",
+	})
+	return nil
+}
+
+// HandleListAnalysisRuns GET /cix/sessions/:sessionUid/analysis-runs — phân trang lịch sử cix_analysis_results (chuẩn như CRM intel-runs).
+func (h *CixAnalysisHandler) HandleListAnalysisRuns(c fiber.Ctx) error {
+	ctx := c.Context()
+	sessionUid := strings.TrimSpace(c.Params("sessionUid"))
+	if sessionUid == "" {
+		c.Status(common.StatusBadRequest).JSON(fiber.Map{
+			"code": common.ErrCodeValidationInput.Code, "message": "Thiếu sessionUid", "status": "error",
+		})
+		return nil
+	}
+	orgID := getActiveOrganizationID(c)
+	if orgID == nil || orgID.IsZero() {
+		c.Status(common.StatusBadRequest).JSON(fiber.Map{
+			"code": common.ErrCodeValidationInput.Code, "message": "Vui lòng chọn tổ chức", "status": "error",
+		})
+		return nil
+	}
+	page, _ := strconv.ParseInt(c.Query("page", "1"), 10, 64)
+	if page < 1 {
+		page = 1
+	}
+	limit, _ := strconv.ParseInt(c.Query("limit", "20"), 10, 64)
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	newestFirst := true
+	switch strings.ToLower(strings.TrimSpace(c.Query("newestFirst", "true"))) {
+	case "false", "0", "no":
+		newestFirst = false
+	}
+
+	res, err := h.svc.ListAnalysisRunsBySession(ctx, *orgID, sessionUid, page, limit, newestFirst)
+	if err != nil {
+		c.Status(common.StatusBadRequest).JSON(fiber.Map{
+			"code": common.ErrCodeValidationInput.Code, "message": err.Error(), "status": "error",
+		})
+		return nil
+	}
+	items := make([]fiber.Map, 0, len(res.Items))
+	for i := range res.Items {
+		r := &res.Items[i]
+		if dto := cixsvc.ToCixAnalysisResponse(r); dto != nil {
+			items = append(items, toResponseMap(dto))
+		}
+	}
+	c.Status(common.StatusOK).JSON(fiber.Map{
+		"code":    "0",
+		"message": "Thành công",
+		"data": fiber.Map{
+			"page":        res.Page,
+			"limit":       res.Limit,
+			"itemCount":   res.ItemCount,
+			"total":       res.Total,
+			"totalPage":   res.TotalPage,
+			"items":       items,
+			"sessionUid":  sessionUid,
+			"newestFirst": newestFirst,
+		},
+		"status": "success",
 	})
 	return nil
 }

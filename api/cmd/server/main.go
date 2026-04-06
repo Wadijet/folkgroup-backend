@@ -12,7 +12,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/sirupsen/logrus"
 
-	adsworker "meta_commerce/internal/api/ads/worker"
+	adsworker "meta_commerce/internal/api/ads_meta/worker"
 	crmqueue "meta_commerce/internal/api/aidecision/crmqueue"
 	"meta_commerce/internal/api/aidecision/decisionlive"
 	aidecisionworker "meta_commerce/internal/api/aidecision/worker"
@@ -23,7 +23,7 @@ import (
 	crmvc "meta_commerce/internal/api/crm/service"
 	ruleintelmigration "meta_commerce/internal/api/ruleintel/migration"
 	basesvc "meta_commerce/internal/api/base/service"
-	_ "meta_commerce/internal/api/ads"         // Đăng ký executor domain ads + deferred + event types (init executor.go)
+	_ "meta_commerce/internal/api/ads_meta"   // Đăng ký executor domain ads_meta (approval vẫn DomainAdsApproval "ads") + deferred + event types
 	_ "meta_commerce/internal/executors/cix" // Đăng ký cix executor với approval (init)
 	approval "meta_commerce/internal/approval"
 	"meta_commerce/internal/delivery"

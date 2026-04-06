@@ -97,9 +97,21 @@ func (s *CrmCustomerService) GetFullProfile(ctx context.Context, unifiedId strin
 		currentMetrics = ensureLayer3InMetrics(currentMetrics)
 	}
 
+	var intelSummary *crmdto.CrmCustomerIntelSummary
+	if !customer.IntelLastRunId.IsZero() || customer.IntelLastComputedAt > 0 || customer.IntelSequence > 0 {
+		intelSummary = &crmdto.CrmCustomerIntelSummary{
+			LastComputedAt: customer.IntelLastComputedAt,
+			Sequence:       customer.IntelSequence,
+		}
+		if !customer.IntelLastRunId.IsZero() {
+			intelSummary.LastRunId = customer.IntelLastRunId.Hex()
+		}
+	}
+
 	return &crmdto.CrmCustomerFullProfileResponse{
 		Profile:         *profile,
 		CurrentMetrics:  currentMetrics,
+		IntelSummary:    intelSummary,
 		RecentOrders:    recentOrders,
 		Conversations:   conversations,
 		Notes:           notes,

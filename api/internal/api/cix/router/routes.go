@@ -25,7 +25,10 @@ func Register(v1 fiber.Router, _ *apirouter.Router) error {
 	// POST /cix/analyze — Ghi cix.analysis_requested (queue AI Decision), không đồng bộ
 	apirouter.RegisterRouteWithMiddleware(v1, "/cix/analyze", "POST", "", []fiber.Handler{analyzeMiddleware, orgContextMiddleware}, analysisHandler.HandleAnalyzeSession)
 
-	// GET /cix/analysis/:sessionUid — Lấy kết quả phân tích theo session
+	// GET /cix/sessions/:sessionUid/analysis-runs — Lịch sử phân tích (cix_analysis_results), phân trang
+	apirouter.RegisterRouteWithMiddleware(v1, "/cix", "GET", "/sessions/:sessionUid/analysis-runs", []fiber.Handler{readMiddleware, orgContextMiddleware}, analysisHandler.HandleListAnalysisRuns)
+
+	// GET /cix/analysis/:sessionUid — Lấy kết quả phân tích mới nhất theo session
 	apirouter.RegisterRouteWithMiddleware(v1, "/cix", "GET", "/analysis/:sessionUid", []fiber.Handler{readMiddleware, orgContextMiddleware}, analysisHandler.HandleGetAnalysisBySession)
 
 	return nil

@@ -34,7 +34,9 @@ Mọi entity cần **phân tách đúng 4 lớp**, không gộp một field làm
 
 **Entity đa nguồn (§1.6):** bắt buộc có **(2) + (3)**; tra cứu thống nhất qua resolve (`ResolveUnifiedId` / `ResolveByAnyIdentifier` — pattern CRM/Auth trong doc).
 
-**Hai lớp persistence (§1.7):** **L1** = mirror/ingest (nguồn theo kênh); **L2** = canonical/đã merge (tương tác liên module). Cùng **bốn vai trò field** có thể dùng trên L1 và L2 nhưng kỳ vọng khác: **`uid` contract chính trên L2**; L1 có thể có **`links` L1→L1** để merge suy ra **`links` L2→L2**. `_id` L1 ≠ `_id` L2.
+**Hai lớp persistence (§1.7):** **L1-persist (mirror)** = ingest theo nguồn; **L2-persist (canonical)** = đã merge (tương tác liên module). Cùng **bốn vai trò field** có thể dùng trên mirror và canonical nhưng kỳ vọng khác: **`uid` contract chính trên canonical**; mirror có thể có **`links` mirror→mirror** để merge suy ra **`links` canonical→canonical**. `_id` mirror ≠ `_id` canonical.
+
+**Không nhầm:** Ký hiệu **L1/L2/L3** trong **pipeline rule CIX** hoặc trường BSON CRM **`layer1`/`layer2`** hoặc **Ads `computeLayer1/2/3`** là **khác hoàn toàn** với L1-persist/L2-persist ở đây — xem [KHUNG_KHUON_MODULE_INTELLIGENCE.md](../../docs/05-development/KHUNG_KHUON_MODULE_INTELLIGENCE.md) mục 0.
 
 **Lưu ý backend thực tế:** `OwnerOrganizationID` (`ObjectID`) thuộc **lớp (1)** cho tenant; nếu contract yêu cầu `org_id` **chuỗi công khai** (`org_*`), đó là **lớp (2)** — không tự động coi `.Hex()` của ObjectID là đủ thay `org_id` contract nếu doc quy định prefix.
 

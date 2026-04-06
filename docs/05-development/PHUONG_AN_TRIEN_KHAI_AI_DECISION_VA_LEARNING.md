@@ -205,8 +205,10 @@ AI Decision Engine.Execute(ctx, req, ownerOrgID)
 
 ### 4.1 Pipeline Theo Vision (rule-intelligence)
 
+*Các bước “metric layer 1/2/3” dưới đây là output tầng Rule/Ads — **không** phải mirror/canonical **L1-persist/L2-persist**; xem [KHUNG_KHUON_MODULE_INTELLIGENCE.md](./KHUNG_KHUON_MODULE_INTELLIGENCE.md) mục 0.*
+
 ```
-Raw Data → Rule → L1 → Rule → L2 → Rule → L3 → Rule → Flag → Rule → Action/Recommendation
+Raw Data → Rule → metric layer 1 → Rule → metric layer 2 → Rule → metric layer 3 → Rule → Flag → Rule → Action/Recommendation
                                                                            │
                                                                            ▼
                                                               AI Decision Engine (Context Aggregation, Policy, Arbitration)
@@ -467,7 +469,7 @@ api/
 | **AdsExecutionWorker** | `api/internal/api/ads/worker/worker.ads.execution.go` | Xử lý status=queued, gọi learningsvc.CreateLearningCaseFromAction khi executed/failed |
 | **BuildLearningCase khi Reject** | `handler.executor.action.go` | Gọi learningsvc.CreateLearningCaseFromAction khi reject |
 | **CIO feedback** | `service.cio.feedback.go` | Gọi learningsvc khi touchpoint executed |
-| **CIX AnalyzeSession** | `service.cix.analysis.go` | L1→L2→L3→Flags→ActionSuggestions, gọi aidecisionsvc.ReceiveCixPayload |
+| **CIX AnalyzeSession** | `service.cix.analysis.go` | **Pipeline rule CIX** (bước L1→L2→L3 trong rule engine) → Flags → ActionSuggestions; gọi aidecisionsvc.ReceiveCixPayload — *không nhầm với L1-persist/L2-persist* |
 | **Delivery HandleExecute** | `handler.delivery.execute.go` | Gate: chỉ nhận từ Executor (DELIVERY_ALLOW_DIRECT_USE deprecate) |
 
 ### 8.2 Chưa Có / Chưa Đúng

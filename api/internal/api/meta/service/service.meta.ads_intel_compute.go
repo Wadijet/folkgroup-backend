@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	adsmodels "meta_commerce/internal/api/ads/models"
+	adsmodels "meta_commerce/internal/api/ads_meta/models"
 	"meta_commerce/internal/api/aidecision/eventemit"
 	"meta_commerce/internal/api/aidecision/eventtypes"
 	"meta_commerce/internal/global"
@@ -19,7 +19,8 @@ import (
 )
 
 // EnqueueAdsIntelCompute đưa job recompute một entity vào ads_intel_compute (không tính toán tại đây).
-func EnqueueAdsIntelCompute(ctx context.Context, objectType, objectID, adAccountID string, ownerOrgID primitive.ObjectID, source, recomputeMode, parentDecisionEventID string) error {
+// causalOrderingAtMs: mốc nghiệp vụ từ payload event; 0 = gán bằng thời điểm enqueue.
+func EnqueueAdsIntelCompute(ctx context.Context, objectType, objectID, adAccountID string, ownerOrgID primitive.ObjectID, source, recomputeMode, parentDecisionEventID string, causalOrderingAtMs int64) error {
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.AdsIntelCompute)
 	if !ok {
 		return fmt.Errorf("collection AdsIntelCompute chưa đăng ký")
@@ -35,6 +36,7 @@ func EnqueueAdsIntelCompute(ctx context.Context, objectType, objectID, adAccount
 		RecomputeMode:         recomputeMode,
 		OwnerOrganizationID:   ownerOrgID,
 		ParentDecisionEventID: parentDecisionEventID,
+		CausalOrderingAtMs:    normalizeAdsIntelCausalMs(causalOrderingAtMs),
 		CreatedAt:             now,
 	}
 	_, err := coll.InsertOne(ctx, job)
@@ -42,7 +44,7 @@ func EnqueueAdsIntelCompute(ctx context.Context, objectType, objectID, adAccount
 }
 
 // EnqueueAdsIntelComputeRecalculateAll đưa job batch RecalculateAll vào ads_intel_compute.
-func EnqueueAdsIntelComputeRecalculateAll(ctx context.Context, ownerOrgID primitive.ObjectID, limit int, parentDecisionEventID string) error {
+func EnqueueAdsIntelComputeRecalculateAll(ctx context.Context, ownerOrgID primitive.ObjectID, limit int, parentDecisionEventID string, causalOrderingAtMs int64) error {
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.AdsIntelCompute)
 	if !ok {
 		return fmt.Errorf("collection AdsIntelCompute chưa đăng ký")
@@ -54,6 +56,7 @@ func EnqueueAdsIntelComputeRecalculateAll(ctx context.Context, ownerOrgID primit
 		OwnerOrganizationID:   ownerOrgID,
 		RecalculateAllLimit:   limit,
 		ParentDecisionEventID: parentDecisionEventID,
+		CausalOrderingAtMs:    normalizeAdsIntelCausalMs(causalOrderingAtMs),
 		CreatedAt:             now,
 	}
 	_, err := coll.InsertOne(ctx, job)
@@ -61,7 +64,7 @@ func EnqueueAdsIntelComputeRecalculateAll(ctx context.Context, ownerOrgID primit
 }
 
 // EnqueueAdsIntelComputeContextReady đưa job đọc snapshot Intelligence + emit ads.context_ready vào ads_intel_compute (consumer không đọc meta_campaigns).
-func EnqueueAdsIntelComputeContextReady(ctx context.Context, parentDecisionEventID, orgID, traceID, correlationID, campaignID, adAccountID string, ownerOrgID primitive.ObjectID) error {
+func EnqueueAdsIntelComputeContextReady(ctx context.Context, parentDecisionEventID, orgID, traceID, correlationID, campaignID, adAccountID string, ownerOrgID primitive.ObjectID, causalOrderingAtMs int64) error {
 	campaignID = strings.TrimSpace(campaignID)
 	if campaignID == "" || ownerOrgID.IsZero() {
 		return nil
@@ -78,6 +81,7 @@ func EnqueueAdsIntelComputeContextReady(ctx context.Context, parentDecisionEvent
 		AdAccountID:              adAccountID,
 		OwnerOrganizationID:      ownerOrgID,
 		ParentDecisionEventID:    parentDecisionEventID,
+		CausalOrderingAtMs:       normalizeAdsIntelCausalMs(causalOrderingAtMs),
 		ContextEmitOrgID:         strings.TrimSpace(orgID),
 		ContextEmitTraceID:       strings.TrimSpace(traceID),
 		ContextEmitCorrelationID: strings.TrimSpace(correlationID),
@@ -97,16 +101,24 @@ func RunAdsIntelComputeJob(ctx context.Context, job *adsmodels.AdsIntelComputeJo
 	}
 	switch job.JobKind {
 	case adsmodels.AdsIntelComputeKindRecomputeOne:
-		if err := ApplyAdsIntelligenceRecomputeWithMode(ctx, job.ObjectType, job.ObjectID, job.AdAccountID, job.OwnerOrganizationID, job.Source, job.RecomputeMode); err != nil {
+		nowMs := time.Now().UnixMilli()
+		err := ApplyAdsIntelligenceRecomputeWithMode(ctx, job.ObjectType, job.ObjectID, job.AdAccountID, job.OwnerOrganizationID, job.Source, job.RecomputeMode)
+		persistAdsMetaIntelAfterRecomputeOne(ctx, job, err, nowMs)
+		if err != nil {
 			return err
 		}
 		// Luồng mới: sau khi tính xong Intelligence mới emit campaign_intel_recomputed (meta_ads_intel) → AI Decision.
 		return emitCampaignIntelRecomputedAfterRecomputeJob(ctx, job)
 	case adsmodels.AdsIntelComputeKindRecalculateAll:
+		nowMs := time.Now().UnixMilli()
 		_, err := RecalculateAllMetaAds(ctx, job.OwnerOrganizationID, job.RecalculateAllLimit)
+		persistAdsMetaIntelAfterRecalculateAll(ctx, job, err, nowMs)
 		return err
 	case adsmodels.AdsIntelComputeKindContextReady:
-		return emitAdsContextReadyFromIntelJob(ctx, job)
+		nowMs := time.Now().UnixMilli()
+		err := emitAdsContextReadyFromIntelJob(ctx, job)
+		persistAdsMetaIntelAfterContextReady(ctx, job, err, nowMs)
+		return err
 	default:
 		return fmt.Errorf("jobKind không hợp lệ: %q", job.JobKind)
 	}

@@ -17,7 +17,7 @@
 | approval | ✅ | ✅ | ⚠️ | ⚠️ | Service ở `internal/approval/` |
 | agent | ✅ | ✅ | ✅ | ✅ | Đầy đủ |
 | ai | ✅ | ✅ | ✅ | ✅ | Đầy đủ |
-| **cix** | ✅ | ✅ | ✅ | ✅ | **Đã có** — Raw→L1→L2→L3→Flag→Action, CIO→CIX→Decision |
+| **cix** | ✅ | ✅ | ✅ | ✅ | **Đã có** — pipeline rule CIX Raw→L1→L2→L3→Flag→Action (*bước rule; không phải L1-persist*), CIO→CIX→Decision |
 | cio | ✅ | ✅ | ✅ | ✅ | Đầy đủ |
 | content | ✅ | ✅ | ✅ | ✅ | Đầy đủ |
 | crm | ✅ | ✅ | ✅ | ✅ | Đầy đủ |
@@ -90,7 +90,7 @@
 - `api/internal/api/googleads/` — router, handler, service, models
 - Collections: google_ad_accounts, google_campaigns, google_ad_groups, google_ads, google_ad_insights
 - Ingestion: sync từ Google Ads API
-- Rule: RULE_GOOGLE_ADS_* (Layer 1, 2, 3, Flag, Action)
+- Rule: RULE_GOOGLE_ADS_* — **metric layer** 1/2/3 + Flag + Action (cùng họ tên với Ads pipeline; *không* phải L1-persist/L2-persist)
 
 **Ưu tiên:** **Trung bình** — Meta đã đủ, Google mở rộng thị trường.
 
@@ -110,7 +110,7 @@
 - Pipeline: Aggregate từ crm, meta_ad_insights, decision_cases → tạo/update content_nodes (insight)
 - Có thể là worker + service, không bắt buộc API public
 
-**Ưu tiên:** **Trung bình** — Content OS có pipeline L1–L8, thiếu nguồn insight tự động.
+**Ưu tiên:** **Trung bình** — Content OS có pipeline **tầng nội dung L1–L8** (vision Content Expansion — *khác* mirror/canonical và *khác* pipeline rule CIX); thiếu nguồn insight tự động.
 
 ---
 

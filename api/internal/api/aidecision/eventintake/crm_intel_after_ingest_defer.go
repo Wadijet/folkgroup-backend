@@ -19,6 +19,8 @@ type CrmIntelAfterIngestFlushJob struct {
 	TraceID       string
 	CorrelationID string
 	ParentEventID string // event crm.intelligence.recompute_requested gần nhất (để trace parentDecisionEventID)
+	// CausalOrderingAtMs — max causal trong cửa sổ debounce (thứ tự nghiệp vụ khi enqueue crm_intel_compute).
+	CausalOrderingAtMs int64
 }
 
 const (
@@ -48,6 +50,20 @@ type crmIntelAfterIngestTrace struct {
 	traceID       string
 	correlationID string
 	parentEventID string
+	causalMs      int64
+}
+
+func mergeCausalMsDebounced(prev, next int64) int64 {
+	if prev <= 0 {
+		return next
+	}
+	if next <= 0 {
+		return prev
+	}
+	if prev > next {
+		return prev
+	}
+	return next
 }
 
 func mergeCrmIntelAfterIngestTrace(prev, next crmIntelAfterIngestTrace) crmIntelAfterIngestTrace {
@@ -61,13 +77,15 @@ func mergeCrmIntelAfterIngestTrace(prev, next crmIntelAfterIngestTrace) crmIntel
 	if s := strings.TrimSpace(next.parentEventID); s != "" {
 		out.parentEventID = s
 	}
+	out.causalMs = mergeCausalMsDebounced(prev.causalMs, next.causalMs)
 	return out
 }
 
 var crmIntelAfterIngestDebouncer = queuedebounce.NewMetaTable[crmIntelAfterIngestKey, crmIntelAfterIngestTrace](mergeCrmIntelAfterIngestTrace)
 
 // ScheduleCrmIntelligenceRecomputeDebounce — trailing debounce sau crm.intelligence.recompute_requested: mỗi lần gọi cùng (org, unifiedId) → due = now + window.
-func ScheduleCrmIntelligenceRecomputeDebounce(orgHex, unifiedID string, window time.Duration, traceID, correlationID, parentEventID string) {
+// causalOrderingAtMs: gộp theo max trong cửa sổ (thứ tự nghiệp vụ); 0 = bỏ qua.
+func ScheduleCrmIntelligenceRecomputeDebounce(orgHex, unifiedID string, window time.Duration, traceID, correlationID, parentEventID string, causalOrderingAtMs int64) {
 	orgHex = strings.TrimSpace(orgHex)
 	unifiedID = strings.TrimSpace(unifiedID)
 	if orgHex == "" || unifiedID == "" {
@@ -84,6 +102,7 @@ func ScheduleCrmIntelligenceRecomputeDebounce(orgHex, unifiedID string, window t
 		traceID:       traceID,
 		correlationID: correlationID,
 		parentEventID: parentEventID,
+		causalMs:      causalOrderingAtMs,
 	}
 	crmIntelAfterIngestDebouncer.Schedule(k, window, meta)
 }
@@ -97,11 +116,12 @@ func TakeDueCrmIntelAfterIngestJobs(now time.Time) []CrmIntelAfterIngestFlushJob
 	out := make([]CrmIntelAfterIngestFlushJob, 0, len(entries))
 	for _, e := range entries {
 		out = append(out, CrmIntelAfterIngestFlushJob{
-			OrgHex:        e.Key.orgHex,
-			UnifiedID:     e.Key.unifiedID,
-			TraceID:       e.Meta.traceID,
-			CorrelationID: e.Meta.correlationID,
-			ParentEventID: e.Meta.parentEventID,
+			OrgHex:             e.Key.orgHex,
+			UnifiedID:          e.Key.unifiedID,
+			TraceID:            e.Meta.traceID,
+			CorrelationID:      e.Meta.correlationID,
+			ParentEventID:      e.Meta.parentEventID,
+			CausalOrderingAtMs: e.Meta.causalMs,
 		})
 	}
 	return out

@@ -11,7 +11,9 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
+	crmqueue "meta_commerce/internal/api/aidecision/crmqueue"
 	"meta_commerce/internal/api/aidecision/eventtypes"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 
@@ -46,6 +48,9 @@ func EmitCixAnalysisRequested(ctx context.Context, conversationID, customerID, c
 	}
 	if strings.TrimSpace(normalizedRecordUID) != "" {
 		payload["normalizedRecordUid"] = normalizedRecordUID
+	}
+	if crmqueue.ExtractCausalOrderingAtMs(payload) <= 0 {
+		payload[crmqueue.PayloadKeyCausalOrderingAtMs] = time.Now().UnixMilli()
 	}
 	src := strings.TrimSpace(eventSource)
 	if src == "" {

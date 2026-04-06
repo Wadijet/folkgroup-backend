@@ -379,7 +379,8 @@ func processAdsIntelligenceRecomputeRequested(ctx context.Context, evt *aidecisi
 	if objectType == "" || objectId == "" || adAccountId == "" || ownerOrgID.IsZero() {
 		return nil
 	}
-	return metasvc.EnqueueAdsIntelCompute(ctx, objectType, objectId, adAccountId, ownerOrgID, source, recomputeMode, evt.EventID)
+	causalMs := crmqueue.ExtractCausalOrderingAtMs(evt.Payload)
+	return metasvc.EnqueueAdsIntelCompute(ctx, objectType, objectId, adAccountId, ownerOrgID, source, recomputeMode, evt.EventID, causalMs)
 }
 
 // processAdsIntelligenceRecalculateAllRequested — consumer chỉ enqueue ads_intel_compute; batch chạy tại worker domain ads.
@@ -397,7 +398,8 @@ func processAdsIntelligenceRecalculateAllRequested(ctx context.Context, evt *aid
 		return nil
 	}
 	limit := payloadIntFromDecisionPayload(evt.Payload, "limit")
-	return metasvc.EnqueueAdsIntelComputeRecalculateAll(ctx, ownerOrgID, limit, evt.EventID)
+	causalMs := crmqueue.ExtractCausalOrderingAtMs(evt.Payload)
+	return metasvc.EnqueueAdsIntelComputeRecalculateAll(ctx, ownerOrgID, limit, evt.EventID, causalMs)
 }
 
 func payloadIntFromDecisionPayload(m map[string]interface{}, key string) int {
@@ -448,12 +450,20 @@ func processCixAnalysisRequested(ctx context.Context, evt *aidecisionmodels.Deci
 	if u, ok := evt.Payload["normalizedRecordUid"].(string); ok {
 		normalizedRecordUid = u
 	}
+	causal := crmqueue.ExtractCausalOrderingAtMs(evt.Payload)
+	if causal <= 0 {
+		causal = time.Now().UnixMilli()
+	}
 	return queueSvc.EnqueueAnalysis(ctx, cixsvc.EnqueueAnalysisInput{
 		ConversationID:      convID,
 		CustomerID:          custID,
 		Channel:             channel,
 		CioEventUid:         normalizedRecordUid,
 		OwnerOrganizationID: ownerOrgID,
+		TraceID:             strings.TrimSpace(evt.TraceID),
+		CorrelationID:       strings.TrimSpace(evt.CorrelationID),
+		CausalOrderingAtMs:  causal,
+		DecisionEventID:     strings.TrimSpace(evt.EventID),
 	})
 }
 
@@ -500,6 +510,9 @@ func processCrmIntelligenceRecomputeRequested(ctx context.Context, evt *aidecisi
 		"unifiedId":     unifiedID,
 		"ownerOrgIdHex": ownerOrgID.Hex(),
 	}
+	if cm := crmqueue.ExtractCausalOrderingAtMs(evt.Payload); cm > 0 {
+		payload[crmqueue.PayloadKeyCausalOrderingAtMs] = cm
+	}
 	if eventintake.PayloadMarksIntelUrgent(evt.Payload) {
 		return crmvc.EnqueueCrmIntelComputeFromDecisionEvent(ctx, evt.EventID, ownerOrgID, payload)
 	}
@@ -507,7 +520,7 @@ func processCrmIntelligenceRecomputeRequested(ctx context.Context, evt *aidecisi
 	if win <= 0 {
 		return crmvc.EnqueueCrmIntelComputeFromDecisionEvent(ctx, evt.EventID, ownerOrgID, payload)
 	}
-	eventintake.ScheduleCrmIntelligenceRecomputeDebounce(ownerOrgID.Hex(), unifiedID, win, evt.TraceID, evt.CorrelationID, evt.EventID)
+	eventintake.ScheduleCrmIntelligenceRecomputeDebounce(ownerOrgID.Hex(), unifiedID, win, evt.TraceID, evt.CorrelationID, evt.EventID, crmqueue.ExtractCausalOrderingAtMs(evt.Payload))
 	return nil
 }
 
@@ -766,7 +779,8 @@ func processAdsContextRequested(ctx context.Context, evt *aidecisionmodels.Decis
 	if orgID == "" {
 		orgID = ownerOrgID.Hex()
 	}
-	return metasvc.EnqueueAdsIntelComputeContextReady(ctx, evt.EventID, orgID, evt.TraceID, evt.CorrelationID, campaignID, adAccountID, ownerOrgID)
+	causalMs := crmqueue.ExtractCausalOrderingAtMs(evt.Payload)
+	return metasvc.EnqueueAdsIntelComputeContextReady(ctx, evt.EventID, orgID, evt.TraceID, evt.CorrelationID, campaignID, adAccountID, ownerOrgID, causalMs)
 }
 
 // processAdsContextReady — bước 5: snapshot đã có trong payload (ads.context_ready).

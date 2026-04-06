@@ -6,7 +6,7 @@ import (
 	"context"
 	"time"
 
-	adsconfig "meta_commerce/internal/api/ads/config"
+	adsconfig "meta_commerce/internal/api/ads_meta/config"
 	"meta_commerce/internal/global"
 
 	"go.mongodb.org/mongo-driver/bson"

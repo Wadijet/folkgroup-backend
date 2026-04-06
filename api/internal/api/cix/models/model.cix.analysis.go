@@ -37,6 +37,20 @@ type CixFlag struct {
 	TriggeredByRule string `json:"triggeredByRule" bson:"triggeredByRule"`
 }
 
+// Trạng thái terminal bản ghi lớp A (cix_analysis_results) — khớp khung intelligence mục 3.
+const (
+	CixAnalysisStatusSuccess = "success"
+	CixAnalysisStatusFailed  = "failed"
+	CixAnalysisStatusSkipped = "skipped"
+)
+
+// CixRawFacts tóm tắt facts đầu vào pipeline (không lưu full transcript — tránh phình document).
+type CixRawFacts struct {
+	TurnCount  int   `json:"turnCount" bson:"turnCount"`
+	FirstMsgAt int64 `json:"firstMsgAt,omitempty" bson:"firstMsgAt,omitempty"`
+	LastMsgAt  int64 `json:"lastMsgAt,omitempty" bson:"lastMsgAt,omitempty"`
+}
+
 // CixAnalysisResult document lưu trong collection cix_analysis_results.
 type CixAnalysisResult struct {
 	ID                 primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"`
@@ -47,6 +61,20 @@ type CixAnalysisResult struct {
 	CorrelationID      string             `json:"correlationId" bson:"correlationId" index:"single:1,sparse"`
 	// PipelineRuleTraceIDs thứ tự các lần chạy rule trong pipeline CIX (L1→L2→Adj→[L3]→Flags→Actions) — tra rule_execution_logs.
 	PipelineRuleTraceIDs []string `json:"pipelineRuleTraceIds,omitempty" bson:"pipelineRuleTraceIds,omitempty"`
+	// Status — success | failed | skipped (mặc định rỗng coi như bản ghi cũ = success).
+	Status       string `json:"status,omitempty" bson:"status,omitempty" index:"single:1,sparse"`
+	ComputedAt   int64  `json:"computedAt,omitempty" bson:"computedAt,omitempty" index:"single:-1"`
+	FailedAt     int64  `json:"failedAt,omitempty" bson:"failedAt,omitempty"`
+	ErrorCode    string `json:"errorCode,omitempty" bson:"errorCode,omitempty"`
+	ErrorMessage string `json:"errorMessage,omitempty" bson:"errorMessage,omitempty"`
+	// ParentJobID — _id document cix_intel_compute sinh ra bản ghi này.
+	ParentJobID primitive.ObjectID `json:"parentJobId,omitempty" bson:"parentJobId,omitempty" index:"single:1,sparse"`
+	// CausalOrderingAt — mốc nghiệp vụ (unix ms) để sort lịch sử khi queue không FIFO.
+	CausalOrderingAt int64 `json:"causalOrderingAt,omitempty" bson:"causalOrderingAt,omitempty"`
+	// CixIntelSequence — bản sao số thứ tự tại thời điểm ghi (sau $inc trên crm_customers.cixIntelSequence).
+	CixIntelSequence int64 `json:"cixIntelSequence,omitempty" bson:"cixIntelSequence,omitempty"`
+	// RawFacts — aggregate thô tối thiểu để audit / derive nhẹ (không thay transcript đầy đủ).
+	RawFacts CixRawFacts `json:"rawFacts,omitempty" bson:"rawFacts,omitempty"`
 	Layer1             CixLayer1          `json:"layer1" bson:"layer1"`
 	Layer2             CixLayer2          `json:"layer2" bson:"layer2"`
 	Layer3             CixLayer3          `json:"layer3" bson:"layer3"`

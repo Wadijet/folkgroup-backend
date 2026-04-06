@@ -1,6 +1,7 @@
-# Thiết Kế Collections CIX — Kiến Trúc 3 Lớp
+# Thiết Kế Collections CIX — Kiến Trúc Ba Tầng Collection
 
 **Ngày:** 2026-03-18  
+**Cập nhật 2026-04-07:** Tiêu đề đổi từ “3 Lớp” → **ba tầng collection** (CIO ledger / CIX context / analysis runs) để **không nhầm** với **L1-persist/L2-persist** (mirror/canonical) hay **pipeline rule CIX L1→L2→L3** — xem [KHUNG_KHUON_MODULE_INTELLIGENCE.md](./KHUNG_KHUON_MODULE_INTELLIGENCE.md) mục 0.  
 **Tham chiếu:** [PHUONG_AN_TRIEN_KHAI_CIX.md](./PHUONG_AN_TRIEN_KHAI_CIX.md), [THIET_KE_MODULE_CIO.md](./THIET_KE_MODULE_CIO.md), [identity-links-model](../../docs-shared/architecture/data-contract/identity-links-model.md)
 
 > **Triển khai `cix_analysis_results` (2026-03-26):** Document phẳng — field **`traceId`** (UUID `rule_execution_logs` của bước **RULE_CIX_ACTIONS**), **`pipelineRuleTraceIds`** ([]string — thứ tự trace các bước rule pipeline), **`correlationId`** (tuỳ có). API response CIX có **`pipelineRuleTraceIds`**. Chi tiết hợp đồng: [unified-data-contract §2.5b](../../docs-shared/architecture/data-contract/unified-data-contract.md#contract-25b-trace-queue).
@@ -29,7 +30,7 @@
 
 ---
 
-## 2. Kiến Trúc 3 Lớp
+## 2. Kiến Trúc Ba Tầng Collection (CIO → CIX)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
@@ -46,7 +47,7 @@
 │ Lớp 2: CIX — Derived / Merged Context                                            │
 │ cix_conversations (hoặc conversation_contexts)                                   │
 │ • Merged context từ nhiều nguồn                                                  │
-│ • Kết quả pipeline Raw → L1 → L2 → L3 → Flag → Action                            │
+│ • Kết quả **pipeline rule CIX** Raw → L1 → L2 → L3 → Flag → Action (*bước rule, không phải L1-persist*) │
 │ • Phiên bản phân tích, trace rule/LLM                                             │
 └─────────────────────────────────────────────────────────────────────────────────┘
                                         │

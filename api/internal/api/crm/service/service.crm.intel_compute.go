@@ -94,9 +94,10 @@ func RunCrmIntelComputeJob(ctx context.Context, job *crmmodels.CrmIntelComputeJo
 			}
 		}
 	}
-	ran, err := runCrmIntelComputePayload(ctx, job, op, svc, ownerOrgID)
-	if err != nil {
-		return err
+	ran, batchStats, execErr := runCrmIntelComputePayload(ctx, job, op, svc, ownerOrgID)
+	persistCrmCustomerIntelAfterJob(ctx, job, ownerOrgID, op, execErr, ran, batchStats)
+	if execErr != nil {
+		return execErr
 	}
 	if ran {
 		uid, _ := job.Payload["unifiedId"].(string)
@@ -106,35 +107,39 @@ func RunCrmIntelComputeJob(ctx context.Context, job *crmmodels.CrmIntelComputeJo
 }
 
 // runCrmIntelComputePayload chạy nghiệp vụ job; ran=true khi đã gọi tầng CRM thật sự (để emit crm_intel_recomputed).
-func runCrmIntelComputePayload(ctx context.Context, job *crmmodels.CrmIntelComputeJob, op string, svc *CrmCustomerService, ownerOrgID primitive.ObjectID) (ran bool, err error) {
+// batchStats != nil và multi=true: ghi một bản ghi lịch sử cho cả job (không cập nhật intelLastRunId từng khách).
+func runCrmIntelComputePayload(ctx context.Context, job *crmmodels.CrmIntelComputeJob, op string, svc *CrmCustomerService, ownerOrgID primitive.ObjectID) (ran bool, batchStats *crmIntelBatchStats, err error) {
 	switch op {
 	case crmqueue.CrmComputeOpRefresh:
 		uid, _ := job.Payload["unifiedId"].(string)
 		if uid == "" || ownerOrgID.IsZero() {
-			return false, nil
+			return false, nil, nil
 		}
-		return true, svc.RefreshMetrics(ctx, uid, ownerOrgID)
+		return true, nil, svc.RefreshMetrics(ctx, uid, ownerOrgID)
 	case crmqueue.CrmComputeOpRecalculateOne:
 		uid, _ := job.Payload["unifiedId"].(string)
 		if uid == "" || ownerOrgID.IsZero() {
-			return false, nil
+			return false, nil, nil
 		}
 		_, err := svc.RecalculateCustomerFromAllSources(ctx, uid, ownerOrgID)
-		return true, err
+		return true, nil, err
 	case crmqueue.CrmComputeOpRecalculateAll:
 		if ownerOrgID.IsZero() {
-			return false, nil
+			return false, nil, nil
 		}
 		limit := crmPayloadInt(job.Payload, "limit")
 		poolSize := crmPayloadInt(job.Payload, "poolSize")
 		if poolSize <= 0 {
 			poolSize = 12
 		}
-		_, err := svc.RecalculateAllCustomers(ctx, ownerOrgID, limit, poolSize)
-		return true, err
+		res, err := svc.RecalculateAllCustomers(ctx, ownerOrgID, limit, poolSize)
+		if err != nil {
+			return true, &crmIntelBatchStats{multi: true}, err
+		}
+		return true, &crmIntelBatchStats{multi: true, processed: res.TotalProcessed, failed: res.TotalFailed}, nil
 	case crmqueue.CrmComputeOpRecalculateBatch:
 		if ownerOrgID.IsZero() {
-			return false, nil
+			return false, nil, nil
 		}
 		offset := crmPayloadInt(job.Payload, "offset")
 		limit := crmPayloadInt(job.Payload, "limit")
@@ -142,37 +147,49 @@ func runCrmIntelComputePayload(ctx context.Context, job *crmmodels.CrmIntelCompu
 		if poolSize <= 0 {
 			poolSize = 12
 		}
-		_, err := svc.RecalculateCustomersBatch(ctx, ownerOrgID, offset, limit, poolSize, nil, nil)
-		return true, err
+		res, err := svc.RecalculateCustomersBatch(ctx, ownerOrgID, offset, limit, poolSize, nil, nil)
+		if err != nil {
+			return true, &crmIntelBatchStats{multi: true}, err
+		}
+		return true, &crmIntelBatchStats{multi: true, processed: res.TotalProcessed, failed: res.TotalFailed}, nil
 	case crmqueue.CrmComputeOpRecalculateMismatch:
 		if ownerOrgID.IsZero() {
-			return false, nil
+			return false, nil, nil
 		}
 		limit := crmPayloadInt(job.Payload, "limit")
 		poolSize := crmPayloadInt(job.Payload, "poolSize")
 		if poolSize <= 0 {
 			poolSize = 10
 		}
-		_, err := svc.RecalculateMismatchCustomers(ctx, ownerOrgID, limit, poolSize)
-		return true, err
+		res, err := svc.RecalculateMismatchCustomers(ctx, ownerOrgID, limit, poolSize)
+		if err != nil {
+			return true, &crmIntelBatchStats{multi: true}, err
+		}
+		return true, &crmIntelBatchStats{multi: true, processed: res.TotalProcessed, failed: res.TotalFailed}, nil
 	case crmqueue.CrmComputeOpRecalculateOrderCountMismatch:
 		if ownerOrgID.IsZero() {
-			return false, nil
+			return false, nil, nil
 		}
 		limit := crmPayloadInt(job.Payload, "limit")
 		poolSize := crmPayloadInt(job.Payload, "poolSize")
 		if poolSize <= 0 {
 			poolSize = 12
 		}
-		_, err := svc.RecalculateOrderCountMismatchCustomers(ctx, ownerOrgID, limit, poolSize)
-		return true, err
+		res, err := svc.RecalculateOrderCountMismatchCustomers(ctx, ownerOrgID, limit, poolSize)
+		if err != nil {
+			return true, &crmIntelBatchStats{multi: true}, err
+		}
+		return true, &crmIntelBatchStats{multi: true, processed: res.TotalProcessed, failed: res.TotalFailed}, nil
 	case crmqueue.CrmComputeOpRecalculateAllOrgs:
 		poolSize := crmPayloadInt(job.Payload, "poolSize")
 		if poolSize <= 0 {
 			poolSize = 12
 		}
-		_, _, _, err := svc.RecalculateAllCustomersForAllOrgs(ctx, poolSize)
-		return true, err
+		tp, tf, oc, err := svc.RecalculateAllCustomersForAllOrgs(ctx, poolSize)
+		if err != nil {
+			return true, &crmIntelBatchStats{multi: true}, err
+		}
+		return true, &crmIntelBatchStats{multi: true, processed: tp, failed: tf, orgCount: oc}, nil
 	case crmqueue.CrmComputeOpClassificationRefresh:
 		mode, _ := job.Payload["mode"].(string)
 		bs := crmPayloadInt(job.Payload, "batchSize")
@@ -182,8 +199,8 @@ func runCrmIntelComputePayload(ctx context.Context, job *crmmodels.CrmIntelCompu
 		log := logger.GetAppLogger()
 		n := svc.RunClassificationRefreshBatch(ctx, log, mode, bs)
 		log.WithFields(map[string]interface{}{"processed": n, "mode": mode}).Debug("[CRM] Classification refresh (worker domain crm_intel_compute)")
-		return true, nil
+		return true, &crmIntelBatchStats{multi: true, processed: n, classificationMode: mode}, nil
 	default:
-		return false, nil
+		return false, nil, nil
 	}
 }

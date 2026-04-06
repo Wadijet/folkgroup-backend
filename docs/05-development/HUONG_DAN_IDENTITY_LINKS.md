@@ -1,14 +1,14 @@
 # Hướng Dẫn Sử Dụng Identity & Links
 
-**Phiên bản:** 1.2  
+**Phiên bản:** 1.3  
 **Ngày:** 2026-03-17  
-**Cập nhật:** 2026-04-06 — mục 2.1 L1/L2; trỏ [uid-field-naming](../../docs-shared/architecture/data-contract/uid-field-naming.md) làm chuẩn tiền tố; [unified-data-contract](../../docs-shared/architecture/data-contract/unified-data-contract.md) §1.7  
+**Cập nhật:** 2026-04-07 — mục 2.1 dùng **L1-persist/L2-persist** (mirror/canonical), trỏ [KHUNG_KHUON_MODULE_INTELLIGENCE](./KHUNG_KHUON_MODULE_INTELLIGENCE.md) mục 0 để không nhầm với pipeline CIX / CRM `layer1`. **2026-04-06:** trỏ [uid-field-naming](../../docs-shared/architecture/data-contract/uid-field-naming.md); [unified-data-contract](../../docs-shared/architecture/data-contract/unified-data-contract.md) §1.7  
 **Cập nhật trước:** mục 3.6, 9.1 — CRM rà soát (lookup, filter, response)  
 **Mục đích:** Hướng dẫn developer cách dùng ID và link — ưu tiên cấu trúc mới (4 lớp), fallback logic cũ.
 
 **Tham chiếu:**
 - [identity-links-model](../../docs-shared/architecture/data-contract/identity-links-model.md) — Spec chuẩn
-- [uid-field-naming](../../docs-shared/architecture/data-contract/uid-field-naming.md) — **Bảng tiền tố (khớp `uid.go`), `links`, camelCase, event/queue/collection, L1/L2** — đọc trước khi đặt tên field mới
+- [uid-field-naming](../../docs-shared/architecture/data-contract/uid-field-naming.md) — **Bảng tiền tố (khớp `uid.go`), `links`, camelCase, event/queue/collection, mirror/canonical** — đọc trước khi đặt tên field mới
 - [LINK_SYSTEM_SPEC](../../docs-shared/ai-context/folkform/sample-data/LINK_SYSTEM_SPEC.md) — Config thực tế
 - [PHUONG_AN_TRIEN_KHAI_IDENTITY_LINKS.md](./PHUONG_AN_TRIEN_KHAI_IDENTITY_LINKS.md) — Phương án triển khai
 
@@ -37,19 +37,19 @@
 | **(3) External IDs** | `sourceIds` | "Tôi là ai ở hệ ngoài" | `{pos: "uuid", fb: "page_psid"}` |
 | **(4) Links** | `links` | "Tôi nối tới ai" | `{customer: {uid: "cust_xxx", status: "resolved"}}` |
 
-### 2.1. Hai lớp document: L1 (mirror) và L2 (canonical)
+### 2.1. Hai lớp document persistence: L1-persist (mirror) và L2-persist (canonical)
 
-**Tách bạch với bảng trên:** bốn lớp là *loại field*; L1/L2 là *bản ghi mirror hay canonical*.
+**Tách bạch với bảng trên:** bốn hàng §2 là *loại field*; **L1-persist / L2-persist** là *bản ghi mirror hay canonical* trong data contract — **không** phải bước “L1/L2/L3” của **pipeline rule CIX** hay trường BSON **`layer1`/`layer2`** CRM ([KHUNG_KHUON_MODULE_INTELLIGENCE.md](./KHUNG_KHUON_MODULE_INTELLIGENCE.md) mục 0).
 
-| | **L1 — mirror / thô** | **L2 — canonical / đã merge** |
+| | **L1-persist — mirror / thô** | **L2-persist — canonical / đã merge** |
 |---|------------------------|-------------------------------|
-| **Vai trò** | Nguồn dữ liệu đồng bộ theo kênh; tham chiếu để tạo/cập nhật L2 | Thực thể trong hệ; tương tác API / event / module khác |
+| **Vai trò** | Nguồn dữ liệu đồng bộ theo kênh; tham chiếu để tạo/cập nhật canonical | Thực thể trong hệ; tương tác API / event / module khác |
 | **`uid`** | Thường không có hoặc không dùng làm ID công khai chính | **Bắt buộc theo contract** khi entity đã canonical hóa (prefix `cust_`, `ord_`, …) |
 | **`sourceIds`** | Một nguồn hoặc field phẳng kiểu id nguồn | Gom đa nguồn sau merge hoặc 1:1 có `source` |
-| **`links`** | Có thể có **L1 → L1** (hoặc `externalRefs`) để giữ đúng quan hệ nguồn; merge dùng để suy ra L2 | **L2 → L2**, ưu tiên `uid` đích đã resolve |
-| **Nối L1↔L2** | L2 mang `source` + `sourceRecordMongoId` → `_id` L1 (1:1) hoặc resolver từ id nguồn | — |
+| **`links`** | Có thể có **mirror → mirror** (hoặc `externalRefs`) để giữ đúng quan hệ nguồn; merge dùng để suy ra canonical | **canonical → canonical**, ưu tiên `uid` đích đã resolve |
+| **Nối mirror↔canonical** | Canonical mang `source` + `sourceRecordMongoId` → `_id` mirror (1:1) hoặc resolver từ id nguồn | — |
 
-**Nguyên tắc code:** Join và payload **liên module** dùng **`uid` / `links` của L2**. Khi chỉ có id trên L1, resolve (CRM, v.v.) rồi mới dùng như contract.
+**Nguyên tắc code:** Join và payload **liên module** dùng **`uid` / `links` của canonical (L2-persist)**. Khi chỉ có id trên mirror, resolve (CRM, v.v.) rồi mới dùng như contract.
 
 **Spec đầy đủ:** [unified-data-contract.md](../../docs-shared/architecture/data-contract/unified-data-contract.md) §1.7, [identity-links-model.md](../../docs-shared/architecture/data-contract/identity-links-model.md) §1.1.
 

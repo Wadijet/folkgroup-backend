@@ -8,12 +8,29 @@ type AnalyzeSessionRequest struct {
 	Channel     string `json:"channel,omitempty"` // mặc định messenger — đồng bộ payload cix.analysis_requested
 }
 
+// CixRawFactsDTO tóm tắt facts đầu vào đã lưu lớp A.
+type CixRawFactsDTO struct {
+	TurnCount  int   `json:"turnCount"`
+	FirstMsgAt int64 `json:"firstMsgAt,omitempty"`
+	LastMsgAt  int64 `json:"lastMsgAt,omitempty"`
+}
+
 // CixAnalysisResponse response kết quả phân tích — theo schema vision.
 type CixAnalysisResponse struct {
 	ID                 string       `json:"id,omitempty"`
 	SessionUid         string       `json:"sessionUid"`
 	CustomerUid        string       `json:"customerUid,omitempty"`
 	TraceID              string   `json:"traceId,omitempty"`
+	CorrelationID        string   `json:"correlationId,omitempty"`
+	Status               string   `json:"status,omitempty"`
+	ComputedAt           int64    `json:"computedAt,omitempty"`
+	FailedAt             int64    `json:"failedAt,omitempty"`
+	ErrorCode            string   `json:"errorCode,omitempty"`
+	ErrorMessage         string   `json:"errorMessage,omitempty"`
+	ParentJobID          string   `json:"parentJobId,omitempty"`
+	CausalOrderingAt     int64    `json:"causalOrderingAt,omitempty"`
+	CixIntelSequence     int64    `json:"cixIntelSequence,omitempty"`
+	RawFacts             CixRawFactsDTO `json:"rawFacts,omitempty"`
 	PipelineRuleTraceIDs []string `json:"pipelineRuleTraceIds,omitempty"`
 	Layer1               CixLayer1DTO `json:"layer1"`
 	Layer2             CixLayer2DTO `json:"layer2"`

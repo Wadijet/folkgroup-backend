@@ -3,6 +3,8 @@
 **Ngày:** 2026-03-18  
 **Tham chiếu:** [05 - cix-contextual-conversation-intelligence.md](../../docs-shared/architecture/vision/05%20-%20cix-contextual-conversation-intelligence.md), [THIET_KE_CIX_COLLECTIONS.md](./THIET_KE_CIX_COLLECTIONS.md), [rule-intelligence.md](../02-architecture/core/rule-intelligence.md)
 
+**Thuật ngữ:** Chuỗi **Raw → L1 → L2 → L3** trong tài liệu CIX là **pipeline rule** (bước `RULE_CIX_LAYER*` trong code), **không** phải **mirror/canonical (L1-persist/L2-persist)** trong data contract — xem [KHUNG_KHUON_MODULE_INTELLIGENCE.md](./KHUNG_KHUON_MODULE_INTELLIGENCE.md) mục 0.
+
 ---
 
 ## 0. CIO Hiện Tại (Đã Có — CIX Dựa Trên)
@@ -25,7 +27,7 @@ CIO đã có event model đầy đủ. CIX chỉ cần tích hợp.
 
 | Collection | Vai trò |
 |------------|---------|
-| `cix_analysis_results` | Kết quả phân tích L1/L2/L3/Flags/Actions |
+| `cix_analysis_results` | Kết quả phân tích **pipeline rule CIX** (bước L1/L2/L3) / Flags / Actions |
 | `cix_pending_analysis` | Hàng đợi — CIO event → enqueue → worker |
 | `cix_conversations` | (Phase 4+) Merged context, versioning — xem [THIET_KE_CIX_COLLECTIONS.md](./THIET_KE_CIX_COLLECTIONS.md) |
 
@@ -33,7 +35,7 @@ CIO đã có event model đầy đủ. CIX chỉ cần tích hợp.
 
 ## 1. Tổng Quan
 
-**CIX = Contextual Conversation Intelligence** — "Người phiên dịch có ngữ cảnh". CIX phân tích hội thoại theo pipeline **Raw → L1 → L2 → L3 → Flag → Action**, đối chiếu với Customer Profile từ Customer Intelligence.
+**CIX = Contextual Conversation Intelligence** — "Người phiên dịch có ngữ cảnh". CIX phân tích hội thoại theo **pipeline rule CIX** **Raw → L1 → L2 → L3 → Flag → Action** (*L1/L2/L3 = bước rule engine, không phải L1-persist/L2-persist*), đối chiếu với Customer Profile từ Customer Intelligence.
 
 | Phase | Tên | Thời gian | Deliverable |
 |-------|-----|-----------|-------------|
@@ -52,7 +54,7 @@ CIO đã có event model đầy đủ. CIX chỉ cần tích hợp.
 | Vai trò | Mô tả |
 |---------|-------|
 | **Input** | Raw conversation (CIO), customer context (CRM) |
-| **Xử lý** | Rule Engine: Raw → L1 → L2 → L3 → Flag → Action |
+| **Xử lý** | Rule Engine — pipeline rule CIX: Raw → L1 → L2 → L3 → Flag → Action |
 | **Output** | cix_analysis_results, cix_signal_update (CRM), payload (Decision) |
 
 **Nguyên tắc:** CIX **không thực thi** — chỉ đưa ra gợi ý cho Decision Engine.
@@ -73,10 +75,10 @@ cix_pending_analysis
 AnalyzeSession:
   1. Đọc transcript từ fb_message_items (conversationId)
   2. Đọc customer context từ crm_customers (valueTier, journeyStage)
-  3. Rule Engine: Raw → L1 → L2 → L3 → Flag → Action
+  3. Rule Engine (pipeline rule CIX): Raw → L1 → L2 → L3 → Flag → Action
   4. Lưu cix_analysis_results
     │
-    ├─► cix_signal_update → CRM (làm giàu Layer 3)
+    ├─► cix_signal_update → CRM (làm giàu **layer3** metrics CRM / CIX signal — không nhầm L1-persist)
     └─► CIX payload → Decision Engine
 ```
 
@@ -101,7 +103,7 @@ AnalyzeSession:
 |----------|------------|---------|
 | Router | ✅ Có | `cix/router/routes.go` |
 | Handler | ✅ Có | `handler.cix.analysis.go` — POST /cix/analyze |
-| Service | ✅ Có | `AnalyzeSession` — Rule Engine pipeline Raw→L1→L2→L3→Flag→Action |
+| Service | ✅ Có | `AnalyzeSession` — **pipeline rule CIX** Raw→L1→L2→L3→Flag→Action (*bước rule*) |
 | Models | ✅ Có | `CixAnalysisResult`, CixLayer1/2/3, CixFlag |
 | Collection | ✅ Có | `cix_analysis_results`, `cix_pending_analysis` |
 | Rule Engine | ✅ Có | RULE_CIX_LAYER1_STAGE, LAYER2_STATE, LAYER2_ADJUST, LAYER3_SIGNALS, FLAGS, ACTIONS |
@@ -167,7 +169,7 @@ AnalyzeSession:
 
 ## 5. Phase 3: Rule Engine Pipeline (2–3 tuần)
 
-**Mục tiêu:** Chạy pipeline Raw → L1 → L2 → L3 → Flag → Action qua Rule Engine.
+**Mục tiêu:** Chạy **pipeline rule CIX** Raw → L1 → L2 → L3 → Flag → Action qua Rule Engine.
 
 ### 5.1 Layers & Rules Cần Seed
 

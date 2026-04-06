@@ -55,15 +55,37 @@ type CrmCustomerProfileResponse struct {
 	OwnerOrganizationId      primitive.ObjectID `json:"ownerOrganizationId,omitempty"`
 }
 
+// CrmCustomerIntelSummary — pointer lịch sử intel trên document khách (đọc nhanh; chi tiết từ GET …/intel-runs).
+type CrmCustomerIntelSummary struct {
+	LastRunId      string `json:"lastRunId,omitempty"`      // hex _id crm_customer_intel_runs
+	LastComputedAt int64  `json:"lastComputedAt,omitempty"` // unix ms — khớp CrmCustomerIntelRun.computedAt
+	Sequence       int64  `json:"sequence,omitempty"`       // intelSequence monotonic trên khách
+}
+
+// CrmCustomerIntelRunListItem — một dòng lịch sử intel (API list).
+type CrmCustomerIntelRunListItem struct {
+	Id                    string                 `json:"id"`
+	Operation             string                 `json:"operation"`
+	Status                string                 `json:"status"`
+	ComputedAt            int64                  `json:"computedAt"`
+	CausalOrderingAt      int64                  `json:"causalOrderingAt,omitempty"`
+	IntelSequence         int64                  `json:"intelSequence,omitempty"`
+	ErrorMessage          string                 `json:"errorMessage,omitempty"`
+	ParentIntelJobId      string                 `json:"parentIntelJobId,omitempty"`
+	ParentDecisionEventId string                 `json:"parentDecisionEventId,omitempty"`
+	MetricsSummary        map[string]interface{} `json:"metricsSummary,omitempty"`
+}
+
 // CrmCustomerFullProfileResponse trả về toàn bộ thông tin khách: profile + orders + conversations + notes + lịch sử hoạt động.
 // currentMetrics: số liệu hiện tại (cùng cấu trúc với metadata.metricsSnapshot) — góc nhìn now song song với lịch sử.
 type CrmCustomerFullProfileResponse struct {
-	Profile         CrmCustomerProfileResponse  `json:"profile"`
-	CurrentMetrics map[string]interface{}       `json:"currentMetrics,omitempty"` // Số liệu hiện tại — so sánh với metricsSnapshot (lịch sử) trong activityHistory
-	RecentOrders   []CrmOrderSummary           `json:"recentOrders"`
-	Conversations  []CrmConversationSummary    `json:"conversations"`
-	Notes          []CrmNoteSummary            `json:"notes"`
-	ActivityHistory []CrmActivitySummary       `json:"activityHistory"`
+	Profile          CrmCustomerProfileResponse  `json:"profile"`
+	CurrentMetrics  map[string]interface{}       `json:"currentMetrics,omitempty"` // Số liệu hiện tại — so sánh với metricsSnapshot (lịch sử) trong activityHistory
+	IntelSummary    *CrmCustomerIntelSummary     `json:"intelSummary,omitempty"`   // Tóm tắt pointer intel (crm_customer_intel_runs)
+	RecentOrders    []CrmOrderSummary            `json:"recentOrders"`
+	Conversations   []CrmConversationSummary     `json:"conversations"`
+	Notes           []CrmNoteSummary             `json:"notes"`
+	ActivityHistory []CrmActivitySummary         `json:"activityHistory"`
 }
 
 // CrmOrderSummary tóm tắt đơn hàng.

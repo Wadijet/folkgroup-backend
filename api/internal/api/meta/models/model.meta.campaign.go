@@ -30,4 +30,11 @@ type MetaCampaign struct {
 
 	// CurrentMetrics: trạng thái metrics hiện tại (raw/layer1/layer2/layer3). Cập nhật khi insight sync hoặc order mới.
 	CurrentMetrics map[string]interface{} `json:"currentMetrics,omitempty" bson:"currentMetrics,omitempty"`
+
+	// IntelLastRunId — _id document ads_meta_intel_runs mới nhất (lớp A) sau recompute_one thành công có campaign.
+	IntelLastRunId primitive.ObjectID `json:"intelLastRunId,omitempty" bson:"intelLastRunId,omitempty"`
+	// IntelLastComputedAt — unix ms khi ghi run thành công gần nhất.
+	IntelLastComputedAt int64 `json:"intelLastComputedAt,omitempty" bson:"intelLastComputedAt,omitempty"`
+	// IntelSequence — $inc mỗi lần ghi run thành công; tie-break sort lịch sử với causalOrderingAt.
+	IntelSequence int64 `json:"intelSequence,omitempty" bson:"intelSequence,omitempty"`
 }

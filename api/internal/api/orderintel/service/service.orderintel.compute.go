@@ -7,6 +7,39 @@ import (
 	orderintelmodels "meta_commerce/internal/api/orderintel/models"
 )
 
+// intelStatusCodeForView — mã status POS thống nhất cho raw và map stage (ưu tiên posData nếu có).
+func intelStatusCodeForView(v *intelOrderView) int {
+	if v == nil {
+		return 0
+	}
+	status := v.Status
+	if pd := mapFromIface(v.PosData); pd != nil {
+		if s, ok := intFromMap(pd, "status"); ok {
+			status = s
+		}
+	}
+	return status
+}
+
+// BuildOrderIntelRaw gom facts đầu vào pipeline (lớp raw) tại thời điểm evaluatedMs.
+func BuildOrderIntelRaw(v *intelOrderView, evaluatedMs int64) orderintelmodels.OrderIntelRaw {
+	if v == nil {
+		return orderintelmodels.OrderIntelRaw{EvaluatedAtMs: evaluatedMs}
+	}
+	status := intelStatusCodeForView(v)
+	pd := mapFromIface(v.PosData)
+	return orderintelmodels.OrderIntelRaw{
+		Status:                status,
+		InsertedAt:            v.InsertedAt,
+		PosUpdatedAt:          v.PosUpdatedAt,
+		TotalAfterDiscountVND: totalAfterDiscountVNDFromView(v),
+		OrderSources:          orderSourcesFromPosData(pd),
+		AdID:                  stringFieldFromPosData(pd, "ad_id"),
+		ConversationID:        stringFieldFromPosData(pd, "conversation_id"),
+		EvaluatedAtMs:         evaluatedMs,
+	}
+}
+
 // ComputeSnapshot tính snapshot intelligence (không ghi DB).
 // orderUid = canonical ord_*; có thể rỗng — persistence dùng khóa orderId + org.
 func ComputeSnapshot(v *intelOrderView, nowMs int64) *orderintelmodels.OrderIntelligenceSnapshot {
@@ -17,12 +50,7 @@ func ComputeSnapshot(v *intelOrderView, nowMs int64) *orderintelmodels.OrderInte
 	if uid == "" && v.OrderId <= 0 && v.ID.IsZero() {
 		return nil
 	}
-	status := v.Status
-	if pd := mapFromIface(v.PosData); pd != nil {
-		if s, ok := intFromMap(pd, "status"); ok {
-			status = s
-		}
-	}
+	status := intelStatusCodeForView(v)
 	l1 := orderintelmodels.OrderLayer1{Stage: mapStatusToStage(status)}
 	total := totalAfterDiscountVNDFromView(v)
 	l2 := orderintelmodels.OrderLayer2{

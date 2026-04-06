@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"sort"
 
-	adsmodels "meta_commerce/internal/api/ads/models"
-	adssvc "meta_commerce/internal/api/ads/service"
+	adsmodels "meta_commerce/internal/api/ads_meta/models"
+	adssvc "meta_commerce/internal/api/ads_meta/service"
 	aidecisionsvc "meta_commerce/internal/api/aidecision/service"
 	"meta_commerce/internal/approval"
 	"meta_commerce/internal/global"

@@ -69,8 +69,9 @@ func EmitDataChanged(ctx context.Context, e DataChangeEvent) {
 	}
 }
 
-// GetOwnerOrganizationIDFromDocument lấy ownerOrganizationId từ document (dùng reflection).
-// Trả về zero ObjectID nếu document không có field OwnerOrganizationID.
+// GetOwnerOrganizationIDFromDocument lấy ownerOrganizationId từ document (struct hoặc map/bson.M).
+// Consumer datachanged load lại bản ghi từ Mongo dạng bson.M — phải đọc key ownerOrganizationId, không chỉ reflection struct.
+// Trả về zero ObjectID nếu không có org hợp lệ.
 func GetOwnerOrganizationIDFromDocument(doc interface{}) primitive.ObjectID {
 	if doc == nil {
 		return primitive.NilObjectID
@@ -81,6 +82,17 @@ func GetOwnerOrganizationIDFromDocument(doc interface{}) primitive.ObjectID {
 			return primitive.NilObjectID
 		}
 		val = val.Elem()
+	}
+	if val.Kind() == reflect.Map && val.Type().Key().Kind() == reflect.String {
+		for _, key := range []string{"ownerOrganizationId", "OwnerOrganizationID"} {
+			mv := val.MapIndex(reflect.ValueOf(key))
+			if mv.IsValid() && mv.CanInterface() {
+				if oid := parseOwnerOrganizationIDFromInterface(mv.Interface()); !oid.IsZero() {
+					return oid
+				}
+			}
+		}
+		return primitive.NilObjectID
 	}
 	if val.Kind() != reflect.Struct {
 		return primitive.NilObjectID
@@ -107,6 +119,37 @@ func GetOwnerOrganizationIDFromDocument(doc interface{}) primitive.ObjectID {
 			return obj
 		}
 		return primitive.NilObjectID
+	default:
+		return primitive.NilObjectID
+	}
+}
+
+// parseOwnerOrganizationIDFromInterface chuẩn hoá giá trị ownerOrganizationId từ BSON (ObjectID, con trỏ, chuỗi hex).
+func parseOwnerOrganizationIDFromInterface(v interface{}) primitive.ObjectID {
+	if v == nil {
+		return primitive.NilObjectID
+	}
+	switch t := v.(type) {
+	case primitive.ObjectID:
+		if t.IsZero() {
+			return primitive.NilObjectID
+		}
+		return t
+	case *primitive.ObjectID:
+		if t == nil || t.IsZero() {
+			return primitive.NilObjectID
+		}
+		return *t
+	case string:
+		s := strings.TrimSpace(t)
+		if s == "" {
+			return primitive.NilObjectID
+		}
+		oid, err := primitive.ObjectIDFromHex(s)
+		if err != nil {
+			return primitive.NilObjectID
+		}
+		return oid
 	default:
 		return primitive.NilObjectID
 	}
@@ -143,7 +186,7 @@ func GetPeriodTimestamp(doc interface{}, collectionName string) int64 {
 			ts = ts / 1000
 		}
 		return ts
-	case "crm_activity_history":
+	case "customer_activity_history", "crm_activity_history": // crm_* — tên collection cũ
 		ts := GetInt64Field(doc, "ActivityAt")
 		if ts == 0 {
 			ts = GetInt64Field(doc, "CreatedAt")

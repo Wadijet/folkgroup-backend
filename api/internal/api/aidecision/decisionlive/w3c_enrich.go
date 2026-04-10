@@ -7,9 +7,9 @@ import (
 	"meta_commerce/internal/traceutil"
 )
 
-// enrichW3CTraceContext điền w3cTraceId (32 hex) + spanId (16 hex) theo chuẩn W3C / OpenTelemetry.
+// enrichW3CTraceContext — Điền w3cTraceId (32 hex) + spanId (16 hex) theo chuẩn W3C / OpenTelemetry.
 // routeTraceKey là khóa luồng trong hệ (vd. trace_xxx hoặc đã là 32 hex) — dùng để neo ổn định tới trace-id chuẩn.
-// parentSpanId chỉ gán khi caller đã set trên ev (phân nhánh).
+// parentSpanId: khi live bật, traceStore.append gán = spanId mốc trước cùng trace trước khi gọi hàm này; caller cũng có thể set sẵn (phân nhánh).
 func enrichW3CTraceContext(ev *DecisionLiveEvent, routeTraceKey string) {
 	if ev == nil {
 		return

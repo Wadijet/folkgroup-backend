@@ -30,9 +30,9 @@ type CrmPendingMergeService struct {
 
 // NewCrmPendingMergeService tạo service CRUD cho crm_pending_merge.
 func NewCrmPendingMergeService() (*CrmPendingMergeService, error) {
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CrmPendingMerge)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CustomerPendingMerge)
 	if !ok {
-		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.CrmPendingMerge, common.ErrNotFound)
+		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.CustomerPendingMerge, common.ErrNotFound)
 	}
 	return &CrmPendingMergeService{
 		BaseServiceMongoImpl: basesvc.NewBaseServiceMongo[crmmodels.CrmPendingMerge](coll),
@@ -41,10 +41,11 @@ func NewCrmPendingMergeService() (*CrmPendingMergeService, error) {
 
 // EnqueueCrmPendingMerge thêm hoặc cập nhật job trong crm_pending_merge.
 // Coalesce + debounce: env CRM_MERGE_QUEUE_COALESCE_* (fallback CRM_INGEST_COALESCE_*).
-func EnqueueCrmPendingMerge(ctx context.Context, collectionName, operation string, document interface{}, prevDoc interface{}, ownerOrgID primitive.ObjectID) error {
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CrmPendingMerge)
+// traceID / correlationID từ consumer AID (datachanged); rỗng nếu flush defer — không xóa trace đã có khi cập nhật coalesce.
+func EnqueueCrmPendingMerge(ctx context.Context, collectionName, operation string, document interface{}, prevDoc interface{}, ownerOrgID primitive.ObjectID, traceID, correlationID string) error {
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CustomerPendingMerge)
 	if !ok {
-		return fmt.Errorf("không tìm thấy collection %s", global.MongoDB_ColNames.CrmPendingMerge)
+		return fmt.Errorf("không tìm thấy collection %s", global.MongoDB_ColNames.CustomerPendingMerge)
 	}
 	docMap, err := documentToBsonM(document)
 	if err != nil {
@@ -71,30 +72,36 @@ func EnqueueCrmPendingMerge(ctx context.Context, collectionName, operation strin
 		if inboxCID != "" {
 			coalesceKey := buildCoalesceKey(ownerOrgID, inboxCID)
 			debounceSec := crmMergeQueueCoalesceDebounceSec()
-			return upsertCoalescedCrmPendingMerge(ctx, coll, collectionName, operation, docMap, ownerOrgID, coalesceKey, inboxCID, debounceSec, now, updatedAtNew, updatedAtOld, updatedAtDeltaMs)
+			return upsertCoalescedCrmPendingMerge(ctx, coll, collectionName, operation, docMap, ownerOrgID, coalesceKey, inboxCID, debounceSec, now, updatedAtNew, updatedAtOld, updatedAtDeltaMs, traceID, correlationID)
 		}
 	}
 
-	filter := bson.M{"businessKey": businessKey}
-	update := bson.M{
-		"$set": bson.M{
-			"collectionName":       collectionName,
-			"operation":            operation,
-			"document":             docMap,
-			"ownerOrganizationId":  ownerOrgID,
-			"createdAt":            now,
-			"processedAt":          nil,
-			"processError":         "",
-			"updatedAtNew":         updatedAtNew,
-			"updatedAtOld":         updatedAtOld,
-			"updatedAtDeltaMs":     updatedAtDeltaMs,
-			"sourceCollections":    []string{collectionName},
-			"sourceSnapshots":      []crmmodels.CrmPendingMergeSnapshot{},
-			"coalesceKey":          "",
-			"inboxCustomerId":      "",
-			"mergeNotBefore":       int64(0),
-		},
+	setNonCoalesced := bson.M{
+		"collectionName":      collectionName,
+		"operation":           operation,
+		"document":            docMap,
+		"ownerOrganizationId": ownerOrgID,
+		"createdAt":           now,
+		"processedAt":         nil,
+		"processError":        "",
+		"updatedAtNew":        updatedAtNew,
+		"updatedAtOld":        updatedAtOld,
+		"updatedAtDeltaMs":    updatedAtDeltaMs,
+		"sourceCollections":   []string{collectionName},
+		"sourceSnapshots":     []crmmodels.CrmPendingMergeSnapshot{},
+		"coalesceKey":         "",
+		"inboxCustomerId":     "",
+		"mergeNotBefore":      int64(0),
 	}
+	if t := strings.TrimSpace(traceID); t != "" {
+		setNonCoalesced["traceId"] = t
+	}
+	if c := strings.TrimSpace(correlationID); c != "" {
+		setNonCoalesced["correlationId"] = c
+	}
+
+	filter := bson.M{"businessKey": businessKey}
+	update := bson.M{"$set": setNonCoalesced}
 	opts := mongoopts.Update().SetUpsert(true)
 	_, err = coll.UpdateOne(ctx, filter, update, opts)
 	return err
@@ -110,7 +117,7 @@ func extractEntityPartFromDocMap(collectionName string, docMap bson.M) (part str
 		}
 	case global.MongoDB_ColNames.FbConvesations:
 		part, _ = getStringFromMap(docMap, "conversationId")
-	case global.MongoDB_ColNames.CrmNotes:
+	case global.MongoDB_ColNames.CustomerNotes:
 		if v, ok := docMap["_id"]; ok {
 			if oid, ok := v.(primitive.ObjectID); ok {
 				part = oid.Hex()
@@ -202,7 +209,7 @@ func extractInboxCustomerIDFromDocMap(collectionName string, docMap bson.M) stri
 			return ""
 		}
 		return strings.TrimSpace(ExtractConversationCustomerId(&d))
-	case global.MongoDB_ColNames.CrmNotes:
+	case global.MongoDB_ColNames.CustomerNotes:
 		var d crmmodels.CrmNote
 		if err := bsonMapToStructPending(docMap, &d); err != nil {
 			return ""
@@ -224,7 +231,7 @@ func bsonMapToStructPending(m bson.M, out interface{}) error {
 	return bson.Unmarshal(data, out)
 }
 
-func upsertCoalescedCrmPendingMerge(ctx context.Context, coll *mongo.Collection, collectionName, operation string, docMap bson.M, ownerOrgID primitive.ObjectID, coalesceKey, inboxCustomerID string, debounceSec int, now, updatedAtNew, updatedAtOld, updatedAtDeltaMs int64) error {
+func upsertCoalescedCrmPendingMerge(ctx context.Context, coll *mongo.Collection, collectionName, operation string, docMap bson.M, ownerOrgID primitive.ObjectID, coalesceKey, inboxCustomerID string, debounceSec int, now, updatedAtNew, updatedAtOld, updatedAtDeltaMs int64, traceID, correlationID string) error {
 	entityPart, ok := extractEntityPartFromDocMap(collectionName, docMap)
 	if !ok {
 		return fmt.Errorf("không trích entity part cho snapshot coalesce")
@@ -268,6 +275,8 @@ func upsertCoalescedCrmPendingMerge(ctx context.Context, coll *mongo.Collection,
 			SourceSnapshots:     []crmmodels.CrmPendingMergeSnapshot{snap},
 			InboxCustomerId:     inboxCustomerID,
 			MergeNotBefore:      mergeNotBefore,
+			TraceID:             strings.TrimSpace(traceID),
+			CorrelationID:       strings.TrimSpace(correlationID),
 		}
 		_, insErr := coll.InsertOne(ctx, job)
 		return insErr
@@ -281,25 +290,40 @@ func upsertCoalescedCrmPendingMerge(ctx context.Context, coll *mongo.Collection,
 		mb = now + int64(debounceSec)
 	}
 
-	_, err = coll.UpdateOne(ctx, bson.M{"_id": cur.ID}, bson.M{
-		"$set": bson.M{
-			"collectionName":      collectionName,
-			"operation":           operation,
-			"document":            cloneBsonMDoc(docMap),
-			"ownerOrganizationId": ownerOrgID,
-			"createdAt":           now,
-			"processedAt":         nil,
-			"processError":        "",
-			"updatedAtNew":        updatedAtNew,
-			"updatedAtOld":        updatedAtOld,
-			"updatedAtDeltaMs":    updatedAtDeltaMs,
-			"sourceSnapshots":     mergedSnaps,
-			"sourceCollections":   srcCols,
-			"inboxCustomerId":     inboxCustomerID,
-			"mergeNotBefore":      mb,
-			"businessKey":         coalesceKey,
-		},
-	})
+	tid := strings.TrimSpace(traceID)
+	if tid == "" {
+		tid = strings.TrimSpace(cur.TraceID)
+	}
+	cid := strings.TrimSpace(correlationID)
+	if cid == "" {
+		cid = strings.TrimSpace(cur.CorrelationID)
+	}
+
+	setCoalesced := bson.M{
+		"collectionName":      collectionName,
+		"operation":           operation,
+		"document":            cloneBsonMDoc(docMap),
+		"ownerOrganizationId": ownerOrgID,
+		"createdAt":           now,
+		"processedAt":         nil,
+		"processError":        "",
+		"updatedAtNew":        updatedAtNew,
+		"updatedAtOld":        updatedAtOld,
+		"updatedAtDeltaMs":    updatedAtDeltaMs,
+		"sourceSnapshots":     mergedSnaps,
+		"sourceCollections":   srcCols,
+		"inboxCustomerId":     inboxCustomerID,
+		"mergeNotBefore":      mb,
+		"businessKey":         coalesceKey,
+	}
+	if tid != "" {
+		setCoalesced["traceId"] = tid
+	}
+	if cid != "" {
+		setCoalesced["correlationId"] = cid
+	}
+
+	_, err = coll.UpdateOne(ctx, bson.M{"_id": cur.ID}, bson.M{"$set": setCoalesced})
 	return err
 }
 
@@ -384,9 +408,9 @@ func documentToBsonM(doc interface{}) (bson.M, error) {
 
 // CountUnprocessedCrmPendingMerge đếm job chưa xử lý (đã đến hạn debounce).
 func CountUnprocessedCrmPendingMerge(ctx context.Context) (int64, error) {
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CrmPendingMerge)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CustomerPendingMerge)
 	if !ok {
-		return 0, fmt.Errorf("không tìm thấy collection %s", global.MongoDB_ColNames.CrmPendingMerge)
+		return 0, fmt.Errorf("không tìm thấy collection %s", global.MongoDB_ColNames.CustomerPendingMerge)
 	}
 	return coll.CountDocuments(ctx, crmPendingMergeDueFilter())
 }
@@ -396,9 +420,9 @@ func GetUnprocessedCrmPendingMerge(ctx context.Context, limit int) ([]crmmodels.
 	if limit <= 0 {
 		limit = 50
 	}
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CrmPendingMerge)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CustomerPendingMerge)
 	if !ok {
-		return nil, fmt.Errorf("không tìm thấy collection %s", global.MongoDB_ColNames.CrmPendingMerge)
+		return nil, fmt.Errorf("không tìm thấy collection %s", global.MongoDB_ColNames.CustomerPendingMerge)
 	}
 	filter := crmPendingMergeDueFilter()
 	opts := mongoopts.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}).SetLimit(int64(limit))
@@ -419,9 +443,9 @@ func GetUnprocessedCrmPendingMerge(ctx context.Context, limit int) ([]crmmodels.
 
 // SetCrmPendingMergeProcessed đánh dấu job đã xử lý.
 func SetCrmPendingMergeProcessed(ctx context.Context, id primitive.ObjectID, processErr string) error {
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CrmPendingMerge)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CustomerPendingMerge)
 	if !ok {
-		return fmt.Errorf("không tìm thấy collection %s", global.MongoDB_ColNames.CrmPendingMerge)
+		return fmt.Errorf("không tìm thấy collection %s", global.MongoDB_ColNames.CustomerPendingMerge)
 	}
 	now := time.Now().Unix()
 	update := bson.M{"$set": bson.M{"processedAt": now, "processError": processErr}}

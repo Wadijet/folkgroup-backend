@@ -24,13 +24,13 @@ type yamlRoot struct {
 }
 
 type collectionOverrideYAML struct {
-	EmitToDecisionQueue  *bool `yaml:"emit_to_decision_queue"`
-	CrmPendingMerge      *bool `yaml:"crm_pending_merge"`
-	ReportTouch          *bool `yaml:"report_touch"`
-	AdsProfile           *bool `yaml:"ads_profile"`
-	CixIntel             *bool `yaml:"cix_intel"`
-	OrderIntel           *bool `yaml:"order_intel"`
-	CrmIntelRefreshDefer *bool `yaml:"crm_intel_refresh_defer"`
+	EmitToDecisionQueue         *bool `yaml:"emit_to_decision_queue"`
+	CustomerPendingMerge      *bool `yaml:"customer_pending_merge"`
+	ReportTouch               *bool `yaml:"report_touch"`
+	AdsProfile                *bool `yaml:"ads_profile"`
+	CixIntel                  *bool `yaml:"cix_intel"`
+	OrderIntel                *bool `yaml:"order_intel"`
+	CustomerIntelRefreshDefer *bool `yaml:"customer_intel_refresh_defer"`
 }
 
 var (
@@ -77,8 +77,8 @@ func applyCollectionOverrides(d routecontract.Decision) routecontract.Decision {
 	if o.EmitToDecisionQueue != nil {
 		d.EmitToDecisionQueue = *o.EmitToDecisionQueue
 	}
-	if o.CrmPendingMerge != nil {
-		d.CrmPendingMergeCollection = *o.CrmPendingMerge
+	if o.CustomerPendingMerge != nil {
+		d.CustomerPendingMergeCollection = *o.CustomerPendingMerge
 	}
 	if o.ReportTouch != nil {
 		d.ReportTouchPipeline = *o.ReportTouch
@@ -92,8 +92,8 @@ func applyCollectionOverrides(d routecontract.Decision) routecontract.Decision {
 	if o.OrderIntel != nil {
 		d.OrderIntelPipeline = *o.OrderIntel
 	}
-	if o.CrmIntelRefreshDefer != nil {
-		d.CrmIntelRefreshDeferPipeline = *o.CrmIntelRefreshDefer
+	if o.CustomerIntelRefreshDefer != nil {
+		d.CustomerIntelRefreshDeferPipeline = *o.CustomerIntelRefreshDefer
 	}
 	return d
 }

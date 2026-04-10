@@ -7,9 +7,10 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// MaxEventsPerOrgFeed số sự kiện replay tối đa cho màn hình live theo org (ring buffer).
+// MaxEventsPerOrgFeed — Giới hạn ring org-live trong RAM (Publish bước 6b); GET org có thể đọc Mongo qua OrgTimelineForAPI khi persist bật.
 const MaxEventsPerOrgFeed = 512
 
+// orgFeedStore — Ring gộp mọi trace trong một org (nguồn cho OrgTimeline RAM và fallback OrgTimelineForAPI).
 type orgFeedStore struct {
 	mu   sync.RWMutex
 	seq  sync.Map // org hex -> *int64
@@ -24,7 +25,7 @@ func orgFeedStoreKey(ownerOrgID primitive.ObjectID) string {
 	return ownerOrgID.Hex()
 }
 
-// appendOrg gắn FeedSeq, đẩy vào ring theo org; trả bản đã ghi.
+// appendOrg gắn FeedSeq, đẩy vào ring theo org; trả bản đã ghi (Publish bước 6b — trước broadcast org-live).
 func (s *orgFeedStore) appendOrg(ownerOrgID primitive.ObjectID, ev DecisionLiveEvent) DecisionLiveEvent {
 	if ownerOrgID.IsZero() {
 		return ev
@@ -52,6 +53,7 @@ func (s *orgFeedStore) appendOrg(ownerOrgID primitive.ObjectID, ev DecisionLiveE
 	return ev
 }
 
+// snapshotOrg — Bản sao buffer org (OrgTimeline bước 1; OrgTimelineForAPI dùng khi không đọc Mongo).
 func (s *orgFeedStore) snapshotOrg(ownerOrgID primitive.ObjectID) []DecisionLiveEvent {
 	if ownerOrgID.IsZero() {
 		return []DecisionLiveEvent{}

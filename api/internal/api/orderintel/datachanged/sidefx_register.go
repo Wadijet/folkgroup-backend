@@ -2,6 +2,8 @@
 package datachanged
 
 import (
+	"strings"
+
 	"meta_commerce/internal/api/aidecision/datachangedsidefx"
 	"meta_commerce/internal/api/aidecision/eventintake"
 	"meta_commerce/internal/global"
@@ -17,8 +19,12 @@ func init() {
 			return nil
 		}
 		if ac.OrderIntelDefer > 0 {
-			eventintake.ScheduleDeferredSideEffect(eventintake.DeferredKindOrderIntelCompute, ac.OrgHex, ac.Src, ac.IDHex, ac.OrderIntelDefer)
-			return nil
+			var tid, cid string
+			if ac.Evt != nil {
+				tid = strings.TrimSpace(ac.Evt.TraceID)
+				cid = strings.TrimSpace(ac.Evt.CorrelationID)
+			}
+			return eventintake.ScheduleDeferredSideEffect(ac.Ctx, eventintake.DeferredKindOrderIntelCompute, ac.OrgHex, ac.Src, ac.IDHex, ac.OrderIntelDefer, tid, cid)
 		}
 		if err := EnqueueIntelligenceFromParentEvent(ac.Ctx, ac.Evt); err != nil {
 			logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{

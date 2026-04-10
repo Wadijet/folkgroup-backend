@@ -5,8 +5,10 @@ package worker
 
 import (
 	"context"
+	"strings"
 	"time"
 
+	"meta_commerce/internal/api/aidecision/decisionlive"
 	"meta_commerce/internal/api/aidecision/eventtypes"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 	aidecisionsvc "meta_commerce/internal/api/aidecision/service"
@@ -122,6 +124,14 @@ func processCustomerContextRequested(ctx context.Context, crmSvc *crmvc.CrmCusto
 		return nil
 	}
 
+	tid := strings.TrimSpace(evt.TraceID)
+	if tid != "" {
+		decisionlive.PublishIntelDomainMilestone(ownerOrgID, tid, evt.CorrelationID, decisionlive.IntelDomainCrmContext, decisionlive.IntelMilestoneStart,
+			"Worker CRM: đang tải ngữ cảnh khách hàng.",
+			[]string{"Đã nhận customer.context_requested — tra cứu hồ sơ CRM để gửi customer.context_ready."},
+			map[string]string{"eventId": evt.EventID, "customerId": custID})
+	}
+
 	// Tìm customer theo customerId (fb, pos, zalo, unifiedId, uid)
 	cust, err := crmSvc.FindOne(ctx, bson.M{
 		"ownerOrganizationId": ownerOrgID,
@@ -136,13 +146,30 @@ func processCustomerContextRequested(ctx context.Context, crmSvc *crmvc.CrmCusto
 	}, nil)
 	if err != nil {
 		// Không tìm thấy — emit context rỗng để AI Decision không chờ
-		_ = emitCustomerContextReady(ctx, decSvc, evt, convID, custID, channel, ownerOrgID, map[string]interface{}{"found": false})
+		if errEmit := emitCustomerContextReady(ctx, decSvc, evt, convID, custID, channel, ownerOrgID, map[string]interface{}{"found": false}); errEmit != nil {
+			return errEmit
+		}
+		if tid != "" {
+			decisionlive.PublishIntelDomainMilestone(ownerOrgID, tid, evt.CorrelationID, decisionlive.IntelDomainCrmContext, decisionlive.IntelMilestoneDone,
+				"Worker CRM: đã gửi context (không tìm thấy khách trong CRM).",
+				[]string{"customer.context_ready với found=false — pipeline AID có thể tiếp tục không chặn."},
+				map[string]string{"eventId": evt.EventID, "customerId": custID})
+		}
 		return nil
 	}
 
 	// Build payload cho AI Decision
 	payload := buildCustomerContextPayload(&cust)
-	return emitCustomerContextReady(ctx, decSvc, evt, convID, custID, channel, ownerOrgID, payload)
+	if errEmit := emitCustomerContextReady(ctx, decSvc, evt, convID, custID, channel, ownerOrgID, payload); errEmit != nil {
+		return errEmit
+	}
+	if tid != "" {
+		decisionlive.PublishIntelDomainMilestone(ownerOrgID, tid, evt.CorrelationID, decisionlive.IntelDomainCrmContext, decisionlive.IntelMilestoneDone,
+			"Worker CRM: đã gửi ngữ cảnh khách (customer.context_ready).",
+			[]string{"Đã nạp hồ sơ CRM và enqueue sự kiện sẵn sàng cho AI Decision."},
+			map[string]string{"eventId": evt.EventID, "customerId": custID, "unifiedId": cust.UnifiedId})
+	}
+	return nil
 }
 
 func buildCustomerContextPayload(c *crmmodels.CrmCustomer) map[string]interface{} {
@@ -170,9 +197,10 @@ func buildCustomerContextPayload(c *crmmodels.CrmCustomer) map[string]interface{
 
 func emitCustomerContextReady(ctx context.Context, decSvc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent, convID, custID, channel string, ownerOrgID primitive.ObjectID, customerPayload map[string]interface{}) error {
 	_, err := decSvc.EmitEvent(ctx, &aidecisionsvc.EmitEventInput{
-		EventType:   eventtypes.CustomerContextReady,
-		EventSource: eventtypes.EventSourceCRM,
-		EntityType:  "customer",
+		EventType:       eventtypes.CustomerContextReady,
+		EventSource:     eventtypes.EventSourceCRM,
+		PipelineStage:   eventtypes.PipelineStageDomainIntel,
+		EntityType:      "customer",
 		EntityID:    custID,
 		OrgID:       evt.OrgID,
 		OwnerOrgID:  ownerOrgID,

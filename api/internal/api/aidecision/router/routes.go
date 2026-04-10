@@ -18,6 +18,7 @@ func Register(v1 fiber.Router, _ *apirouter.Router) error {
 	apirouter.RegisterRouteWithMiddleware(v1, "/ai-decision/execute", "POST", "", []fiber.Handler{actionMiddleware, orgContextMiddleware}, aidecisionhdl.HandleExecute)
 	apirouter.RegisterRouteWithMiddleware(v1, "/ai-decision", "GET", "/traces/:traceId/timeline", []fiber.Handler{readMiddleware, orgContextMiddleware}, aidecisionhdl.HandleTraceTimeline)
 	apirouter.RegisterRouteWithMiddleware(v1, "/ai-decision", "GET", "/traces/:traceId/live", []fiber.Handler{readMiddleware, orgContextMiddleware}, aidecisionhdl.HandleTraceLiveWS)
+	apirouter.RegisterRouteWithMiddleware(v1, "/ai-decision", "GET", "/e2e-reference-catalog", []fiber.Handler{readMiddleware, orgContextMiddleware}, aidecisionhdl.HandleE2EReferenceCatalog)
 	apirouter.RegisterRouteWithMiddleware(v1, "/ai-decision", "GET", "/org-live/timeline", []fiber.Handler{readMiddleware, orgContextMiddleware}, aidecisionhdl.HandleOrgLiveTimeline)
 	apirouter.RegisterRouteWithMiddleware(v1, "/ai-decision", "GET", "/org-live/persisted-events", []fiber.Handler{readMiddleware, orgContextMiddleware}, aidecisionhdl.HandleOrgLivePersistedEvents)
 	apirouter.RegisterRouteWithMiddleware(v1, "/ai-decision", "GET", "/org-live/metrics", []fiber.Handler{readMiddleware, orgContextMiddleware}, aidecisionhdl.HandleOrgLiveMetrics)

@@ -15,6 +15,12 @@ type DecisionEvent struct {
 	EventID   string                 `json:"eventId" bson:"eventId" index:"unique:1"` // evt_xxx
 	EventType string                 `json:"eventType" bson:"eventType" index:"single:1"`
 	EventSource string               `json:"eventSource" bson:"eventSource" index:"single:1"`
+	// PipelineStage giai đoạn trong khung quy trình tổng (ingress → merge → intel → AID) — xem eventtypes.PipelineStage*.
+	PipelineStage string `json:"pipelineStage,omitempty" bson:"pipelineStage,omitempty" index:"single:1,sparse"`
+	// E2EStage / E2EStepID — tham chiếu luồng chuẩn G1–G6 (docs/flows/bang-pha-buoc-event-e2e.md); gán khi emit.
+	E2EStage       string `json:"e2eStage,omitempty" bson:"e2eStage,omitempty" index:"single:1,sparse"`
+	E2EStepID      string `json:"e2eStepId,omitempty" bson:"e2eStepId,omitempty"`
+	E2EStepLabelVi string `json:"e2eStepLabelVi,omitempty" bson:"e2eStepLabelVi,omitempty"`
 	EntityType string                `json:"entityType" bson:"entityType"`
 	EntityID  string                 `json:"entityId" bson:"entityId"`
 	OrgID     string                 `json:"orgId" bson:"orgId" index:"single:1"`

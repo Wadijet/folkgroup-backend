@@ -11,6 +11,39 @@ import (
 
 const maxQueueErrRunes = 400
 
+// traceConcreteObservabilityHint — mã hỗ trợ (đội kỹ thuật); người dùng chỉ cần chụp màn hình hoặc copy refs.
+func traceConcreteObservabilityHint(evt *aidecisionmodels.DecisionEvent) string {
+	if evt == nil {
+		return "Nếu cần hỗ trợ: trong phần tham chiếu của sự kiện thường có mã luồng và mã việc."
+	}
+	var parts []string
+	if s := strings.TrimSpace(evt.EventID); s != "" {
+		parts = append(parts, "mã việc "+s)
+	}
+	if s := strings.TrimSpace(evt.TraceID); s != "" {
+		parts = append(parts, "mã luồng "+s)
+	}
+	if s := strings.TrimSpace(evt.CorrelationID); s != "" {
+		parts = append(parts, "mã liên kết "+s)
+	}
+	if len(parts) == 0 {
+		return "Nếu cần hỗ trợ, hãy gửi kèm ảnh chụp dòng thời gian hoặc mã trong phần tham chiếu."
+	}
+	return "Gửi hỗ trợ kèm: " + strings.Join(parts, ", ") + "."
+}
+
+// queueDetailSectionTraceConcrete — neo ngắn gọn với mã nội bộ (chủ yếu cho đội kỹ thuật).
+func queueDetailSectionTraceConcrete(evt *aidecisionmodels.DecisionEvent) string {
+	if evt == nil {
+		return "Việc này có bản ghi trong hàng đợi xử lý nội bộ — đội kỹ thuật tra theo mã luồng trong tham chiếu."
+	}
+	eid := strings.TrimSpace(evt.EventID)
+	if eid == "" {
+		return "Việc này có bản ghi trong hàng đợi xử lý nội bộ — tra theo mã luồng trong tham chiếu."
+	}
+	return fmt.Sprintf("Mã việc trong hệ thống: %s (đội kỹ thuật dùng để tra cứu).", eid)
+}
+
 // QueueMilestone — Mốc trong vòng đời xử lý một job trên hàng đợi; mỗi mốc tương ứng một DecisionLiveEvent trên timeline live.
 type QueueMilestone int
 
@@ -23,38 +56,55 @@ const (
 	QueueMilestoneNoHandler                             // Chưa có handler cho loại sự kiện
 )
 
-// BuildQueueConsumerEvent — Dựng DecisionLiveEvent cho timeline: tóm tắt và gạch đầu dòng ưu tiên người xem không chuyên kỹ thuật.
-func BuildQueueConsumerEvent(evt *aidecisionmodels.DecisionEvent, ms QueueMilestone, processErr error, extraBullets []string) decisionlive.DecisionLiveEvent {
+// BuildQueueConsumerEvent — Timeline consumer G2: summary + ít bullet (nghiệp vụ); chi tiết/audit trong một section mở rộng; processTrace = cây nhánh logic (tùy worker điền). TraceStep (Phương án B): inputRef / reasoning / outputRef có cấu trúc. Dòng «Trong quy trình:» do Publish (enrichPublishE2ERef) chèn — không lặp ở đây.
+func BuildQueueConsumerEvent(evt *aidecisionmodels.DecisionEvent, ms QueueMilestone, processErr error, extraBullets []string, processTrace []decisionlive.DecisionLiveProcessNode) decisionlive.DecisionLiveEvent {
 	dn := DomainNarrativeFromQueueEvent(evt)
 	bullets := queueStructuredBullets(evt, ms, dn, processErr)
 	bullets = append(bullets, extraBullets...)
-	// Chỉ hiện mã theo dõi ở mốc đầu để tránh lặp lại giữa các bước trên cùng một yêu cầu.
-	if eid := strings.TrimSpace(evt.EventID); eid != "" && ms == QueueMilestoneProcessingStart {
-		bullets = append([]string{
-			"Mã theo dõi yêu cầu: " + eid + ". (Cùng một luồng có thể có thêm yêu cầu khác nếu dữ liệu cập nhật nhiều lần.)",
-		}, bullets...)
-	}
+	bullets = capDetailBullets(bullets, 5)
 	sections := queueDetailSections(evt, ms, processErr)
 	phase, severity, summary, rs := queueSummaryForMilestone(ms, dn, evt, processErr)
+	e2eRef := eventtypes.ResolveE2EForQueueConsumerMilestone(evt.EventType, evt.EventSource, evt.PipelineStage, queueMilestoneToE2EKey(ms))
+	outcomeKind := queueOutcomeKindForMilestone(ms, evt)
 	ev := decisionlive.DecisionLiveEvent{
 		Phase:            phase,
 		Severity:         severity,
+		OutcomeKind:      outcomeKind,
 		Summary:          summary,
 		ReasoningSummary: rs,
+		E2EStage:         e2eRef.Stage,
+		E2EStepID:        e2eRef.StepID,
+		E2EStepLabelVi:   e2eRef.LabelVi,
 		SourceKind:       decisionlive.SourceQueue,
 		SourceTitle:      queueFriendlyEventLabel(evt),
 		CorrelationID:    evt.CorrelationID,
 		DecisionCaseID:   decisionCaseIDFromQueuePayload(evt),
-		Refs:             decisionlive.RefsFromDecisionEventEnvelope(evt),
+		Refs:             mergeRefsE2E(decisionlive.RefsFromDecisionEventEnvelope(evt), e2eRef),
 		DetailBullets:    bullets,
 		DetailSections:   sections,
-		Step: &decisionlive.TraceStep{
-			Kind:      "queue",
-			Title:     dn.StepTitle,
-			Reasoning: dn.BusinessOneLine,
-		},
+		Step:             buildQueueConsumerTraceStep(evt, ms, dn, processErr),
+		ProcessTrace:     processTrace,
 	}
 	return ev
+}
+
+// queueOutcomeKindForMilestone — Phân loại kết quả consumer queue (bất thường vs bình thường).
+func queueOutcomeKindForMilestone(ms QueueMilestone, evt *aidecisionmodels.DecisionEvent) string {
+	switch ms {
+	case QueueMilestoneHandlerError:
+		return decisionlive.OutcomeProcessingError
+	case QueueMilestoneRoutingSkipped:
+		return decisionlive.OutcomePolicySkipped
+	case QueueMilestoneNoHandler:
+		if isDatachangedCustomerMirrorOnly(evt) {
+			return decisionlive.OutcomeNominal
+		}
+		return decisionlive.OutcomeUnsupported
+	case QueueMilestoneHandlerDone:
+		return decisionlive.OutcomeSuccess
+	default:
+		return decisionlive.OutcomeNominal
+	}
 }
 
 func decisionCaseIDFromQueuePayload(evt *aidecisionmodels.DecisionEvent) string {
@@ -74,11 +124,11 @@ func decisionCaseIDFromQueuePayload(evt *aidecisionmodels.DecisionEvent) string 
 // isDatachangedCustomerMirrorOnly — datachanged khách POS/FB/CRM: không có handler «bước chính» trên consumer;
 // merge CRM / báo cáo / ads chỉ chạy trong applyDatachangedSideEffects (mốc DATACHANGED_EFFECTS).
 func isDatachangedCustomerMirrorOnly(evt *aidecisionmodels.DecisionEvent) bool {
-	if evt == nil || evt.EventSource != eventtypes.EventSourceDatachanged {
+	if evt == nil || !eventtypes.IsL1DatachangedEventSource(evt.EventSource) {
 		return false
 	}
 	et := strings.TrimSpace(evt.EventType)
-	for _, p := range []string{"pos_customer.", "fb_customer.", "crm_customer."} {
+	for _, p := range []string{"pos_customer.", "fb_customer.", "crm_customer.", "customer_customer."} {
 		if strings.HasPrefix(et, p) {
 			return true
 		}
@@ -92,20 +142,24 @@ func queueSummaryForMilestone(ms QueueMilestone, dn DomainNarrative, evt *aideci
 	case QueueMilestoneProcessingStart:
 		phase = decisionlive.PhaseQueueProcessing
 		severity = decisionlive.SeverityInfo
-		// Dòng tóm tắt ngắn; bối cảnh nằm ở ReasoningSummary / chi tiết — tránh nhồi hai câu dài giống nhau giữa các mốc.
-		summary = fmt.Sprintf("Bắt đầu xử lý: %s", dn.StepTitle)
+		// Không tiền tố G2 ở summary: neo G2-Sxx nằm ở DetailBullets (Publish/enrichPublishE2ERef) + e2e*.
+		summary = fmt.Sprintf("Đang bắt đầu: %s", dn.StepTitle)
+		reasoningSummary = dn.BusinessOneLine
 	case QueueMilestoneDatachangedDone:
 		phase = decisionlive.PhaseDatachangedEffects
 		severity = decisionlive.SeverityInfo
 		if isDatachangedCustomerMirrorOnly(evt) {
-			summary = fmt.Sprintf("Đã xong đồng bộ phụ (CRM, báo cáo, xếp hàng phân tích… nếu áp dụng). Loại «%s» không có thêm bước xử lý chính trên hàng đợi.", queueFriendlyEventLabel(evt))
+			summary = fmt.Sprintf("Đã đồng bộ %s — không cần bước tự động thêm trên trợ lý.", queueFriendlyEventLabel(evt))
+			reasoningSummary = dn.BusinessOneLine
 		} else {
-			summary = fmt.Sprintf("Đã xong phần chuẩn bị (đồng bộ phụ). Tiếp theo: %s", dn.StepTitle)
+			summary = fmt.Sprintf("Đã đồng bộ sau khi lưu dữ liệu — tiếp tục: %s", dn.StepTitle)
+			reasoningSummary = dn.BusinessOneLine
 		}
 	case QueueMilestoneHandlerDone:
 		phase = decisionlive.PhaseQueueDone
 		severity = decisionlive.SeverityInfo
 		summary = fmt.Sprintf("Đã xử lý xong: %s", dn.StepTitle)
+		reasoningSummary = dn.BusinessOneLine
 	case QueueMilestoneHandlerError:
 		phase = decisionlive.PhaseQueueError
 		severity = decisionlive.SeverityError
@@ -113,19 +167,23 @@ func queueSummaryForMilestone(ms QueueMilestone, dn DomainNarrative, evt *aideci
 		if processErr != nil {
 			errStr = truncateRunes(processErr.Error(), maxQueueErrRunes)
 		}
-		summary = fmt.Sprintf("Có lỗi khi xử lý «%s»: %s", dn.StepTitle, errStr)
+		summary = fmt.Sprintf("Không xử lý được «%s»: %s", dn.StepTitle, errStr)
+		reasoningSummary = dn.BusinessOneLine
 	case QueueMilestoneRoutingSkipped:
 		phase = decisionlive.PhaseSkipped
 		severity = decisionlive.SeverityInfo
-		summary = fmt.Sprintf("Không cần xử lý thêm cho «%s» — đúng cấu hình hệ thống.", dn.StepTitle)
+		summary = fmt.Sprintf("Đã bỏ qua theo cài đặt — «%s»", dn.StepTitle)
+		reasoningSummary = dn.BusinessOneLine
 	case QueueMilestoneNoHandler:
 		phase = decisionlive.PhaseSkipped
 		if isDatachangedCustomerMirrorOnly(evt) {
 			severity = decisionlive.SeverityInfo
-			summary = fmt.Sprintf("Kết thúc luồng «%s»: không có pipeline/case AI riêng — phần merge CRM và side-effect đã nằm ở bước đồng bộ phụ phía trên.", queueFriendlyEventLabel(evt))
+			summary = fmt.Sprintf("Chỉ cần đồng bộ — %s", queueFriendlyEventLabel(evt))
+			reasoningSummary = dn.BusinessOneLine
 		} else {
 			severity = decisionlive.SeverityWarn
-			summary = fmt.Sprintf("Chưa hỗ trợ kiểu việc này («%s»). Liên hệ kỹ thuật nếu bạn kỳ vọng có xử lý.", queueFriendlyEventLabel(evt))
+			summary = fmt.Sprintf("Chưa hỗ trợ loại cập nhật này — %s", queueFriendlyEventLabel(evt))
+			reasoningSummary = dn.BusinessOneLine
 		}
 	default:
 		phase = decisionlive.PhaseQueueProcessing
@@ -136,6 +194,11 @@ func queueSummaryForMilestone(ms QueueMilestone, dn DomainNarrative, evt *aideci
 }
 
 // queueFriendlyEventLabel — nhãn hiển thị ngắn (tiếng Việt); mã kỹ thuật vẫn nằm trong refs khi cần tra cứu.
+// QueueFriendlyEventLabel — nhãn ngắn tiếng Việt cho loại cập nhật (UI / processTrace / timeline).
+func QueueFriendlyEventLabel(evt *aidecisionmodels.DecisionEvent) string {
+	return queueFriendlyEventLabel(evt)
+}
+
 func queueFriendlyEventLabel(evt *aidecisionmodels.DecisionEvent) string {
 	if evt == nil {
 		return ""
@@ -167,135 +230,133 @@ func queueFriendlyEventLabel(evt *aidecisionmodels.DecisionEvent) string {
 	case eventtypes.FbCustomerInserted, eventtypes.FbCustomerUpdated:
 		return "Khách hàng Facebook"
 	case eventtypes.CrmCustomerInserted, eventtypes.CrmCustomerUpdated:
-		return "Khách CRM (đã merge)"
+		return "Khách hàng (đã gộp dữ liệu)"
 	default:
 		if et != "" {
-			return et
+			return "Cập nhật tự động"
 		}
-		return "AI Decision"
+		return "Cập nhật hệ thống"
 	}
 }
 
 func queueStructuredBullets(evt *aidecisionmodels.DecisionEvent, ms QueueMilestone, dn DomainNarrative, processErr error) []string {
-	lineViệc := fmt.Sprintf("Việc đang làm: %s.", dn.StepTitle)
-	var lineNguồn string
-	switch evt.EventSource {
-	case eventtypes.EventSourceDatachanged:
-		lineNguồn = "Có thay đổi dữ liệu trên hệ thống vừa được ghi lại — các bước sau sẽ dựa trên bản mới nhất."
-	case eventtypes.EventSourceAIDecision:
-		lineNguồn = "Đây là bước tiếp theo trong luồng xử lý tự động (sau khi một bước trước hoàn tất)."
-	case eventtypes.EventSourceDebounce:
-		lineNguồn = "Sau khi gom các cập nhật tin nhắn trong một khoảng thời gian ngắn."
-	case eventtypes.EventSourceOrderIntel, eventtypes.EventSourceCixIntel, eventtypes.EventSourceCRM, eventtypes.EventSourceMetaAdsIntel:
-		lineNguồn = "Kết quả từ bước phân tích / đồng bộ chuyên sâu vừa sẵn sàng."
-	default:
-		if strings.TrimSpace(evt.EventSource) != "" {
-			lineNguồn = "Yêu cầu từ hệ thống (bước nối tiếp trong quy trình)."
-		}
-	}
-	var lineMốc string
+	var parts []string
 	switch ms {
 	case QueueMilestoneProcessingStart:
-		lineMốc = "Ở bước này: hệ thống vừa nhận yêu cầu và bắt đầu xử lý."
+		if evt != nil && eventtypes.IsL1DatachangedEventSource(evt.EventSource) {
+			parts = append(parts, fmt.Sprintf("«%s» — sau khi lưu dữ liệu, hệ thống đồng bộ rồi chuyển bước tiếp.", dn.StepTitle))
+		} else {
+			parts = append(parts, fmt.Sprintf("«%s» — hệ thống đang chuyển tới bước xử lý phù hợp.", dn.StepTitle))
+		}
 	case QueueMilestoneDatachangedDone:
 		if isDatachangedCustomerMirrorOnly(evt) {
-			lineMốc = "Ở bước này: side-effect sau datachanged (merge CRM, báo cáo, ads…) đã chạy hoặc đã lên lịch; với loại khách POS/FB/CRM không còn handler «chính» sau đó."
+			parts = append(parts, fmt.Sprintf("Đã đồng bộ %s — không cần thêm bước tự động trên trợ lý.", queueFriendlyEventLabel(evt)))
 		} else {
-			lineMốc = "Ở bước này: đã xong phần đồng bộ phụ (CRM, báo cáo, xếp hàng phân tích… nếu áp dụng). Sắp chạy bước chính."
-		}
-	case QueueMilestoneHandlerDone:
-		lineMốc = "Ở bước này: đã hoàn tất toàn bộ xử lý cho yêu cầu này."
-	case QueueMilestoneHandlerError:
-		lineMốc = "Ở bước này: xử lý không thành công — có thể được thử lại."
-		if processErr != nil {
-			lineMốc += " Thông báo: " + truncateRunes(processErr.Error(), 200)
-		}
-	case QueueMilestoneRoutingSkipped:
-		lineMốc = "Ở bước này: hệ thống quyết định không cần làm thêm — không phải lỗi."
-	case QueueMilestoneNoHandler:
-		if isDatachangedCustomerMirrorOnly(evt) {
-			lineMốc = "Ở bước này: đúng thiết kế — consumer không đăng ký bước case/pipeline sau cho mirror khách; không phải lỗi hay thiếu tính năng merge CRM."
-		} else {
-			lineMốc = "Ở bước này: chưa có quy trình xử lý tương ứng trên phiên bản hiện tại."
+			parts = append(parts, fmt.Sprintf("Đã đồng bộ xong — tiếp tục với «%s».", dn.StepTitle))
 		}
 	default:
-		lineMốc = "Xem dòng tóm tắt phía trên."
+		switch ms {
+		case QueueMilestoneHandlerDone:
+			parts = append(parts, fmt.Sprintf("Đã hoàn tất «%s».", dn.StepTitle))
+		case QueueMilestoneHandlerError:
+			line := fmt.Sprintf("Gặp sự cố khi xử lý «%s».", dn.StepTitle)
+			if processErr != nil {
+				line += " " + truncateRunes(processErr.Error(), 180)
+			}
+			parts = append(parts, line)
+		case QueueMilestoneRoutingSkipped:
+			parts = append(parts, fmt.Sprintf("Theo cài đặt, bỏ qua bước tự động cho «%s».", dn.StepTitle))
+		case QueueMilestoneNoHandler:
+			if isDatachangedCustomerMirrorOnly(evt) {
+				parts = append(parts, fmt.Sprintf("Với %s chỉ cần đồng bộ dữ liệu — không có thêm bước trợ lý.", queueFriendlyEventLabel(evt)))
+			} else {
+				parts = append(parts, fmt.Sprintf("Loại cập nhật «%s» chưa được hỗ trợ tự động.", queueFriendlyEventLabel(evt)))
+			}
+		default:
+			parts = append(parts, dn.StepTitle)
+		}
 	}
-	base := []string{lineViệc}
-	if lineNguồn != "" {
-		base = append(base, lineNguồn)
-	}
-	base = append(base, lineMốc)
 	if len(dn.EntityBullets) > 0 {
-		base = append(base, dn.EntityBullets...)
+		parts = append(parts, dn.EntityBullets...)
 	}
-	return base
+	return parts
 }
 
-// queueDetailSections — Phần chi tiết trong cùng một mốc timeline (không tạo thêm live_event).
-func queueDetailSections(evt *aidecisionmodels.DecisionEvent, ms QueueMilestone, processErr error) []decisionlive.DecisionLiveDetailSection {
-	var steps []string
+// queueE2EPositionAuditLine — mốc timeline này map bước E2E nào (để audit đối chiếu bang-pha-buoc-event-e2e).
+func queueE2EPositionAuditLine(ms QueueMilestone, evt *aidecisionmodels.DecisionEvent) string {
+	// Một dòng neo với luồng G2 trong docs/flows/bang-pha-buoc-event-e2e (consumer queue).
 	switch ms {
 	case QueueMilestoneProcessingStart:
-		steps = []string{
-			"Hệ thống đã lấy yêu cầu từ hàng chờ và bắt đầu xử lý.",
-			"Thông tin kèm theo (đơn, khách, chiến dịch…) được đọc để làm đúng việc.",
+		return "G2 — nhận job từ hàng đợi nội bộ; bắt đầu xử lý."
+	case QueueMilestoneDatachangedDone:
+		if evt != nil && isDatachangedCustomerMirrorOnly(evt) {
+			return "G2 — đồng bộ mirror khách xong; thường không còn handler trên consumer."
 		}
-		if evt != nil && evt.EventSource == eventtypes.EventSourceDatachanged {
-			steps = append(steps, "Nếu có thay đổi dữ liệu nguồn: có thể chạy trước các bước đồng bộ phụ (CRM, báo cáo, xếp hàng phân tích), rồi mới tới bước chính.")
-		} else {
-			steps = append(steps, "Tiếp theo là bước xử lý đúng với loại việc này.")
-		}
+		return "G2 — đồng bộ sau lưu xong; tiếp routing/handler nếu có."
+	case QueueMilestoneHandlerDone:
+		return "G2 — handler nghiệp vụ chạy xong."
+	case QueueMilestoneHandlerError:
+		return "G2 — lỗi handler; có thể retry; gửi hỗ trợ kèm mã việc/trace."
+	case QueueMilestoneRoutingSkipped:
+		return "G2 — routing bỏ qua handler (theo cấu hình)."
+	case QueueMilestoneNoHandler:
+		return "G2 — chưa có handler cho loại sự kiện (có thể bổ sung sau)."
+	default:
+		return "Các mốc cùng traceId xếp theo thời gian."
+	}
+}
+
+func queueDetailSectionTechnicalTitle() string {
+	return "Thông tin thêm"
+}
+
+// queueDetailSections — Một section mở rộng (E2E + audit); tránh nhiều accordion chồng chữ.
+func queueDetailSections(evt *aidecisionmodels.DecisionEvent, ms QueueMilestone, processErr error) []decisionlive.DecisionLiveDetailSection {
+	items := []string{
+		queueE2EPositionAuditLine(ms, evt),
+		"Vị trí trong quy trình chuẩn (G1–G6) xem e2eStepLabelVi và doc bang-pha-buoc-event-e2e.",
+	}
+	switch ms {
+	case QueueMilestoneProcessingStart:
+		items = append(items, "Thứ tự G2: nhận job → (datachanged) đồng bộ sau lưu → routing → handler.", traceConcreteObservabilityHint(evt))
+		items = append(items, queueDetailSectionTraceConcrete(evt))
 	case QueueMilestoneDatachangedDone:
 		if isDatachangedCustomerMirrorOnly(evt) {
-			steps = []string{
-				"Với cập nhật khách POS / Facebook / CRM chỉ mirror: consumer xếp job vào crm_pending_merge (CrmPendingMergeWorker mới merge vào crm_customers).",
-				"Sau đó consumer đóng job ở trạng thái «không có handler chính» — không phải lỗi.",
-			}
+			items = append(items, "Mirror khách: đồng bộ nền đã chạy; thường hết chuỗi consumer tại đây.")
 		} else {
-			steps = []string{
-				"Các bước chuẩn bị sau khi dữ liệu đổi (nếu có) đã xong.",
-				"Chuyển sang bước chính: ví dụ cập nhật hồ sơ rủi ro đơn, xếp hàng phân tích, v.v.",
-			}
+			items = append(items, "Có thể có mốc kế khi dispatch handler.")
 		}
 	case QueueMilestoneHandlerDone:
-		steps = []string{
-			"Toàn bộ xử lý nghiệp vụ cho yêu cầu này đã hoàn tất.",
-			"Không còn bước nào trên hàng chờ cho mã yêu cầu này.",
-		}
+		items = append(items, "Job được đánh dấu hoàn tất trên hàng đợi.")
 	case QueueMilestoneHandlerError:
-		steps = []string{
-			"Có lỗi trong lúc xử lý — phần tóm tắt phía trên có thể có thông báo ngắn.",
-			"Hệ thống có thể tự thử lại; nếu lỗi lặp lại, cần xem nhật ký hoặc liên hệ kỹ thuật.",
-		}
+		items = append(items, "Hỗ trợ: gửi kèm org + traceId / eventId trong refs.")
 		if processErr != nil {
-			steps = append(steps, "Chi tiết kỹ thuật có thể xuất hiện trong ô lỗi kèm theo.")
+			items = append(items, "Chi tiết lỗi: "+truncateRunes(processErr.Error(), 280))
 		}
 	case QueueMilestoneRoutingSkipped:
-		steps = []string{
-			"Theo cấu hình, loại việc này không cần chạy thêm bước sâu.",
-			"Dừng tại đây là đúng thiết kế, không phải sự cố.",
-		}
+		items = append(items, "Bỏ qua handler theo quy tắc routing — không phải lỗi.")
 	case QueueMilestoneNoHandler:
 		if isDatachangedCustomerMirrorOnly(evt) {
-			steps = []string{
-				"consumer_dispatch không đăng ký handler cho pos_customer.* / fb_customer.* / crm_customer.* — enqueue crm_pending_merge trong applyDatachangedSideEffects, merge thực tế ở CrmPendingMergeWorker.",
-				"Nếu crm_customers vẫn trống: kiểm tra CrmPendingMergeWorker và backlog crm_pending_merge, log [CRM], ownerOrganizationId / customerId trên bản ghi nguồn.",
-			}
+			items = append(items, "Chỉ đồng bộ mirror khách — không có handler thêm.")
 		} else {
-			steps = []string{
-				"Phiên bản hệ thống hiện tại chưa có quy trình xử lý cho kiểu việc này.",
-				"Nếu bạn cần tính năng này: kiểm tra cập nhật phần mềm hoặc cấu hình.",
-			}
+			items = append(items, "Có thể bổ sung handler trong bản sau.")
 		}
 	default:
-		steps = []string{
-			"Mỗi mốc trên dòng thời gian là một bước riêng — đọc theo thứ tự từ trên xuống.",
-		}
+		items = append(items, "Các mốc được lưu theo thời gian để bạn xem lại lịch sử xử lý.")
 	}
-	return []decisionlive.DecisionLiveDetailSection{
-		{Title: "Giải thích thêm cho bước này", Items: steps},
+	items = capStringSlice(items, 8)
+	return []decisionlive.DecisionLiveDetailSection{{Title: queueDetailSectionTechnicalTitle(), Items: items}}
+}
+
+func capStringSlice(s []string, max int) []string {
+	if len(s) <= max {
+		return s
 	}
+	return s[:max]
+}
+
+func capDetailBullets(b []string, max int) []string {
+	return capStringSlice(b, max)
 }
 
 func truncateRunes(s string, max int) string {
@@ -310,4 +371,39 @@ func truncateOneLine(s string, max int) string {
 	s = strings.TrimSpace(s)
 	s = strings.ReplaceAll(s, "\n", " ")
 	return truncateRunes(s, max)
+}
+
+func queueMilestoneToE2EKey(ms QueueMilestone) string {
+	switch ms {
+	case QueueMilestoneProcessingStart:
+		return eventtypes.E2EQueueMilestoneProcessingStart
+	case QueueMilestoneDatachangedDone:
+		return eventtypes.E2EQueueMilestoneDatachangedDone
+	case QueueMilestoneHandlerDone:
+		return eventtypes.E2EQueueMilestoneHandlerDone
+	case QueueMilestoneHandlerError:
+		return eventtypes.E2EQueueMilestoneHandlerError
+	case QueueMilestoneRoutingSkipped:
+		return eventtypes.E2EQueueMilestoneRoutingSkipped
+	case QueueMilestoneNoHandler:
+		return eventtypes.E2EQueueMilestoneNoHandler
+	default:
+		return ""
+	}
+}
+
+func mergeRefsE2E(refs map[string]string, ref eventtypes.E2ERef) map[string]string {
+	if refs == nil {
+		refs = make(map[string]string)
+	}
+	if ref.Stage != "" {
+		refs[eventtypes.E2EPayloadKeyStage] = ref.Stage
+	}
+	if ref.StepID != "" {
+		refs[eventtypes.E2EPayloadKeyStepID] = ref.StepID
+	}
+	if ref.LabelVi != "" {
+		refs[eventtypes.E2EPayloadKeyLabelVi] = ref.LabelVi
+	}
+	return refs
 }

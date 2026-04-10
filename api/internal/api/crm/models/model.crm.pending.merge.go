@@ -38,4 +38,7 @@ type CrmPendingMerge struct {
 	CoalesceKey         string                    `json:"coalesceKey,omitempty" bson:"coalesceKey,omitempty" index:"single:1"`
 	InboxCustomerId     string                    `json:"inboxCustomerId,omitempty" bson:"inboxCustomerId,omitempty"`
 	MergeNotBefore      int64                     `json:"mergeNotBefore,omitempty" bson:"mergeNotBefore,omitempty"`
+	// TraceID / CorrelationID — copy từ decision_events_queue khi xếp job (defer trong RAM có thể rỗng).
+	TraceID       string `json:"traceId,omitempty" bson:"traceId,omitempty"`
+	CorrelationID string `json:"correlationId,omitempty" bson:"correlationId,omitempty"`
 }

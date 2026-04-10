@@ -15,8 +15,8 @@ type CrmIntelComputeJob struct {
 
 	ParentDecisionEventID string `json:"parentDecisionEventId,omitempty" bson:"parentDecisionEventId,omitempty"`
 
-	ProcessedAt  *int64 `json:"processedAt,omitempty" bson:"processedAt,omitempty" index:"single:1,compound:crm_intel_compute_poll"`
+	ProcessedAt  *int64 `json:"processedAt,omitempty" bson:"processedAt,omitempty" index:"single:1,compound:customer_intel_compute_poll"`
 	ProcessError string `json:"processError,omitempty" bson:"processError,omitempty"`
 	RetryCount   int    `json:"retryCount" bson:"retryCount"`
-	CreatedAt    int64  `json:"createdAt" bson:"createdAt" index:"single:1,compound:crm_intel_compute_poll,order:1"`
+	CreatedAt    int64  `json:"createdAt" bson:"createdAt" index:"single:1,compound:customer_intel_compute_poll,order:1"`
 }

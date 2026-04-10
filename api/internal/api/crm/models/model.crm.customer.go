@@ -35,8 +35,8 @@ type CrmCustomer struct {
 	ID primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"`
 
 	// Identity
-	Uid               string               `json:"uid" bson:"uid" index:"single:1,compound:crm_customer_org_uid"`
-	UnifiedId         string               `json:"unifiedId" bson:"unifiedId" index:"single:1,compound:crm_customer_org_unified_unique"`
+	Uid               string               `json:"uid" bson:"uid" index:"single:1,compound:customer_profile_org_uid"`
+	UnifiedId         string               `json:"unifiedId" bson:"unifiedId" index:"single:1,compound:customer_profile_org_unified_unique"`
 	SourceIds         CrmCustomerSourceIds `json:"sourceIds" bson:"sourceIds"`
 	SourceIdsPos      string               `json:"-" bson:"sourceIds.pos,omitempty" index:"single:1,sparse"`
 	SourceIdsFb       string               `json:"-" bson:"sourceIds.fb,omitempty" index:"single:1,sparse"`
@@ -68,9 +68,9 @@ type CrmCustomer struct {
 	IsOmnichannel      bool   `json:"isOmnichannel" bson:"isOmnichannel"`
 
 	// Cached metrics (aggregate từ pc_pos_orders, cập nhật qua hooks)
-	TotalSpent         float64 `json:"totalSpent" bson:"totalSpent" index:"compound:crm_customer_org_totalspent,order:-1"` // Index cho sort totalSpend desc trong dashboard
+	TotalSpent         float64 `json:"totalSpent" bson:"totalSpent" index:"compound:customer_profile_org_totalspent,order:-1"` // Index cho sort totalSpend desc trong dashboard
 	OrderCount         int     `json:"orderCount" bson:"orderCount"`
-	LastOrderAt        int64   `json:"lastOrderAt,omitempty" bson:"lastOrderAt,omitempty" index:"single:-1,compound:crm_customer_org_lastorder,order:-1"` // Unix ms — index cho sort dashboard (ownerOrg + lastOrderAt desc)
+	LastOrderAt        int64   `json:"lastOrderAt,omitempty" bson:"lastOrderAt,omitempty" index:"single:-1,compound:customer_profile_org_lastorder,order:-1"` // Unix ms — index cho sort dashboard (ownerOrg + lastOrderAt desc)
 	SecondLastOrderAt  int64   `json:"secondLastOrderAt,omitempty" bson:"secondLastOrderAt,omitempty"` // Unix ms — đơn thứ 2 gần nhất (để tính REACTIVATED)
 	RevenueLast30d     float64 `json:"revenueLast30d" bson:"revenueLast30d"`                       // Doanh thu 30 ngày qua (cho Momentum)
 	RevenueLast90d     float64 `json:"revenueLast90d" bson:"revenueLast90d"`                       // Doanh thu 90 ngày qua (cho Momentum)
@@ -114,19 +114,19 @@ type CrmCustomer struct {
 
 	// Phân loại hiện tại (cập nhật cùng lúc với metrics qua hooks).
 	// Dùng cho filter/sort dashboard; activity history giữ snapshot lịch sử theo từng sự kiện.
-	ValueTier      string `json:"valueTier,omitempty" bson:"valueTier,omitempty" index:"single:1,compound:crm_customer_org_value"`             // top|high|medium|low|new
-	LifecycleStage string `json:"lifecycleStage,omitempty" bson:"lifecycleStage,omitempty" index:"single:1,compound:crm_customer_org_lifecycle"`   // active|cooling|inactive|dead (chưa mua = rỗng, dùng Journey)
-	JourneyStage   string `json:"journeyStage,omitempty" bson:"journeyStage,omitempty" index:"single:1,compound:crm_customer_org_journey"`       // visitor|engaged|blocked_spam|first|repeat|promoter (VIP dùng valueTier; inactive dùng lifecycleStage)
-	Channel        string `json:"channel,omitempty" bson:"channel,omitempty" index:"single:1,compound:crm_customer_org_channel"`                 // online|offline|omnichannel
-	LoyaltyStage   string `json:"loyaltyStage,omitempty" bson:"loyaltyStage,omitempty" index:"single:1,compound:crm_customer_org_loyalty"`       // core|repeat|one_time
-	MomentumStage  string `json:"momentumStage,omitempty" bson:"momentumStage,omitempty" index:"single:1,compound:crm_customer_org_momentum"`    // rising|stable|declining|lost
+	ValueTier      string `json:"valueTier,omitempty" bson:"valueTier,omitempty" index:"single:1,compound:customer_profile_org_value"`             // top|high|medium|low|new
+	LifecycleStage string `json:"lifecycleStage,omitempty" bson:"lifecycleStage,omitempty" index:"single:1,compound:customer_profile_org_lifecycle"`   // active|cooling|inactive|dead (chưa mua = rỗng, dùng Journey)
+	JourneyStage   string `json:"journeyStage,omitempty" bson:"journeyStage,omitempty" index:"single:1,compound:customer_profile_org_journey"`       // visitor|engaged|blocked_spam|first|repeat|promoter (VIP dùng valueTier; inactive dùng lifecycleStage)
+	Channel        string `json:"channel,omitempty" bson:"channel,omitempty" index:"single:1,compound:customer_profile_org_channel"`                 // online|offline|omnichannel
+	LoyaltyStage   string `json:"loyaltyStage,omitempty" bson:"loyaltyStage,omitempty" index:"single:1,compound:customer_profile_org_loyalty"`       // core|repeat|one_time
+	MomentumStage  string `json:"momentumStage,omitempty" bson:"momentumStage,omitempty" index:"single:1,compound:customer_profile_org_momentum"`    // rising|stable|declining|lost
 
 	// Merge metadata
 	MergeMethod string `json:"mergeMethod" bson:"mergeMethod"` // customer_id | fb_id | phone | single_source
 	MergedAt    int64  `json:"mergedAt" bson:"mergedAt"`
 
 	// Phân quyền
-	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:crm_customer_org_unified_unique,compound:crm_customer_org_uid,compound:crm_customer_org_lastorder,compound:crm_customer_org_totalspent,compound:crm_customer_org_value,compound:crm_customer_org_journey,compound:crm_customer_org_lifecycle,compound:crm_customer_org_channel,compound:crm_customer_org_loyalty,compound:crm_customer_org_momentum"`
+	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"single:1,compound:customer_profile_org_unified_unique,compound:customer_profile_org_uid,compound:customer_profile_org_lastorder,compound:customer_profile_org_totalspent,compound:customer_profile_org_value,compound:customer_profile_org_journey,compound:customer_profile_org_lifecycle,compound:customer_profile_org_channel,compound:customer_profile_org_loyalty,compound:customer_profile_org_momentum"`
 
 	// Metadata
 	CreatedAt int64 `json:"createdAt" bson:"createdAt" index:"single:1"`

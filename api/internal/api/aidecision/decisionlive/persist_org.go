@@ -16,8 +16,8 @@ import (
 	"meta_commerce/internal/global"
 )
 
-// orgPersistEnabled: mặc định bật qua config (AIDecisionLiveOrgPersist / AI_DECISION_LIVE_ORG_PERSIST).
-// Tắt: AI_DECISION_LIVE_ORG_PERSIST=false — chỉ ring RAM process (restart mất replay org-live từ server).
+// orgPersistEnabled — Bật ghi/đọc Mongo decision_org_live_events (config AIDecisionLiveOrgPersist hoặc env AI_DECISION_LIVE_ORG_PERSIST).
+// Tắt: chỉ ring RAM process; OrgTimelineForAPI không đọc Mongo; ListPersistedOrgLiveEventsFromMongo trả lỗi ErrOrgLivePersistDisabled.
 func orgPersistEnabled() bool {
 	if global.MongoDB_ServerConfig != nil {
 		return global.MongoDB_ServerConfig.AIDecisionLiveOrgPersist
@@ -26,17 +26,27 @@ func orgPersistEnabled() bool {
 	return v == "1" || strings.EqualFold(v, "true") || v == "yes"
 }
 
+// persistOrgLiveEventAsync — Publish bước 7: ghi Mongo decision_org_live_events (chỉ khi live bật — hàm chỉ gọi từ nhánh đó).
+//
+//	Bước 1 — orgPersistEnabled() false hoặc org zero → return (không ghi).
+//	Bước 2 — Không có collection trong registry → return.
+//	Bước 3 — Sinh _id Mongo, createdAt ms, BuildOrgLivePersistDocument(owner, id, createdAt, orgEv).
+//	Bước 4 — Goroutine InsertOne timeout 5s; lỗi chỉ log (GET timeline vẫn có thể dùng RAM).
 func persistOrgLiveEventAsync(ownerOrgID primitive.ObjectID, ev DecisionLiveEvent) {
+	// Bước 1
 	if !orgPersistEnabled() || ownerOrgID.IsZero() {
 		return
 	}
+	// Bước 2
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.AIDecisionOrgLiveEvents)
 	if !ok || coll == nil {
 		return
 	}
+	// Bước 3
 	docID := primitive.NewObjectID()
 	createdAt := time.Now().UnixMilli()
 	doc := BuildOrgLivePersistDocument(ownerOrgID, docID, createdAt, ev)
+	// Bước 4
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -51,7 +61,13 @@ func persistOrgLiveEventAsync(ownerOrgID primitive.ObjectID, ev DecisionLiveEven
 	}()
 }
 
-// OrgTimelineForAPI đọc replay org-live: ưu tiên Mongo (đa replica), lỗi/rỗng thì fallback RAM.
+// OrgTimelineForAPI — Replay org-live cho HTTP/WS (thứ tự giống ring RAM sau khi đảo chiều Mongo).
+//
+//	Bước 1 — Persist org tắt hoặc không có collection: snapshotOrg (RAM) → backfill → return.
+//	Bước 2 — Persist bật: Find Mongo (mới nhất trước, giới hạn MaxEventsPerOrgFeed), unmarshal payload.
+//	Bước 3 — Find lỗi / kết quả rỗng: fallback như bước 1.
+//	Bước 4 — Có dữ liệu Mongo: đảo slice về thời gian tăng (khớp thứ tự ring).
+//	Bước 5 — backfillLiveEventsDerivedFields (opsTier, feed…) rồi return.
 func OrgTimelineForAPI(ctx context.Context, ownerOrgID primitive.ObjectID) []DecisionLiveEvent {
 	var out []DecisionLiveEvent
 	if !orgPersistEnabled() {
@@ -112,7 +128,7 @@ const (
 	persistedOrgLiveMaxLimit     = 100
 )
 
-// PersistedOrgLiveListFilter phân trang + lọc đọc trực tiếp collection decision_org_live_events (không fallback RAM).
+// PersistedOrgLiveListFilter — Tham số GET persisted-events: owner org bắt buộc; traceId/decisionCaseId/createdAt khớp trường phẳng trên document (mục 4.7 THIET_KE).
 type PersistedOrgLiveListFilter struct {
 	OwnerOrgID     primitive.ObjectID
 	Page           int
@@ -123,7 +139,12 @@ type PersistedOrgLiveListFilter struct {
 	ToCreatedMs    *int64
 }
 
-// ListPersistedOrgLiveEventsFromMongo đọc chỉ từ Mongo — sort createdAt giảm dần (mới nhất trước).
+// ListPersistedOrgLiveEventsFromMongo — GET /org-live/persisted-events: chỉ Mongo, không fallback RAM.
+//
+//	Bước 1 — Kiểm tra persist bật + org + collection.
+//	Bước 2 — filter ownerOrganizationId + tùy chọn traceId, decisionCaseId, createdAt range.
+//	Bước 3 — CountDocuments; Find sort createdAt giảm, skip/limit.
+//	Bước 4 — Mỗi row: decode payload → json.Unmarshal → DecisionLiveEvent; sau đó backfillLiveEventsDerivedFields (đồng bộ với OrgTimelineForAPI).
 func ListPersistedOrgLiveEventsFromMongo(ctx context.Context, f PersistedOrgLiveListFilter) ([]DecisionLiveEvent, int64, error) {
 	if !orgPersistEnabled() {
 		return nil, 0, ErrOrgLivePersistDisabled
@@ -197,5 +218,7 @@ func ListPersistedOrgLiveEventsFromMongo(ctx context.Context, f PersistedOrgLive
 		}
 		out = append(out, ev)
 	}
+	// Cùng enrich như OrgTimelineForAPI: bản ghi cũ thiếu businessDomain / uiTitle / phaseLabelVi trên payload vẫn đủ field cho UI.
+	backfillLiveEventsDerivedFields(out)
 	return out, total, cur.Err()
 }

@@ -1,4 +1,4 @@
-// Package orderintelsvc — Lớp A order_intel_runs + pointer intel trên commerce_orders (chuẩn hai lớp A/B).
+// Package orderintelsvc — Lớp A order_intel_runs + pointer intel trên order_canonical (chuẩn hai lớp A/B).
 package orderintelsvc
 
 import (
@@ -38,7 +38,7 @@ func buildOrderIntelSummary(snap *orderintelmodels.OrderIntelligenceSnapshot) bs
 	}
 }
 
-// persistOrderIntelAfterJob ghi một bản ghi order_intel_runs; thành công và có commerce_orders thì $inc intelSequence + cập nhật pointer.
+// persistOrderIntelAfterJob ghi một bản ghi order_intel_runs; thành công và có order_canonical thì $inc intelSequence + cập nhật pointer.
 // Thứ tự sort lịch sử đề xuất: causalOrderingAt tăng, intelSequence tăng, _id.
 func persistOrderIntelAfterJob(ctx context.Context, job *orderintelmodels.OrderIntelComputeJob, view *intelOrderView, snap *orderintelmodels.OrderIntelligenceSnapshot, raw orderintelmodels.OrderIntelRaw, execErr error, nowMs int64) (primitive.ObjectID, error) {
 	if job == nil {
@@ -62,14 +62,14 @@ func persistOrderIntelAfterJob(ctx context.Context, job *orderintelmodels.OrderI
 
 	orderUid := ""
 	orderID := int64(0)
-	commerceOID := primitive.NilObjectID
+	canonicalOID := primitive.NilObjectID
 	if snap != nil {
 		orderUid = strings.TrimSpace(snap.OrderUid)
 		orderID = snap.OrderID
 	}
 	if view != nil {
-		if commerceOID.IsZero() && !view.CommerceMongoID.IsZero() {
-			commerceOID = view.CommerceMongoID
+		if canonicalOID.IsZero() && !view.OrderCanonicalMongoID.IsZero() {
+			canonicalOID = view.OrderCanonicalMongoID
 		}
 		if orderUid == "" {
 			orderUid = strings.TrimSpace(view.Uid)
@@ -92,7 +92,7 @@ func persistOrderIntelAfterJob(ctx context.Context, job *orderintelmodels.OrderI
 		OwnerOrganizationID:  job.OwnerOrganizationID,
 		OrderUid:             orderUid,
 		OrderID:              orderID,
-		CommerceOrderMongoID: commerceOID,
+		OrderCanonicalMongoID: canonicalOID,
 		Operation:            op,
 		Status:               status,
 		ParentIntelJobID:     job.ID,
@@ -129,12 +129,12 @@ func persistOrderIntelAfterJob(ctx context.Context, job *orderintelmodels.OrderI
 		return primitive.NilObjectID, insErr
 	}
 
-	if execErr != nil || commerceOID.IsZero() || job.OwnerOrganizationID.IsZero() {
+	if execErr != nil || canonicalOID.IsZero() || job.OwnerOrganizationID.IsZero() {
 		return runID, nil
 	}
 
-	commerceColl, okCo := global.RegistryCollections.Get(global.MongoDB_ColNames.CommerceOrders)
-	if !okCo || commerceColl == nil {
+	canonicalColl, okCo := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderCanonical)
+	if !okCo || canonicalColl == nil {
 		return runID, nil
 	}
 
@@ -142,20 +142,20 @@ func persistOrderIntelAfterJob(ctx context.Context, job *orderintelmodels.OrderI
 	var bumped struct {
 		IntelSequence int64 `bson:"intelSequence"`
 	}
-	incErr := commerceColl.FindOneAndUpdate(ctx,
-		bson.M{"_id": commerceOID, "ownerOrganizationId": job.OwnerOrganizationID},
+	incErr := canonicalColl.FindOneAndUpdate(ctx,
+		bson.M{"_id": canonicalOID, "ownerOrganizationId": job.OwnerOrganizationID},
 		bson.M{"$inc": bson.M{"intelSequence": 1}},
 		options.FindOneAndUpdate().SetReturnDocument(options.After),
 	).Decode(&bumped)
 	if incErr != nil {
-		logger.GetAppLogger().WithError(incErr).WithField("commerceOrderId", commerceOID.Hex()).Warn("📋 [ORDER_INTEL_RUN] Không $inc intelSequence trên commerce_orders")
+		logger.GetAppLogger().WithError(incErr).WithField("orderCanonicalId", canonicalOID.Hex()).Warn("📋 [ORDER_INTEL_RUN] Không $inc intelSequence trên order_canonical")
 	} else {
 		seq = bumped.IntelSequence
 		_, _ = coll.UpdateOne(ctx, bson.M{"_id": runID}, bson.M{"$set": bson.M{"intelSequence": seq}})
 	}
 
-	_, uerr := commerceColl.UpdateOne(ctx,
-		bson.M{"_id": commerceOID, "ownerOrganizationId": job.OwnerOrganizationID},
+	_, uerr := canonicalColl.UpdateOne(ctx,
+		bson.M{"_id": canonicalOID, "ownerOrganizationId": job.OwnerOrganizationID},
 		bson.M{"$set": bson.M{
 			"intelLastRunId":      runID,
 			"intelLastComputedAt": nowMs,
@@ -163,7 +163,7 @@ func persistOrderIntelAfterJob(ctx context.Context, job *orderintelmodels.OrderI
 		}},
 	)
 	if uerr != nil {
-		logger.GetAppLogger().WithError(uerr).WithField("commerceOrderId", commerceOID.Hex()).Warn("📋 [ORDER_INTEL_RUN] Không cập nhật pointer intelLastRunId trên commerce_orders")
+		logger.GetAppLogger().WithError(uerr).WithField("orderCanonicalId", canonicalOID.Hex()).Warn("📋 [ORDER_INTEL_RUN] Không cập nhật pointer intelLastRunId trên order_canonical")
 	}
 	return runID, nil
 }

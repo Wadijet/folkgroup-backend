@@ -23,7 +23,7 @@ func (s *AIDecisionService) RefreshOpenCasesAfterCrmIntel(ctx context.Context, u
 	if unifiedID == "" || orgID == "" || ownerOrgID.IsZero() {
 		return nil
 	}
-	collCRM, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CrmCustomers)
+	collCRM, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CustomerCustomers)
 	if !ok {
 		return nil
 	}

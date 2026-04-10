@@ -198,7 +198,7 @@ flowchart TB
 | Module | Pha ghi thô | Pha merge (thống nhất) | Pha intel |
 |--------|-------------|-------------------------|-----------|
 | **CRM** | Khớp | Khớp (`crm_customers`) | Khớp |
-| **Order intel** | `pc_pos_orders` (Pancake) → chiếu **`commerce_orders`** | 1:1 canonical (`source` + `sourceRecordMongoId`); không merge đa nguồn | Khớp — xem [PHUONG_AN_DOMAIN_ORDER_KHOP_KHUNG_CIO_AID.md](./PHUONG_AN_DOMAIN_ORDER_KHOP_KHUNG_CIO_AID.md) |
+| **Order intel** | `pc_pos_orders` (Pancake) → chiếu **`order_canonical`** | 1:1 canonical (`source` + `sourceRecordMongoId`); không merge đa nguồn | Khớp — xem [PHUONG_AN_DOMAIN_ORDER_KHOP_KHUNG_CIO_AID.md](./PHUONG_AN_DOMAIN_ORDER_KHOP_KHUNG_CIO_AID.md) |
 | **CIX / conversation** | Khớp (`fb_message_items` → enqueue) | Trọng tâm hội thoại, không qua `crm_customers` trước CIX | Khớp tương đối |
 | **Meta Ads** | Khớp (insight / entity) | **Khác** — thực thể campaign/ad/…, debounce trong meta hooks | Khớp góc độ bàn giao AID |
 

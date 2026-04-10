@@ -3,8 +3,10 @@ package worker
 
 import (
 	"context"
+	"strings"
 	"time"
 
+	"meta_commerce/internal/api/aidecision/decisionlive"
 	orderintelmodels "meta_commerce/internal/api/orderintel/models"
 	orderintelsvc "meta_commerce/internal/api/orderintel/service"
 	"meta_commerce/internal/global"
@@ -94,6 +96,18 @@ func (w *OrderIntelComputeWorker) Start(ctx context.Context) {
 				return
 			}
 
+			tid := strings.TrimSpace(job.TraceID)
+			jobExtra := map[string]string{"jobId": job.ID.Hex()}
+			if job.OrderUid != "" {
+				jobExtra["orderUid"] = job.OrderUid
+			}
+			if tid != "" {
+				decisionlive.PublishIntelDomainMilestone(job.OwnerOrganizationID, tid, job.CorrelationID, decisionlive.IntelDomainOrderIntel, decisionlive.IntelMilestoneStart,
+					"Worker Order Intel: bắt đầu tính Raw → L3 / cờ trên đơn.",
+					[]string{"Job order_intel_compute đang chạy tại domain đơn hàng — kết quả sẽ bàn giao về AI Decision."},
+					jobExtra)
+			}
+
 			runErr := orderintelsvc.RunOrderIntelComputeJob(ctx, &job)
 			if runErr != nil {
 				_, uerr := coll.UpdateOne(ctx, bson.M{"_id": job.ID}, bson.M{
@@ -107,6 +121,16 @@ func (w *OrderIntelComputeWorker) Start(ctx context.Context) {
 					log.WithError(uerr).WithField("jobId", job.ID.Hex()).Warn("📋 [ORDER_INTEL] Ghi lỗi job thất bại")
 				}
 				log.WithError(runErr).WithField("jobId", job.ID.Hex()).Warn("📋 [ORDER_INTEL] RunOrderIntelComputeJob thất bại")
+				if tid != "" {
+					msg := strings.TrimSpace(runErr.Error())
+					if len(msg) > 400 {
+						msg = msg[:400] + "…"
+					}
+					decisionlive.PublishIntelDomainMilestone(job.OwnerOrganizationID, tid, job.CorrelationID, decisionlive.IntelDomainOrderIntel, decisionlive.IntelMilestoneError,
+						"Worker Order Intel: lỗi khi tính intelligence đơn.",
+						[]string{"Chi tiết (rút gọn): " + msg},
+						jobExtra)
+				}
 				return
 			}
 
@@ -117,6 +141,12 @@ func (w *OrderIntelComputeWorker) Start(ctx context.Context) {
 			}})
 			if uerr != nil {
 				log.WithError(uerr).WithField("jobId", job.ID.Hex()).Warn("📋 [ORDER_INTEL] Đánh dấu hoàn thành thất bại")
+			}
+			if tid != "" {
+				decisionlive.PublishIntelDomainMilestone(job.OwnerOrganizationID, tid, job.CorrelationID, decisionlive.IntelDomainOrderIntel, decisionlive.IntelMilestoneDone,
+					"Worker Order Intel: hoàn tất job tính intelligence.",
+					[]string{"Đã cập nhật snapshot intel đơn; có thể đã emit order_intel_recomputed về hàng đợi AI Decision."},
+					jobExtra)
 			}
 		}()
 	}

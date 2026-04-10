@@ -24,9 +24,9 @@ type CrmNoteService struct {
 
 // NewCrmNoteService tạo CrmNoteService mới.
 func NewCrmNoteService() (*CrmNoteService, error) {
-	coll, exist := global.RegistryCollections.Get(global.MongoDB_ColNames.CrmNotes)
+	coll, exist := global.RegistryCollections.Get(global.MongoDB_ColNames.CustomerNotes)
 	if !exist {
-		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.CrmNotes, common.ErrNotFound)
+		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.CustomerNotes, common.ErrNotFound)
 	}
 	return &CrmNoteService{
 		BaseServiceMongoImpl: basesvc.NewBaseServiceMongo[crmmodels.CrmNote](coll),

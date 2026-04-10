@@ -5,11 +5,13 @@ package worker
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
+	"meta_commerce/internal/api/aidecision/decisionlive"
 	"meta_commerce/internal/api/aidecision/intelrecomputed"
 	cixmodels "meta_commerce/internal/api/cix/models"
 	cixsvc "meta_commerce/internal/api/cix/service"
@@ -110,6 +112,18 @@ func (w *CixIntelComputeWorker) Start(ctx context.Context) {
 
 			now := time.Now().UnixMilli()
 			for _, job := range jobs {
+				tid := strings.TrimSpace(job.TraceID)
+				extra := map[string]string{
+					"jobId":          job.ID.Hex(),
+					"conversationId": strings.TrimSpace(job.ConversationID),
+					"channel":        strings.TrimSpace(job.Channel),
+				}
+				if tid != "" {
+					decisionlive.PublishIntelDomainMilestone(job.OwnerOrganizationID, tid, job.CorrelationID, decisionlive.IntelDomainCIX, decisionlive.IntelMilestoneStart,
+						"Worker CIX: bắt đầu phân tích hội thoại (Rule Engine).",
+						[]string{"Đang đọc tin nhắn và áp dụng luật intel tại domain CIX — kết quả sẽ bàn giao về AI Decision khi xong."},
+						extra)
+				}
 				result, err := analysisSvc.AnalyzeSessionWithParams(ctx, cixsvc.AnalyzeSessionParams{
 					SessionUid:          job.ConversationID,
 					CustomerUid:         job.CustomerID,
@@ -122,6 +136,16 @@ func (w *CixIntelComputeWorker) Start(ctx context.Context) {
 				if err != nil {
 					newRetry := job.RetryCount + 1
 					if newRetry >= cixIntelComputeMaxRetries {
+						if tid != "" {
+							errMsg := strings.TrimSpace(err.Error())
+							if len(errMsg) > 400 {
+								errMsg = errMsg[:400] + "…"
+							}
+							decisionlive.PublishIntelDomainMilestone(job.OwnerOrganizationID, tid, job.CorrelationID, decisionlive.IntelDomainCIX, decisionlive.IntelMilestoneError,
+								"Worker CIX: dừng sau nhiều lần thử — không phân tích được hội thoại.",
+								[]string{"Lý do kỹ thuật (rút gọn): " + errMsg},
+								extra)
+						}
 						failDoc, insErr := analysisSvc.InsertTerminalFailure(ctx, cixsvc.CixTerminalFailureInput{
 							OwnerOrganizationID: job.OwnerOrganizationID,
 							SessionUid:          job.ConversationID,
@@ -157,6 +181,18 @@ func (w *CixIntelComputeWorker) Start(ctx context.Context) {
 					analysisHex = result.ID.Hex()
 				}
 				_ = intelrecomputed.EmitCixIntelRecomputed(ctx, job.OwnerOrganizationID, job.ID.Hex(), job.ConversationID, job.CustomerID, job.Channel, job.CioEventUid, analysisHex)
+				if tid != "" {
+					doneExtra := map[string]string{
+						"jobId":            job.ID.Hex(),
+						"conversationId":   strings.TrimSpace(job.ConversationID),
+						"analysisId":       analysisHex,
+						"handoffEventType": "cix_intel_recomputed",
+					}
+					decisionlive.PublishIntelDomainMilestone(job.OwnerOrganizationID, tid, job.CorrelationID, decisionlive.IntelDomainCIX, decisionlive.IntelMilestoneDone,
+						"Worker CIX: đã hoàn tất phân tích và bàn giao intel về AI Decision.",
+						[]string{"Đã enqueue cix_intel_recomputed trên cùng trace — consumer AID sẽ tiếp nhận theo hàng đợi."},
+						doneExtra)
+				}
 				_, _ = coll.UpdateOne(ctx, bson.M{"_id": job.ID}, bson.M{
 					"$set": bson.M{
 						"processedAt":  now,

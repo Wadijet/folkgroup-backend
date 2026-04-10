@@ -21,8 +21,8 @@ const (
 	WorkerCommandCleanup           = "notification_command_cleanup"
 	WorkerAgentCommandCleanup      = "notification_agent_command_cleanup"
 	WorkerAgentActivityCleanup     = "notification_agent_activity_cleanup"
-	WorkerCrmPendingMerge          = "crm_pending_merge"
-	WorkerCrmBulk                  = "crm_bulk"
+	WorkerCrmPendingMerge          = "customer_pending_merge"
+	WorkerCrmBulk                  = "customer_bulk"
 	WorkerAdsExecution             = "ads_execution"
 	WorkerAdsAutoPropose           = "ads_auto_propose"
 	WorkerAdsCircuitBreaker        = "ads_circuit_breaker"
@@ -37,8 +37,8 @@ const (
 	WorkerAIDecisionClosure        = "ai_decision_closure"
 	WorkerOrderIntelCompute = "order_intel_compute"
 	WorkerAdsIntelCompute = "ads_intel_compute"
-	WorkerCrmContext               = "crm_context"
-	WorkerCrmIntelCompute   = "crm_intel_compute"
+	WorkerCrmContext               = "customer_context"
+	WorkerCrmIntelCompute   = "customer_intel_compute"
 	WorkerLearningRuleSuggestion   = "learning_rule_suggestion"
 	WorkerLearningEvaluation       = "learning_evaluation"
 	WorkerLearningInsightAggregate = "learning_insight_aggregate"
@@ -64,7 +64,7 @@ var workerMetadataMap = map[string]WorkerMetadata{
 	WorkerCommandCleanup:           {Module: "notification", Domain: "system", Description: "Dọn command cũ hết hạn"},
 	WorkerAgentCommandCleanup:      {Module: "notification", Domain: "system", Description: "Dọn agent command cũ hết hạn"},
 	WorkerAgentActivityCleanup:     {Module: "notification", Domain: "system", Description: "Dọn agent activity log cũ"},
-	WorkerCrmPendingMerge:          {Module: "crm", Domain: "customer", Description: "Queue merge L1→L2 khách hàng (crm_pending_merge)"},
+	WorkerCrmPendingMerge:          {Module: "crm", Domain: "customer", Description: "Queue merge L1→L2 khách hàng (customer_pending_merge)"},
 	WorkerCrmBulk:                  {Module: "crm", Domain: "customer", Description: "Xử lý bulk job cập nhật customer hàng loạt"},
 	WorkerAdsExecution:             {Module: "ads", Domain: "ads", Description: "Thực thi các đề xuất quảng cáo đã được duyệt"},
 	WorkerAdsAutoPropose:           {Module: "ads", Domain: "aidecision", Description: "Auto propose (aidecision/adsautop → executor.propose_requested); code AID, đăng ký cạnh worker ads"},
@@ -81,7 +81,7 @@ var workerMetadataMap = map[string]WorkerMetadata{
 	WorkerOrderIntelCompute: {Module: "orderintel", Domain: "order", Description: "Poll order_intel_compute — tính Raw→L1→L2→L3→Flags, emit order_intel_recomputed"},
 	WorkerAdsIntelCompute: {Module: "ads", Domain: "ads", Description: "Poll ads_intel_compute — ApplyAdsIntelligenceRecompute / RecalculateAll (không tính trong consumer AI Decision)"},
 	WorkerCrmContext:               {Module: "crm", Domain: "customer", Description: "Consume customer.context_requested → load customer → emit customer.context_ready"},
-	WorkerCrmIntelCompute:   {Module: "crm", Domain: "customer", Description: "Poll crm_intel_compute — RefreshMetrics / Recalculate* / classification_refresh (không tính trong consumer AI Decision)"},
+	WorkerCrmIntelCompute:   {Module: "crm", Domain: "customer", Description: "Poll customer_intel_compute — RefreshMetrics / Recalculate* / classification_refresh (không tính trong consumer AI Decision)"},
 	WorkerLearningRuleSuggestion:   {Module: "learning", Domain: "learning", Description: "Phân tích learning_cases → tạo rule suggestions (Phase 3, LEARNING_RULE_SUGGESTION_ENABLED=true)"},
 	WorkerLearningEvaluation:       {Module: "learning", Domain: "learning", Description: "Batch tính evaluation (outcome_class, error_attribution) cho learning_cases"},
 	WorkerLearningInsightAggregate: {Module: "learning", Domain: "learning", Description: "Aggregate anonymized learning stats cross-merchant (Phase 3)"},

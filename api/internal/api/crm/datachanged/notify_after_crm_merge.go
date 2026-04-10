@@ -56,7 +56,7 @@ func NotifyIntelRecomputeAfterCrmMergeIfNeeded(ctx context.Context, item *crmmod
 		// createdAt trong queue thường là Unix giây (EnqueueCrmPendingMerge)
 		causalMs = item.CreatedAt * 1000
 	}
-	_, err = crmqueue.EmitCrmIntelligenceRecomputeRequested(ctx, unifiedID, ownerOrgID, sourceCollection, jobHex, causalMs)
+	_, err = crmqueue.EmitCrmIntelligenceRecomputeRequested(ctx, unifiedID, ownerOrgID, sourceCollection, jobHex, causalMs, item.TraceID, item.CorrelationID)
 	if err != nil {
 		logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
 			"collection": sourceCollection, "unifiedId": unifiedID,
@@ -102,7 +102,7 @@ func extractCustomerIDFromPendingMergeDoc(collectionName string, doc bson.M) str
 			return ""
 		}
 		return strings.TrimSpace(crmvc.ExtractConversationCustomerId(&d))
-	case global.MongoDB_ColNames.CrmNotes:
+	case global.MongoDB_ColNames.CustomerNotes:
 		var d crmmodels.CrmNote
 		if err := bsonMapToStructForNotify(doc, &d); err != nil {
 			return ""

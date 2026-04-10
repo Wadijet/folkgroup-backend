@@ -16,7 +16,9 @@ API contract và design cross-repo: [docs-shared/ai-context/folkform/api-context
 
 - **Trace W3C (`w3cTraceId`, span, timeline):** [api-context — Version 4.10](../../docs-shared/ai-context/folkform/api-context.md#version-410); [unified-data-contract — §2.5c](../../docs-shared/architecture/data-contract/unified-data-contract.md#contract-25c-w3c-trace).
 - **Case vs trace / API audit (list case, queue, org-live persist):** [api-context — Version 4.11](../../docs-shared/ai-context/folkform/api-context.md#version-411); [unified-data-contract — §2.5d](../../docs-shared/architecture/data-contract/unified-data-contract.md#contract-25d-case-trace-audit).
+- **Tham chiếu E2E G1–G6 (`e2e*` trên queue / timeline):** [api-context — Version 4.14](../../docs-shared/ai-context/folkform/api-context.md#version-414); [unified-data-contract — §2.5e](../../docs-shared/architecture/data-contract/unified-data-contract.md#contract-25e-e2e-reference); [bang-pha-buoc-event-e2e](../flows/bang-pha-buoc-event-e2e.md).
+- **Khung nội dung timeline (detailBullets / detailSections — trace & audit):** [api-context — Version 4.15](../../docs-shared/ai-context/folkform/api-context.md#version-415); [bang-pha-buoc-event-e2e — Khung nội dung timeline](../flows/bang-pha-buoc-event-e2e.md#khung-nội-dung-timeline-trace--audit).
 
 ---
 
-**Cập nhật:** 2026-03-26
+**Cập nhật:** 2026-04-07

@@ -1,8 +1,8 @@
 # Trung tâm chỉ huy AI Decision — Ý tưởng màn hình & thiết kế dữ liệu backend
 
-**Phiên bản:** 1.8  
-**Ngày:** 2026-03-25  
-**Trạng thái:** `GET /ai-decision/org-live/metrics` + WS `aggregate` — **`schemaVersion` 2**, nhóm JSON: **`meta`**, **`queue`**, **`intake`**, **`publishCounters`**, **`realtime`**, **`consumer`**, **`workers`** (RAM per process). **`AI_DECISION_LIVE_ENABLED=0`:** vẫn metrics phễu + gauge (không ring/WS). Chi tiết §5.2. **Phân loại vận hành `opsTier` trên feed live:** §4.4.
+**Phiên bản:** 1.11  
+**Ngày:** 2026-04-07  
+**Trạng thái:** `GET /ai-decision/org-live/metrics` + WS `aggregate` — **`schemaVersion` 2**, nhóm JSON: **`meta`**, **`queue`**, **`intake`**, **`publishCounters`**, **`realtime`**, **`consumer`**, **`workers`** (RAM per process). **`AI_DECISION_LIVE_ENABLED=0`:** vẫn metrics phễu + gauge (không ring/WS). Chi tiết §5.2. **Phân loại vận hành `opsTier` trên feed live:** §4.4. **Luồng `Publish` từng bước:** §4.5. **Luồng đọc timeline trace / org:** §4.6. **Ghi Mongo `decision_org_live_events`:** §4.7.
 
 ---
 
@@ -22,20 +22,21 @@ Tài liệu này mô tả:
 | Nội dung | Vị trí / hành vi |
 |----------|------------------|
 | Envelope sự kiện live | `DecisionLiveEvent` — `api/internal/api/aidecision/decisionlive/types.go` |
-| Publish + fan-out WS | `decisionlive.Publish` — `decisionlive/publish.go` (live bật: ring + WS; live tắt: chỉ metrics trung tâm chỉ huy) |
+| Publish + fan-out WS | `decisionlive.Publish` — `decisionlive/publish.go` (live bật: ring + WS; live tắt: chỉ metrics trung tâm chỉ huy). **Thứ tự xử lý chi tiết:** §4.5 |
 | Snapshot metrics — lũy kế `publishCounters.*` + gauge `realtime.gaugeByPhase` | `command_center_metrics.go` — `BuildCommandCenterSnapshot`, `RecordCommandCenterPublish`, `RecordConsumerWorkBegin` |
 | **Gauge** trong `realtime.gaugeByPhase` | `command_center_gauges.go` — chuyển phase theo `Publish` (trace); `worker_held` + `consuming` (event không trace); `adjustGaugeOnLivePublish` |
 | Thống kê consumer (lần chạy, avg ms, throughput cửa sổ) | `command_center_consumer_stats.go` — `RecordConsumerCompletion` (sau mỗi lease→xong trong worker) |
 | Độ sâu queue | `reconcile_queue_depth.go` + `StartCommandCenterReconciler` trong `main` |
-| Replay theo trace | `GET /api/v1/ai-decision/traces/:traceId/timeline` |
-| WebSocket theo trace | `GET /api/v1/ai-decision/traces/:traceId/live` — mỗi message = một JSON `DecisionLiveEvent` |
+| Replay theo trace | `GET /api/v1/ai-decision/traces/:traceId/timeline` — `decisionlive.Timeline` + backfill; chi tiết §4.6 |
+| WebSocket theo trace | `GET /api/v1/ai-decision/traces/:traceId/live` — Subscribe → replay → drain Seq → stream; §4.6 |
 | Replay + WS theo org | `GET /api/v1/ai-decision/org-live/timeline`, `GET /api/v1/ai-decision/org-live` (WebSocket) + **aggregate** định kỳ (`AI_DECISION_WS_AGGREGATE_SEC`, mặc định ~3s) |
 | Metrics HTTP | `GET /api/v1/ai-decision/org-live/metrics` |
 | Tắt publish live | `AI_DECISION_LIVE_ENABLED=0` — **không** ring / WS / persist async; **vẫn** `publishCounters` + **gauge** qua nhánh metrics của `Publish` |
 | Log mỗi lần đếm metrics | `AI_DECISION_METRICS_CHANGE_LOG` — đặt `1` để bật (mặc định tắt) |
 | Phân loại “đáng xem” cho vận hành | `eventopstier.ClassifyEventType` — `api/internal/api/aidecision/eventopstier/`; điền vào `DecisionLiveEvent` trong `decisionlive.Publish` (§4.4) |
+| Ghi persist org-live (Mongo) | Collection **`decision_org_live_events`** — `persistOrgLiveEventAsync` + `BuildOrgLivePersistDocument` (`persist_org.go`, `persist_org_audit.go`); **mục 4.7** |
 
-**Lưu ý lưu trữ:** Lũy kế + gauge chỉ **RAM process** (không Redis). `queue.depth` sau reconcile giữ trong RAM; GET/WS aggregate mặc định **không** đọc Mongo mỗi request. Replay org-live có thể đọc Mongo collection **`decision_org_live_events`** chỉ khi **`AI_DECISION_LIVE_ORG_PERSIST=1`** (mặc định tắt — chỉ ring RAM process).
+**Lưu ý lưu trữ:** Lũy kế + gauge chỉ **RAM process** (không Redis). `queue.depth` sau reconcile giữ trong RAM; GET/WS aggregate mặc định **không** đọc Mongo mỗi request. Replay org-live có thể đọc Mongo **`decision_org_live_events`** khi persist bật (**§4.7**); tắt persist → chỉ ring RAM process. **Ghi** vào collection đó chỉ xảy ra khi **live bật** (nhánh Publish có bước 6–7) **và** persist bật.
 
 Tham chiếu API tổng quan: [docs/api/api-overview.md](../api/api-overview.md). Vision AI Decision: [docs-shared/architecture/vision/08 - ai-decision.md](../../docs-shared/architecture/vision/08%20-%20ai-decision.md).
 
@@ -134,6 +135,97 @@ Mục đích: người **quản lý / vận hành** lọc feed org-live và time
 **API ingest:** `POST /api/v1/ai-decision/events` — response `data` thêm `opsTier`, `opsTierLabelVi` (cùng logic `ClassifyEventType` với body `eventType`).
 
 **Ghi chú:** Bản ghi replay đã lưu Mongo (khi bật persist) trước phiên bản có field này có thể thiếu `opsTier` cho đến khi có sự kiện mới.
+
+### 4.5. Luồng `decisionlive.Publish` — xử lý dữ liệu theo từng bước
+
+Mục này mô tả **một lần gọi** `Publish(ownerOrgID, traceID, ev)` từ đầu vào đến đích (ring, WebSocket, metrics, tùy chọn persist). Code: `api/internal/api/aidecision/decisionlive/publish.go`; cập nhật bộ đếm/gauge: `command_center_metrics.go` (`recordCommandCenterPublish`).
+
+**Bước 0 — Kiểm tra đầu vào (bắt buộc có org + trace)**  
+- Nếu `traceID` rỗng **hoặc** `ownerOrgID` zero: **dừng ngay**, không ghi ring, không broadcast, không cộng metrics (trừ log cảnh báo khi bật `AI_DECISION_METRICS_CHANGE_LOG=1`).  
+- Lý do: mọi tín hiệu phễu theo trace và fan-out WS đều gắn cặp (org, trace).
+
+**Bước 1 — Chuẩn hóa envelope `DecisionLiveEvent`**  
+- `schemaVersion`: nếu 0 → gán `1`.  
+- `stream`: nếu rỗng → `aidecision.live`.  
+- Gán `traceId`, `orgIdHex` từ tham số.  
+- `tsMs`: nếu 0 → thời điểm hiện tại (ms).  
+- `severity`: nếu rỗng → mức info (hằng số trong package).
+
+**Bước 2 — Làm giàu metadata (phục vụ feed + metrics)**  
+- **W3C trace context** (`enrichW3CTraceContext`) — gắn ngữ cảnh trace cho client/debug.  
+- **`opsTier` / `opsTierLabelVi`** (`enrichLiveEventOpsTier`) — quy tắc §4.4.  
+- **Nguồn feed** (`enrichLiveEventFeedSource`) — phục vụ phân loại trên feed / counters.
+
+**Bước 3 — Nhánh theo `AI_DECISION_LIVE_ENABLED`**
+
+| Điều kiện | Điều gì xảy ra tiếp theo |
+|-----------|---------------------------|
+| **`AI_DECISION_LIVE_ENABLED=0`** (hoặc giá trị khác `1`/rỗng) | Chỉ gọi `recordCommandCenterPublish(ownerOrgID, ev, "publish_chi_metrics")`: cộng **`publishCounters`** (phase, sourceKind, feed, ops tier) và cập nhật **`realtime.gaugeByPhase`** qua `adjustGaugeOnLivePublish`. **Không** ghi ring replay, **không** WebSocket, **không** `persistOrgLiveEventAsync`. Một lần log cảnh báo cấp process (sync.Once) nhắc vận hành. |
+| **Live bật** (mặc định: biến môi trường trống hoặc `1`) | Tiếp tục bước 4–7. |
+
+**Bước 4 — Ring replay theo trace (RAM process)**  
+- `globalStore.append(org, trace, ev)` → bản `final` (có `seq` / thứ tự trong ring, giới hạn `MaxEventsPerTrace`).  
+- Dùng cho `GET .../traces/:traceId/timeline` và client WS trace sau khi đã replay buffer cũ.
+
+**Bước 5 — Metrics trung tâm chỉ huy (đường publish đầy đủ / WS)**  
+- `RecordCommandCenterPublish(ownerOrgID, final)` → bên trong gọi `recordCommandCenterPublish(..., "publish_ws")` — cùng semantics bước 3 nhưng nhãn đếm khác (`publish_ws` vs `publish_chi_metrics`) để phân biệt nguồn bump trong triển khai hiện tại.
+
+**Bước 6 — Fan-out WebSocket**  
+- Broadcast kênh **theo trace:** `orgHex:traceId` — subscriber WS trace nhận `final`.  
+- Gắn vào **feed org:** `globalOrgFeed.appendOrg` → `orgEv` (có thể thêm field dẫn xuất cho màn org-live).  
+- Broadcast kênh **theo org:** `orgHex:__org_feed__` — subscriber org-live nhận `orgEv`.
+
+**Bước 7 — Persist org-live (tùy chọn)**  
+- `persistOrgLiveEventAsync` — chỉ có ý nghĩa khi bật cấu hình persist org-live (xem §2, `AI_DECISION_LIVE_ORG_PERSIST`); mặc định thường **không** ghi Mongo.
+
+**Tóm tắt một dòng:**  
+- **Live tắt:** chỉ **Bước 0–2** rồi **metrics** (bước 3 nhánh tắt).  
+- **Live bật:** **0–2** → **4** (ring) → **5** (metrics) → **6** (WS) → **7** (persist nếu bật).
+
+**Không nhầm với intake queue:** `intake.*` trong snapshot đếm từ **`EmitEvent`** khi ghi `decision_events_queue` (§5.2); **`Publish`** không tăng `intake` — nó phản ánh **tiến trình / timeline** sau khi pipeline đã có mốc live.
+
+### 4.6. Luồng đọc timeline theo trace và theo org (đối chiếu Publish)
+
+**Một trace (`traceId` + org): nguồn dữ liệu** là ring RAM `traceStore` sau các lần **Publish bước 4** (chỉ khi live bật). Code đọc: `decisionlive.Timeline`, `decisionlive.Subscribe`; HTTP/WS: `handler.aidecision.live.go`.
+
+**GET `/api/v1/ai-decision/traces/:traceId/timeline`**  
+1. Kiểm tra org + `traceId`.  
+2. `Timeline` → `snapshot` ring → `backfillLiveEventsDerivedFields` (bù `opsTier` / feed nếu bản ghi cũ).  
+3. Trả JSON `{ traceId, events }`.
+
+**WS `/api/v1/ai-decision/traces/:traceId/live`**  
+1. **Subscribe** kênh `orgHex:traceId` **trước** khi gửi replay (tránh race mất mốc Publish xen kẽ).  
+2. **Timeline** — lấy toàn bộ mốc đã có, tính `maxSeq`.  
+3. Gửi lần lượt từng `DecisionLiveEvent` (sau `SanitizeDecisionLiveEventJSON`).  
+4. **Drain** non-blocking `liveCh`: bỏ mốc có `seq ≤ maxSeq` đã nằm trong replay; gửi các mốc mới còn lại trong buffer.  
+5. Vòng **stream**: ping/read client + nhận tiếp từ `liveCh` cho đến đóng kết nối.
+
+**Org-live (mọi trace):** `OrgTimelineForAPI` — nếu persist bật thì ưu tiên đọc Mongo `decision_org_live_events` (đảo thứ tự về tăng dần thời gian), lỗi/rỗng thì fallback ring RAM; sau đó luôn **backfill**. WS `/org-live` tương tự với **FeedSeq** thay cho Seq ở bước drain, rồi thêm message **aggregate** định kỳ.
+
+**Điều kiện vận hành:** `AI_DECISION_LIVE_ENABLED=0` — không có mốc mới trên ring; timeline chỉ còn dữ liệu RAM tồn tại trước đó (tới khi restart). Metrics vẫn nhận Publish nhánh chỉ metrics (§4.5 bước 3a).
+
+### 4.7. Collection `decision_org_live_events` — khi nào ghi, document gồm gì, đọc ra sao
+
+**Điều kiện ghi:**  
+1. `AI_DECISION_LIVE_ENABLED` bật (Publish chạy bước 4–7).  
+2. `AI_DECISION_LIVE_ORG_PERSIST` (hoặc `AIDecisionLiveOrgPersist` trong config) bật.  
+3. Có collection trong registry.  
+→ `persistOrgLiveEventAsync` gọi sau **Publish bước 6b** (đã có `orgEv` với `FeedSeq`), **InsertOne** bất đồng bộ, timeout 5s; lỗi ghi không chặn pipeline (client vẫn có RAM/WS).
+
+**Một document = một mốc org-live** (tương ứng một lần fan-out org). `docSchemaVersion` = **2**.
+
+**Cấu trúc nội dung (theo `BuildOrgLivePersistDocument`):**  
+- **`payload`**: `[]byte` — JSON nguyên vẹn **`DecisionLiveEvent`** (nguồn sự thật đầy đủ cho replay; API rebuild struct bằng `json.Unmarshal`).  
+- **Trường phẳng** (lọc, list, UI nhanh): `_id`, `ownerOrganizationId`, `createdAt` (ms server lúc ghi), `traceId`, `w3cTraceId`, `spanId`, `parentSpanId`, `correlationId`, `decisionCaseId`, `phase`, `severity`, `seq`, `feedSeq`, `stream`, `sourceKind`, `sourceTitle`, `feedSourceCategory`, `feedSourceLabelVi`, `opsTier`, `opsTierLabelVi`, `decisionMode`.  
+- **UI suy ra**: `uiTitle`, `uiSummary`, `phaseLabelVi`, `stepKind`, `stepTitle`.  
+- **`refs`**: map gộp `ev.Refs` + định danh trace/case (audit/query).  
+- **`detailBullets`**, **`detailSections`**: copy từ event (BSON lồng).
+
+**Đọc:**  
+- **`OrgTimelineForAPI`**: ưu tiên đọc Mongo (chỉ `payload` decode), đảo thứ tự thời gian tăng, **backfill**; fallback RAM nếu persist tắt / lỗi / rỗng.  
+- **`GET .../org-live/persisted-events`**: chỉ Mongo, phân trang + lọc (`traceId`, `decisionCaseId`, khoảng `createdAt`), response events từ **payload**.
+
+**Model index trong code:** `api/internal/api/aidecision/models/model.aidecision.org_live_event.go` (`AIDecisionOrgLiveEvent`) — subset trường cho `CreateIndexes`; document thực tế có thêm trường phẳng do `bson.M` khi InsertOne.
 
 ---
 
@@ -336,7 +428,7 @@ Dùng **`schemaVersion`** trong `data` (hiện **2**) để client tách phiên 
 - [api-overview.md](../api/api-overview.md) — AI Decision routes (backend)
 - [08 - ai-decision.md](../../docs-shared/architecture/vision/08%20-%20ai-decision.md) — Vision (**docs-shared**)
 - [unified-data-contract.md](../../docs-shared/architecture/data-contract/unified-data-contract.md) — Định danh & event base
-- Code: `api/internal/api/aidecision/decisionlive/` (`command_center_metrics.go`, `command_center_gauges.go`, `command_center_consumer_stats.go`, `reconcile_queue_depth.go`, `publish.go`, `ops_tier_enrich.go`), `eventopstier/classify.go`, `queuedepth/sync.go` (độ sâu queue RAM), `handler/handler.aidecision.live.go`, `router/routes.go`, worker `worker.aidecision.consumer.go`
+- Code: `api/internal/api/aidecision/decisionlive/` (`command_center_metrics.go`, `command_center_gauges.go`, `command_center_consumer_stats.go`, `reconcile_queue_depth.go`, `publish.go`, `persist_org.go`, `persist_org_audit.go`, `ops_tier_enrich.go`), `models/model.aidecision.org_live_event.go`, `eventopstier/classify.go`, `queuedepth/sync.go` (độ sâu queue RAM), `handler/handler.aidecision.live.go`, `router/routes.go`, worker `worker.aidecision.consumer.go`
 - **Đối chiếu MongoDB:** `go run ./cmd/aidecision_queue_metrics_audit` (toàn DB) hoặc `go run ./cmd/aidecision_queue_metrics_audit <ownerOrganizationId hex>` — cùng pipeline reconcile `queueDepth`, thêm đếm mọi `status` và bản ghi thiếu `ownerOrganizationId`.
 - **WebSocket trình duyệt (Chrome / Flutter Web):** `AuthMiddleware` + org context hỗ trợ fallback query `access_token` (hoặc `token`) và `role_id` khi không gửi được `Authorization` / `X-Active-Role-ID` trên handshake — cùng luồng kiểm tra như REST.
 
@@ -355,3 +447,6 @@ Dùng **`schemaVersion`** trong `data` (hiện **2**) để client tách phiên 
 | 2026-03-25 | 1.6 | `AI_DECISION_LIVE_ENABLED=0`: vẫn cập nhật phễu + gauge phase qua `Publish` (không ring/WS); alert `live_disabled` và env mô tả trong api-overview khớp hành vi |
 | 2026-03-25 | 1.7 | **schemaVersion 2:** nhóm `meta` / `queue` / `intake` / `publishCounters` / `realtime` / `consumer` / `workers` — tách semantics, bỏ flat root |
 | 2026-03-25 | 1.8 | **`opsTier` / `opsTierLabelVi`** trên `DecisionLiveEvent` + `eventopstier`; `POST /ai-decision/events` trả tier; persist org-live `decision_org_live_events` + env `AI_DECISION_LIVE_ORG_PERSIST` (mặc định tắt); refresh `queue.depth` sau emit/lease/complete (package `queuedepth`) — §4.4, §2 |
+| 2026-04-07 | 1.9 | **§4.5** — mô tả luồng `decisionlive.Publish` theo từng bước (đầu vào → chuẩn hóa → enrich → nhánh live tắt/bật → ring → metrics → WS → persist); làm rõ khác `intake` |
+| 2026-04-07 | 1.10 | **§4.6** — luồng đọc timeline trace (GET/WS) và org-live (`OrgTimelineForAPI`, FeedSeq, drain); đồng bộ comment code `types`, `publish`, `store`, handler live |
+| 2026-04-07 | 1.11 | **§4.7** — `decision_org_live_events`: điều kiện ghi, cấu trúc document (payload JSON + trường phẳng), cách đọc; comment model, persist, handler persisted-events |

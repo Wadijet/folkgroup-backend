@@ -3,6 +3,7 @@ package datachanged
 
 import (
 	"context"
+	"strings"
 
 	crmvc "meta_commerce/internal/api/crm/service"
 	"meta_commerce/internal/api/events"
@@ -11,7 +12,8 @@ import (
 )
 
 // EnqueueCrmMergeFromDataChange ghi job vào crm_pending_merge (khách POS/FB, đơn, hội thoại, ghi chú).
-func EnqueueCrmMergeFromDataChange(ctx context.Context, e events.DataChangeEvent) {
+// traceID / correlationID từ envelope datachanged (consumer AID); defer flush có thể truyền rỗng.
+func EnqueueCrmMergeFromDataChange(ctx context.Context, e events.DataChangeEvent, traceID, correlationID string) {
 	if e.Document == nil {
 		return
 	}
@@ -25,8 +27,8 @@ func EnqueueCrmMergeFromDataChange(ctx context.Context, e events.DataChangeEvent
 		global.MongoDB_ColNames.FbCustomers,
 		global.MongoDB_ColNames.PcPosOrders,
 		global.MongoDB_ColNames.FbConvesations,
-		global.MongoDB_ColNames.CrmNotes:
-		if err := crmvc.EnqueueCrmPendingMerge(ctx, e.CollectionName, e.Operation, e.Document, e.PreviousDocument, ownerOrgID); err != nil {
+		global.MongoDB_ColNames.CustomerNotes:
+		if err := crmvc.EnqueueCrmPendingMerge(ctx, e.CollectionName, e.Operation, e.Document, e.PreviousDocument, ownerOrgID, strings.TrimSpace(traceID), strings.TrimSpace(correlationID)); err != nil {
 			logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
 				"collection": e.CollectionName,
 				"operation":  e.Operation,

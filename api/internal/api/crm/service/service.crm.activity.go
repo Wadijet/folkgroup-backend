@@ -50,9 +50,9 @@ type CrmActivityService struct {
 
 // NewCrmActivityService tạo CrmActivityService mới.
 func NewCrmActivityService() (*CrmActivityService, error) {
-	coll, exist := global.RegistryCollections.Get(global.MongoDB_ColNames.CrmActivityHistory)
+	coll, exist := global.RegistryCollections.Get(global.MongoDB_ColNames.CustomerActivityHistory)
 	if !exist {
-		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.CrmActivityHistory, common.ErrNotFound)
+		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.CustomerActivityHistory, common.ErrNotFound)
 	}
 	return &CrmActivityService{
 		BaseServiceMongoImpl: basesvc.NewBaseServiceMongo[crmmodels.CrmActivityHistory](coll),
@@ -163,7 +163,7 @@ func (s *CrmActivityService) logActivityUpsert(ctx context.Context, input LogAct
 		},
 	}
 	events.EmitDataChanged(ctx, events.DataChangeEvent{
-		CollectionName: global.MongoDB_ColNames.CrmActivityHistory,
+		CollectionName: global.MongoDB_ColNames.CustomerActivityHistory,
 		Operation:      events.OpUpsert,
 		Document:       doc,
 	})

@@ -82,9 +82,10 @@ func emitCrmIntelligenceCompute(ctx context.Context, operation string, ownerOrgI
 		entID = u
 	}
 	res, err := eventemit.EmitDecisionEvent(ctx, &eventemit.EmitInput{
-		EventType:   EventTypeCrmIntelligenceComputeRequested,
-		EventSource: eventtypes.EventSourceCRM,
-		EntityType:  "crm_customer",
+		EventType:       EventTypeCrmIntelligenceComputeRequested,
+		EventSource:     eventtypes.EventSourceCRM,
+		PipelineStage:   eventtypes.PipelineStageAfterL1Change,
+		EntityType:      "crm_customer",
 		EntityID:    entID,
 		OrgID:       orgIDStr,
 		OwnerOrgID:  ownerOrgID,
@@ -110,7 +111,8 @@ func EmitCrmIntelligenceRefreshRequested(ctx context.Context, unifiedId string, 
 
 // EmitCrmIntelligenceRecomputeRequested — sau CrmPendingMergeWorker merge L1→L2 → queue AID (debounce → crm_intel_compute).
 // causalOrderingAtMs: thời điểm nghiệp vụ (thường updatedAt nguồn L1 ms); 0 = không gửi (worker dùng mặc định khi persist).
-func EmitCrmIntelligenceRecomputeRequested(ctx context.Context, unifiedID string, ownerOrgID primitive.ObjectID, sourceCollection, pendingMergeJobHex string, causalOrderingAtMs int64) (string, error) {
+// traceID / correlationID — nối timeline với luồng datachanged / merge queue (có thể rỗng).
+func EmitCrmIntelligenceRecomputeRequested(ctx context.Context, unifiedID string, ownerOrgID primitive.ObjectID, sourceCollection, pendingMergeJobHex string, causalOrderingAtMs int64, traceID, correlationID string) (string, error) {
 	unifiedID = strings.TrimSpace(unifiedID)
 	if unifiedID == "" || ownerOrgID.IsZero() {
 		return "", nil
@@ -129,14 +131,17 @@ func EmitCrmIntelligenceRecomputeRequested(ctx context.Context, unifiedID string
 		payload["pendingMergeJobId"] = strings.TrimSpace(pendingMergeJobHex)
 	}
 	res, err := eventemit.EmitDecisionEvent(ctx, &eventemit.EmitInput{
-		EventType:   EventTypeCrmIntelligenceRecomputeRequested,
-		EventSource: eventtypes.EventSourceCrmMergeQueue,
-		EntityType:  "crm_customer",
+		EventType:       EventTypeCrmIntelligenceRecomputeRequested,
+		EventSource:     eventtypes.EventSourceCrmMergeQueue,
+		PipelineStage:   eventtypes.PipelineStageAfterL2Merge,
+		EntityType:      "crm_customer",
 		EntityID:    unifiedID,
 		OrgID:       ownerOrgID.Hex(),
 		OwnerOrgID:  ownerOrgID,
 		Priority:    "normal",
 		Lane:        aidecisionmodels.EventLaneNormal,
+		TraceID:       strings.TrimSpace(traceID),
+		CorrelationID: strings.TrimSpace(correlationID),
 		Payload:     payload,
 	})
 	if err != nil {

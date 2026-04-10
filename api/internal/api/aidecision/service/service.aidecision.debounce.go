@@ -96,9 +96,10 @@ func (s *AIDecisionService) FlushExpired(ctx context.Context) (int, error) {
 	emitted := 0
 	for _, st := range states {
 		_, err = s.EmitEvent(ctx, &EmitEventInput{
-			EventType:     eventtypes.MessageBatchReady,
-			EventSource:   eventtypes.EventSourceDebounce,
-			EntityType:    "conversation",
+			EventType:       eventtypes.MessageBatchReady,
+			EventSource:     eventtypes.EventSourceDebounce,
+			PipelineStage:   eventtypes.PipelineStageAIDCoordination,
+			EntityType:      "conversation",
 			EntityID:      st.ConversationID,
 			OrgID:         st.OrgID,
 			OwnerOrgID:    st.OwnerOrgID,

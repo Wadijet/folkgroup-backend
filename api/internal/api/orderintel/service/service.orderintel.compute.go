@@ -1,4 +1,4 @@
-// Package orderintelsvc — Tính Raw → L1 → L2 → L3 → Flags từ intelOrderView (nguồn: commerce_orders, fallback pc_pos_orders).
+// Package orderintelsvc — Tính Raw → L1 → L2 → L3 → Flags từ intelOrderView (nguồn: order_canonical, fallback pc_pos_orders).
 package orderintelsvc
 
 import (

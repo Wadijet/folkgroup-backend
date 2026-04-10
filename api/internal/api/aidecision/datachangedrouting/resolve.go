@@ -21,22 +21,22 @@ func resolveBase(collection string) routecontract.Decision {
 		Collection:                   c,
 		RuleID:                       ruleIDForCollection(c),
 		EmitToDecisionQueue:          datachangedemit.DefaultShouldEmitToDecisionQueue(c),
-		CrmPendingMergeCollection:    isCrmPendingMergeCollection(c),
-		ReportTouchPipeline:          true,
-		AdsProfilePipeline:           true,
-		CixIntelPipeline:             c == global.MongoDB_ColNames.FbMessageItems,
-		OrderIntelPipeline:           c == global.MongoDB_ColNames.PcPosOrders,
-		CrmIntelRefreshDeferPipeline: true,
+		CustomerPendingMergeCollection:    isCustomerPendingMergeCollection(c),
+		ReportTouchPipeline:               true,
+		AdsProfilePipeline:                true,
+		CixIntelPipeline:                  c == global.MongoDB_ColNames.FbMessageItems,
+		OrderIntelPipeline:                c == global.MongoDB_ColNames.PcPosOrders,
+		CustomerIntelRefreshDeferPipeline: true,
 	}
 }
 
-func isCrmPendingMergeCollection(name string) bool {
+func isCustomerPendingMergeCollection(name string) bool {
 	switch name {
 	case global.MongoDB_ColNames.PcPosCustomers,
 		global.MongoDB_ColNames.FbCustomers,
 		global.MongoDB_ColNames.PcPosOrders,
 		global.MongoDB_ColNames.FbConvesations,
-		global.MongoDB_ColNames.CrmNotes:
+		global.MongoDB_ColNames.CustomerNotes:
 		return true
 	default:
 		return false
@@ -47,8 +47,8 @@ func ruleIDForCollection(c string) string {
 	if c == "" {
 		return "empty_collection"
 	}
-	if isCrmPendingMergeCollection(c) {
-		return "crm_l1_merge_sources"
+	if isCustomerPendingMergeCollection(c) {
+		return "customer_l1_merge_sources"
 	}
 	if c == global.MongoDB_ColNames.FbMessageItems {
 		return "cix_fb_message_items"

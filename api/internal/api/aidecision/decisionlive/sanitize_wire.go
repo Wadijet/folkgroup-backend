@@ -2,7 +2,7 @@ package decisionlive
 
 import "math"
 
-// SanitizeDecisionLiveEventJSON chuẩn hóa field trước khi json.Marshal (tránh lỗi NaN/Inf đóng WS).
+// SanitizeDecisionLiveEventJSON — Trước khi gửi từng DecisionLiveEvent qua WS (replay hoặc stream): chuẩn hóa số (tránh NaN/Inf làm hỏng JSON).
 func SanitizeDecisionLiveEventJSON(ev *DecisionLiveEvent) {
 	if ev == nil {
 		return

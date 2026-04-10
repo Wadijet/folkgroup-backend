@@ -167,9 +167,9 @@ func (s *CrmCustomerService) RecalculateCustomerFromAllSources(ctx context.Conte
 // limit <= 0: xử lý tất cả mismatch; limit > 0: giới hạn số khách.
 // poolSize <= 0: dùng default 10; truyền worker.GetEffectivePoolSize(10, worker.PriorityLow) để giảm khi CPU/RAM cao.
 func (s *CrmCustomerService) RecalculateMismatchCustomers(ctx context.Context, ownerOrgID primitive.ObjectID, limit int, poolSize int) (*crmdto.CrmRecalculateAllResult, error) {
-	actColl, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CrmActivityHistory)
+	actColl, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CustomerActivityHistory)
 	if !ok {
-		return nil, fmt.Errorf("không tìm thấy collection %s", global.MongoDB_ColNames.CrmActivityHistory)
+		return nil, fmt.Errorf("không tìm thấy collection %s", global.MongoDB_ColNames.CustomerActivityHistory)
 	}
 
 	nowMs := time.Now().UnixMilli()

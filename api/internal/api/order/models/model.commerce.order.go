@@ -14,14 +14,14 @@ const SourcePancakePOS = "pancake_pos"
 // Đồng bộ từ pc_pos_orders: 1:1 qua sourceRecordMongoId (không merge đa nguồn vào một đơn).
 type CommerceOrder struct {
 	ID                  primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"`
-	Uid                 string             `json:"uid" bson:"uid" index:"compound:idx_commerce_uid_org"`
-	Source              string             `json:"source" bson:"source" index:"compound:idx_commerce_source_ref"`
+	Uid                 string             `json:"uid" bson:"uid" index:"compound:idx_order_canonical_uid_org"`
+	Source              string             `json:"source" bson:"source" index:"compound:idx_order_canonical_source_ref"`
 	SourceIds           map[string]string  `json:"sourceIds,omitempty" bson:"sourceIds,omitempty"`
 	Links               map[string]identity.LinkItem `json:"links,omitempty" bson:"links,omitempty"`
-	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"compound:idx_commerce_uid_org,compound:idx_commerce_source_ref"`
+	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"compound:idx_order_canonical_uid_org,compound:idx_order_canonical_source_ref"`
 
 	// SourceRecordMongoID — _id của bản ghi nguồn (vd. pc_pos_orders).
-	SourceRecordMongoID primitive.ObjectID `json:"sourceRecordMongoId" bson:"sourceRecordMongoId" index:"compound:idx_commerce_source_ref"`
+	SourceRecordMongoID primitive.ObjectID `json:"sourceRecordMongoId" bson:"sourceRecordMongoId" index:"compound:idx_order_canonical_source_ref"`
 
 	// Trường denormalized phục vụ intel (Pancake: copy từ PcPosOrder).
 	OrderId      int64                  `json:"orderId" bson:"orderId"`

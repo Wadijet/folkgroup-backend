@@ -103,8 +103,8 @@ func recordConsumerWorkEndGauge(orgHex, traceID string) {
 	}
 }
 
-// adjustGaugeOnLivePublish cập nhật gauge theo chuyển phase của một trace (mỗi Publish một bước).
-// Gọi từ RecordCommandCenterPublish — cumulative đã tăng riêng.
+// adjustGaugeOnLivePublish — phần gauge của Publish bước 3a/5: realtime.gaugeByPhase theo (org, trace, phase mới).
+// Gọi từ recordCommandCenterPublish sau incrementMemLivePublish (lũy kế tăng trước đó trong cùng hàm).
 func adjustGaugeOnLivePublish(orgHex, traceID, newPhase string) {
 	if orgHex == "" || strings.TrimSpace(traceID) == "" {
 		return

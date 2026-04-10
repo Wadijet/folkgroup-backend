@@ -81,7 +81,7 @@ func persistCrmCustomerIntelAfterJob(ctx context.Context, job *crmmodels.CrmInte
 	if !ran && execErr == nil {
 		return
 	}
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CrmCustomerIntelRuns)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CustomerIntelRuns)
 	if !ok || coll == nil {
 		logger.GetAppLogger().Warn("[CRM_INTEL_RUN] Collection crm_customer_intel_runs chưa đăng ký — bỏ qua persist")
 		return

@@ -54,9 +54,10 @@ func EmitCrmIntelRecomputed(ctx context.Context, ownerOrgID primitive.ObjectID, 
 		entID = strings.TrimSpace(crmJobIDHex)
 	}
 	_, err := eventemit.EmitDecisionEvent(ctx, &eventemit.EmitInput{
-		EventType:     EventTypeCrmIntelRecomputed,
-		EventSource:   eventtypes.EventSourceCrmIntel,
-		EntityType:    "crm_customer",
+		EventType:       EventTypeCrmIntelRecomputed,
+		EventSource:     eventtypes.EventSourceCrmIntel,
+		PipelineStage:   eventtypes.PipelineStageDomainIntel,
+		EntityType:      "crm_customer",
 		EntityID:      entID,
 		OrgID:         orgHex,
 		OwnerOrgID:    ownerOrgID,
@@ -112,9 +113,10 @@ func EmitOrderIntelRecomputed(ctx context.Context, ownerOrgID primitive.ObjectID
 		entID = strings.TrimSpace(orderIntelJobIDHex)
 	}
 	_, err := eventemit.EmitDecisionEvent(ctx, &eventemit.EmitInput{
-		EventType:     EventTypeOrderIntelRecomputed,
-		EventSource:   eventtypes.EventSourceOrderIntel,
-		EntityType:    "order",
+		EventType:       EventTypeOrderIntelRecomputed,
+		EventSource:     eventtypes.EventSourceOrderIntel,
+		PipelineStage:   eventtypes.PipelineStageDomainIntel,
+		EntityType:      "order",
 		EntityID:      entID,
 		OrgID:         orgHex,
 		OwnerOrgID:    ownerOrgID,
@@ -162,9 +164,10 @@ func EmitCixIntelRecomputed(ctx context.Context, ownerOrgID primitive.ObjectID, 
 		entID = strings.TrimSpace(cixJobIDHex)
 	}
 	_, err := eventemit.EmitDecisionEvent(ctx, &eventemit.EmitInput{
-		EventType:     EventTypeCixIntelRecomputed,
-		EventSource:   eventtypes.EventSourceCixIntel,
-		EntityType:    "conversation",
+		EventType:       EventTypeCixIntelRecomputed,
+		EventSource:     eventtypes.EventSourceCixIntel,
+		PipelineStage:   eventtypes.PipelineStageDomainIntel,
+		EntityType:      "conversation",
 		EntityID:      entID,
 		OrgID:         orgHex,
 		OwnerOrgID:    ownerOrgID,

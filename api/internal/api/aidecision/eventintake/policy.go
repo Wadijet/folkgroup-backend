@@ -42,7 +42,7 @@ func EvaluateDatachangedSideEffects(evt *aidecisionmodels.DecisionEvent, sourceC
 		AllowReport:        true,
 		AllowAds:           true,
 	}
-	if evt == nil || evt.EventSource != eventtypes.EventSourceDatachanged {
+	if evt == nil || !eventtypes.IsL1DatachangedEventSource(evt.EventSource) {
 		return d
 	}
 	sec := envInt("AI_DECISION_EVENTINTAKE_CRM_DEDUPE_SEC", 0)

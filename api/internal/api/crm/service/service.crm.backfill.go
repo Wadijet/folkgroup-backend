@@ -180,7 +180,7 @@ func (s *CrmCustomerService) countBackfillSourceTotals(ctx context.Context, owne
 		}
 	}
 	if runNote {
-		if coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CrmNotes); ok {
+		if coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CustomerNotes); ok {
 			notesTotal, _ = coll.CountDocuments(ctx, bson.M{"ownerOrganizationId": ownerOrgID, "isDeleted": false})
 		}
 	}

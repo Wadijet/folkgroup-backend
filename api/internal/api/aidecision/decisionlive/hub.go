@@ -40,6 +40,7 @@ func (h *hub) subscribe(key string) (<-chan DecisionLiveEvent, func()) {
 	return ch, cancel
 }
 
+// broadcast — đẩy một sự kiện tới mọi WS đã subscribe key; dùng trong Publish bước 6 (kênh trace rồi kênh org).
 func (h *hub) broadcast(key string, ev DecisionLiveEvent) {
 	h.mu.Lock()
 	list := h.subs[key]

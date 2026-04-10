@@ -28,6 +28,10 @@ type AdsIntelComputeJob struct {
 
 	ParentDecisionEventID string `json:"parentDecisionEventId,omitempty" bson:"parentDecisionEventId,omitempty"`
 
+	// ParentTraceID / ParentCorrelationID — nối timeline decisionlive khi worker ads chạy (recompute_one / recalculate_all).
+	ParentTraceID       string `json:"parentTraceId,omitempty" bson:"parentTraceId,omitempty"`
+	ParentCorrelationID string `json:"parentCorrelationId,omitempty" bson:"parentCorrelationId,omitempty"`
+
 	// CausalOrderingAtMs — mốc nghiệp vụ (payload causalOrderingAtMs từ event hoặc gán lúc enqueue); sort lịch sử intel khi worker không FIFO.
 	CausalOrderingAtMs int64 `json:"causalOrderingAtMs,omitempty" bson:"causalOrderingAtMs,omitempty"`
 

@@ -48,7 +48,7 @@ func shouldSkipConsumerLiveSpan(evt *aidecisionmodels.DecisionEvent) bool {
 	return evt.EventType == aidecisionsvc.EventTypeExecuteRequested
 }
 
-func publishQueueLivePhase(ownerOrgID primitive.ObjectID, evt *aidecisionmodels.DecisionEvent, ms livecopy.QueueMilestone, processErr error, extraBullets []string) {
+func publishQueueLivePhase(ownerOrgID primitive.ObjectID, evt *aidecisionmodels.DecisionEvent, ms livecopy.QueueMilestone, processErr error, extraBullets []string, processTrace []decisionlive.DecisionLiveProcessNode) {
 	if ownerOrgID.IsZero() || evt == nil {
 		return
 	}
@@ -56,7 +56,7 @@ func publishQueueLivePhase(ownerOrgID primitive.ObjectID, evt *aidecisionmodels.
 	if tid == "" {
 		return
 	}
-	ev := livecopy.BuildQueueConsumerEvent(evt, ms, processErr, extraBullets)
+	ev := livecopy.BuildQueueConsumerEvent(evt, ms, processErr, extraBullets, processTrace)
 	decisionlive.Publish(ownerOrgID, tid, ev)
 }
 
@@ -65,50 +65,50 @@ func publishQueueConsumerLifecycleStart(ownerOrgID primitive.ObjectID, evt *aide
 	if shouldSkipConsumerLiveSpan(evt) {
 		return
 	}
-	publishQueueLivePhase(ownerOrgID, evt, livecopy.QueueMilestoneProcessingStart, nil, nil)
+	publishQueueLivePhase(ownerOrgID, evt, livecopy.QueueMilestoneProcessingStart, nil, nil, queueTraceForProcessingStart(evt))
 }
 
 // publishQueueConsumerLifecycleEnd — Mốc «kết thúc xử lý» sau processEvent (thành công hoặc lỗi).
 // Nếu kind là routing_skipped hoặc no_handler thì không gửi HandlerDone — các trường hợp đó đã có mốc riêng, tránh hiểu nhầm là đã chạy handler đầy đủ.
-func publishQueueConsumerLifecycleEnd(ownerOrgID primitive.ObjectID, evt *aidecisionmodels.DecisionEvent, processErr error, kind aidecisionmodels.ConsumerCompletionKind) {
+func publishQueueConsumerLifecycleEnd(ownerOrgID primitive.ObjectID, evt *aidecisionmodels.DecisionEvent, processErr error, kind aidecisionmodels.ConsumerCompletionKind, processTrace []decisionlive.DecisionLiveProcessNode) {
 	if shouldSkipConsumerLiveSpan(evt) {
 		return
 	}
 	if processErr != nil {
-		publishQueueLivePhase(ownerOrgID, evt, livecopy.QueueMilestoneHandlerError, processErr, nil)
+		publishQueueLivePhase(ownerOrgID, evt, livecopy.QueueMilestoneHandlerError, processErr, nil, processTrace)
 		return
 	}
 	switch kind {
 	case aidecisionmodels.ConsumerCompletionKindRoutingSkipped, aidecisionmodels.ConsumerCompletionKindNoHandler:
 		return
 	default:
-		publishQueueLivePhase(ownerOrgID, evt, livecopy.QueueMilestoneHandlerDone, nil, nil)
+		publishQueueLivePhase(ownerOrgID, evt, livecopy.QueueMilestoneHandlerDone, nil, nil, processTrace)
 	}
 }
 
-// publishQueueDatachangedEffectsDone — Mốc «đã xong bước chuẩn bị sau khi dữ liệu đổi» (chỉ EventSource = datachanged).
-func publishQueueDatachangedEffectsDone(ownerOrgID primitive.ObjectID, evt *aidecisionmodels.DecisionEvent) {
-	if evt == nil || ownerOrgID.IsZero() || evt.EventSource != eventtypes.EventSourceDatachanged {
+// publishQueueDatachangedEffectsDone — Mốc «đã xong bước chuẩn bị sau khi dữ liệu đổi» (l1_datachanged hoặc datachanged cũ).
+func publishQueueDatachangedEffectsDone(ownerOrgID primitive.ObjectID, evt *aidecisionmodels.DecisionEvent, processTrace []decisionlive.DecisionLiveProcessNode) {
+	if evt == nil || ownerOrgID.IsZero() || !eventtypes.IsL1DatachangedEventSource(evt.EventSource) {
 		return
 	}
 	if shouldSkipConsumerLiveSpan(evt) {
 		return
 	}
-	publishQueueLivePhase(ownerOrgID, evt, livecopy.QueueMilestoneDatachangedDone, nil, nil)
+	publishQueueLivePhase(ownerOrgID, evt, livecopy.QueueMilestoneDatachangedDone, nil, nil, processTrace)
 }
 
 // publishQueueRoutingSkipped — Mốc «bỏ qua theo quy tắc routing» (noop — không gọi handler nghiệp vụ).
-func publishQueueRoutingSkipped(ownerOrgID primitive.ObjectID, evt *aidecisionmodels.DecisionEvent) {
+func publishQueueRoutingSkipped(ownerOrgID primitive.ObjectID, evt *aidecisionmodels.DecisionEvent, processTrace []decisionlive.DecisionLiveProcessNode) {
 	if shouldSkipConsumerLiveSpan(evt) {
 		return
 	}
-	publishQueueLivePhase(ownerOrgID, evt, livecopy.QueueMilestoneRoutingSkipped, nil, nil)
+	publishQueueLivePhase(ownerOrgID, evt, livecopy.QueueMilestoneRoutingSkipped, nil, nil, processTrace)
 }
 
 // publishQueueNoRegisteredHandler — Mốc «chưa có handler» — eventType chưa được đăng ký trong consumer.
-func publishQueueNoRegisteredHandler(ownerOrgID primitive.ObjectID, evt *aidecisionmodels.DecisionEvent) {
+func publishQueueNoRegisteredHandler(ownerOrgID primitive.ObjectID, evt *aidecisionmodels.DecisionEvent, processTrace []decisionlive.DecisionLiveProcessNode) {
 	if shouldSkipConsumerLiveSpan(evt) {
 		return
 	}
-	publishQueueLivePhase(ownerOrgID, evt, livecopy.QueueMilestoneNoHandler, nil, nil)
+	publishQueueLivePhase(ownerOrgID, evt, livecopy.QueueMilestoneNoHandler, nil, nil, processTrace)
 }

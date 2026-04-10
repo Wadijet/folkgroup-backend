@@ -22,7 +22,7 @@ func MergeRelevantDataKey(collectionName string) string {
 		return "posData"
 	case global.MongoDB_ColNames.FbConvesations:
 		return "panCakeData"
-	case global.MongoDB_ColNames.CrmNotes:
+	case global.MongoDB_ColNames.CustomerNotes:
 		return ""
 	default:
 		return ""
@@ -42,7 +42,7 @@ func ExtractUpdatedAtFromDoc(collectionName string, doc interface{}) int64 {
 	if err := bson.Unmarshal(data, &m); err != nil {
 		return 0
 	}
-	if collectionName == global.MongoDB_ColNames.CrmNotes {
+	if collectionName == global.MongoDB_ColNames.CustomerNotes {
 		if t := TimestampFromMap(m, "updatedAt"); t > 0 {
 			return t
 		}

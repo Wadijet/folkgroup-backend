@@ -1,6 +1,6 @@
 # Phương án chỉnh domain Order khớp khung Ingress → Merge/Enrich → Intelligence (CIO · Domain · AID)
 
-**Trạng thái triển khai (2026-04-02):** Đã tách **`commerce_orders`** (canonical); `pc_pos_orders` chỉ mirror Pancake. Đồng bộ 1:1 trong `applyDatachangedSideEffects` qua `order/datachanged.SyncCommerceOrderFromPancakeDataChange` (không emit queue thứ hai). Order Intel đọc **`commerce_orders`**, fallback `pc_pos_orders` nếu thiếu bản chiếu. Backfill lịch sử: gọi `orderdatachanged.UpsertCommerceFromPancakePosOrder` theo lô (user tự triển khai sau).
+**Trạng thái triển khai:** Đã tách **`order_canonical`** (canonical đơn đa nguồn; trước đây tên `commerce_orders`); `pc_pos_orders` chỉ mirror Pancake. Đồng bộ 1:1 trong `applyDatachangedSideEffects` qua `order/datachanged.SyncCommerceOrderFromPancakeDataChange` (không emit queue thứ hai). Order Intel đọc **`order_canonical`**, fallback `pc_pos_orders` nếu thiếu bản chiếu. Read model intel: **`order_intel_snapshots`** (cùng họ `order_intel_*`). Backfill lịch sử: gọi `orderdatachanged.UpsertCommerceFromPancakePosOrder` theo lô (user tự triển khai sau).
 
 **Mục đích:** Đưa module **đơn hàng (PC POS + Order Intelligence)** lên cùng **ngôn ngữ kiến trúc** với [KHUNG_LUONG_INGEST_MERGE_INTEL_CIO_AID_DOMAIN.md](./KHUNG_LUONG_INGEST_MERGE_INTEL_CIO_AID_DOMAIN.md) và **bốn lớp ID** ([unified-data-contract.md](../../docs-shared/architecture/data-contract/unified-data-contract.md)), **không bắt buộc** copy nguyên xi cơ chế queue merge như CRM nếu **một đơn = một document canonical** đủ cho nghiệp vụ hiện tại.
 
@@ -63,14 +63,14 @@
 
 ### Giai đoạn 2 — Đa nguồn đơn hàng (khi có yêu cầu sản phẩm)
 
-**Mục tiêu:** Một **đơn canonical** trong hệ (một `ord_*` / một hàng trong `pc_pos_orders` hoặc collection mới `commerce_orders`).
+**Mục tiêu:** Một **đơn canonical** trong hệ (một `ord_*` / một hàng trong `pc_pos_orders` hoặc collection **`order_canonical`**).
 
 **Lựa chọn kiến trúc:**
 
 | Cách | Ý tưởng | Ưu | Nhược |
 |------|---------|-----|--------|
 | **2a. Giữ `pc_pos_orders`, thêm collection mirror theo nguồn** | `shopee_orders`, … → worker `order_pending_ingest` → upsert/merge vào `pc_pos_orders` (trường `source`, `sourceIds`) | Intel giữ nguyên `loadOrderForJob` | Model `PcPosOrder` có thể cần field `source` / generalize tên |
-| **2b. Collection canonical mới** | Mọi nguồn → `commerce_orders`; `pc_pos_orders` chỉ mirror POS hoặc deprecate dần | Tách rõ POS vs chuẩn | Migration + đổi consumer/report |
+| **2b. Collection canonical mới** | Mọi nguồn → `order_canonical`; `pc_pos_orders` chỉ mirror POS hoặc deprecate dần | Tách rõ POS vs chuẩn | Migration + đổi consumer/report |
 
 **Luồng khớp khung:**
 

@@ -192,12 +192,15 @@ func RecordConsumerWorkBegin(ownerOrgID primitive.ObjectID, eventType, traceID s
 	incrementMemLivePublish(orgHex, PhaseConsuming, sk, "consumer_bat_dau", false, "", "")
 }
 
-// RecordCommandCenterPublish — Mỗi sự kiện live đầy đủ (ring + WebSocket): cộng bộ đếm theo phase và nguồn.
+// RecordCommandCenterPublish — Bước 5 trong Publish (live bật): sau khi đã append ring, cộng publishCounters + gauge.
+// demTu nội bộ = "publish_ws" (đối chiếu bước 3a dùng "publish_chi_metrics" khi live tắt).
 func RecordCommandCenterPublish(ownerOrgID primitive.ObjectID, ev DecisionLiveEvent) {
 	recordCommandCenterPublish(ownerOrgID, ev, "publish_ws")
 }
 
-// recordCommandCenterPublish — Cập nhật bộ đếm phễu (phase, nguồn, feed, ops tier) và gauge phase; dùng cả khi live tắt (chỉ metrics).
+// recordCommandCenterPublish — Lõi metrics cho mọi nhánh Publish có org hợp lệ:
+// incrementMemLivePublish (byPhase, bySourceKind, feed, opsTier) rồi adjustGaugeOnLivePublish theo trace+phase.
+// demTu: nhãn nguồn bump (publish_chi_metrics | publish_ws | …) để phân tích nội bộ.
 func recordCommandCenterPublish(ownerOrgID primitive.ObjectID, ev DecisionLiveEvent, demTu string) {
 	if ownerOrgID.IsZero() {
 		return

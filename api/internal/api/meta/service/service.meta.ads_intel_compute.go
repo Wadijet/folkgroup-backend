@@ -20,7 +20,7 @@ import (
 
 // EnqueueAdsIntelCompute đưa job recompute một entity vào ads_intel_compute (không tính toán tại đây).
 // causalOrderingAtMs: mốc nghiệp vụ từ payload event; 0 = gán bằng thời điểm enqueue.
-func EnqueueAdsIntelCompute(ctx context.Context, objectType, objectID, adAccountID string, ownerOrgID primitive.ObjectID, source, recomputeMode, parentDecisionEventID string, causalOrderingAtMs int64) error {
+func EnqueueAdsIntelCompute(ctx context.Context, objectType, objectID, adAccountID string, ownerOrgID primitive.ObjectID, source, recomputeMode, parentDecisionEventID string, causalOrderingAtMs int64, parentTraceID, parentCorrelationID string) error {
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.AdsIntelCompute)
 	if !ok {
 		return fmt.Errorf("collection AdsIntelCompute chưa đăng ký")
@@ -36,6 +36,8 @@ func EnqueueAdsIntelCompute(ctx context.Context, objectType, objectID, adAccount
 		RecomputeMode:         recomputeMode,
 		OwnerOrganizationID:   ownerOrgID,
 		ParentDecisionEventID: parentDecisionEventID,
+		ParentTraceID:         strings.TrimSpace(parentTraceID),
+		ParentCorrelationID:   strings.TrimSpace(parentCorrelationID),
 		CausalOrderingAtMs:    normalizeAdsIntelCausalMs(causalOrderingAtMs),
 		CreatedAt:             now,
 	}
@@ -44,7 +46,7 @@ func EnqueueAdsIntelCompute(ctx context.Context, objectType, objectID, adAccount
 }
 
 // EnqueueAdsIntelComputeRecalculateAll đưa job batch RecalculateAll vào ads_intel_compute.
-func EnqueueAdsIntelComputeRecalculateAll(ctx context.Context, ownerOrgID primitive.ObjectID, limit int, parentDecisionEventID string, causalOrderingAtMs int64) error {
+func EnqueueAdsIntelComputeRecalculateAll(ctx context.Context, ownerOrgID primitive.ObjectID, limit int, parentDecisionEventID string, causalOrderingAtMs int64, parentTraceID, parentCorrelationID string) error {
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.AdsIntelCompute)
 	if !ok {
 		return fmt.Errorf("collection AdsIntelCompute chưa đăng ký")
@@ -56,6 +58,8 @@ func EnqueueAdsIntelComputeRecalculateAll(ctx context.Context, ownerOrgID primit
 		OwnerOrganizationID:   ownerOrgID,
 		RecalculateAllLimit:   limit,
 		ParentDecisionEventID: parentDecisionEventID,
+		ParentTraceID:         strings.TrimSpace(parentTraceID),
+		ParentCorrelationID:   strings.TrimSpace(parentCorrelationID),
 		CausalOrderingAtMs:    normalizeAdsIntelCausalMs(causalOrderingAtMs),
 		CreatedAt:             now,
 	}
@@ -139,9 +143,10 @@ func emitAdsContextReadyFromIntelJob(ctx context.Context, job *adsmodels.AdsInte
 		orgID = job.OwnerOrganizationID.Hex()
 	}
 	_, err := eventemit.EmitDecisionEvent(ctx, &eventemit.EmitInput{
-		EventType:     eventtypes.AdsContextReady,
-		EventSource:   eventtypes.EventSourceMetaAdsIntel,
-		EntityType:    "ad_account",
+		EventType:       eventtypes.AdsContextReady,
+		EventSource:     eventtypes.EventSourceMetaAdsIntel,
+		PipelineStage:   eventtypes.PipelineStageDomainIntel,
+		EntityType:      "ad_account",
 		EntityID:      entityID,
 		OrgID:         orgID,
 		OwnerOrgID:    job.OwnerOrganizationID,

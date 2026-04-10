@@ -79,9 +79,10 @@ func (s *AIDecisionService) ProcessMetaCampaignDataChanged(ctx context.Context, 
 			return nil
 		}
 		_, err = s.EmitEvent(ctx, &EmitEventInput{
-			EventType:     eventtypes.AdsContextRequested,
-			EventSource:   EventSourceAIDecision,
-			EntityType:    "campaign",
+			EventType:       eventtypes.AdsContextRequested,
+			EventSource:     EventSourceAIDecision,
+			PipelineStage:   eventtypes.PipelineStageAIDCoordination,
+			EntityType:      "campaign",
 			EntityID:      campaignID,
 			OrgID:         evt.OrgID,
 			OwnerOrgID:    ownerOrgID,
@@ -104,9 +105,10 @@ func (s *AIDecisionService) ProcessMetaCampaignDataChanged(ctx context.Context, 
 	}
 
 	_, err = s.EmitEvent(ctx, &EmitEventInput{
-		EventType:     eventtypes.AdsContextRequested,
-		EventSource:   EventSourceAIDecision,
-		EntityType:    "campaign",
+		EventType:       eventtypes.AdsContextRequested,
+		EventSource:     EventSourceAIDecision,
+		PipelineStage:   eventtypes.PipelineStageAIDCoordination,
+		EntityType:      "campaign",
 		EntityID:      campaignID,
 		OrgID:         evt.OrgID,
 		OwnerOrgID:    ownerOrgID,

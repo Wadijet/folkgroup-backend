@@ -2,9 +2,12 @@
 package aidecisionhdl
 
 import (
+	"strings"
+
 	"github.com/gofiber/fiber/v3"
 
 	aidecisiondto "meta_commerce/internal/api/aidecision/dto"
+	"meta_commerce/internal/api/aidecision/eventtypes"
 	"meta_commerce/internal/api/aidecision/eventopstier"
 	aidecisionsvc "meta_commerce/internal/api/aidecision/service"
 	basehdl "meta_commerce/internal/api/base/handler"
@@ -39,10 +42,16 @@ func HandleIngestEvent(c fiber.Ctx) error {
 			lane = aidecisionsvc.DefaultLaneForEventType(req.EventType)
 		}
 
+		pipelineStage := strings.TrimSpace(req.PipelineStage)
+		if pipelineStage == "" {
+			pipelineStage = eventtypes.PipelineStageExternalIngest
+		}
+
 		svc := aidecisionsvc.NewAIDecisionService()
 		resp, err := svc.EmitEvent(c.Context(), &aidecisionsvc.EmitEventInput{
 			EventType:     req.EventType,
 			EventSource:   req.EventSource,
+			PipelineStage: pipelineStage,
 			EntityType:    req.EntityType,
 			EntityID:      req.EntityID,
 			OrgID:         req.OrgID,

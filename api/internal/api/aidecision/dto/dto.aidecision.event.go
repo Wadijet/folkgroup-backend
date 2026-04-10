@@ -5,6 +5,7 @@ package dto
 type IngestEventRequest struct {
 	EventType     string                 `json:"eventType" validate:"required"`
 	EventSource   string                 `json:"eventSource" validate:"required"`
+	PipelineStage string                 `json:"pipelineStage,omitempty"`
 	EntityType    string                 `json:"entityType" validate:"required"`
 	EntityID      string                 `json:"entityId" validate:"required"`
 	OrgID         string                 `json:"orgId" validate:"required"`

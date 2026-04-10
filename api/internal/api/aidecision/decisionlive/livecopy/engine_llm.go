@@ -14,7 +14,7 @@ func engineDecisionSections(actionSuggestions []string) []decisionlive.DecisionL
 	}
 	items := append([]string{}, actionSuggestions...)
 	return []decisionlive.DecisionLiveDetailSection{
-		{Title: "Hành động đã chọn (trước policy)", Items: items},
+		{Title: "Các hành động được đề xuất (trước khi phân loại duyệt)", Items: items},
 	}
 }
 
@@ -30,7 +30,7 @@ func DecisionModeLabelVi(mode string) string {
 	case "":
 		return "mặc định"
 	default:
-		return mode
+		return "theo cấu hình hệ thống"
 	}
 }
 
@@ -38,14 +38,11 @@ func DecisionModeLabelVi(mode string) string {
 func BuildEngineSkippedNoCix(correlationID string) decisionlive.DecisionLiveEvent {
 	return decisionlive.DecisionLiveEvent{
 		Phase:         decisionlive.PhaseSkipped,
-		Summary:       "[Bỏ qua] Thiếu dữ liệu tình huống (CIX) — không thể đưa ra quyết định.",
+		OutcomeKind:   decisionlive.OutcomeDataIncomplete,
+		Summary:       "Chưa đủ dữ liệu phân tích hội thoại — tạm thời không đưa ra gợi ý.",
 		CorrelationID: correlationID,
-		ReasoningSummary: "Điều kiện tiên quyết: phải có payload phân tích tình huống.",
-		DetailBullets: []string{
-			"Đầu vào: CIXPayload rỗng hoặc không truyền.",
-			"Cơ chế: engine dừng trước parse — không gọi LLM/policy.",
-			"Kết quả: không có Execution Plan.",
-		},
+		ReasoningSummary: "Cần có kết quả phân tích tin nhắn trước; vui lòng chờ bước phân tích hoàn tất hoặc kiểm tra kết nối.",
+		DetailBullets: []string{"Hệ thống chưa nhận được bản phân tích hội thoại cần thiết — không chạy các bước gợi ý tiếp theo."},
 		Step: &decisionlive.TraceStep{
 			Kind:      "rule",
 			Title:     "Kiểm tra dữ liệu đầu vào",
@@ -58,14 +55,11 @@ func BuildEngineSkippedNoCix(correlationID string) decisionlive.DecisionLiveEven
 func BuildEngineParseEvent(correlationID string, suggestionCount int) decisionlive.DecisionLiveEvent {
 	return decisionlive.DecisionLiveEvent{
 		Phase:         decisionlive.PhaseParse,
-		Summary:       fmt.Sprintf("[Đang chạy] Đã đọc %d gợi ý hành động từ tình huống (CIX).", suggestionCount),
+		OutcomeKind:   decisionlive.OutcomeNominal,
+		Summary:       fmt.Sprintf("Đã đọc %d gợi ý từ phân tích hội thoại.", suggestionCount),
 		CorrelationID: correlationID,
-		ReasoningSummary: "Parse: trích actionSuggestions từ payload để pipeline rule/LLM xử lý.",
-		DetailBullets: []string{
-			"Đầu vào: actionSuggestions trong CIXPayload.",
-			"Cơ chế: trích danh sách chuỗi trước khi rule/LLM.",
-			fmt.Sprintf("Kết quả: %d gợi ý đưa vào bước kế.", suggestionCount),
-		},
+		ReasoningSummary: "Các gợi ý này sẽ được lọc bằng quy tắc và có thể bổ sung bằng AI nếu cần.",
+		DetailBullets: []string{fmt.Sprintf("Có %d hành động gợi ý ban đầu để hệ thống xem xét.", suggestionCount)},
 		Step: &decisionlive.TraceStep{
 			Kind:      "rule",
 			Title:     "Đọc gợi ý hành động",
@@ -79,17 +73,14 @@ func BuildEngineParseEvent(correlationID string, suggestionCount int) decisionli
 func BuildEngineEmptyActions(correlationID, decisionMode string, confidence float64, reasoningSummary string) decisionlive.DecisionLiveEvent {
 	return decisionlive.DecisionLiveEvent{
 		Phase:            decisionlive.PhaseEmpty,
-		Summary:          "[Dừng có kiểm soát] Không có hành động nào được chọn — không tạo đề xuất.",
+		OutcomeKind:      decisionlive.OutcomeNoActions,
+		Summary:          "Không có việc cần làm tiếp — không tạo đề xuất mới.",
 		CorrelationID:    correlationID,
 		DecisionMode:     decisionMode,
 		Confidence:       confidence,
 		Severity:         decisionlive.SeverityWarn,
 		ReasoningSummary: reasoningSummary,
-		DetailBullets: []string{
-			"Đầu vào: danh sách gợi ý sau rule/LLM rỗng.",
-			"Cơ chế: không vào policy/propose.",
-			"Kết quả: Execution Plan rỗng — có thể bình thường theo nghiệp vụ.",
-		},
+		DetailBullets: []string{"Sau khi áp quy tắc và AI (nếu có), không còn hành động phù hợp để đề xuất."},
 	}
 }
 
@@ -97,7 +88,8 @@ func BuildEngineEmptyActions(correlationID, decisionMode string, confidence floa
 func BuildEngineDecisionEvent(correlationID, decisionMode string, confidence float64, reasoningSummary string, actionSuggestions []string) decisionlive.DecisionLiveEvent {
 	return decisionlive.DecisionLiveEvent{
 		Phase:            decisionlive.PhaseDecision,
-		Summary:          fmt.Sprintf("[Hoàn tất bước] Đã chọn %d hành động (%s).", len(actionSuggestions), DecisionModeLabelVi(decisionMode)),
+		OutcomeKind:      decisionlive.OutcomeNominal,
+		Summary:          fmt.Sprintf("Đã chọn %d hướng xử lý (%s).", len(actionSuggestions), DecisionModeLabelVi(decisionMode)),
 		CorrelationID:    correlationID,
 		DecisionMode:     decisionMode,
 		Confidence:       confidence,
@@ -105,11 +97,7 @@ func BuildEngineDecisionEvent(correlationID, decisionMode string, confidence flo
 		Detail: map[string]interface{}{
 			"selectedActions": actionSuggestions,
 		},
-		DetailBullets: []string{
-			"Đầu vào: tập gợi ý sau rule/LLM.",
-			"Cơ chế: tổng hợp chế độ quyết định và độ tin cậy.",
-			fmt.Sprintf("Kết quả: %d hành động chọn cho bước policy.", len(actionSuggestions)),
-		},
+		DetailBullets: []string{fmt.Sprintf("Đã có %d hành động ứng viên — bước sau: kiểm tra cần duyệt hay chạy tự động.", len(actionSuggestions))},
 		DetailSections: engineDecisionSections(actionSuggestions),
 		Step: &decisionlive.TraceStep{
 			Kind:      "rule",
@@ -122,17 +110,14 @@ func BuildEngineDecisionEvent(correlationID, decisionMode string, confidence flo
 
 // BuildEnginePolicyEvent — PhasePolicy.
 func BuildEnginePolicyEvent(correlationID string, needApproval, autoActions int) decisionlive.DecisionLiveEvent {
-	policyBullets := []string{
-		fmt.Sprintf("Đầu vào: %d hành động cần duyệt, %d hành động tự động (theo policy).", needApproval, autoActions),
-		"Cơ chế: CIX_APPROVAL_ACTIONS — tách approve vs auto.",
-		fmt.Sprintf("Kết quả: %d chờ duyệt, %d tự động (nếu cấu hình cho phép).", needApproval, autoActions),
-	}
+	policyBullets := []string{fmt.Sprintf("%d việc cần bạn hoặc quản trị duyệt · %d việc có thể chạy tự động.", needApproval, autoActions)}
 	return decisionlive.DecisionLiveEvent{
 		Phase:         decisionlive.PhasePolicy,
-		Summary:       fmt.Sprintf("[Phân loại] %d hành động cần duyệt, %d hành động xử lý tự động.", needApproval, autoActions),
+		OutcomeKind:   decisionlive.OutcomeNominal,
+		Summary:       fmt.Sprintf("Đã phân loại: %d việc chờ duyệt, %d việc tự động.", needApproval, autoActions),
 		CorrelationID: correlationID,
 		DetailBullets: policyBullets,
-		ReasoningSummary: "Policy: danh mục duyệt lấy từ biến môi trường / mặc định escalate, assign.",
+		ReasoningSummary: "Danh mục «cần duyệt» do cấu hình hệ thống quyết định; phần còn lại có thể thực hiện ngay nếu cho phép.",
 		Step: &decisionlive.TraceStep{
 			Kind:  "policy",
 			Title: "Phân loại theo quy tắc duyệt",
@@ -152,15 +137,12 @@ func BuildEngineProposeSuccess(correlationID string, actionIDs []string, detail 
 	}
 	return decisionlive.DecisionLiveEvent{
 		Phase:         decisionlive.PhasePropose,
-		Summary:       fmt.Sprintf("[Hoàn tất] Đã tạo %d đề xuất hoặc tác vụ thực hiện.", len(actionIDs)),
+		OutcomeKind:   decisionlive.OutcomeSuccess,
+		Summary:       fmt.Sprintf("Đã tạo %d đề xuất hoặc việc cần làm.", len(actionIDs)),
 		CorrelationID: correlationID,
 		Detail:        detail,
-		ReasoningSummary: "Propose: ghi action_pending / delivery theo từng hành động.",
-		DetailBullets: []string{
-			"Đầu vào: danh sách hành động sau policy.",
-			"Cơ chế: proposeCixAction / proposeAndApproveAuto.",
-			fmt.Sprintf("Kết quả: %d bản ghi liên quan (id trong detail).", len(actionIDs)),
-		},
+		ReasoningSummary: "Bạn có thể xem và duyệt trong màn hình đề xuất hoặc việc được giao.",
+		DetailBullets: []string{fmt.Sprintf("Có %d mục đã ghi nhận — chi tiết nằm trong phần mở rộng (nếu có).", len(actionIDs))},
 		Step: &decisionlive.TraceStep{
 			Kind:      "propose",
 			Title:     "Ghi nhận đề xuất",
@@ -173,34 +155,28 @@ func BuildEngineProposeSuccess(correlationID string, actionIDs []string, detail 
 func BuildEngineProposeNone(correlationID string) decisionlive.DecisionLiveEvent {
 	return decisionlive.DecisionLiveEvent{
 		Phase:         decisionlive.PhasePropose,
-		Summary:       "[Cảnh báo] Không tạo được đề xuất — kiểm tra quyền duyệt hoặc kết nối thực thi.",
+		OutcomeKind:   decisionlive.OutcomeProposalFailed,
+		Summary:       "Chưa tạo được đề xuất — có thể do quyền hoặc kết nối hệ thống.",
 		CorrelationID: correlationID,
 		Severity:      decisionlive.SeverityWarn,
-		ReasoningSummary: "Propose thất bại: không có action id — xem log propose/approval.",
-		DetailBullets: []string{
-			"Đầu vào: danh sách hành động sau policy.",
-			"Cơ chế: propose trả lỗi hoặc nil document.",
-			"Kết quả: không có action id — cần điều tra.",
-		},
+		ReasoningSummary: "Vui lòng thử lại sau hoặc liên hệ quản trị nếu lặp lại nhiều lần.",
+		DetailBullets: []string{"Hệ thống không ghi nhận được mã việc sau bước đề xuất — đội kỹ thuật có thể tra log nội bộ."},
 	}
 }
 
 // BuildEngineDoneEvent — PhaseDone cuối engine.
 func BuildEngineDoneEvent(correlationID, srcTitle string) decisionlive.DecisionLiveEvent {
-	doneSummary := "[Hoàn tất] Đã xử lý xong luồng quyết định cho phiên này."
+	doneSummary := "Đã hoàn tất phân tích và gợi ý cho lượt này."
 	if strings.TrimSpace(srcTitle) != "" {
-		doneSummary = fmt.Sprintf("[Hoàn tất] Đã xử lý xong %s.", strings.TrimSpace(srcTitle))
+		doneSummary = fmt.Sprintf("Đã xử lý xong %s.", strings.TrimSpace(srcTitle))
 	}
 	return decisionlive.DecisionLiveEvent{
 		Phase:         decisionlive.PhaseDone,
+		OutcomeKind:   decisionlive.OutcomeSuccess,
 		Summary:       doneSummary,
 		CorrelationID: correlationID,
-		ReasoningSummary: "Kết thúc pipeline engine: case có thể đóng (closed_proposed) tùy cấu hình.",
-		DetailBullets: []string{
-			"Đầu vào: toàn bộ bước trước đã hoàn thành hoặc dừng có kiểm soát.",
-			"Cơ chế: executor quản lý bước sau trên action.",
-			"Kết quả: timeline engine kết thúc tại mốc này.",
-		},
+		ReasoningSummary: "Các bước tiếp theo (nếu có) là duyệt hoặc thực hiện — tùy cấu hình cửa hàng.",
+		DetailBullets: []string{"Vòng phân tích tự động đã kết thúc; việc gửi tin hoặc cập nhật hệ thống khác do bước sau đảm nhiệm."},
 	}
 }
 
@@ -208,14 +184,11 @@ func BuildEngineDoneEvent(correlationID, srcTitle string) decisionlive.DecisionL
 func BuildLLMEmptySuggestions(correlationID string) decisionlive.DecisionLiveEvent {
 	return decisionlive.DecisionLiveEvent{
 		Phase:         decisionlive.PhaseLLM,
-		Summary:       "[Đang chạy] LLM gợi ý hành động khi chưa có gợi ý từ tình huống.",
+		OutcomeKind:   decisionlive.OutcomeNominal,
+		Summary:       "Đang dùng AI để gợi ý hành động vì chưa có danh sách từ phân tích hội thoại.",
 		CorrelationID: correlationID,
-		ReasoningSummary: "LLM: chọn trong tập allowed khi rule/CIX không đưa danh sách.",
-		DetailBullets: []string{
-			"Đầu vào: CIX + customer context + allowed actions.",
-			"Cơ chế: decideWhenEmpty.",
-			"Kết quả: danh sách selected_actions (nếu model trả về hợp lệ).",
-		},
+		ReasoningSummary: "AI chỉ chọn trong các hành động được phép — an toàn theo cấu hình.",
+		DetailBullets: []string{"Hệ thống bổ sung gợi ý bằng AI khi chưa có đủ gợi ý ban đầu."},
 		Step: &decisionlive.TraceStep{
 			Kind:      "llm",
 			Title:     "Gợi ý khi chưa có danh sách ban đầu",
@@ -228,14 +201,11 @@ func BuildLLMEmptySuggestions(correlationID string) decisionlive.DecisionLiveEve
 func BuildLLMRefineSuggestions(correlationID string, suggestionCount int) decisionlive.DecisionLiveEvent {
 	return decisionlive.DecisionLiveEvent{
 		Phase:         decisionlive.PhaseLLM,
-		Summary:       "[Đang chạy] LLM lọc và tinh chỉnh danh sách gợi ý hành động.",
+		OutcomeKind:   decisionlive.OutcomeNominal,
+		Summary:       "Đang dùng AI để rút gọn danh sách gợi ý cho phù hợp hơn.",
 		CorrelationID: correlationID,
-		ReasoningSummary: "LLM refine: giảm nhiễu khi CIX trả về nhiều hành động.",
-		DetailBullets: []string{
-			fmt.Sprintf("Đầu vào: %d gợi ý từ rule/CIX.", suggestionCount),
-			"Cơ chế: refineActions trong tập allowed.",
-			"Kết quả: danh sách rút gọn cho bước decision.",
-		},
+		ReasoningSummary: "Khi có nhiều gợi ý, AI giúp chọn bộ hành động gọn và đúng ngữ cảnh hơn.",
+		DetailBullets: []string{fmt.Sprintf("Đang xem xét %d gợi ý ban đầu.", suggestionCount)},
 		Step: &decisionlive.TraceStep{
 			Kind:      "llm",
 			Title:     "Tinh chỉnh danh sách gợi ý",

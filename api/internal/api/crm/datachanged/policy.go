@@ -16,7 +16,7 @@ func IsCustomerIntelligenceSourceCollection(src string) bool {
 		global.MongoDB_ColNames.PcPosCustomers,
 		global.MongoDB_ColNames.FbConvesations,
 		global.MongoDB_ColNames.PcPosOrders,
-		global.MongoDB_ColNames.CrmCustomers:
+		global.MongoDB_ColNames.CustomerCustomers:
 		return true
 	default:
 		return false

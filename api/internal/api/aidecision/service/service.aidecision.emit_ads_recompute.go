@@ -32,13 +32,16 @@ func EmitAdsIntelligenceRecomputeRequested(ctx context.Context, objectType, obje
 		payload["recomputeMode"] = recomputeMode
 	}
 	eventSource := eventtypes.EventSourceMetaHooks
+	stage := eventtypes.PipelineStageAfterL1Change
 	if strings.TrimSpace(strings.ToLower(recomputeMode)) == "full" {
 		eventSource = eventtypes.EventSourceMetaAPI
+		stage = eventtypes.PipelineStageExternalIngest
 	}
 	res, err := svc.EmitEvent(ctx, &EmitEventInput{
-		EventType:   EventTypeAdsIntelligenceRecomputeRequested,
-		EventSource: eventSource,
-		EntityType:  objectType,
+		EventType:       EventTypeAdsIntelligenceRecomputeRequested,
+		EventSource:     eventSource,
+		PipelineStage:   stage,
+		EntityType:      objectType,
 		EntityID:    objectId,
 		OrgID:       ownerOrgID.Hex(),
 		OwnerOrgID:  ownerOrgID,
@@ -56,9 +59,10 @@ func EmitAdsIntelligenceRecomputeRequested(ctx context.Context, objectType, obje
 func EmitAdsIntelligenceRecalculateAllRequested(ctx context.Context, ownerOrgID primitive.ObjectID, limit int) (eventID string, err error) {
 	svc := NewAIDecisionService()
 	res, err := svc.EmitEvent(ctx, &EmitEventInput{
-		EventType:   EventTypeAdsIntelligenceRecalculateAllRequested,
-		EventSource: eventtypes.EventSourceMetaAPI,
-		EntityType:  "organization",
+		EventType:       EventTypeAdsIntelligenceRecalculateAllRequested,
+		EventSource:     eventtypes.EventSourceMetaAPI,
+		PipelineStage:   eventtypes.PipelineStageExternalIngest,
+		EntityType:      "organization",
 		EntityID:    ownerOrgID.Hex(),
 		OrgID:       ownerOrgID.Hex(),
 		OwnerOrgID:  ownerOrgID,

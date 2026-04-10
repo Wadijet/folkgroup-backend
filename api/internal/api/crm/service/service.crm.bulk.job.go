@@ -23,9 +23,9 @@ type CrmBulkJobService struct {
 
 // NewCrmBulkJobService tạo service CRUD cho crm_bulk_jobs.
 func NewCrmBulkJobService() (*CrmBulkJobService, error) {
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CrmBulkJobs)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CustomerBulkJobs)
 	if !ok {
-		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.CrmBulkJobs, common.ErrNotFound)
+		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.CustomerBulkJobs, common.ErrNotFound)
 	}
 	return &CrmBulkJobService{
 		BaseServiceMongoImpl: basesvc.NewBaseServiceMongo[crmmodels.CrmBulkJob](coll),

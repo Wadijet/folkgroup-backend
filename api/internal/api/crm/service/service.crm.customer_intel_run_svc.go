@@ -24,9 +24,9 @@ type CrmCustomerIntelRunService struct {
 
 // NewCrmCustomerIntelRunService tạo service cho collection crm_customer_intel_runs.
 func NewCrmCustomerIntelRunService() (*CrmCustomerIntelRunService, error) {
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CrmCustomerIntelRuns)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CustomerIntelRuns)
 	if !ok {
-		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.CrmCustomerIntelRuns, common.ErrNotFound)
+		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.CustomerIntelRuns, common.ErrNotFound)
 	}
 	return &CrmCustomerIntelRunService{
 		BaseServiceMongoImpl: basesvc.NewBaseServiceMongo[crmmodels.CrmCustomerIntelRun](coll),

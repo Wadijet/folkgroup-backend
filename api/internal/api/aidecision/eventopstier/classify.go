@@ -38,7 +38,10 @@ var pipelineEntityPrefixes = map[string]struct{}{
 	"message":             {},
 	"order":               {},
 	"cix_analysis_result": {},
-	"crm_customer":        {},
+	"customer_customer":   {},
+	"customer_note":       {},
+	"customer_activity":   {},
+	"crm_customer":        {}, // legacy datachanged prefix
 	"crm_note":            {},
 	"crm_activity":        {},
 	"fb_customer":         {}, // hồ sơ khách FB — ngữ cảnh CI / bán hàng

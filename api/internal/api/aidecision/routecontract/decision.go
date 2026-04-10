@@ -9,10 +9,10 @@ type Decision struct {
 
 	EmitToDecisionQueue bool
 
-	CrmPendingMergeCollection    bool
-	ReportTouchPipeline          bool
-	AdsProfilePipeline           bool
-	CixIntelPipeline             bool
-	OrderIntelPipeline           bool
-	CrmIntelRefreshDeferPipeline bool
+	CustomerPendingMergeCollection    bool
+	ReportTouchPipeline               bool
+	AdsProfilePipeline                bool
+	CixIntelPipeline                  bool
+	OrderIntelPipeline                bool
+	CustomerIntelRefreshDeferPipeline bool
 }

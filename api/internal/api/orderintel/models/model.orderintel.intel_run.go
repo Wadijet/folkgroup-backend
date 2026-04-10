@@ -11,7 +11,7 @@ const (
 	OrderIntelRunStatusFailed  = "failed"
 )
 
-// OrderIntelRun — một lần chạy intel đơn; commerce_orders giữ pointer intelLastRunId / intelLastComputedAt / intelSequence.
+// OrderIntelRun — một lần chạy intel đơn; order_canonical giữ pointer intelLastRunId / intelLastComputedAt / intelSequence.
 type OrderIntelRun struct {
 	ID                  primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"`
 	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"compound:order_intel_run_org_uid;compound:order_intel_run_org_orderid;compound:order_intel_run_parent_job_unique"`
@@ -19,7 +19,7 @@ type OrderIntelRun struct {
 	OrderUid string `json:"orderUid,omitempty" bson:"orderUid,omitempty" index:"compound:order_intel_run_org_uid"`
 	OrderID  int64  `json:"orderId,omitempty" bson:"orderId,omitempty" index:"compound:order_intel_run_org_orderid"`
 
-	CommerceOrderMongoID primitive.ObjectID `json:"commerceOrderMongoId,omitempty" bson:"commerceOrderMongoId,omitempty"`
+	OrderCanonicalMongoID primitive.ObjectID `json:"orderCanonicalMongoId,omitempty" bson:"orderCanonicalMongoId,omitempty"`
 
 	Operation string `json:"operation" bson:"operation"` // nguồn job: aidecision_order, recompute, ...
 	Status    string `json:"status" bson:"status"`         // success | failed
@@ -34,7 +34,7 @@ type OrderIntelRun struct {
 	ComputedAt int64 `json:"computedAt" bson:"computedAt" index:"single:-1"`
 	// CausalOrderingAt — mốc nghiệp vụ (payload causalOrderingAtMs hoặc lúc enqueue); sort lịch sử khi worker không FIFO.
 	CausalOrderingAt int64 `json:"causalOrderingAt,omitempty" bson:"causalOrderingAt,omitempty"`
-	// IntelSequence — bản sao số thứ tự monotonic trên commerce_orders sau lần chạy thành công; tie-break với CausalOrderingAt.
+	// IntelSequence — bản sao số thứ tự monotonic trên order_canonical sau lần chạy thành công; tie-break với CausalOrderingAt.
 	IntelSequence int64 `json:"intelSequence,omitempty" bson:"intelSequence,omitempty"`
 
 	ErrorCode    string `json:"errorCode,omitempty" bson:"errorCode,omitempty"`

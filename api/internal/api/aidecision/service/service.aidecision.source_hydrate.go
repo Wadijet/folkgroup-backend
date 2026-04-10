@@ -19,7 +19,7 @@ import (
 // HydrateDatachangedPayload đọc bản ghi nguồn và merge vào evt.Payload (không ghi đè field đã có và khác rỗng).
 // Luôn trả về nil — không làm fail consumer khi doc không còn.
 func (s *AIDecisionService) HydrateDatachangedPayload(ctx context.Context, evt *aidecisionmodels.DecisionEvent) {
-	if evt == nil || evt.EventSource != eventtypes.EventSourceDatachanged || evt.Payload == nil {
+	if evt == nil || !eventtypes.IsL1DatachangedEventSource(evt.EventSource) || evt.Payload == nil {
 		return
 	}
 	p := evt.Payload
@@ -57,7 +57,7 @@ func (s *AIDecisionService) HydrateDatachangedPayload(ctx context.Context, evt *
 		}
 	case global.MongoDB_ColNames.PcPosOrders:
 		hydratePcPosOrderFromRaw(p, raw)
-	case global.MongoDB_ColNames.CrmCustomers:
+	case global.MongoDB_ColNames.CustomerCustomers:
 		mergeStringIfEmpty(p, raw, "unifiedId", "unifiedId")
 	}
 	// Mọi collection: ref phẳng thường gặp (Meta/CRM/FB…) — chỉ điền khi payload chưa có.

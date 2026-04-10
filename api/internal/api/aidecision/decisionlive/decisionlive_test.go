@@ -15,9 +15,23 @@ func TestTraceStoreAppendAndSnapshot(t *testing.T) {
 	if out.Seq != 1 {
 		t.Fatalf("seq mong đợi 1, got %d", out.Seq)
 	}
+	if out.ParentSpanID != "" {
+		t.Fatalf("mốc đầu không có parentSpanId, got %q", out.ParentSpanID)
+	}
+	if out.SpanID == "" || out.W3CTraceID == "" {
+		t.Fatalf("thiếu spanId/w3cTraceId sau append: span=%q w3c=%q", out.SpanID, out.W3CTraceID)
+	}
 	snap := s.snapshot(org, trace)
 	if len(snap) != 1 || snap[0].Seq != 1 {
 		t.Fatalf("snapshot sai: %+v", snap)
+	}
+
+	out2 := s.append(org, trace, DecisionLiveEvent{Phase: PhaseDone, Summary: "y"})
+	if out2.ParentSpanID != out.SpanID {
+		t.Fatalf("mốc 2 parentSpanId mong %q, got %q", out.SpanID, out2.ParentSpanID)
+	}
+	if out2.SpanID == "" || out2.SpanID == out.SpanID {
+		t.Fatalf("mốc 2 phải có spanId mới khác mốc 1: %q / %q", out.SpanID, out2.SpanID)
 	}
 }
 

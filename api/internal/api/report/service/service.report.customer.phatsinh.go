@@ -4,6 +4,7 @@ package reportsvc
 
 import (
 	"context"
+	"fmt"
 
 	crmvc "meta_commerce/internal/api/crm/service"
 	reportconstants "meta_commerce/internal/api/report/constants"
@@ -11,6 +12,15 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
+
+// newCrmActivityServiceForReport tạo service CRM activity dùng chung trong report.
+func newCrmActivityServiceForReport() (*crmvc.CrmActivityService, error) {
+	actSvc, err := crmvc.NewCrmActivityService()
+	if err != nil {
+		return nil, fmt.Errorf("tạo CrmActivityService: %w", err)
+	}
+	return actSvc, nil
+}
 
 // customerState trạng thái classification của 1 khách tại 1 thời điểm (từ metricsSnapshot).
 type customerState struct {

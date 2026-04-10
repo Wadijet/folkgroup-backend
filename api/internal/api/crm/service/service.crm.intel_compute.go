@@ -4,6 +4,7 @@ package crmvc
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	crmqueue "meta_commerce/internal/api/aidecision/crmqueue"
@@ -16,7 +17,8 @@ import (
 )
 
 // EnqueueCrmIntelComputeFromDecisionEvent đưa job vào crm_intel_compute (không tính toán tại đây).
-func EnqueueCrmIntelComputeFromDecisionEvent(ctx context.Context, parentDecisionEventID string, ownerOrgID primitive.ObjectID, payload map[string]interface{}) error {
+// traceID / correlationID ghi vào payload để worker domain Publish timeline cùng luồng AID.
+func EnqueueCrmIntelComputeFromDecisionEvent(ctx context.Context, parentDecisionEventID string, ownerOrgID primitive.ObjectID, payload map[string]interface{}, traceID, correlationID string) error {
 	if payload == nil {
 		return nil
 	}
@@ -24,13 +26,19 @@ func EnqueueCrmIntelComputeFromDecisionEvent(ctx context.Context, parentDecision
 	if op == "" {
 		return nil
 	}
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CrmIntelCompute)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CustomerIntelCompute)
 	if !ok {
-		return fmt.Errorf("collection CrmIntelCompute chưa đăng ký")
+		return fmt.Errorf("collection CustomerIntelCompute chưa đăng ký")
 	}
-	pcopy := make(map[string]interface{}, len(payload)+1)
+	pcopy := make(map[string]interface{}, len(payload)+3)
 	for k, v := range payload {
 		pcopy[k] = v
+	}
+	if tid := strings.TrimSpace(traceID); tid != "" {
+		pcopy["traceId"] = tid
+	}
+	if cid := strings.TrimSpace(correlationID); cid != "" {
+		pcopy["correlationId"] = cid
 	}
 	orgID := ownerOrgID
 	if orgID.IsZero() {

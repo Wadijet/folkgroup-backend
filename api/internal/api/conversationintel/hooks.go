@@ -68,7 +68,7 @@ func resolveCustomerIDForConversation(ctx context.Context, conversationID string
 }
 
 // EnqueueCixIntelComputeFromDatachanged — Luồng 1: xếp thẳng job cix_intel_compute khi nguồn là fb_message_items.
-func EnqueueCixIntelComputeFromDatachanged(ctx context.Context, e events.DataChangeEvent, normalizedRecordUid string) error {
+func EnqueueCixIntelComputeFromDatachanged(ctx context.Context, e events.DataChangeEvent, normalizedRecordUid, traceID, correlationID string) error {
 	if e.Document == nil {
 		return nil
 	}
@@ -102,6 +102,8 @@ func EnqueueCixIntelComputeFromDatachanged(ctx context.Context, e events.DataCha
 		Channel:             "messenger",
 		CioEventUid:         strings.TrimSpace(normalizedRecordUid),
 		OwnerOrganizationID: ownerOrgID,
+		TraceID:             strings.TrimSpace(traceID),
+		CorrelationID:       strings.TrimSpace(correlationID),
 		CausalOrderingAtMs:  causal,
 	})
 }

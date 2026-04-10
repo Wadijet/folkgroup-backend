@@ -78,7 +78,7 @@ Mỗi dòng là một **bounded context**; mở rộng feature ưu tiên giữ l
 
 | Module | Vai trò | Queue / worker điển hình (tham chiếu code) |
 |--------|---------|---------------------------------------------|
-| **crm** | Khách canonical (L2-persist), merge mirror→canonical, bulk, intel CRM | `crm_pending_merge`, `crm_intel_compute`, … |
+| **crm** (Mongo: `customer_*`) | Khách canonical (L2-persist), merge mirror→canonical, bulk, intel khách | `customer_pending_merge`, `customer_intel_compute`, … |
 | **order** | Đơn, đồng bộ canonical commerce | Datachanged qua `order/datachanged`; phối hợp orderintel |
 | **orderintel** | Intelligence đơn | `order_intel_compute` |
 | **meta** | Ads profile, enqueue intel Meta | `ads_intel_compute`, debounce campaign, … |
@@ -161,20 +161,44 @@ Giá trị dùng trên envelope queue; **không** tự thêm string tùy tiện 
 
 ---
 
-## 11. Checklist khi thêm module hoặc luồng mới
+## 11. Field `pipelineStage` (giai đoạn trong khung quy trình tổng)
+
+Trên document `decision_events_queue` có thêm **`pipelineStage`** (JSON/BSON cùng tên). Field này **không thay** `EventSource` / `eventType`:
+
+| Field | Vai trò |
+|-------|---------|
+| `eventSource` | **Kênh kỹ thuật** phát event (`datachanged`, `crm_merge_queue`, `cix_intel`, …) |
+| `eventType` | **Loại sự kiện nghiệp vụ** (`order.inserted`, `crm.intelligence.recompute_requested`, …) |
+| **`pipelineStage`** | **Bước trong khung tổng** — ingress persist → merge L2 → intel miền → điều phối AID → ingest ngoài |
+
+**Hằng số Go (một nguồn):** `api/internal/api/aidecision/eventtypes/pipeline_stage.go` — dùng `eventtypes.PipelineStage*` khi gọi `EmitEvent` / `EmitDecisionEvent`.
+
+| Giá trị | Ý nghĩa (điển hình) |
+|---------|---------------------|
+| `after_l1_change` | Sau thay đổi mirror/L1 / hook **datachanged**; CRM **`crm.intelligence.compute_requested`** (refresh sau side-effect); Ads recompute từ **meta_hooks** (không full). Tên cũ trên queue: `after_source_persist` (resolver vẫn chấp nhận). |
+| `after_l2_merge` | Sau merge mirror→canonical — **`crm.intelligence.recompute_requested`** với **`EventSource = crm_merge_queue`** |
+| `domain_intel` | Worker miền đã tính xong — `*_intel_recomputed`, **`customer.context_ready`**, **`campaign_intel_recomputed`**, **`ads.context_ready`** (worker Meta), … |
+| `aid_coordination` | Điều phối nội bộ AID — orchestrate (**`customer.context_requested`**, **`cix.analysis_requested`** từ consumer), **debounce** `message.batch_ready`, **`aidecision.execute_requested`**, **`executor.propose_requested`**, **`ads.context_requested`**, … |
+| `external_ingest` | HTTP/API đưa thẳng vào queue — **`POST /ai-decision/events`** (mặc định nếu client không gửi `pipelineStage`), **`cix.analysis_requested`** từ **CIX HTTP**, batch Ads **meta_api** (recalculate all / recompute full), … |
+
+**Ghi chú:** Khi thêm luồng emit mới, gán **`pipelineStage`** cùng lúc với **`EventSource`** / **`eventType`** để filter và metrics theo giai đoạn không nhầm với kênh kỹ thuật.
+
+---
+
+## 12. Checklist khi thêm module hoặc luồng mới
 
 - [ ] Module thuộc nhóm nào (B–F)?
 - [ ] Có cần **queue/worker riêng** không? Nếu có: collection job, idempotency, owner worker file trong `internal/worker/`.
 - [ ] Collection L1 có trong **source sync registry** / emit filter không?
 - [ ] Side-effect sau datachanged: đăng ký qua **`datachangedsidefx.Register`** trong package miền (`*/datachanged/sidefx_register.go`); worker chỉ build **`ApplyContext`** + **`Run`** (`applyDatachangedSideEffects`).
-- [ ] Handoff sau worker: **`EventSource`** và **`eventType`** đã có trong bảng mục 10?
+- [ ] Handoff sau worker: **`EventSource`** và **`eventType`** đã có trong bảng mục 10? **`pipelineStage`** đã chọn đúng dòng mục 11?
 - [ ] Đã đọc [NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md](../05-development/NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md) nếu chạm CRUD / datachanged?
 - [ ] Queue miền thứ hai trở đi: có dùng lại **debounce/coalesce chung** (Phase 4) thay vì copy logic?
 - [ ] Vận hành: metric `no_handler`, DLQ/retry job miền, bulk/outbox (Phase 5) đã được xem xét?
 
 ---
 
-## 12. Lộ trình chuẩn hóa — Phase 4–6 (tiếp theo)
+## 13. Lộ trình chuẩn hóa — Phase 4–6 (tiếp theo)
 
 Các phase 1–3 (consumerreg, `datachangedsidefx`, `datachangedrouting` + YAML, `datachangedemit`, tách đăng ký consumer) đã ghi trong changelog. Dưới đây là **các bước kế tiếp** (chưa triển khai hết — dùng làm north star khi thêm queue miền và vận hành).
 
@@ -194,12 +218,13 @@ Các phase 1–3 (consumerreg, `datachangedsidefx`, `datachangedrouting` + YAML,
 
 - Rà soát import, API HTTP, và luồng cũ trong `api/internal/api/decision/` so với `aidecision/`.
 - Chốt: route/handler nào **deprecated**, cái nào **proxy** sang AID, cái nào **xóa** sau migration.
-- Mục tiêu cuối: một **trung tâm quyết định** rõ (`aidecision`), `decision/` chỉ còn shim tạm hoặc được gỡ hẳn — cập nhật [backend-module-map.md](backend-module-map.md) và checklist mục 11 khi hoàn tất từng bước.
+- Mục tiêu cuối: một **trung tâm quyết định** rõ (`aidecision`), `decision/` chỉ còn shim tạm hoặc được gỡ hẳn — cập nhật [backend-module-map.md](backend-module-map.md) và checklist mục 12 khi hoàn tất từng bước.
 
 ---
 
 ## Changelog
 
+- **2026-04-07:** Thêm mục **11** — field **`pipelineStage`** trên `decision_events_queue` (khác `eventSource` / `eventType`); hằng số `eventtypes/pipeline_stage.go`; đánh số lại checklist → mục 12, lộ trình Phase 4–6 → mục 13. Tham chiếu: [NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md](../05-development/NGUYEN_TAC_LUONG_CRUD_DATACHANGED_AI_DECISION.md) sau sơ đồ mục 1; [api-overview.md](../api/api-overview.md) (POST `/ai-decision/events`).
 - **2026-04-06 (Phase 4 util):** Thêm `api/internal/queuedebounce`; refactor `eventintake` defer side-effect + CRM intel sau ingest sang `Table` / `MetaTable`.
 - **2026-04-06 (roadmap Phase 4–6):** Thêm mục 12 — util debounce/coalesce chung; vận hành (metric `no_handler`, DLQ/retry miền, outbox/reconcile bulk); dọn `decision/` vs `aidecision/`. Cập nhật mục 9–10 và checklist mục 11.
 - **2026-04-06 (datachangedrouting YAML):** `routing.default.yaml` embed + env `DATACHANGED_ROUTING_CONFIG`; `collection_overrides` ghi đè pipeline + contributor đọc `routecontract.Decision` trên `ApplyContext.Route`; ví dụ `api/config/datachanged_routing.example.yaml`.

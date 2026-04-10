@@ -2,6 +2,8 @@
 package datachanged
 
 import (
+	"strings"
+
 	"meta_commerce/internal/api/aidecision/datachangedsidefx"
 	"meta_commerce/internal/api/aidecision/eventintake"
 )
@@ -15,8 +17,12 @@ func init() {
 			return nil
 		}
 		if ac.ReportWin > 0 {
-			eventintake.ScheduleDeferredSideEffect(eventintake.DeferredKindReport, ac.OrgHex, ac.Src, ac.IDHex, ac.ReportWin)
-			return nil
+			var tid, cid string
+			if ac.Evt != nil {
+				tid = strings.TrimSpace(ac.Evt.TraceID)
+				cid = strings.TrimSpace(ac.Evt.CorrelationID)
+			}
+			return eventintake.ScheduleDeferredSideEffect(ac.Ctx, eventintake.DeferredKindReport, ac.OrgHex, ac.Src, ac.IDHex, ac.ReportWin, tid, cid)
 		}
 		RecordTouchFromDataChange(ac.Ctx, ac.E)
 		return nil

@@ -231,7 +231,7 @@ func RecordReportTouchFromDataChange(ctx context.Context, e events.DataChangeEve
 		}
 		reportTouchSet(ctx, redisTouchPrefixCustomer+orgHex, strconv.FormatInt(ts, 10))
 
-	case global.MongoDB_ColNames.CrmActivityHistory:
+	case global.MongoDB_ColNames.CustomerActivityHistory:
 		if e.Operation == events.OpUpdate && e.PreviousDocument != nil {
 			tsNew := events.GetPeriodTimestamp(e.Document, e.CollectionName)
 			tsPrev := events.GetPeriodTimestamp(e.PreviousDocument, e.CollectionName)

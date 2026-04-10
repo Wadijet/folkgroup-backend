@@ -1,4 +1,4 @@
-// Package orderintelsvc — View tối thiểu để tính Order Intelligence từ commerce_orders hoặc fallback pc_pos_orders.
+// Package orderintelsvc — View tối thiểu để tính Order Intelligence từ order_canonical hoặc fallback pc_pos_orders.
 package orderintelsvc
 
 import (
@@ -18,10 +18,10 @@ type intelOrderView struct {
 	CustomerId       string
 	LinksCustomerUid string
 	OrderId          int64
-	// ID — _id bản ghi dùng làm nguồn tính intel (commerce_orders khi có, không thì pc_pos_orders).
+	// ID — _id bản ghi dùng làm nguồn tính intel (order_canonical khi có, không thì pc_pos_orders).
 	ID primitive.ObjectID
-	// CommerceMongoID — _id commerce_orders khi nguồn là canonical (để trace).
-	CommerceMongoID primitive.ObjectID
+	// OrderCanonicalMongoID — _id order_canonical khi nguồn là canonical (để trace).
+	OrderCanonicalMongoID primitive.ObjectID
 	// PancakeSourceMongoID — _id pc_pos_orders (luôn set khi biết).
 	PancakeSourceMongoID primitive.ObjectID
 	Status           int
@@ -49,7 +49,7 @@ func newIntelViewFromCommerce(c *ordermodels.CommerceOrder) *intelOrderView {
 		LinksCustomerUid:     linksCust,
 		OrderId:              c.OrderId,
 		ID:                   c.ID,
-		CommerceMongoID:      c.ID,
+		OrderCanonicalMongoID: c.ID,
 		PancakeSourceMongoID: c.SourceRecordMongoID,
 		Status:               c.Status,
 		InsertedAt:           c.InsertedAt,
@@ -71,7 +71,7 @@ func newIntelViewFromPC(o *pcmodels.PcPosOrder) *intelOrderView {
 		LinksCustomerUid:     strings.TrimSpace(o.LinksCustomerUid),
 		OrderId:              o.OrderId,
 		ID:                   o.ID,
-		CommerceMongoID:      primitive.NilObjectID,
+		OrderCanonicalMongoID: primitive.NilObjectID,
 		PancakeSourceMongoID: o.ID,
 		Status:               o.Status,
 		InsertedAt:           o.InsertedAt,

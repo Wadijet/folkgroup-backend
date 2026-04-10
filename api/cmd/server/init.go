@@ -66,7 +66,7 @@ func initColNames() {
 	global.MongoDB_ColNames.PcPosVariations = "pc_pos_variations"
 	global.MongoDB_ColNames.PcPosCategories = "pc_pos_categories"
 	global.MongoDB_ColNames.PcPosOrders = "pc_pos_orders"
-	global.MongoDB_ColNames.CommerceOrders = "commerce_orders"
+	global.MongoDB_ColNames.OrderCanonical = "order_canonical"
 
 	// Notification System Collections (Hệ thống 2 - Routing/Template)
 	global.MongoDB_ColNames.NotificationSenders = "notification_senders"
@@ -116,14 +116,14 @@ func initColNames() {
 	global.MongoDB_ColNames.ReportSnapshots = "report_snapshots"
 	global.MongoDB_ColNames.ReportDirtyPeriods = "report_dirty_periods"
 
-	// Module CRM (tiền tố crm_)
-	global.MongoDB_ColNames.CrmCustomers = "crm_customers"
-	global.MongoDB_ColNames.CrmActivityHistory = "crm_activity_history"
-	global.MongoDB_ColNames.CrmNotes = "crm_notes"
-	global.MongoDB_ColNames.CrmPendingMerge = "crm_pending_merge"
-	global.MongoDB_ColNames.CrmBulkJobs = "crm_bulk_jobs"
-	global.MongoDB_ColNames.CrmIntelCompute = "crm_intel_compute"
-	global.MongoDB_ColNames.CrmCustomerIntelRuns = "crm_customer_intel_runs"
+	// Module Customer (tiền tố customer_)
+	global.MongoDB_ColNames.CustomerCustomers = "customer_customers"
+	global.MongoDB_ColNames.CustomerActivityHistory = "customer_activity_history"
+	global.MongoDB_ColNames.CustomerNotes = "customer_notes"
+	global.MongoDB_ColNames.CustomerPendingMerge = "customer_pending_merge"
+	global.MongoDB_ColNames.CustomerBulkJobs = "customer_bulk_jobs"
+	global.MongoDB_ColNames.CustomerIntelCompute = "customer_intel_compute"
+	global.MongoDB_ColNames.CustomerIntelRuns = "customer_intel_runs"
 
 	// Module Meta Ads
 	global.MongoDB_ColNames.MetaAdAccounts = "meta_ad_accounts"
@@ -162,7 +162,7 @@ func initColNames() {
 	global.MongoDB_ColNames.CixIntelCompute = "cix_intel_compute"
 
 	// Module Order Intelligence — Vision 07
-	global.MongoDB_ColNames.OrderIntelligenceSnapshots = "order_intelligence_snapshots"
+	global.MongoDB_ColNames.OrderIntelSnapshots = "order_intel_snapshots"
 	global.MongoDB_ColNames.OrderIntelCompute = "order_intel_compute"
 	global.MongoDB_ColNames.OrderIntelRuns = "order_intel_runs"
 
@@ -170,6 +170,7 @@ func initColNames() {
 	global.MongoDB_ColNames.DecisionEventsQueue = "decision_events_queue"
 	global.MongoDB_ColNames.DecisionCasesRuntime = "decision_cases_runtime"
 	global.MongoDB_ColNames.DecisionDebounceState = "decision_debounce_state"
+	global.MongoDB_ColNames.DecisionTrailingDebounce = "decision_trailing_debounce"
 	global.MongoDB_ColNames.DecisionRoutingRules = "decision_routing_rules"
 	global.MongoDB_ColNames.DecisionContextPolicyOverrides = "decision_context_policy_overrides"
 	global.MongoDB_ColNames.AIDecisionOrgLiveEvents = "decision_org_live_events"
@@ -228,7 +229,7 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.PcPosVariations), pcmodels.PcPosVariation{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.PcPosCategories), pcmodels.PcPosCategory{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.PcPosOrders), pcmodels.PcPosOrder{})
-	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CommerceOrders), ordermodels.CommerceOrder{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.OrderCanonical), ordermodels.CommerceOrder{})
 
 	// Notification System Indexes (Hệ thống 2 - Routing/Template)
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.NotificationSenders), notifmodels.NotificationChannelSender{})
@@ -275,14 +276,14 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.ReportDirtyPeriods), reportmodels.ReportDirtyPeriod{})
 
 	// Module CRM
-	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmCustomers), crmmodels.CrmCustomer{})
-	database.CreateCrmCustomerProfileIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmCustomers))
-	database.CreateCrmActivityIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmActivityHistory))
-	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmNotes), crmmodels.CrmNote{})
-	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmPendingMerge), crmmodels.CrmPendingMerge{})
-	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmBulkJobs), crmmodels.CrmBulkJob{})
-	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmIntelCompute), crmmodels.CrmIntelComputeJob{})
-	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CrmCustomerIntelRuns), crmmodels.CrmCustomerIntelRun{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CustomerCustomers), crmmodels.CrmCustomer{})
+	database.CreateCrmCustomerProfileIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CustomerCustomers))
+	database.CreateCrmActivityIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CustomerActivityHistory))
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CustomerNotes), crmmodels.CrmNote{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CustomerPendingMerge), crmmodels.CrmPendingMerge{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CustomerBulkJobs), crmmodels.CrmBulkJob{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CustomerIntelCompute), crmmodels.CrmIntelComputeJob{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CustomerIntelRuns), crmmodels.CrmCustomerIntelRun{})
 
 	// Module Meta Ads
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.MetaAdAccounts), metamodels.MetaAdAccount{})
@@ -321,7 +322,7 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.CixIntelCompute), cixmodels.CixIntelComputeJob{})
 
 	// Module Order Intelligence
-	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.OrderIntelligenceSnapshots), orderintelmodels.OrderIntelligenceSnapshot{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.OrderIntelSnapshots), orderintelmodels.OrderIntelligenceSnapshot{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.OrderIntelCompute), orderintelmodels.OrderIntelComputeJob{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.OrderIntelRuns), orderintelmodels.OrderIntelRun{})
 
@@ -332,6 +333,10 @@ func initDatabase_MongoDB() {
 		logrus.Warnf("decision_cases_runtime extra indexes: %v", err)
 	}
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DecisionDebounceState), aidecisionmodels.DebounceState{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DecisionTrailingDebounce), aidecisionmodels.TrailingDebounceSlot{})
+	if err := database.EnsureDecisionTrailingDebounceIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DecisionTrailingDebounce)); err != nil {
+		logrus.Warnf("decision_trailing_debounce compound index: %v", err)
+	}
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DecisionRoutingRules), aidecisionmodels.DecisionRoutingRule{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.DecisionContextPolicyOverrides), aidecisionmodels.DecisionContextPolicyOverride{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.AIDecisionOrgLiveEvents), aidecisionmodels.AIDecisionOrgLiveEvent{})

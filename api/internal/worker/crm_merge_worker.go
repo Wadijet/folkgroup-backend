@@ -119,17 +119,19 @@ func (w *CrmPendingMergeWorker) Start(ctx context.Context) {
 
 				for _, item := range list {
 					start := time.Now()
+					notifyCrmPendingMergeLiveStart(&item)
 					err := w.processItem(ctx, customerSvc, &item)
-					jobType := "crm_pending_merge:" + item.CollectionName
+					jobType := "customer_pending_merge:" + item.CollectionName
 					if len(item.SourceSnapshots) > 0 {
-						jobType = "crm_pending_merge:coalesced"
+						jobType = "customer_pending_merge:coalesced"
 					} else if item.CollectionName == "" {
-						jobType = "crm_pending_merge:unknown"
+						jobType = "customer_pending_merge:unknown"
 					}
 					metrics.RecordDuration(jobType, time.Since(start))
 					errStr := ""
 					if err != nil {
 						errStr = err.Error()
+						notifyCrmPendingMergeLiveError(&item, err)
 						log.WithError(err).WithFields(map[string]interface{}{
 							"collection": item.CollectionName,
 							"id":         item.ID.Hex(),
@@ -141,6 +143,7 @@ func (w *CrmPendingMergeWorker) Start(ctx context.Context) {
 								"id":         item.ID.Hex(),
 							}).Debug("📋 [CRM_MERGE_QUEUE] Thông báo intel sau merge (AID debounce)")
 						}
+						notifyCrmPendingMergeLiveDone(&item)
 					}
 					if setErr := crmvc.SetCrmPendingMergeProcessed(ctx, item.ID, errStr); setErr != nil {
 						log.WithError(setErr).Warn("📋 [CRM_MERGE_QUEUE] SetCrmPendingMergeProcessed thất bại")

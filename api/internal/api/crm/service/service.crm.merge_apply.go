@@ -21,7 +21,7 @@ var crmMergeQueueCollectionApplyOrder = map[string]int{
 	global.MongoDB_ColNames.FbCustomers:    20,
 	global.MongoDB_ColNames.PcPosOrders:    30,
 	global.MongoDB_ColNames.FbConvesations: 40,
-	global.MongoDB_ColNames.CrmNotes:       50,
+	global.MongoDB_ColNames.CustomerNotes:       50,
 }
 
 // ApplyCrmPendingMergeJob xử lý một job queue: đa snapshot (coalesce) hoặc một document (legacy).
@@ -126,7 +126,7 @@ func ApplyCrmMergeFromSourceDocument(ctx context.Context, customerSvc *CrmCustom
 		_, err := customerSvc.IngestConversationTouchpoint(ctx, customerId, ownerOrgID, d.ConversationId, false, &d)
 		return err
 
-	case global.MongoDB_ColNames.CrmNotes:
+	case global.MongoDB_ColNames.CustomerNotes:
 		var d crmmodels.CrmNote
 		if err := bsonMapToStructCRM(doc, &d); err != nil {
 			return err

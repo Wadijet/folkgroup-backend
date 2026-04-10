@@ -23,25 +23,21 @@ func BuildExecuteQueuedEvent(
 		refs["w3cTraceId"] = w3cTraceID
 	}
 	bullets := []string{
-		"Đã có đủ ngữ cảnh (gồm phân tích hội thoại nếu cần) để chạy engine ra quyết định.",
-		"Yêu cầu thực thi đã được ghi vào hàng đợi; worker sẽ lấy job và gọi engine (ExecuteWithCase).",
-		"Mốc này: vừa xếp hàng — chưa chạy engine; các bước parse / quyết định / đề xuất nằm ở mốc sau.",
+		"Đã đủ thông tin cần thiết — hệ thống sẽ phân tích và gợi ý trong giây lát.",
+		"Các bước tiếp theo sẽ hiện thêm trên dòng thời gian (đọc gợi ý, duyệt, tạo việc…).",
 	}
-	bullets = append(bullets,
-		"Engine sẽ nạp hồ sơ (nếu có), áp quy tắc và có thể gọi LLM tùy cấu hình.",
-	)
 	if decisionCaseID != "" {
-		bullets = append(bullets, "Hồ sơ liên quan: "+decisionCaseID)
+		bullets = append(bullets, "Mã hồ sơ xử lý: "+decisionCaseID)
 	}
 	queuedSections := []decisionlive.DecisionLiveDetailSection{
-		{Title: "Các mốc tiếp theo trên timeline", Items: []string{
-			"Một mốc khi worker bắt đầu consume job execute.",
-			"Sau đó là chuỗi mốc: phân tích đầu vào → quyết định → chính sách → đề xuất (mỗi bước một dòng trên timeline).",
-			"Toàn bộ diễn ra tuần tự — không gộp trong một mốc duy nhất.",
+		{Title: "Thông tin thêm", Items: []string{
+			"Thứ tự thường gặp: nhận việc → đọc gợi ý → (có thể) hỗ trợ AI → chọn hành động → tạo đề xuất.",
+			"Nếu cần hỗ trợ, gửi kèm mã trong phần tham chiếu của sự kiện.",
 		}},
 	}
 	return decisionlive.DecisionLiveEvent{
 		Phase:           decisionlive.PhaseQueued,
+		OutcomeKind:     decisionlive.OutcomeNominal,
 		SourceKind:      sourceKind,
 		SourceTitle:     sourceTitle,
 		Summary:         queuedSummary,
@@ -51,10 +47,10 @@ func BuildExecuteQueuedEvent(
 		Refs:            refs,
 		DetailBullets:   bullets,
 		DetailSections:  queuedSections,
-		ReasoningSummary: "Một job execute trên hàng đợi tương ứng một lượt chạy engine ra quyết định.",
+		ReasoningSummary: "Mỗi lượt xử lý tương ứng một vòng phân tích và gợi ý hoàn chỉnh.",
 		Step: &decisionlive.TraceStep{
 			Kind:  "queue",
-			Title: "Xếp hàng thực thi quyết định",
+			Title: "Đang chờ phân tích trợ lý",
 		},
 	}
 }
@@ -76,21 +72,19 @@ func BuildExecuteConsumingEvent(
 		consRefs["w3cTraceId"] = w3c
 	}
 	bullets := []string{
-		"Worker đã đọc xong yêu cầu execute và nạp hồ sơ (nếu có).",
-		"Engine bắt đầu chạy: quy tắc, có thể LLM, rồi tạo đề xuất hoặc bước duyệt.",
-		"Mốc này: mới khởi động engine — các bước chi tiết sẽ hiện thành từng dòng timeline phía sau.",
+		"Trợ lý đã bắt đầu phân tích — các bước tiếp theo sẽ hiện dưới dạng dòng thời gian.",
 	}
 	if caseID != "" {
 		bullets = append(bullets, "Hồ sơ: "+caseID)
 	}
 	consumingSections := []decisionlive.DecisionLiveDetailSection{
-		{Title: "Các bước sau (mỗi bước = một mốc timeline)", Items: []string{
-			"Ở mốc này engine vừa bắt đầu xử lý job execute.",
-			"Phân tích, quyết định, chính sách và đề xuất được ghi riêng từng mốc — không gộp một dòng.",
+		{Title: "Thông tin thêm", Items: []string{
+			"Thời điểm hiển thị giúp bạn đối chiếu thứ tự; mã hồ sơ nằm trong phần tham chiếu nếu cần gửi hỗ trợ.",
 		}},
 	}
 	return decisionlive.DecisionLiveEvent{
 		Phase:           decisionlive.PhaseConsuming,
+		OutcomeKind:     decisionlive.OutcomeNominal,
 		SourceKind:      sourceKind,
 		SourceTitle:     sourceTitle,
 		Summary:         summary,
@@ -100,10 +94,10 @@ func BuildExecuteConsumingEvent(
 		Refs:            consRefs,
 		DetailBullets:   bullets,
 		DetailSections:  consumingSections,
-		ReasoningSummary: "Consumer đã lấy job execute và gọi engine — không còn chờ trên hàng đợi.",
+		ReasoningSummary: "Hệ thống đang phân tích trực tiếp, không còn chờ trong hàng đợi.",
 		Step: &decisionlive.TraceStep{
 			Kind:  "execute",
-			Title: "Bắt đầu chạy engine ra quyết định",
+			Title: "Đang phân tích và chuẩn bị gợi ý",
 		},
 	}
 }

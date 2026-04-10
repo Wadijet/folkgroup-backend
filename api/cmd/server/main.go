@@ -28,6 +28,7 @@ import (
 	approval "meta_commerce/internal/approval"
 	"meta_commerce/internal/delivery"
 	"meta_commerce/internal/global"
+	"meta_commerce/internal/livehooks"
 	"meta_commerce/internal/logger"
 	"meta_commerce/internal/systemalert"
 	"meta_commerce/internal/worker"
@@ -404,6 +405,9 @@ func main() {
 
 	// Đăng ký tất cả workers vào Registry thống nhất
 	reg := worker.DefaultRegistry()
+
+	// Hook timeline live cho worker nền (tránh import cycle worker ↔ decisionlive)
+	livehooks.RegisterCrmPendingMergeLiveHooks()
 
 	// Worker Controller: lấy mẫu CPU định kỳ, throttle workers khi quá tải — đăng ký đầu tiên
 	reg.Register("system_worker_controller", worker.DefaultController())

@@ -55,7 +55,7 @@ func ClassifyDatachangedBusinessUrgency(evt *aidecisionmodels.DecisionEvent, sou
 
 	// --- Realtime: chạm trực tiếp khách, tiền, hoặc thao tác nhân viên trên hồ sơ ---
 	switch src {
-	case c.CrmNotes, c.CrmCustomers, c.CrmActivityHistory:
+	case c.CustomerNotes, c.CustomerCustomers, c.CustomerActivityHistory:
 		return UrgencyRealtime
 	case c.FbMessages:
 		// Tin nhắn mới = cần pipeline hội thoại / CRM kịp thời.

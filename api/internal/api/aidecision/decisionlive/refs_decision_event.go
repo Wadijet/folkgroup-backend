@@ -35,6 +35,9 @@ func RefsFromDecisionEventEnvelope(evt *aidecisionmodels.DecisionEvent) map[stri
 	put("traceId", evt.TraceID)
 	put("w3cTraceId", evt.W3CTraceID)
 	put("correlationId", evt.CorrelationID)
+	put("pipelineStage", evt.PipelineStage)
+	put("e2eStage", evt.E2EStage)
+	put("e2eStepId", evt.E2EStepID)
 
 	if evt.Payload != nil {
 		put("decisionCaseId", strFromPayload(evt.Payload, "decisionCaseId", "decisionCaseID"))

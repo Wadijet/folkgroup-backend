@@ -3,8 +3,10 @@ package worker
 
 import (
 	"context"
+	"strings"
 	"time"
 
+	"meta_commerce/internal/api/aidecision/decisionlive"
 	adsmodels "meta_commerce/internal/api/ads_meta/models"
 	metasvc "meta_commerce/internal/api/meta/service"
 	"meta_commerce/internal/global"
@@ -94,6 +96,21 @@ func (w *AdsIntelComputeWorker) Start(ctx context.Context) {
 				return
 			}
 
+			tid, cid := adsIntelJobTraceIDs(&job)
+			extra := map[string]string{"jobId": job.ID.Hex(), "jobKind": job.JobKind}
+			if job.ObjectID != "" {
+				extra["objectId"] = job.ObjectID
+			}
+			if job.AdAccountID != "" {
+				extra["adAccountId"] = job.AdAccountID
+			}
+			if tid != "" {
+				decisionlive.PublishIntelDomainMilestone(job.OwnerOrganizationID, tid, cid, decisionlive.IntelDomainAdsIntel, decisionlive.IntelMilestoneStart,
+					"Worker Ads Intel: bắt đầu xử lý job (recompute / context_ready / batch).",
+					[]string{"Job ads_intel_compute chạy tại domain Meta/Ads — kết quả có thể emit campaign_intel_recomputed hoặc ads.context_ready."},
+					extra)
+			}
+
 			runErr := metasvc.RunAdsIntelComputeJob(ctx, &job)
 			if runErr != nil {
 				_, uerr := coll.UpdateOne(ctx, bson.M{"_id": job.ID}, bson.M{
@@ -107,6 +124,16 @@ func (w *AdsIntelComputeWorker) Start(ctx context.Context) {
 					log.WithError(uerr).WithField("jobId", job.ID.Hex()).Warn("📋 [ADS_INTEL] Ghi lỗi job thất bại")
 				}
 				log.WithError(runErr).WithField("jobId", job.ID.Hex()).Warn("📋 [ADS_INTEL] RunAdsIntelComputeJob thất bại")
+				if tid != "" {
+					msg := strings.TrimSpace(runErr.Error())
+					if len(msg) > 400 {
+						msg = msg[:400] + "…"
+					}
+					decisionlive.PublishIntelDomainMilestone(job.OwnerOrganizationID, tid, cid, decisionlive.IntelDomainAdsIntel, decisionlive.IntelMilestoneError,
+						"Worker Ads Intel: lỗi khi chạy job.",
+						[]string{"Chi tiết (rút gọn): " + msg},
+						extra)
+				}
 				return
 			}
 
@@ -118,6 +145,23 @@ func (w *AdsIntelComputeWorker) Start(ctx context.Context) {
 			if uerr != nil {
 				log.WithError(uerr).WithField("jobId", job.ID.Hex()).Warn("📋 [ADS_INTEL] Đánh dấu hoàn thành thất bại")
 			}
+			if tid != "" {
+				decisionlive.PublishIntelDomainMilestone(job.OwnerOrganizationID, tid, cid, decisionlive.IntelDomainAdsIntel, decisionlive.IntelMilestoneDone,
+					"Worker Ads Intel: hoàn tất job.",
+					[]string{"Đã cập nhật intelligence / ngữ cảnh ads theo loại job — kiểm tra sự kiện bàn giao trên cùng trace."},
+					extra)
+			}
 		}()
 	}
+}
+
+// adsIntelJobTraceIDs — context_ready dùng ContextEmit*; các job khác dùng parent trace từ consumer AID.
+func adsIntelJobTraceIDs(job *adsmodels.AdsIntelComputeJob) (traceID, correlationID string) {
+	if job == nil {
+		return "", ""
+	}
+	if job.JobKind == adsmodels.AdsIntelComputeKindContextReady {
+		return strings.TrimSpace(job.ContextEmitTraceID), strings.TrimSpace(job.ContextEmitCorrelationID)
+	}
+	return strings.TrimSpace(job.ParentTraceID), strings.TrimSpace(job.ParentCorrelationID)
 }

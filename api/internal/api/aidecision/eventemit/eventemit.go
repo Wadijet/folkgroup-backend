@@ -3,8 +3,10 @@ package eventemit
 
 import (
 	"context"
+	"strings"
 	"time"
 
+	"meta_commerce/internal/api/aidecision/eventtypes"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/utility"
@@ -17,6 +19,7 @@ import (
 type EmitInput struct {
 	EventType     string
 	EventSource   string
+	PipelineStage string
 	EntityType    string
 	EntityID      string
 	OrgID         string
@@ -44,10 +47,18 @@ func EmitDecisionEvent(ctx context.Context, input *EmitInput) (*EmitResult, erro
 	now := time.Now().UnixMilli()
 	eventID := utility.GenerateUID(utility.UIDPrefixEvent)
 
+	payload := clonePayloadMap(input.Payload)
+	ref := eventtypes.ResolveE2EForQueueEnvelope(input.EventType, input.EventSource, input.PipelineStage)
+	eventtypes.MergePayloadE2E(payload, ref)
+
 	doc := &aidecisionmodels.DecisionEvent{
 		EventID:             eventID,
 		EventType:           input.EventType,
 		EventSource:         input.EventSource,
+		PipelineStage:       strings.TrimSpace(input.PipelineStage),
+		E2EStage:            ref.Stage,
+		E2EStepID:           ref.StepID,
+		E2EStepLabelVi:      ref.LabelVi,
 		EntityType:          input.EntityType,
 		EntityID:            input.EntityID,
 		OrgID:               input.OrgID,
@@ -58,7 +69,7 @@ func EmitDecisionEvent(ctx context.Context, input *EmitInput) (*EmitResult, erro
 		Status:              aidecisionmodels.EventStatusPending,
 		TraceID:             input.TraceID,
 		CorrelationID:       input.CorrelationID,
-		Payload:             input.Payload,
+		Payload:             payload,
 		AttemptCount:        0,
 		MaxAttempts:         5,
 		CreatedAt:           now,
@@ -72,4 +83,16 @@ func EmitDecisionEvent(ctx context.Context, input *EmitInput) (*EmitResult, erro
 		EventID: eventID,
 		Status:  aidecisionmodels.EventStatusPending,
 	}, nil
+}
+
+// clonePayloadMap sao chép payload để tránh sửa map gốc caller.
+func clonePayloadMap(p map[string]interface{}) map[string]interface{} {
+	if p == nil {
+		return map[string]interface{}{}
+	}
+	out := make(map[string]interface{}, len(p))
+	for k, v := range p {
+		out[k] = v
+	}
+	return out
 }

@@ -30,14 +30,17 @@ func TestBuildQueueConsumerEvent_Done(t *testing.T) {
 		EventType:   eventtypes.OrderUpdated,
 		EventSource: eventtypes.EventSourceDatachanged,
 	}
-	ev := BuildQueueConsumerEvent(evt, QueueMilestoneHandlerDone, nil, nil)
+	ev := BuildQueueConsumerEvent(evt, QueueMilestoneHandlerDone, nil, nil, nil)
 	if ev.Phase == "" {
 		t.Fatal("phase")
 	}
-	if len(ev.DetailBullets) < 3 {
+	if len(ev.DetailBullets) < 1 {
 		t.Fatalf("detail bullets: %v", ev.DetailBullets)
 	}
-	if len(ev.DetailSections) != 1 || len(ev.DetailSections[0].Items) < 2 {
-		t.Fatalf("detailSections (diễn giải trong mốc): %+v", ev.DetailSections)
+	if len(ev.DetailSections) != 1 {
+		t.Fatalf("mong đợi 1 detailSection (chi tiết kỹ thuật gộp): %+v", ev.DetailSections)
+	}
+	if len(ev.DetailSections[0].Items) < 2 {
+		t.Fatalf("chi tiết kỹ thuật phải có ít nhất 2 dòng: %+v", ev.DetailSections)
 	}
 }

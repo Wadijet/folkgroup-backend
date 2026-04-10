@@ -146,7 +146,8 @@ func mapSourceKindsToPipelineDomain(sourceKinds []string) string {
 			continue
 		}
 		switch {
-		case strings.HasPrefix(sk, "crm_"), sk == "crm_customers", sk == "crm_activity":
+		case strings.HasPrefix(sk, "customer_"), sk == "customer_customers", sk == "customer_activity",
+			strings.HasPrefix(sk, "crm_"), sk == "crm_customers", sk == "crm_activity": // legacy debounce keys
 			return PipelineDebounceDomainCrm
 		case strings.HasPrefix(sk, "cix_"), sk == "cix_analysis", sk == "fb_message_items":
 			return PipelineDebounceDomainCix
@@ -291,7 +292,7 @@ func refreshPipelineStripMongo(ctx context.Context, ownerOrgID primitive.ObjectI
 	flt := filterIntelComputePendingOnly(ownerOrgID)
 	ads := countColl(ctx, global.MongoDB_ColNames.AdsIntelCompute, flt)
 	cix := countColl(ctx, global.MongoDB_ColNames.CixIntelCompute, flt)
-	crm := countColl(ctx, global.MongoDB_ColNames.CrmIntelCompute, flt)
+	crm := countColl(ctx, global.MongoDB_ColNames.CustomerIntelCompute, flt)
 	ord := countColl(ctx, global.MongoDB_ColNames.OrderIntelCompute, flt)
 
 	c.lastRefreshMs = nowMs

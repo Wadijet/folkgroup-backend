@@ -4,23 +4,34 @@
 package datachanged
 
 import (
+	"strings"
+
 	"meta_commerce/internal/api/aidecision/datachangedsidefx"
 	"meta_commerce/internal/api/aidecision/eventintake"
 )
 
 func init() {
 	datachangedsidefx.Register(10, "crm_merge_queue", func(ac *datachangedsidefx.ApplyContext) error {
-		if !ac.Route.CrmPendingMergeCollection {
+		if !ac.Route.CustomerPendingMergeCollection {
 			return nil
 		}
 		if !ac.Dec.AllowCrmMergeQueue {
 			return nil
 		}
 		if ac.IngestWin > 0 {
-			eventintake.ScheduleDeferredSideEffect(eventintake.DeferredKindCrmMergeQueue, ac.OrgHex, ac.Src, ac.IDHex, ac.IngestWin)
-			return nil
+			var tid, cid string
+			if ac.Evt != nil {
+				tid = strings.TrimSpace(ac.Evt.TraceID)
+				cid = strings.TrimSpace(ac.Evt.CorrelationID)
+			}
+			return eventintake.ScheduleDeferredSideEffect(ac.Ctx, eventintake.DeferredKindCrmMergeQueue, ac.OrgHex, ac.Src, ac.IDHex, ac.IngestWin, tid, cid)
 		}
-		EnqueueCrmMergeFromDataChange(ac.Ctx, ac.E)
+		var tid, cid string
+		if ac.Evt != nil {
+			tid = strings.TrimSpace(ac.Evt.TraceID)
+			cid = strings.TrimSpace(ac.Evt.CorrelationID)
+		}
+		EnqueueCrmMergeFromDataChange(ac.Ctx, ac.E, tid, cid)
 		return nil
 	})
 }

@@ -29,22 +29,22 @@ func defaultRouteForSrc(c string) routecontract.Decision {
 		Collection:                   c,
 		RuleID:                       "sidefx_fallback_unset_route",
 		EmitToDecisionQueue:          true,
-		CrmPendingMergeCollection:    isCrmPendingMergeCollectionLocal(c),
-		ReportTouchPipeline:          true,
-		AdsProfilePipeline:           true,
-		CixIntelPipeline:             c == global.MongoDB_ColNames.FbMessageItems,
-		OrderIntelPipeline:           c == global.MongoDB_ColNames.PcPosOrders,
-		CrmIntelRefreshDeferPipeline: true,
+		CustomerPendingMergeCollection:    isCustomerPendingMergeCollectionLocal(c),
+		ReportTouchPipeline:               true,
+		AdsProfilePipeline:                true,
+		CixIntelPipeline:                  c == global.MongoDB_ColNames.FbMessageItems,
+		OrderIntelPipeline:                c == global.MongoDB_ColNames.PcPosOrders,
+		CustomerIntelRefreshDeferPipeline: true,
 	}
 }
 
-func isCrmPendingMergeCollectionLocal(name string) bool {
+func isCustomerPendingMergeCollectionLocal(name string) bool {
 	switch name {
 	case global.MongoDB_ColNames.PcPosCustomers,
 		global.MongoDB_ColNames.FbCustomers,
 		global.MongoDB_ColNames.PcPosOrders,
 		global.MongoDB_ColNames.FbConvesations,
-		global.MongoDB_ColNames.CrmNotes:
+		global.MongoDB_ColNames.CustomerNotes:
 		return true
 	default:
 		return false

@@ -19,15 +19,22 @@ func BuildAdsOptimizationLiveEvent(
 	campaignID, adAccountID string,
 ) decisionlive.DecisionLiveEvent {
 	adsSections := []decisionlive.DecisionLiveDetailSection{
-		{Title: "Luồng tối ưu quảng cáo (mỗi bước có thể là một mốc timeline)", Items: []string{
-			"Trước bước này thường đã có các mốc trên hàng đợi (chuẩn bị ngữ cảnh, v.v.) — mỗi mốc một dòng timeline.",
-			"Ở bước đánh giá: hệ thống đối chiếu số liệu chiến dịch với quy tắc hành động.",
-			"Sau đó có thể là mốc đề xuất hoặc job khác — theo dõi tiếp trên cùng một trace.",
+		{Title: "Thông tin thêm", Items: []string{
+			"Đối chiếu chiến dịch và tài khoản quảng cáo trong phần tham chiếu với dữ liệu đã lưu.",
+			"Nếu cần hỗ trợ, gửi kèm mã luồng (trace) trong sự kiện.",
 		}},
+	}
+	outcomeK := decisionlive.OutcomeNominal
+	switch strings.TrimSpace(severity) {
+	case decisionlive.SeverityError:
+		outcomeK = decisionlive.OutcomeProcessingError
+	case decisionlive.SeverityWarn:
+		outcomeK = decisionlive.OutcomeNoActions
 	}
 	ev := decisionlive.DecisionLiveEvent{
 		Phase:          phase,
 		Severity:       severity,
+		OutcomeKind:    outcomeK,
 		Summary:        summary,
 		SourceKind:     decisionlive.FeedSourceAds,
 		SourceTitle:    "Chiến dịch Meta Ads",
@@ -39,7 +46,7 @@ func BuildAdsOptimizationLiveEvent(
 		ev.CorrelationID = caseDoc.CorrelationID
 		decisionlive.EnrichLiveEventFromCase(caseDoc.DecisionCaseID, caseDoc.TraceID, &ev)
 	}
-	rs := "Đối chiếu số liệu chiến dịch với quy tắc; nếu đủ điều kiện sẽ tạo gợi ý chờ duyệt."
+	rs := "Hệ thống đang so sánh số liệu chiến dịch với quy tắc đã cài; nếu phù hợp sẽ có gợi ý để bạn duyệt."
 	if strings.TrimSpace(ev.ReasoningSummary) == "" {
 		ev.ReasoningSummary = rs
 	}
@@ -61,17 +68,15 @@ func BuildAdsOptimizationLiveEvent(
 }
 
 func adsMergeStructuredBullets(campaignID, adAccountID string, queueEvt *aidecisionmodels.DecisionEvent, detail []string) []string {
-	in := "Dựa trên số liệu chiến dịch đã lưu trên hệ thống và nội dung job hiện tại."
+	line := "Đang đánh giá chiến dịch quảng cáo đã lưu theo quy tắc của bạn."
 	if cid := firstNonEmpty(campaignID, refVal(queueEvt, "campaignId")); cid != "" {
-		in = "Chiến dịch: " + cid
+		line = "Chiến dịch " + cid
 		if aa := firstNonEmpty(adAccountID, refVal(queueEvt, "adAccountId")); aa != "" {
-			in += " — Tài khoản quảng cáo: " + aa
+			line += " · tài khoản " + aa
 		}
-		in += "."
+		line += " — kết quả tóm tắt ở dòng phía trên."
 	}
-	mech := "Đối chiếu số liệu với quy tắc; nếu có hành động phù hợp sẽ chuyển sang bước duyệt / thực thi."
-	out := "Kết luận từng bước nằm ở dòng tóm tắt phía trên."
-	core := []string{in, mech, out}
+	core := []string{line}
 	if len(detail) == 0 {
 		return core
 	}

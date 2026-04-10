@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"time"
 
-	crmvc "meta_commerce/internal/api/crm/service"
 	reportdto "meta_commerce/internal/api/report/dto"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -80,18 +79,18 @@ func (s *ReportService) ComputeCustomerReport(ctx context.Context, reportKey, pe
 
 // computeCustomerPhatSinh tính số phát sinh (in/out) cho toàn bộ cấu trúc metrics. Snapshot chỉ lưu phát sinh, không lưu số cuối kỳ.
 func (s *ReportService) computeCustomerPhatSinh(ctx context.Context, ownerOrgID primitive.ObjectID, startMs, endMs int64) (map[string]interface{}, error) {
-	actSvc, err := crmvc.NewCrmActivityService()
+	actSvc, err := newCrmActivityServiceForReport()
 	if err != nil {
-		return nil, fmt.Errorf("tạo CrmActivityService: %w", err)
+		return nil, err
 	}
 	return computeAllPhatSinh(ctx, actSvc, ownerOrgID, startMs, endMs)
 }
 
 // computeCustomerPhatSinhBatch tính phát sinh cho nhiều kỳ trong 1 lần (2 DB calls thay vì 2*N). Dùng cho period-movements-from-db (PHỤ, đối chiếu).
 func (s *ReportService) computeCustomerPhatSinhBatch(ctx context.Context, ownerOrgID primitive.ObjectID, reportKey string, periodKeys []string) ([]map[string]interface{}, error) {
-	actSvc, err := crmvc.NewCrmActivityService()
+	actSvc, err := newCrmActivityServiceForReport()
 	if err != nil {
-		return nil, fmt.Errorf("tạo CrmActivityService: %w", err)
+		return nil, err
 	}
 	return computeAllPhatSinhBatch(ctx, actSvc, ownerOrgID, reportKey, periodKeys)
 }
@@ -236,9 +235,9 @@ func (s *ReportService) GetStartMsForCustomersParams(params *reportdto.Customers
 // GetPeriodEndBalance lấy số dư cuối kỳ theo cấu trúc raw/layer1/layer2/layer3 (giống metricsSnapshot).
 // Query từ crm_activity_history. startMs dùng cho activeInPeriod; 0 = bỏ qua.
 func (s *ReportService) GetPeriodEndBalance(ctx context.Context, ownerOrgID primitive.ObjectID, endMs, startMs int64) (map[string]interface{}, error) {
-	actSvc, err := crmvc.NewCrmActivityService()
+	actSvc, err := newCrmActivityServiceForReport()
 	if err != nil {
-		return nil, fmt.Errorf("tạo CrmActivityService: %w", err)
+		return nil, err
 	}
 	snapshotMap, err := actSvc.GetLastSnapshotPerCustomerBeforeEndMs(ctx, ownerOrgID, endMs)
 	if err != nil {

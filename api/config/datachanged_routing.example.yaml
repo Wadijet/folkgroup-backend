@@ -8,9 +8,9 @@ collection_overrides: {}
   # Ví dụ:
   # "meta_campaigns":
   #   emit_to_decision_queue: true
-  #   crm_pending_merge: false
+  #   customer_pending_merge: false
   #   report_touch: true
   #   ads_profile: true
   #   cix_intel: false
   #   order_intel: false
-  #   crm_intel_refresh_defer: true
+  #   customer_intel_refresh_defer: true

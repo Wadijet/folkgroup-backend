@@ -60,9 +60,10 @@ func (s *AIDecisionService) EmitExecuteRequested(ctx context.Context, req *Execu
 		entityID = "execute"
 	}
 	res, err := s.EmitEvent(ctx, &EmitEventInput{
-		EventType:     EventTypeExecuteRequested,
-		EventSource:   eventtypes.EventSourceAIDecision,
-		EntityType:    "decision_execution",
+		EventType:       EventTypeExecuteRequested,
+		EventSource:     eventtypes.EventSourceAIDecision,
+		PipelineStage:   eventtypes.PipelineStageAIDCoordination,
+		EntityType:      "decision_execution",
 		EntityID:      entityID,
 		OrgID:         orgID,
 		OwnerOrgID:    ownerOrgID,
@@ -131,9 +132,9 @@ func (s *AIDecisionService) ProcessExecuteRequestedEvent(ctx context.Context, ev
 	}
 	if req.TraceID != "" {
 		sk, st := decisionlive.InferSourceForFeed(req.CIXPayload, req.SessionUid, req.CustomerUid)
-		sum := "Đang phân tích và chuẩn bị quyết định…"
+		sum := "Trợ lý đang đọc tình huống và chuẩn bị gợi ý…"
 		if st != "" {
-			sum = "Đang xử lý " + st + " — phân tích ngữ cảnh và đề xuất hành động."
+			sum = "Đang xử lý " + st + " — xem ngữ cảnh và gợi ý việc nên làm tiếp."
 		}
 		w3cLive := strings.TrimSpace(evt.W3CTraceID)
 		if w3cLive == "" {

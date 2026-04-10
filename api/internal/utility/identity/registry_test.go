@@ -17,12 +17,12 @@ func TestShouldEnrichPcPosOrdersKhongCanInitGlobal(t *testing.T) {
 	}
 }
 
-func TestShouldEnrichCommerceOrdersKhongCanInitGlobal(t *testing.T) {
-	if !ShouldEnrich("commerce_orders") {
-		t.Fatal("ShouldEnrich(commerce_orders) phải true ngay khi load package")
+func TestShouldEnrichOrderCanonicalKhongCanInitGlobal(t *testing.T) {
+	if !ShouldEnrich("order_canonical") {
+		t.Fatal("ShouldEnrich(order_canonical) phải true ngay khi load package")
 	}
-	if _, ok := GetConfig("commerce_orders"); !ok {
-		t.Fatal("GetConfig(commerce_orders) phải ok")
+	if _, ok := GetConfig("order_canonical"); !ok {
+		t.Fatal("GetConfig(order_canonical) phải ok")
 	}
 }
 

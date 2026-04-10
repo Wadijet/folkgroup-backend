@@ -33,7 +33,7 @@ type MongoDB_Auth_CollectionName struct {
 	PcPosVariations         string // Tên collection cho biến thể sản phẩm từ Pancake POS API
 	PcPosCategories         string // Tên collection cho danh mục sản phẩm từ Pancake POS API
 	PcPosOrders             string // Tên collection cho đơn hàng từ Pancake POS API (mirror Pancake)
-	CommerceOrders          string // commerce_orders: đơn canonical đa nguồn (Order Intel đọc từ đây)
+	OrderCanonical          string // order_canonical: đơn canonical đa nguồn (Order Intel đọc từ đây; cùng domain order_* với intel)
 
 	// Notification System Collections (Hệ thống 2 - Routing/Template)
 	NotificationSenders      string // Tên collection cho notification senders
@@ -83,16 +83,16 @@ type MongoDB_Auth_CollectionName struct {
 	ReportSnapshots    string // report_snapshots: kết quả snapshot theo chu kỳ
 	ReportDirtyPeriods string // report_dirty_periods: đánh dấu chu kỳ cần tính lại
 
-	// Module CRM (tiền tố crm_)
-	CrmCustomers         string // crm_customers: khách đã merge
-	CrmActivityHistory  string // crm_activity_history: lịch sử hoạt động
-	CrmNotes            string // crm_notes: ghi chú khách
-	CrmPendingMerge     string // crm_pending_merge: queue merge L1→L2 CRM (khác CIO ingest)
-	CrmBulkJobs string // crm_bulk_jobs: queue cho worker xử lý sync, backfill, recalculate
-	// CrmIntelCompute — quy ước chung với Ads/Order: collection MongoDB `{domain}_intel_compute` = chuỗi đăng ký worker Worker{Domain}IntelCompute.
-	CrmIntelCompute string // crm_intel_compute
-	// CrmCustomerIntelRuns — mỗi lần chạy intel khách (job/API) thành công hoặc thất bại có ý nghĩa: một document lịch sử; crm_customers giữ pointer mới nhất.
-	CrmCustomerIntelRuns string // crm_customer_intel_runs
+	// Module Customer (canonical khách — tiền tố customer_, đồng bộ order_/meta_/cix_)
+	CustomerCustomers      string // customer_customers: khách đã merge (L2-persist)
+	CustomerActivityHistory string // customer_activity_history: lịch sử hoạt động
+	CustomerNotes          string // customer_notes: ghi chú khách
+	CustomerPendingMerge   string // customer_pending_merge: queue merge L1→L2 (khác CIO ingest)
+	CustomerBulkJobs       string // customer_bulk_jobs: queue worker sync, backfill, recalculate
+	// CustomerIntelCompute — cùng quy ước *_intel_compute với Ads/Order/CIX.
+	CustomerIntelCompute string // customer_intel_compute
+	// CustomerIntelRuns — lớp A: mỗi lần chạy intel khách; customer_customers giữ pointer mới nhất.
+	CustomerIntelRuns string // customer_intel_runs
 
 	// Module Meta Ads (tiền tố meta_)
 	MetaAdAccounts  string // meta_ad_accounts: ad accounts (act_xxx)
@@ -153,18 +153,22 @@ type MongoDB_Auth_CollectionName struct {
 	CixIntelCompute    string // cix_intel_compute: job phân tích (CIO → enqueue; WorkerCixIntelCompute), cùng quy ước *_intel_compute
 
 	// Module Order Intelligence — Vision 07 (Raw→L1→L2→L3→Flags per order)
-	OrderIntelligenceSnapshots string // order_intelligence_snapshots: snapshot theo đơn (upsert theo orderUid + org)
-	OrderIntelCompute          string // order_intel_compute — worker tính Raw→L3→Flags, không tính trong consumer AI Decision
-	// OrderIntelRuns — lớp A: mỗi lần worker kết thúc (thành công/thất bại); commerce_orders giữ pointer mới nhất.
+	OrderIntelSnapshots string // order_intel_snapshots: read model B theo đơn (upsert theo orderUid + org)
+	OrderIntelCompute   string // order_intel_compute — worker tính Raw→L3→Flags, không tính trong consumer AI Decision
+	// OrderIntelRuns — lớp A: mỗi lần worker kết thúc (thành công/thất bại); order_canonical giữ pointer mới nhất.
 	OrderIntelRuns string // order_intel_runs
 
 	// Module AI Decision — Event & Decision Case (PLATFORM_L1_EVENT_DECISION_SUPPLEMENT)
 	DecisionEventsQueue   string // decision_events_queue: hàng đợi event chờ AI Decision xử lý
 	DecisionCasesRuntime string // decision_cases_runtime: case đang vận hành — từ trigger đến outcome
 	DecisionDebounceState string // decision_debounce_state: gom message trước message.batch_ready
+	// DecisionTrailingDebounce — trailing defer datachanged (report/crm/cix/order…) + crm intel sau ingest; một doc/khóa, xóa khi flush.
+	DecisionTrailingDebounce string
 	DecisionRoutingRules  string // decision_routing_rules: override noop/pass_through theo org + eventType
 	DecisionContextPolicyOverrides string // decision_context_policy_overrides: matrix required/optional theo org + caseType
-	AIDecisionOrgLiveEvents        string // decision_org_live_events: mỗi Publish một dòng; trường phẳng ui/refs/phase (docSchemaVersion>=2) + payload JSON DecisionLiveEvent
+	// AIDecisionOrgLiveEvents — Timeline org-live persist: mỗi mốc Publish (live bật + persist bật) một document.
+	// Nội dung: BSON BuildOrgLivePersistDocument — trường phẳng (query/UI) + payload ([]byte JSON DecisionLiveEvent). Model index: aidecisionmodels.AIDecisionOrgLiveEvent.
+	AIDecisionOrgLiveEvents string
 }
 
 // Các biến toàn cục

@@ -2,6 +2,8 @@
 package datachanged
 
 import (
+	"strings"
+
 	"meta_commerce/internal/api/aidecision/datachangedsidefx"
 	"meta_commerce/internal/api/aidecision/eventintake"
 	"meta_commerce/internal/global"
@@ -17,10 +19,19 @@ func init() {
 			return nil
 		}
 		if ac.CixIntelDefer > 0 {
-			eventintake.ScheduleDeferredSideEffect(eventintake.DeferredKindCixIntelCompute, ac.OrgHex, ac.Src, ac.IDHex, ac.CixIntelDefer)
-			return nil
+			var tid, cid string
+			if ac.Evt != nil {
+				tid = strings.TrimSpace(ac.Evt.TraceID)
+				cid = strings.TrimSpace(ac.Evt.CorrelationID)
+			}
+			return eventintake.ScheduleDeferredSideEffect(ac.Ctx, eventintake.DeferredKindCixIntelCompute, ac.OrgHex, ac.Src, ac.IDHex, ac.CixIntelDefer, tid, cid)
 		}
-		if err := EnqueueCixComputeFromDataChange(ac.Ctx, ac.E, ac.IDHex); err != nil {
+		var tid, cid string
+		if ac.Evt != nil {
+			tid = strings.TrimSpace(ac.Evt.TraceID)
+			cid = strings.TrimSpace(ac.Evt.CorrelationID)
+		}
+		if err := EnqueueCixComputeFromDataChange(ac.Ctx, ac.E, ac.IDHex, tid, cid); err != nil {
 			logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
 				"eventId": ac.Evt.EventID, "orgHex": ac.OrgHex, "sourceCollection": ac.Src,
 			}).Warn("📋 [CIX_INTEL] Không xếp job cix_intel_compute từ fb_message_items datachanged")

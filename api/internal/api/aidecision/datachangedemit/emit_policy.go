@@ -18,9 +18,9 @@ var EmitPerCollection = map[string]bool{
 	"pc_pos_products":      false,
 	"pc_pos_variations":    false,
 	"pc_pos_categories":    false,
-	"crm_customers":        false,
-	"crm_activity_history": false,
-	"crm_notes":            false,
+	"customer_customers":        false,
+	"customer_activity_history": false,
+	"customer_notes":            false,
 	"cix_analysis_results": false,
 	"webhook_logs":         false,
 }

@@ -80,7 +80,7 @@ func isQueueConsumerFeedPhase(phase string) bool {
 	}
 }
 
-// enrichLiveEventFeedSource điền feedSourceCategory / feedSourceLabelVi (chip “Nguồn” trên UI).
+// enrichLiveEventFeedSource — Publish bước 2: điền feedSourceCategory / feedSourceLabelVi (chip “Nguồn” trên UI).
 func enrichLiveEventFeedSource(ev *DecisionLiveEvent) {
 	if ev == nil || strings.TrimSpace(ev.FeedSourceCategory) != "" {
 		return
@@ -112,6 +112,12 @@ func enrichLiveEventFeedSource(ev *DecisionLiveEvent) {
 		return
 	default:
 		if isOrchestrationPipelinePhase(ev.Phase) {
+			ev.FeedSourceCategory = FeedSourceIntel
+			ev.FeedSourceLabelVi = labelFeedSource(FeedSourceIntel)
+			applySourceKindForFeedCategory(ev, FeedSourceIntel)
+			return
+		}
+		if isIntelDomainComputePhase(ev.Phase) {
 			ev.FeedSourceCategory = FeedSourceIntel
 			ev.FeedSourceLabelVi = labelFeedSource(FeedSourceIntel)
 			applySourceKindForFeedCategory(ev, FeedSourceIntel)

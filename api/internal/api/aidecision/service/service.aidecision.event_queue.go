@@ -27,6 +27,7 @@ import (
 type EmitEventInput struct {
 	EventType     string                 `json:"eventType"`
 	EventSource   string                 `json:"eventSource"`
+	PipelineStage string                 `json:"pipelineStage,omitempty"`
 	EntityType    string                 `json:"entityType"`
 	EntityID      string                 `json:"entityId"`
 	OrgID         string                 `json:"orgId"`
@@ -56,10 +57,18 @@ func (s *AIDecisionService) EmitEvent(ctx context.Context, input *EmitEventInput
 	now := time.Now().UnixMilli()
 	eventID := utility.GenerateUID(utility.UIDPrefixEvent)
 
+	payload := cloneEmitPayload(input.Payload)
+	ref := eventtypes.ResolveE2EForQueueEnvelope(input.EventType, input.EventSource, input.PipelineStage)
+	eventtypes.MergePayloadE2E(payload, ref)
+
 	doc := &aidecisionmodels.DecisionEvent{
 		EventID:            eventID,
 		EventType:          input.EventType,
 		EventSource:        input.EventSource,
+		PipelineStage:      strings.TrimSpace(input.PipelineStage),
+		E2EStage:           ref.Stage,
+		E2EStepID:          ref.StepID,
+		E2EStepLabelVi:     ref.LabelVi,
 		EntityType:         input.EntityType,
 		EntityID:           input.EntityID,
 		OrgID:              input.OrgID,
@@ -70,7 +79,7 @@ func (s *AIDecisionService) EmitEvent(ctx context.Context, input *EmitEventInput
 		Status:             aidecisionmodels.EventStatusPending,
 		TraceID:            input.TraceID,
 		CorrelationID:      input.CorrelationID,
-		Payload:            input.Payload,
+		Payload:            payload,
 		AttemptCount:       0,
 		MaxAttempts:        5,
 		CreatedAt:          now,
@@ -412,4 +421,16 @@ func DefaultLaneForEventType(eventType string) string {
 	default:
 		return aidecisionmodels.EventLaneNormal
 	}
+}
+
+// cloneEmitPayload sao chép payload emit để gộp tham chiếu E2E mà không sửa map gốc caller.
+func cloneEmitPayload(p map[string]interface{}) map[string]interface{} {
+	if p == nil {
+		return map[string]interface{}{}
+	}
+	out := make(map[string]interface{}, len(p))
+	for k, v := range p {
+		out[k] = v
+	}
+	return out
 }

@@ -5,12 +5,12 @@
 #   collection_overrides:
 #     "tên_collection":
 #       emit_to_decision_queue: false   # đồng bộ hook L2 (ShouldEmit) + Resolve/side-effect sau merge YAML
-#       crm_pending_merge: false
+#       customer_pending_merge: false
 #       report_touch: false
 #       ads_profile: false
 #       cix_intel: false
 #       order_intel: false
-#       crm_intel_refresh_defer: false  # tắt lên lịch defer refresh CRM intel (mốc 90)
+#       customer_intel_refresh_defer: false  # tắt defer refresh intel khách (mốc 90)
 #
 # File ngoài: đặt biến môi trường DATACHANGED_ROUTING_CONFIG=/đường/dẫn/tới/file.yaml
 # Nếu không set: dùng nội dung embed (file này).

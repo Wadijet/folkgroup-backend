@@ -8,7 +8,7 @@
 //	fb_conversations                        conversation              có
 //	fb_messages                             message                   có
 //	pc_pos_orders                           order                     có
-//	commerce_orders                         (không ghi queue mặc định — chiếu từ pc_pos_orders; DatachangedEmitPerCollection nếu thêm key)
+//	order_canonical                         (không ghi queue mặc định — chiếu từ pc_pos_orders; DatachangedEmitPerCollection nếu thêm key)
 //	fb_pages                                fb_page                   không (DatachangedEmitPerCollection)
 //	fb_message_items                        fb_message_item           có
 //	fb_posts                                fb_post                   không (DatachangedEmitPerCollection)
@@ -74,9 +74,9 @@ func sourceSyncPrefixesMap() map[string]string {
 			c.PcPosCategories: "pos_category",
 
 			// CRM (khách đã merge / hoạt động / ghi chú — thường từ ingest / đồng bộ)
-			c.CrmCustomers:       "crm_customer",
-			c.CrmActivityHistory: "crm_activity",
-			c.CrmNotes:           "crm_note",
+			c.CustomerCustomers:      "customer_customer",
+			c.CustomerActivityHistory: "customer_activity",
+			c.CustomerNotes:          "customer_note",
 
 			// CIX — kết quả phân tích hội thoại (ghi DB → datachanged → AID)
 			c.CixAnalysisResults: "cix_analysis_result",

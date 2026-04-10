@@ -262,8 +262,8 @@ func (w *AIDecisionConsumerWorker) Start(ctx context.Context) {
 						decisionlive.RecordConsumerWorkBegin(oid, evt.EventType, evt.TraceID)
 						publishQueueConsumerLifecycleStart(oid, evt)
 						t0 := time.Now()
-						completionKind, processErr := processEvent(ctx, svc, evt)
-						publishQueueConsumerLifecycleEnd(oid, evt, processErr, completionKind)
+						completionKind, processErr, traceForEnd := processEvent(ctx, svc, evt)
+						publishQueueConsumerLifecycleEnd(oid, evt, processErr, completionKind, traceForEnd)
 						durMs := time.Since(t0).Milliseconds()
 						decisionlive.RecordConsumerCompletion(oid, evt.EventType, evt.TraceID, processErr == nil, durMs, completionKind)
 						if processErr != nil {
@@ -327,21 +327,27 @@ func ensureDecisionEventTraceIDs(evt *aidecisionmodels.DecisionEvent) {
 }
 
 // processEvent xử lý theo event_type — đăng ký tại consumer_dispatch.go (EvaluateCaseStep/rule store sau này).
-func processEvent(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) (aidecisionmodels.ConsumerCompletionKind, error) {
+// traceForEnd: cây processTrace đầy đủ cho mốc HandlerDone / HandlerError (nil nếu routing_skipped sớm).
+func processEvent(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) (aidecisionmodels.ConsumerCompletionKind, error, []decisionlive.DecisionLiveProcessNode) {
 	if evt == nil {
-		return aidecisionmodels.ConsumerCompletionKindProcessed, nil
+		return aidecisionmodels.ConsumerCompletionKindProcessed, nil, nil
 	}
-	// Vision L1: side-effect từ CRUD (queue crm_pending_merge, Report MarkDirty, Ads debounce) chỉ chạy trong consumer sau event datachanged.
-	if evt.EventSource == eventtypes.EventSourceDatachanged {
-		_ = applyDatachangedSideEffects(ctx, svc, evt)
-		publishQueueDatachangedEffectsDone(ownerOrgIDFromDecisionEvent(evt), evt)
+	tr := newQueueProcessTracer(evt)
+	oid := ownerOrgIDFromDecisionEvent(evt)
+	// Vision L1: side-effect từ CRUD (queue crm_pending_merge, Report MarkDirty, Ads debounce) chỉ chạy trong consumer sau event L1 datachanged.
+	if eventtypes.IsL1DatachangedEventSource(evt.EventSource) {
+		dcChildren := applyDatachangedSideEffects(ctx, svc, evt)
+		tr.noteDatachangedSideEffects(dcChildren)
+		publishQueueDatachangedEffectsDone(oid, evt, tr.snapshotTree())
 	}
 	// decision_routing_rules: behavior noop → không gọi handler đã đăng ký (event vẫn complete).
-	if svc.ShouldSkipDispatchForRoutingRule(ctx, ownerOrgIDFromDecisionEvent(evt), evt.EventType) {
-		publishQueueRoutingSkipped(ownerOrgIDFromDecisionEvent(evt), evt)
-		return aidecisionmodels.ConsumerCompletionKindRoutingSkipped, nil
+	if svc.ShouldSkipDispatchForRoutingRule(ctx, oid, evt.EventType) {
+		tr.noteRoutingSkipped()
+		publishQueueRoutingSkipped(oid, evt, tr.snapshotTree())
+		return aidecisionmodels.ConsumerCompletionKindRoutingSkipped, nil, nil
 	}
-	return dispatchConsumerEvent(ctx, svc, evt)
+	kind, err := dispatchConsumerEvent(ctx, svc, evt, tr)
+	return kind, err, tr.snapshotTree()
 }
 
 // ownerOrgIDFromDecisionEvent lấy OwnerOrganizationID từ envelope hoặc payload (ownerOrgIdHex).
@@ -380,7 +386,7 @@ func processAdsIntelligenceRecomputeRequested(ctx context.Context, evt *aidecisi
 		return nil
 	}
 	causalMs := crmqueue.ExtractCausalOrderingAtMs(evt.Payload)
-	return metasvc.EnqueueAdsIntelCompute(ctx, objectType, objectId, adAccountId, ownerOrgID, source, recomputeMode, evt.EventID, causalMs)
+	return metasvc.EnqueueAdsIntelCompute(ctx, objectType, objectId, adAccountId, ownerOrgID, source, recomputeMode, evt.EventID, causalMs, evt.TraceID, evt.CorrelationID)
 }
 
 // processAdsIntelligenceRecalculateAllRequested — consumer chỉ enqueue ads_intel_compute; batch chạy tại worker domain ads.
@@ -399,7 +405,7 @@ func processAdsIntelligenceRecalculateAllRequested(ctx context.Context, evt *aid
 	}
 	limit := payloadIntFromDecisionPayload(evt.Payload, "limit")
 	causalMs := crmqueue.ExtractCausalOrderingAtMs(evt.Payload)
-	return metasvc.EnqueueAdsIntelComputeRecalculateAll(ctx, ownerOrgID, limit, evt.EventID, causalMs)
+	return metasvc.EnqueueAdsIntelComputeRecalculateAll(ctx, ownerOrgID, limit, evt.EventID, causalMs, evt.TraceID, evt.CorrelationID)
 }
 
 func payloadIntFromDecisionPayload(m map[string]interface{}, key string) int {
@@ -481,7 +487,7 @@ func processCrmIntelligenceComputeRequested(ctx context.Context, evt *aidecision
 			}
 		}
 	}
-	return crmvc.EnqueueCrmIntelComputeFromDecisionEvent(ctx, evt.EventID, ownerOrgID, evt.Payload)
+	return crmvc.EnqueueCrmIntelComputeFromDecisionEvent(ctx, evt.EventID, ownerOrgID, evt.Payload, evt.TraceID, evt.CorrelationID)
 }
 
 // processCrmIntelligenceRecomputeRequested — crm.intelligence.recompute_requested (như ads.intelligence.recompute_requested): debounce theo org+unifiedId rồi xếp crm_intel_compute (refresh); gấp → enqueue ngay.
@@ -514,14 +520,13 @@ func processCrmIntelligenceRecomputeRequested(ctx context.Context, evt *aidecisi
 		payload[crmqueue.PayloadKeyCausalOrderingAtMs] = cm
 	}
 	if eventintake.PayloadMarksIntelUrgent(evt.Payload) {
-		return crmvc.EnqueueCrmIntelComputeFromDecisionEvent(ctx, evt.EventID, ownerOrgID, payload)
+		return crmvc.EnqueueCrmIntelComputeFromDecisionEvent(ctx, evt.EventID, ownerOrgID, payload, evt.TraceID, evt.CorrelationID)
 	}
 	win := eventintake.CrmIntelAfterIngestDebounceWindow()
 	if win <= 0 {
-		return crmvc.EnqueueCrmIntelComputeFromDecisionEvent(ctx, evt.EventID, ownerOrgID, payload)
+		return crmvc.EnqueueCrmIntelComputeFromDecisionEvent(ctx, evt.EventID, ownerOrgID, payload, evt.TraceID, evt.CorrelationID)
 	}
-	eventintake.ScheduleCrmIntelligenceRecomputeDebounce(ownerOrgID.Hex(), unifiedID, win, evt.TraceID, evt.CorrelationID, evt.EventID, crmqueue.ExtractCausalOrderingAtMs(evt.Payload))
-	return nil
+	return eventintake.ScheduleCrmIntelligenceRecomputeDebounce(ctx, ownerOrgID.Hex(), unifiedID, win, evt.TraceID, evt.CorrelationID, evt.EventID, crmqueue.ExtractCausalOrderingAtMs(evt.Payload))
 }
 
 // processSyncedSourceWithDebounce: bản ghi đồng bộ từ nguồn (conversation/message trên Mongo). Debounce: upsert state → message.batch_ready.

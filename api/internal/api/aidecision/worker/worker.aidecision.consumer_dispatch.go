@@ -26,16 +26,28 @@ import (
 	aidecisionsvc "meta_commerce/internal/api/aidecision/service"
 )
 
-// dispatchConsumerEvent tra handler đã đăng ký; không có → no_handler (không lỗi).
-func dispatchConsumerEvent(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) (aidecisionmodels.ConsumerCompletionKind, error) {
+// dispatchConsumerEvent tra handler đã đăng ký; không có → no_handler (không lỗi). tr ghi processTrace (lookup → handler).
+func dispatchConsumerEvent(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent, tr *queueProcessTracer) (aidecisionmodels.ConsumerCompletionKind, error) {
 	if evt == nil {
 		return aidecisionmodels.ConsumerCompletionKindProcessed, nil
 	}
+	if tr == nil {
+		tr = newQueueProcessTracer(evt)
+	}
+	tr.noteRoutingAllowDispatch()
+	tr.noteDispatchLookup()
 	h, ok := consumerreg.Lookup(evt.EventType)
 	if !ok {
-		publishQueueNoRegisteredHandler(ownerOrgIDFromDecisionEvent(evt), evt)
+		tr.noteNoHandlerRegistered()
+		publishQueueNoRegisteredHandler(ownerOrgIDFromDecisionEvent(evt), evt, tr.snapshotTree())
 		return aidecisionmodels.ConsumerCompletionKindNoHandler, nil
 	}
+	tr.noteHandlerInvoke()
 	err := h(ctx, svc, evt)
+	if err != nil {
+		tr.noteHandlerError(err)
+	} else {
+		tr.noteHandlerSuccess()
+	}
 	return aidecisionmodels.ConsumerCompletionKindProcessed, err
 }

@@ -111,7 +111,8 @@ func emitUnifiedSourceDataChanged(ctx context.Context, decSvc *aidecisionsvc.AID
 	correlationID := utility.GenerateUID(utility.UIDPrefixCorrelation)
 	_, _ = decSvc.EmitEvent(ctx, &aidecisionsvc.EmitEventInput{
 		EventType:     eventType,
-		EventSource:   eventtypes.EventSourceDatachanged,
+		EventSource:   eventtypes.EventSourceL1Datachanged,
+		PipelineStage: eventtypes.PipelineStageAfterL1Change,
 		EntityType:    entityPrefix,
 		EntityID:      idHex,
 		OrgID:         ownerOrgID.Hex(),

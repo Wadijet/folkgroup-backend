@@ -48,9 +48,10 @@ func EmitExecutorProposeRequest(ctx context.Context, domain string, proposeInput
 	}
 	svc := NewAIDecisionService()
 	res, err := svc.EmitEvent(ctx, &EmitEventInput{
-		EventType:   EventTypeExecutorProposeRequested,
-		EventSource: domain,
-		EntityType:  domain,
+		EventType:       EventTypeExecutorProposeRequested,
+		EventSource:     domain,
+		PipelineStage:   eventtypes.PipelineStageAIDCoordination,
+		EntityType:      domain,
 		EntityID:    entityID,
 		OrgID:       ownerOrgID.Hex(),
 		OwnerOrgID:  ownerOrgID,

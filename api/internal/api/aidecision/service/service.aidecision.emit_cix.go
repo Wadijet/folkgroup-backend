@@ -56,10 +56,15 @@ func EmitCixAnalysisRequested(ctx context.Context, conversationID, customerID, c
 	if src == "" {
 		src = EventSourceAIDecision
 	}
+	stage := eventtypes.PipelineStageAIDCoordination
+	if src == EventSourceCixHTTP {
+		stage = eventtypes.PipelineStageExternalIngest
+	}
 	res, err := svc.EmitEvent(ctx, &EmitEventInput{
-		EventType:     EventTypeCixAnalysisRequested,
-		EventSource:   src,
-		EntityType:    "conversation",
+		EventType:       EventTypeCixAnalysisRequested,
+		EventSource:     src,
+		PipelineStage:   stage,
+		EntityType:      "conversation",
 		EntityID:      conversationID,
 		OrgID:         ownerOrgID.Hex(),
 		OwnerOrgID:    ownerOrgID,

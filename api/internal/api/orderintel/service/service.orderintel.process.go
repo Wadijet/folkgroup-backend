@@ -59,7 +59,7 @@ func RunOrderIntelComputeJob(ctx context.Context, job *orderintelmodels.OrderInt
 	}
 	if !runID.IsZero() {
 		if uerr := patchSnapshotLastIntelRunID(ctx, snap, runID); uerr != nil {
-			logger.GetAppLogger().WithError(uerr).WithField("runId", runID.Hex()).Warn("📋 [ORDER_INTEL] Không gắn lastIntelRunId lên order_intelligence_snapshots")
+			logger.GetAppLogger().WithError(uerr).WithField("runId", runID.Hex()).Warn("📋 [ORDER_INTEL] Không gắn lastIntelRunId lên order_intel_snapshots")
 		}
 	}
 
@@ -80,9 +80,9 @@ func RunOrderIntelComputeJob(ctx context.Context, job *orderintelmodels.OrderInt
 	if !view.PancakeSourceMongoID.IsZero() {
 		pancakeHex = view.PancakeSourceMongoID.Hex()
 	}
-	commerceHex := ""
-	if !view.CommerceMongoID.IsZero() {
-		commerceHex = view.CommerceMongoID.Hex()
+	orderCanonicalHex := ""
+	if !view.OrderCanonicalMongoID.IsZero() {
+		orderCanonicalHex = view.OrderCanonicalMongoID.Hex()
 	}
 	extras := map[string]interface{}{
 		"orderId":                  snap.OrderID,
@@ -94,7 +94,7 @@ func RunOrderIntelComputeJob(ctx context.Context, job *orderintelmodels.OrderInt
 		"orderCompletedTransition": orderCompletedTransition,
 		"totalAfterDiscountVnd":    snap.Layer2.TotalAfterDiscountVND,
 		"orderMongoId":             mongoHex,
-		"commerceOrderMongoId":     commerceHex,
+		"orderCanonicalMongoId":    orderCanonicalHex,
 		"pancakeOrderMongoId":      pancakeHex,
 		"sourceEventId":            job.ID.Hex(),
 		"sourceEventType":          "order_intel.domain_job",
@@ -107,20 +107,20 @@ func RunOrderIntelComputeJob(ctx context.Context, job *orderintelmodels.OrderInt
 }
 
 func loadOrderForJob(ctx context.Context, job *orderintelmodels.OrderIntelComputeJob) (*intelOrderView, error) {
-	commerceColl, okCo := global.RegistryCollections.Get(global.MongoDB_ColNames.CommerceOrders)
+	canonicalColl, okCo := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderCanonical)
 	pcColl, okPc := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
 	if !okPc {
 		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.PcPosOrders, common.ErrNotFound)
 	}
 	ownerOrgID := job.OwnerOrganizationID
 
-	tryCommerce := func() *intelOrderView {
-		if !okCo || commerceColl == nil {
+	tryOrderCanonical := func() *intelOrderView {
+		if !okCo || canonicalColl == nil {
 			return nil
 		}
 		if job.OrderUid != "" {
 			var co ordermodels.CommerceOrder
-			err := commerceColl.FindOne(ctx, bson.M{"uid": job.OrderUid, "ownerOrganizationId": ownerOrgID}).Decode(&co)
+			err := canonicalColl.FindOne(ctx, bson.M{"uid": job.OrderUid, "ownerOrganizationId": ownerOrgID}).Decode(&co)
 			if err == nil {
 				return newIntelViewFromCommerce(&co)
 			}
@@ -137,7 +137,7 @@ func loadOrderForJob(ctx context.Context, job *orderintelmodels.OrderIntelComput
 			return nil
 		}
 		var co ordermodels.CommerceOrder
-		err = commerceColl.FindOne(ctx, bson.M{
+		err = canonicalColl.FindOne(ctx, bson.M{
 			"ownerOrganizationId": ownerOrgID,
 			"source":              ordermodels.SourcePancakePOS,
 			"sourceRecordMongoId": oid,
@@ -151,11 +151,11 @@ func loadOrderForJob(ctx context.Context, job *orderintelmodels.OrderIntelComput
 		return nil
 	}
 
-	if v := tryCommerce(); v != nil {
+	if v := tryOrderCanonical(); v != nil {
 		return v, nil
 	}
 
-	// Fallback: bản ghi Pancake chưa kịp chiếu lên commerce_orders (race hiếm / job cũ).
+	// Fallback: bản ghi Pancake chưa kịp chiếu lên order_canonical (race hiếm / job cũ).
 	if job.OrderUid != "" {
 		var doc pcmodels.PcPosOrder
 		err := pcColl.FindOne(ctx, bson.M{"uid": job.OrderUid, "ownerOrganizationId": ownerOrgID}).Decode(&doc)
@@ -244,7 +244,7 @@ func findPreviousSnapshot(ctx context.Context, snap *orderintelmodels.OrderIntel
 	if filter == nil {
 		return nil, nil
 	}
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderIntelligenceSnapshots)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderIntelSnapshots)
 	if !ok {
 		return nil, nil
 	}
@@ -260,9 +260,9 @@ func findPreviousSnapshot(ctx context.Context, snap *orderintelmodels.OrderIntel
 }
 
 func upsertSnapshot(ctx context.Context, snap *orderintelmodels.OrderIntelligenceSnapshot) error {
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderIntelligenceSnapshots)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderIntelSnapshots)
 	if !ok {
-		return fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.OrderIntelligenceSnapshots, common.ErrNotFound)
+		return fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.OrderIntelSnapshots, common.ErrNotFound)
 	}
 	filter := snapshotUpsertFilter(snap)
 	if filter == nil {
@@ -306,9 +306,9 @@ func patchSnapshotLastIntelRunID(ctx context.Context, snap *orderintelmodels.Ord
 	if snap == nil || runID.IsZero() {
 		return nil
 	}
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderIntelligenceSnapshots)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderIntelSnapshots)
 	if !ok {
-		return fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.OrderIntelligenceSnapshots, common.ErrNotFound)
+		return fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.OrderIntelSnapshots, common.ErrNotFound)
 	}
 	filter := snapshotUpsertFilter(snap)
 	if filter == nil {

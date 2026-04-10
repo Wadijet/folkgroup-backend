@@ -62,9 +62,10 @@ func OrchestrateConversationSourceEvent(ctx context.Context, svc *aidecisionsvc.
 	emittedCustomer := false
 	if custID != "" {
 		_, _ = svc.EmitEvent(ctx, &aidecisionsvc.EmitEventInput{
-			EventType:     eventtypes.CustomerContextRequested,
-			EventSource:   aidecisionsvc.EventSourceAIDecision,
-			EntityType:    "customer",
+			EventType:       eventtypes.CustomerContextRequested,
+			EventSource:     aidecisionsvc.EventSourceAIDecision,
+			PipelineStage:   eventtypes.PipelineStageAIDCoordination,
+			EntityType:      "customer",
 			EntityID:      custID,
 			OrgID:         evt.OrgID,
 			OwnerOrgID:    ownerOrgID,
@@ -87,9 +88,10 @@ func OrchestrateConversationSourceEvent(ctx context.Context, svc *aidecisionsvc.
 		return nil
 	}
 	_, err = svc.EmitEvent(ctx, &aidecisionsvc.EmitEventInput{
-		EventType:     eventtypes.CixAnalysisRequested,
-		EventSource:   aidecisionsvc.EventSourceAIDecision,
-		EntityType:    "conversation",
+		EventType:       eventtypes.CixAnalysisRequested,
+		EventSource:     aidecisionsvc.EventSourceAIDecision,
+		PipelineStage:   eventtypes.PipelineStageAIDCoordination,
+		EntityType:      "conversation",
 		EntityID:      convID,
 		OrgID:         evt.OrgID,
 		OwnerOrgID:    ownerOrgID,

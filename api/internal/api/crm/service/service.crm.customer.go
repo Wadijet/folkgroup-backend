@@ -29,9 +29,9 @@ type CrmCustomerService struct {
 
 // NewCrmCustomerService tạo CrmCustomerService mới.
 func NewCrmCustomerService() (*CrmCustomerService, error) {
-	coll, exist := global.RegistryCollections.Get(global.MongoDB_ColNames.CrmCustomers)
+	coll, exist := global.RegistryCollections.Get(global.MongoDB_ColNames.CustomerCustomers)
 	if !exist {
-		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.CrmCustomers, common.ErrNotFound)
+		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.CustomerCustomers, common.ErrNotFound)
 	}
 	return &CrmCustomerService{
 		BaseServiceMongoImpl: basesvc.NewBaseServiceMongo[crmmodels.CrmCustomer](coll),

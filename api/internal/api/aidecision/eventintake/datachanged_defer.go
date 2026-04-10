@@ -16,16 +16,15 @@
 //
 // Mỗi lần có datachanged mới cho cùng (org, collection, id), deadline trailing = now + window.
 //
-// Lưu trữ: queuedebounce.Table (gom chung Phase 4).
+// Lưu trữ: MongoDB decision_trailing_debounce (bucket datachanged_defer).
 package eventintake
 
 import (
+	"context"
 	"os"
 	"strconv"
 	"strings"
 	"time"
-
-	"meta_commerce/internal/queuedebounce"
 )
 
 // DeferChannel kênh side-effect (mỗi kênh có thể có override env riêng).
@@ -54,19 +53,10 @@ type DeferredSideEffectFlushJob struct {
 	OrgHex string
 	Coll   string
 	IDHex  string
+	// TraceID / CorrelationID — gom theo khóa defer (lần Schedule gần nhất có trace được giữ; flush xóa document).
+	TraceID       string
+	CorrelationID string
 }
-
-type deferEntityKey struct {
-	orgHex, coll, idHex string
-}
-
-var (
-	reportDeferTable     = queuedebounce.NewTable[deferEntityKey]()
-	crmRefDeferTable     = queuedebounce.NewTable[deferEntityKey]()
-	crmMergeQDeferTable  = queuedebounce.NewTable[deferEntityKey]()
-	orderIntelDeferTable = queuedebounce.NewTable[deferEntityKey]()
-	cixIntelDeferTable   = queuedebounce.NewTable[deferEntityKey]()
-)
 
 // deferSecForChannel: nếu env key có trong môi trường → dùng giá trị (0 = không trì hoãn kênh này).
 // Nếu không khai báo env → fallbackSec (theo mức nghiệp vụ).
@@ -133,49 +123,35 @@ func DeferWindowFor(u BusinessSideEffectUrgency, ch DeferChannel) time.Duration 
 }
 
 // ScheduleDeferredSideEffect — Ghi nhận việc cần làm sau; trailing: mỗi lần gọi lại với cùng khóa → due = now + window (lùi hạn).
-// Đến hạn, consumer gọi TakeDueDeferredSideEffectJobs rồi flush đúng một job cho khóa đó (đã xóa khỏi map).
-func ScheduleDeferredSideEffect(kind DeferredSideEffectKind, orgHex, coll, idHex string, window time.Duration) {
+// Đến hạn, consumer gọi TakeDueDeferredSideEffectJobs rồi flush đúng một job cho khóa đó (document đã xóa bởi FindOneAndDelete).
+// traceID / correlationID: từ decision event datachanged — merge theo khóa (giữ trace mới nhất nếu có).
+func ScheduleDeferredSideEffect(ctx context.Context, kind DeferredSideEffectKind, orgHex, coll, idHex string, window time.Duration, traceID, correlationID string) error {
 	if window <= 0 {
-		return
+		return nil
 	}
-	orgHex = strings.TrimSpace(orgHex)
-	coll = strings.TrimSpace(coll)
-	idHex = strings.TrimSpace(idHex)
-	if orgHex == "" || coll == "" || idHex == "" {
-		return
-	}
-	k := deferEntityKey{orgHex: orgHex, coll: coll, idHex: idHex}
-	switch kind {
-	case DeferredKindReport:
-		reportDeferTable.Schedule(k, window)
-	case DeferredKindCrmRefresh:
-		crmRefDeferTable.Schedule(k, window)
-	case DeferredKindCrmMergeQueue:
-		crmMergeQDeferTable.Schedule(k, window)
-	case DeferredKindOrderIntelCompute:
-		orderIntelDeferTable.Schedule(k, window)
-	case DeferredKindCixIntelCompute:
-		cixIntelDeferTable.Schedule(k, window)
-	}
+	return upsertTrailingDatachangedDefer(ctx, kind, orgHex, coll, idHex, window, traceID, correlationID)
 }
 
-// TakeDueDeferredSideEffectJobs lấy mọi job đã đến hạn và xóa khỏi lịch (gọi từ worker mỗi tick).
-func TakeDueDeferredSideEffectJobs(now time.Time) []DeferredSideEffectFlushJob {
-	var out []DeferredSideEffectFlushJob
-	appendDue := func(tab *queuedebounce.Table[deferEntityKey], kind DeferredSideEffectKind) {
-		for _, ek := range tab.TakeDue(now) {
-			out = append(out, DeferredSideEffectFlushJob{
-				Kind:   kind,
-				OrgHex: ek.orgHex,
-				Coll:   ek.coll,
-				IDHex:  ek.idHex,
-			})
-		}
+// TakeDueDeferredSideEffectJobs lấy mọi job đã đến hạn (đã xóa document trong Mongo).
+func TakeDueDeferredSideEffectJobs(ctx context.Context, now time.Time) ([]DeferredSideEffectFlushJob, error) {
+	docs, err := takeDueTrailingDocs(ctx, now, trailingBucketDatachangedDefer)
+	if err != nil || len(docs) == 0 {
+		return nil, err
 	}
-	appendDue(reportDeferTable, DeferredKindReport)
-	appendDue(crmRefDeferTable, DeferredKindCrmRefresh)
-	appendDue(crmMergeQDeferTable, DeferredKindCrmMergeQueue)
-	appendDue(orderIntelDeferTable, DeferredKindOrderIntelCompute)
-	appendDue(cixIntelDeferTable, DeferredKindCixIntelCompute)
-	return out
+	out := make([]DeferredSideEffectFlushJob, 0, len(docs))
+	for _, d := range docs {
+		k := DeferredSideEffectKind(strings.TrimSpace(d.DeferKind))
+		if k == "" {
+			continue
+		}
+		out = append(out, DeferredSideEffectFlushJob{
+			Kind:          k,
+			OrgHex:        strings.TrimSpace(d.OrgHex),
+			Coll:          strings.TrimSpace(d.SourceColl),
+			IDHex:         strings.TrimSpace(d.IDHex),
+			TraceID:       strings.TrimSpace(d.TraceID),
+			CorrelationID: strings.TrimSpace(d.CorrelationID),
+		})
+	}
+	return out, nil
 }

@@ -25,7 +25,7 @@ type LinkKeyConfig struct {
 // registry — key phải là tên collection thật (khớp cmd/server/init.go initColNames).
 // Không dùng global.MongoDB_ColNames.Xxx làm key: lúc init package các field đó vẫn "" → mọi entry gộp thành một key rỗng → ShouldEnrich("pc_pos_orders") luôn false.
 var registry = map[string]ColConfig{
-	"crm_customers": {
+	"customer_customers": {
 		Prefix: utility.UIDPrefixCustomer,
 		// sourceIds đã có struct riêng, không extract từ payload
 	},
@@ -55,8 +55,8 @@ var registry = map[string]ColConfig{
 			{Path: "posData.customer_id", Key: "customer", Source: "pos"},
 		},
 	},
-	// commerce_orders — đơn canonical; posData giữ layout Pancake khi source=pancake_pos (enrich/CRUD sau này).
-	"commerce_orders": {
+	// order_canonical — đơn canonical đa nguồn; posData giữ layout Pancake khi source=pancake_pos (enrich/CRUD sau này).
+	"order_canonical": {
 		Prefix:     utility.UIDPrefixOrder,
 		SourceKeys: []SourceKeyConfig{{Path: "posData.id", Source: "pos"}},
 		LinkKeys: []LinkKeyConfig{
@@ -164,11 +164,11 @@ var registry = map[string]ColConfig{
 			{Path: "conversationId", Key: "conversation", Source: "facebook"},
 		},
 	},
-	"crm_activity_history": {
+	"customer_activity_history": {
 		Prefix: utility.UIDPrefixActivity,
 		// links từ unifiedId trong activity
 	},
-	"crm_notes": {
+	"customer_notes": {
 		Prefix: utility.UIDPrefixNote,
 		LinkKeys: []LinkKeyConfig{
 			{Path: "customerId", Key: "customer", Source: ""},

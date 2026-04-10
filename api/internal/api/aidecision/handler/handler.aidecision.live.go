@@ -1,4 +1,11 @@
-// Package aidecisionhdl — Live timeline + WebSocket cho AI Decision (backend only).
+// Package aidecisionhdl — HTTP + WebSocket cho timeline AI Decision (theo trace và theo org).
+//
+// Luồng đọc timeline một trace (khớp decisionlive.Publish / Timeline / Subscribe):
+//
+//	REST GET …/traces/:traceId/timeline — chỉ snapshot ring + backfill (không mở WS).
+//	WS …/traces/:traceId/live — (1) Subscribe trace (2) Timeline replay (3) gửi replay (4) drain trùng Seq (5) vòng đọc liveCh + ping.
+//
+// Org-live: GET …/org-live/timeline dùng OrgTimelineForAPI; WS …/org-live tương tự với FeedSeq + aggregate định kỳ.
 package aidecisionhdl
 
 import (
@@ -27,7 +34,11 @@ var wsUpgrader = websocket.FastHTTPUpgrader{
 	},
 }
 
-// HandleTraceTimeline GET /ai-decision/traces/:traceId/timeline — replay sự kiện đã buffer (canonical).
+// HandleTraceTimeline GET /ai-decision/traces/:traceId/timeline — Replay timeline một trace từ RAM (decisionlive.Timeline).
+//
+//	Bước 1 — Xác thực org + traceId.
+//	Bước 2 — decisionlive.Timeline: snapshot ring (Publish đã ghi) + backfill.
+//	Bước 3 — JSON { traceId, events }.
 func HandleTraceTimeline(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {
 		orgID := getActiveOrgID(c)
@@ -56,7 +67,9 @@ func HandleTraceTimeline(c fiber.Ctx) error {
 	})
 }
 
-// HandleTraceLiveWS GET /ai-decision/traces/:traceId/live — WebSocket: gửi replay rồi stream tiếp.
+// HandleTraceLiveWS GET /ai-decision/traces/:traceId/live — WebSocket: replay timeline trace rồi stream các mốc Publish tiếp theo.
+//
+//	Trong handler upgrade: Subscribe trước (tránh lỗi race với Publish), rồi Timeline, gửi từng event, drain kênh trùng Seq đã replay, sau đó for-select đọc liveCh.
 func HandleTraceLiveWS(c fiber.Ctx) error {
 	orgID := getActiveOrgID(c)
 	if orgID == nil {
@@ -79,10 +92,11 @@ func HandleTraceLiveWS(c fiber.Ctx) error {
 			return nil
 		})
 
-		// Đăng ký trước replay để không mất event publish trong lúc gửi replay.
+		// Bước WS 1 — Subscribe trace trước replay (cùng kênh Publish bước 6a); tránh mất mốc publish xen giữa replay.
 		liveCh, cancel := decisionlive.Subscribe(*orgID, traceID)
 		defer cancel()
 
+		// Bước WS 2–3 — Snapshot timeline (ring) và gửi replay; ghi maxSeq để drain bỏ trùng.
 		events := decisionlive.Timeline(*orgID, traceID)
 		var maxSeq int64
 		for _, ev := range events {
@@ -94,12 +108,13 @@ func HandleTraceLiveWS(c fiber.Ctx) error {
 				return
 			}
 		}
+		// Bước WS 4 — Đọc non-blocking liveCh: bỏ event đã có trong replay (Seq ≤ maxSeq), gửi các mốc mới xen kẽ.
 		if err := drainLiveChSkipAlreadyReplayed(conn, liveCh, maxSeq, false); err != nil {
 			logrus.WithError(err).Debug("AI Decision live: drain sau replay thất bại")
 			return
 		}
 
-		// Goroutine đọc từ client + xử lý control frame; goroutine ping giữ kết động và gia hạn read deadline qua Pong.
+		// Bước WS 5 — Ping + đọc control từ client; vòng for-select nhận tiếp từ liveCh (stream realtime).
 		done := make(chan struct{})
 		startLiveWSPing(conn, done)
 		go func() {
@@ -142,7 +157,7 @@ func writeLiveJSON(conn *websocket.Conn, ev decisionlive.DecisionLiveEvent) erro
 	return conn.WriteMessage(websocket.TextMessage, b)
 }
 
-// drainLiveChSkipAlreadyReplayed đọc hết buffer liveCh sau replay; bỏ qua event trùng seq đã gửi trong replay.
+// drainLiveChSkipAlreadyReplayed — Sau replay timeline: quét non-blocking liveCh; bỏ mốc trùng Seq (trace) hoặc FeedSeq (org) đã gửi.
 func drainLiveChSkipAlreadyReplayed(conn *websocket.Conn, liveCh <-chan decisionlive.DecisionLiveEvent, maxSeq int64, useFeedSeq bool) error {
 	for {
 		select {
@@ -204,7 +219,7 @@ func startLiveWSPing(conn *websocket.Conn, done <-chan struct{}) {
 	}()
 }
 
-// HandleOrgLiveTimeline GET /ai-decision/org-live/timeline — replay stream theo tổ chức (mọi trace).
+// HandleOrgLiveTimeline GET /ai-decision/org-live/timeline — Replay org-live (OrgTimelineForAPI: Mongo nếu persist bật, không thì RAM).
 func HandleOrgLiveTimeline(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {
 		orgID := getActiveOrgID(c)
@@ -225,8 +240,12 @@ func HandleOrgLiveTimeline(c fiber.Ctx) error {
 	})
 }
 
-// HandleOrgLivePersistedEvents GET /ai-decision/org-live/persisted-events — chỉ đọc decision_org_live_events (Mongo), không fallback RAM; cần bật AI_DECISION_LIVE_ORG_PERSIST.
-// Query: page, limit (mặc 50, tối đa 100), traceId?, decisionCaseId?, fromCreatedMs?, toCreatedMs? (Unix ms). Sort createdAt giảm dần.
+// HandleOrgLivePersistedEvents GET /ai-decision/org-live/persisted-events — Chỉ đọc Mongo decision_org_live_events (không RAM).
+//
+//	Bước 1 — Kiểm tra org; parse page/limit/query lọc (traceId, decisionCaseId, from/to createdAt ms).
+//	Bước 2 — ListPersistedOrgLiveEventsFromMongo: filter + sort createdAt giảm + phân trang.
+//	Bước 3 — Trả events (từ json.Unmarshal payload) + pagination; persist tắt → 400 ErrOrgLivePersistDisabled.
+// Cần AI_DECISION_LIVE_ORG_PERSIST (hoặc config tương đương) bật.
 func HandleOrgLivePersistedEvents(c fiber.Ctx) error {
 	return basehdl.SafeHandlerWrapper(c, func() error {
 		orgID := getActiveOrgID(c)
@@ -299,7 +318,7 @@ func HandleOrgLiveMetrics(c fiber.Ctx) error {
 	})
 }
 
-// HandleOrgLiveWS GET /ai-decision/org-live — WebSocket: replay buffer org rồi stream mọi trace.
+// HandleOrgLiveWS GET /ai-decision/org-live — WS org: replay OrgTimelineForAPI → drain FeedSeq trùng → aggregate định kỳ + stream liveCh.
 func HandleOrgLiveWS(c fiber.Ctx) error {
 	orgID := getActiveOrgID(c)
 	if orgID == nil {
@@ -316,10 +335,11 @@ func HandleOrgLiveWS(c fiber.Ctx) error {
 			return nil
 		})
 
-		// Đăng ký trước replay — tránh mất toàn bộ event publish trong lúc gửi replay (race subscribe sau).
+		// Bước org WS 1 — SubscribeOrg trước replay (kênh Publish bước 6b).
 		liveCh, cancel := decisionlive.SubscribeOrg(*orgID)
 		defer cancel()
 
+		// Bước org WS 2–3 — Replay (Mongo/RAM) + gửi client; maxFeed cho drain.
 		var maxFeed int64
 		for _, ev := range decisionlive.OrgTimelineForAPI(context.Background(), *orgID) {
 			if ev.FeedSeq > maxFeed {
@@ -330,11 +350,13 @@ func HandleOrgLiveWS(c fiber.Ctx) error {
 				return
 			}
 		}
+		// Bước org WS 4 — Drain trùng FeedSeq đã replay.
 		if err := drainLiveChSkipAlreadyReplayed(conn, liveCh, maxFeed, true); err != nil {
 			logrus.WithError(err).Debug("AI Decision org-live: drain sau replay thất bại")
 			return
 		}
 
+		// Bước org WS 5 — Một bản aggregate trung tâm chỉ huy ngay sau replay.
 		if err := writeCommandCenterAggregate(conn, *orgID); err != nil {
 			logrus.WithError(err).Debug("AI Decision org-live: gửi aggregate ban đầu thất bại")
 		}
@@ -350,6 +372,7 @@ func HandleOrgLiveWS(c fiber.Ctx) error {
 			}
 		}()
 
+		// Bước org WS 6 — Vòng select: aggregate định kỳ + stream từ liveCh (mọi trace).
 		aggTicker := time.NewTicker(decisionlive.WSCommandCenterAggregateInterval())
 		defer aggTicker.Stop()
 

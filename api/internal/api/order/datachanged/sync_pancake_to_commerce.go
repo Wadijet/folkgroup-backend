@@ -1,4 +1,4 @@
-// Package orderdatachanged — Đồng bộ đơn canonical commerce_orders từ mirror Pancake (pc_pos_orders), không phát EmitDataChanged (tránh lặp queue AID).
+// Package orderdatachanged — Đồng bộ đơn canonical order_canonical từ mirror Pancake (pc_pos_orders), không phát EmitDataChanged (tránh lặp queue AID).
 package orderdatachanged
 
 import (
@@ -17,7 +17,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// SyncCommerceOrderFromPancakeDataChange upsert commerce_orders từ event datachanged pc_pos_orders.
+// SyncCommerceOrderFromPancakeDataChange upsert order_canonical từ event datachanged pc_pos_orders.
 func SyncCommerceOrderFromPancakeDataChange(ctx context.Context, e events.DataChangeEvent) error {
 	if e.Document == nil {
 		return nil
@@ -33,12 +33,12 @@ func SyncCommerceOrderFromPancakeDataChange(ctx context.Context, e events.DataCh
 	return UpsertCommerceFromPancakePosOrder(ctx, &pos)
 }
 
-// UpsertCommerceFromPancakePosOrder ghi commerce_orders theo bản ghi Pancake (gọi từ sync datachanged hoặc backfill sau).
+// UpsertCommerceFromPancakePosOrder ghi order_canonical theo bản ghi Pancake (gọi từ sync datachanged hoặc backfill sau).
 func UpsertCommerceFromPancakePosOrder(ctx context.Context, pos *pcmodels.PcPosOrder) error {
 	if pos == nil || pos.OwnerOrganizationID.IsZero() || pos.ID.IsZero() {
 		return nil
 	}
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CommerceOrders)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderCanonical)
 	if !ok || coll == nil {
 		return nil
 	}

@@ -28,6 +28,16 @@ type AdsIntelComputeJob struct {
 
 	ParentDecisionEventID string `json:"parentDecisionEventId,omitempty" bson:"parentDecisionEventId,omitempty"`
 
+	// EventType / EventSource / PipelineStage — bản sao envelope bus AID (tùy chọn).
+	EventType     string `json:"eventType,omitempty" bson:"eventType,omitempty"`
+	EventSource   string `json:"eventSource,omitempty" bson:"eventSource,omitempty"`
+	PipelineStage string `json:"pipelineStage,omitempty" bson:"pipelineStage,omitempty"`
+	OwnerDomain           string `json:"ownerDomain,omitempty" bson:"ownerDomain,omitempty"`
+	ProcessorDomain       string `json:"processorDomain,omitempty" bson:"processorDomain,omitempty"`
+	EnqueueSourceDomain   string `json:"enqueueSourceDomain,omitempty" bson:"enqueueSourceDomain,omitempty"`
+	E2EStage              string `json:"e2eStage,omitempty" bson:"e2eStage,omitempty"`
+	E2EStepID             string `json:"e2eStepId,omitempty" bson:"e2eStepId,omitempty"`
+
 	// ParentTraceID / ParentCorrelationID — nối timeline decisionlive khi worker ads chạy (recompute_one / recalculate_all).
 	ParentTraceID       string `json:"parentTraceId,omitempty" bson:"parentTraceId,omitempty"`
 	ParentCorrelationID string `json:"parentCorrelationId,omitempty" bson:"parentCorrelationId,omitempty"`

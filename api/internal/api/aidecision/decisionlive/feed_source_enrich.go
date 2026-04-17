@@ -201,7 +201,7 @@ func classifyEventTypeFeedSource(et string) string {
 		s == eventtypes.ConversationMessageInserted || s == eventtypes.MessageBatchReady {
 		return FeedSourceIntel
 	}
-	// Hội thoại / tin nhắn datachanged (inserted/updated)
+	// Hội thoại / tin nhắn datachanged (.changed / legacy .inserted|.updated)
 	if strings.HasPrefix(s, eventtypes.PrefixConversation) || strings.HasPrefix(s, eventtypes.PrefixMessage) {
 		return FeedSourceConversation
 	}

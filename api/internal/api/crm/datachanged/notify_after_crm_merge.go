@@ -5,6 +5,7 @@ import (
 	"context"
 	"strings"
 
+	"meta_commerce/internal/api/aidecision/eventtypes"
 	crmqueue "meta_commerce/internal/api/aidecision/crmqueue"
 	crmmodels "meta_commerce/internal/api/crm/models"
 	crmvc "meta_commerce/internal/api/crm/service"
@@ -16,7 +17,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 )
 
-// NotifyIntelRecomputeAfterCrmMergeIfNeeded — resolve unifiedId sau merge queue, emit crm.intelligence.recompute_requested.
+// NotifyIntelRecomputeAfterCrmMergeIfNeeded — resolve unifiedId sau merge queue, emit decision_events_queue (l2_datachanged + <prefix>.changed khi map được collection; fallback recompute_requested).
 func NotifyIntelRecomputeAfterCrmMergeIfNeeded(ctx context.Context, item *crmmodels.CrmPendingMerge) error {
 	if item == nil || item.OwnerOrganizationID.IsZero() {
 		return nil
@@ -56,11 +57,15 @@ func NotifyIntelRecomputeAfterCrmMergeIfNeeded(ctx context.Context, item *crmmod
 		// createdAt trong queue thường là Unix giây (EnqueueCrmPendingMerge)
 		causalMs = item.CreatedAt * 1000
 	}
-	_, err = crmqueue.EmitCrmIntelligenceRecomputeRequested(ctx, unifiedID, ownerOrgID, sourceCollection, jobHex, causalMs, item.TraceID, item.CorrelationID)
+	eventType, ok := eventtypes.EventTypeChangedForCollection(sourceCollection)
+	if !ok {
+		eventType = crmqueue.EventTypeCrmIntelligenceRecomputeRequested
+	}
+	_, err = crmqueue.EmitAfterL2MergeForCrmIntel(ctx, eventType, unifiedID, ownerOrgID, sourceCollection, jobHex, causalMs, item.TraceID, item.CorrelationID)
 	if err != nil {
 		logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
 			"collection": sourceCollection, "unifiedId": unifiedID,
-		}).Warn("[CRM] Không emit crm.intelligence.recompute_requested sau merge queue")
+		}).Warn("[CRM] Không emit sau merge L2 (l2_datachanged) lên decision_events_queue")
 	}
 	return err
 }

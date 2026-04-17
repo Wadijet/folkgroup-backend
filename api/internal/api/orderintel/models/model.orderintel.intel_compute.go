@@ -17,11 +17,20 @@ type OrderIntelComputeJob struct {
 	CorrelationID       string             `json:"correlationId,omitempty" bson:"correlationId,omitempty"`
 	ParentEventID       string             `json:"parentEventId,omitempty" bson:"parentEventId,omitempty"`
 	ParentEventType     string             `json:"parentEventType,omitempty" bson:"parentEventType,omitempty"`
-	Source              string             `json:"source" bson:"source"`
-	ProcessedAt         *int64             `json:"processedAt,omitempty" bson:"processedAt,omitempty" index:"single:1,compound:order_intel_compute_poll"`
-	ProcessError        string             `json:"processError,omitempty" bson:"processError,omitempty"`
-	RetryCount          int                `json:"retryCount" bson:"retryCount"`
+	// EventType / EventSource / PipelineStage — bản sao envelope decision_events_queue (tùy chọn).
+	EventType     string `json:"eventType,omitempty" bson:"eventType,omitempty"`
+	EventSource   string `json:"eventSource,omitempty" bson:"eventSource,omitempty"`
+	PipelineStage string `json:"pipelineStage,omitempty" bson:"pipelineStage,omitempty"`
+	OwnerDomain           string `json:"ownerDomain,omitempty" bson:"ownerDomain,omitempty"`
+	ProcessorDomain       string `json:"processorDomain,omitempty" bson:"processorDomain,omitempty"`
+	EnqueueSourceDomain   string `json:"enqueueSourceDomain,omitempty" bson:"enqueueSourceDomain,omitempty"`
+	E2EStage              string `json:"e2eStage,omitempty" bson:"e2eStage,omitempty"`
+	E2EStepID             string `json:"e2eStepId,omitempty" bson:"e2eStepId,omitempty"`
+	Source        string `json:"source" bson:"source"`
+	ProcessedAt   *int64 `json:"processedAt,omitempty" bson:"processedAt,omitempty" index:"single:1,compound:order_intel_compute_poll"`
+	ProcessError  string `json:"processError,omitempty" bson:"processError,omitempty"`
+	RetryCount    int    `json:"retryCount" bson:"retryCount"`
 	// CausalOrderingAtMs — copy từ payload event (causalOrderingAtMs) hoặc gán lúc enqueue; sort lịch sử intel đơn.
-	CausalOrderingAtMs  int64              `json:"causalOrderingAtMs,omitempty" bson:"causalOrderingAtMs,omitempty"`
-	CreatedAt           int64              `json:"createdAt" bson:"createdAt" index:"single:1,compound:order_intel_compute_poll,order:1"`
+	CausalOrderingAtMs int64 `json:"causalOrderingAtMs,omitempty" bson:"causalOrderingAtMs,omitempty"`
+	CreatedAt          int64 `json:"createdAt" bson:"createdAt" index:"single:1,compound:order_intel_compute_poll,order:1"`
 }

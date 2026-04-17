@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"meta_commerce/internal/api/aidecision/crmqueue"
 	"meta_commerce/internal/api/aidecision/decisionlive"
 	"meta_commerce/internal/api/aidecision/decisionlive/livecopy"
 	"meta_commerce/internal/api/aidecision/eventtypes"
@@ -160,7 +161,7 @@ func OrchestrateOrderSourceEvent(ctx context.Context, svc *aidecisionsvc.AIDecis
 		}
 	}
 
-	err := orderintelsvc.EnqueueOrderIntelligenceFromParent(ctx, evt)
+	err := orderintelsvc.EnqueueOrderIntelligenceFromParent(ctx, evt, crmqueue.EnqueueSourceAIDecision)
 	publishOrchestrateOrder(ownerOrgID, evt, caseDoc, createdNew, orderUid, custID, convID, err == nil)
 	return err
 }

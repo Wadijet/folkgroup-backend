@@ -39,7 +39,7 @@ func formatLiveEventDemo(ev decisionlive.DecisionLiveEvent) string {
 func TestDemoTraceConversationFlow_Print(t *testing.T) {
 	evt := &aidecisionmodels.DecisionEvent{
 		EventID:       "evt_ggoisu0q9goe",
-		EventType:     eventtypes.MessageUpdated,
+		EventType:     eventtypes.MessageChanged,
 		EventSource:   eventtypes.EventSourceDatachanged,
 		CorrelationID: "corr_demo_1",
 		TraceID:       "trace_lo35demo",

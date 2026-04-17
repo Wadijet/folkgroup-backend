@@ -11,7 +11,7 @@
 //
 //  3. Sau worker intel (fan-in vào AID): {miền}_intel_recomputed (underscore — đã dùng trong production).
 //
-//  4. Đồng bộ Mongo (datachanged): {prefix}.inserted | {prefix}.updated theo hooks/source_sync_registry.go.
+//  4. Đồng bộ Mongo (datachanged): {prefix}.changed theo hooks/datachanged.go (legacy queue có thể còn .inserted/.updated).
 //
 //  5. Đề xuất / thực thi: executor.propose_requested, ads.propose_requested, aidecision.execute_requested.
 package eventtypes
@@ -43,8 +43,9 @@ const (
 	AdsIntelligenceRecomputeRequested      = "ads.intelligence.recompute_requested"
 	AdsIntelligenceRecalculateAllRequested = "ads.intelligence.recalculate_all_requested"
 	CampaignIntelRecomputed                = "campaign_intel_recomputed"
-	MetaCampaignInserted                   = "meta_campaign.inserted"
-	MetaCampaignUpdated                    = "meta_campaign.updated"
+	MetaCampaignInserted                   = "meta_campaign.inserted" // legacy queue
+	MetaCampaignUpdated                    = "meta_campaign.updated"   // legacy queue
+	MetaCampaignChanged                    = "meta_campaign.changed"
 	AdsProposeRequested                    = "ads.propose_requested"
 
 	// --- Customer / CRM intelligence queue ---
@@ -59,17 +60,20 @@ const (
 	CixIntelRecomputed   = "cix_intel_recomputed"
 
 	// --- Order ---
-	OrderInserted              = "order.inserted"
-	OrderUpdated               = "order.updated"
+	OrderInserted              = "order.inserted" // legacy queue
+	OrderUpdated               = "order.updated"  // legacy queue
+	OrderChanged               = "order.changed"
 	OrderIntelligenceRequested = "order.intelligence_requested"
 	OrderRecomputeRequested    = "order.recompute_requested"
 	OrderIntelRecomputed       = "order_intel_recomputed"
 
 	// --- Conversation / message ---
-	ConversationInserted        = "conversation.inserted"
-	ConversationUpdated         = "conversation.updated"
-	MessageInserted             = "message.inserted"
-	MessageUpdated              = "message.updated"
+	ConversationInserted        = "conversation.inserted" // legacy queue
+	ConversationUpdated         = "conversation.updated"  // legacy queue
+	ConversationChanged         = "conversation.changed"
+	MessageInserted             = "message.inserted" // legacy queue
+	MessageUpdated              = "message.updated"  // legacy queue
+	MessageChanged              = "message.changed"
 	ConversationMessageInserted = "conversation.message_inserted"
 	MessageBatchReady           = "message.batch_ready"
 

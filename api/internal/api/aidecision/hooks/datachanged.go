@@ -5,7 +5,7 @@
 //   - Lớp 2 — hook này: cổng enqueue (org, registry, bỏ delete) — không lặp lại so sánh updated_at nguồn (đã thuộc lớp 1).
 //
 // Payload queue tối giản: sourceCollection, normalizedRecordUid, dataChangeOperation — consumer hydrate từ Mongo.
-// event_type = <prefix>.inserted|.updated theo source_sync_registry.
+// event_type = <prefix>.changed (thống nhất insert/update) theo source_sync_registry.
 // Ghi queue thực tế qua ShouldEmitDatachangedToDecisionQueue (registry không xóa — chỉ lọc emit).
 package hooks
 
@@ -72,18 +72,9 @@ func idHexFromDoc(m map[string]interface{}) string {
 	return ""
 }
 
-// eventTypeForSourceSync: insert → *.inserted; update | upsert → *.updated.
-func eventTypeForSourceSync(entityPrefix string, op string) string {
-	suffix := "updated"
-	switch op {
-	case events.OpInsert:
-		suffix = "inserted"
-	case events.OpUpdate, events.OpUpsert:
-		suffix = "updated"
-	default:
-		suffix = "updated"
-	}
-	return entityPrefix + "." + suffix
+// eventTypeForSourceSync — một hậu tố .changed cho mọi thao tác ghi L1 (chi tiết: payload dataChangeOperation).
+func eventTypeForSourceSync(entityPrefix string) string {
+	return entityPrefix + ".changed"
 }
 
 // emitUnifiedSourceDataChanged — payload tối giản; consumer gọi HydrateDatachangedPayload.
@@ -105,7 +96,7 @@ func emitUnifiedSourceDataChanged(ctx context.Context, decSvc *aidecisionsvc.AID
 	if events.IsAdsIntelligenceRollupContext(ctx) {
 		payload["adsIntelligenceRollupOnly"] = true
 	}
-	eventType := eventTypeForSourceSync(entityPrefix, e.Operation)
+	eventType := eventTypeForSourceSync(entityPrefix)
 	// Một traceId / correlationId gốc cho toàn chuỗi queue → orchestrate → CIX / execute (không ghi đè khi caller đã set).
 	traceID := utility.GenerateUID(utility.UIDPrefixTrace)
 	correlationID := utility.GenerateUID(utility.UIDPrefixCorrelation)

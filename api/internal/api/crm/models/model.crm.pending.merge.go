@@ -41,4 +41,13 @@ type CrmPendingMerge struct {
 	// TraceID / CorrelationID — copy từ decision_events_queue khi xếp job (defer trong RAM có thể rỗng).
 	TraceID       string `json:"traceId,omitempty" bson:"traceId,omitempty"`
 	CorrelationID string `json:"correlationId,omitempty" bson:"correlationId,omitempty"`
+	// EventType / EventSource / PipelineStage — bản sao envelope bus AID khi enqueue merge (tùy chọn).
+	EventType     string `json:"eventType,omitempty" bson:"eventType,omitempty"`
+	EventSource   string `json:"eventSource,omitempty" bson:"eventSource,omitempty"`
+	PipelineStage string `json:"pipelineStage,omitempty" bson:"pipelineStage,omitempty"`
+	OwnerDomain           string `json:"ownerDomain,omitempty" bson:"ownerDomain,omitempty"`
+	ProcessorDomain       string `json:"processorDomain,omitempty" bson:"processorDomain,omitempty"`
+	EnqueueSourceDomain   string `json:"enqueueSourceDomain,omitempty" bson:"enqueueSourceDomain,omitempty"`
+	E2EStage              string `json:"e2eStage,omitempty" bson:"e2eStage,omitempty"`
+	E2EStepID             string `json:"e2eStepId,omitempty" bson:"e2eStepId,omitempty"`
 }

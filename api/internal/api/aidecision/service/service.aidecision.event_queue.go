@@ -409,9 +409,10 @@ func (s *AIDecisionService) FailEvent(ctx context.Context, eventID string, retry
 func DefaultLaneForEventType(eventType string) string {
 	switch eventType {
 	case eventtypes.ConversationMessageInserted, eventtypes.MessageBatchReady,
+		eventtypes.ConversationChanged, eventtypes.MessageChanged,
 		eventtypes.ConversationInserted, eventtypes.ConversationUpdated, eventtypes.MessageInserted, eventtypes.MessageUpdated,
 		eventtypes.CixAnalysisRequested, eventtypes.CustomerContextRequested, eventtypes.CustomerContextReady,
-		eventtypes.OrderInserted, eventtypes.OrderUpdated, eventtypes.OrderRecomputeRequested,
+		eventtypes.OrderChanged, eventtypes.OrderInserted, eventtypes.OrderUpdated, eventtypes.OrderRecomputeRequested,
 		eventtypes.OrderIntelligenceRequested, // Order Intelligence — cùng lane fast với order.*
 		eventtypes.OrderIntelRecomputed, eventtypes.CixIntelRecomputed,
 		EventTypeExecutorProposeRequested, EventTypeAdsProposeRequested, EventTypeExecuteRequested:

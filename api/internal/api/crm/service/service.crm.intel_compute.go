@@ -18,7 +18,8 @@ import (
 
 // EnqueueCrmIntelComputeFromDecisionEvent đưa job vào crm_intel_compute (không tính toán tại đây).
 // traceID / correlationID ghi vào payload để worker domain Publish timeline cùng luồng AID.
-func EnqueueCrmIntelComputeFromDecisionEvent(ctx context.Context, parentDecisionEventID string, ownerOrgID primitive.ObjectID, payload map[string]interface{}, traceID, correlationID string) error {
+// bus — bản sao eventType/eventSource/pipelineStage từ decision_events_queue (có thể nil).
+func EnqueueCrmIntelComputeFromDecisionEvent(ctx context.Context, parentDecisionEventID string, ownerOrgID primitive.ObjectID, payload map[string]interface{}, traceID, correlationID string, bus *crmqueue.DomainQueueBusFields) error {
 	if payload == nil {
 		return nil
 	}
@@ -56,6 +57,16 @@ func EnqueueCrmIntelComputeFromDecisionEvent(ctx context.Context, parentDecision
 		OwnerOrganizationID:   orgID,
 		ParentDecisionEventID: parentDecisionEventID,
 		CreatedAt:             now,
+	}
+	if bus != nil {
+		job.EventType = strings.TrimSpace(bus.EventType)
+		job.EventSource = strings.TrimSpace(bus.EventSource)
+		job.PipelineStage = strings.TrimSpace(bus.PipelineStage)
+		job.OwnerDomain = strings.TrimSpace(bus.OwnerDomain)
+		job.ProcessorDomain = strings.TrimSpace(bus.ProcessorDomain)
+		job.EnqueueSourceDomain = strings.TrimSpace(bus.EnqueueSourceDomain)
+		job.E2EStage = strings.TrimSpace(bus.E2EStage)
+		job.E2EStepID = strings.TrimSpace(bus.E2EStepID)
 	}
 	_, err := coll.InsertOne(ctx, job)
 	return err

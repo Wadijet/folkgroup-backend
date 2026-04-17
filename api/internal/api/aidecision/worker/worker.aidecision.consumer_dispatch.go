@@ -6,7 +6,7 @@
 //
 // Luồng Ads — bước 3→5 (sau khi Intelligence đã có từ worker recompute):
 //
-//  3) campaign_intel_recomputed (meta_ads_intel) hoặc legacy meta_campaign.inserted|updated → ProcessMetaCampaignDataChanged:
+//  3) campaign_intel_recomputed (meta_ads_intel) hoặc meta_campaign.changed (legacy .inserted|.updated) → ProcessMetaCampaignDataChanged:
 //     resolve case ads_optimization, cooldown → emit ads.context_requested (chỉ “xin snapshot”, consumer nhẹ).
 //  4) ads.context_requested → processAdsContextRequested → EnqueueAdsIntelComputeContextReady;
 //     worker ads_intel_compute (job context_ready) đọc DB → emit ads.context_ready (payload ads đã đóng gói).

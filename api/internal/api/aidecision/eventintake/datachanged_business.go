@@ -95,10 +95,27 @@ func ClassifyDatachangedBusinessUrgency(evt *aidecisionmodels.DecisionEvent, sou
 		switch {
 		case strings.HasPrefix(et, "crm_note."), strings.HasPrefix(et, "crm_customer."), strings.HasPrefix(et, "crm_activity."):
 			return UrgencyRealtime
+		case strings.HasPrefix(et, "fb_message_item.") && strings.HasSuffix(et, ".inserted"):
+			return UrgencyRealtime
+		case strings.HasPrefix(et, "fb_message_item.") && strings.HasSuffix(et, ".changed"):
+			if op == events.OpInsert {
+				return UrgencyRealtime
+			}
+			return UrgencyOperational
 		case strings.HasPrefix(et, "message.") && strings.HasSuffix(et, ".inserted"):
 			return UrgencyRealtime
+		case strings.HasPrefix(et, "message.") && strings.HasSuffix(et, ".changed"):
+			if op == events.OpInsert {
+				return UrgencyRealtime
+			}
+			return UrgencyOperational
 		case strings.HasPrefix(et, "order.") && strings.HasSuffix(et, ".inserted"):
 			return UrgencyRealtime
+		case strings.HasPrefix(et, "order.") && strings.HasSuffix(et, ".changed"):
+			if op == events.OpInsert || op == events.OpUpsert {
+				return UrgencyRealtime
+			}
+			return UrgencyOperational
 		case strings.HasPrefix(et, "meta_"), strings.HasPrefix(et, "fb_page."), strings.HasPrefix(et, "fb_post."),
 			strings.HasPrefix(et, "pos_product."), strings.HasPrefix(et, "pos_shop."), strings.HasPrefix(et, "webhook_log."):
 			return UrgencyBackground

@@ -3,6 +3,7 @@ package consumerreg
 
 import (
 	"context"
+	"strings"
 
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 	aidecisionsvc "meta_commerce/internal/api/aidecision/service"
@@ -29,7 +30,19 @@ func RegisterMany(types []string, h Handler) {
 }
 
 // Lookup trả handler đã đăng ký.
+// Tương thích queue cũ: *.inserted / *.updated → cùng handler với *.changed (emit mới chỉ dùng .changed).
 func Lookup(eventType string) (Handler, bool) {
 	h, ok := handlers[eventType]
-	return h, ok && h != nil
+	if ok && h != nil {
+		return h, true
+	}
+	if i := strings.LastIndexByte(eventType, '.'); i > 0 {
+		sfx := eventType[i+1:]
+		if sfx == "inserted" || sfx == "updated" {
+			alt := eventType[:i] + ".changed"
+			h2, ok2 := handlers[alt]
+			return h2, ok2 && h2 != nil
+		}
+	}
+	return nil, false
 }

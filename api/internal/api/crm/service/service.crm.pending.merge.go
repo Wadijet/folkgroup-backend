@@ -14,6 +14,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	mongoopts "go.mongodb.org/mongo-driver/mongo/options"
 
+	crmqueue "meta_commerce/internal/api/aidecision/crmqueue"
 	basesvc "meta_commerce/internal/api/base/service"
 	crmmodels "meta_commerce/internal/api/crm/models"
 	"meta_commerce/internal/api/events"
@@ -39,10 +40,38 @@ func NewCrmPendingMergeService() (*CrmPendingMergeService, error) {
 	}, nil
 }
 
+// applyDomainQueueBusToPendingMergeSet ghi eventType/eventSource/pipelineStage; giữ giá trị cũ nếu bus rỗng từng field và có prev.
+func applyDomainQueueBusToPendingMergeSet(set bson.M, bus *crmqueue.DomainQueueBusFields, prev *crmmodels.CrmPendingMerge) {
+	if bus == nil {
+		return
+	}
+	mergeOne := func(key, fromBus, prevVal string) {
+		v := strings.TrimSpace(fromBus)
+		if v != "" {
+			set[key] = v
+			return
+		}
+		if prev != nil {
+			if p := strings.TrimSpace(prevVal); p != "" {
+				set[key] = p
+			}
+		}
+	}
+	mergeOne("eventType", bus.EventType, prev.EventType)
+	mergeOne("eventSource", bus.EventSource, prev.EventSource)
+	mergeOne("pipelineStage", bus.PipelineStage, prev.PipelineStage)
+	mergeOne("ownerDomain", bus.OwnerDomain, prev.OwnerDomain)
+	mergeOne("processorDomain", bus.ProcessorDomain, prev.ProcessorDomain)
+	mergeOne("enqueueSourceDomain", bus.EnqueueSourceDomain, prev.EnqueueSourceDomain)
+	mergeOne("e2eStage", bus.E2EStage, prev.E2EStage)
+	mergeOne("e2eStepId", bus.E2EStepID, prev.E2EStepID)
+}
+
 // EnqueueCrmPendingMerge thêm hoặc cập nhật job trong crm_pending_merge.
 // Coalesce + debounce: env CRM_MERGE_QUEUE_COALESCE_* (fallback CRM_INGEST_COALESCE_*).
 // traceID / correlationID từ consumer AID (datachanged); rỗng nếu flush defer — không xóa trace đã có khi cập nhật coalesce.
-func EnqueueCrmPendingMerge(ctx context.Context, collectionName, operation string, document interface{}, prevDoc interface{}, ownerOrgID primitive.ObjectID, traceID, correlationID string) error {
+// bus — bản sao envelope bus AID (có thể nil).
+func EnqueueCrmPendingMerge(ctx context.Context, collectionName, operation string, document interface{}, prevDoc interface{}, ownerOrgID primitive.ObjectID, traceID, correlationID string, bus *crmqueue.DomainQueueBusFields) error {
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.CustomerPendingMerge)
 	if !ok {
 		return fmt.Errorf("không tìm thấy collection %s", global.MongoDB_ColNames.CustomerPendingMerge)
@@ -72,7 +101,7 @@ func EnqueueCrmPendingMerge(ctx context.Context, collectionName, operation strin
 		if inboxCID != "" {
 			coalesceKey := buildCoalesceKey(ownerOrgID, inboxCID)
 			debounceSec := crmMergeQueueCoalesceDebounceSec()
-			return upsertCoalescedCrmPendingMerge(ctx, coll, collectionName, operation, docMap, ownerOrgID, coalesceKey, inboxCID, debounceSec, now, updatedAtNew, updatedAtOld, updatedAtDeltaMs, traceID, correlationID)
+			return upsertCoalescedCrmPendingMerge(ctx, coll, collectionName, operation, docMap, ownerOrgID, coalesceKey, inboxCID, debounceSec, now, updatedAtNew, updatedAtOld, updatedAtDeltaMs, traceID, correlationID, bus)
 		}
 	}
 
@@ -99,6 +128,7 @@ func EnqueueCrmPendingMerge(ctx context.Context, collectionName, operation strin
 	if c := strings.TrimSpace(correlationID); c != "" {
 		setNonCoalesced["correlationId"] = c
 	}
+	applyDomainQueueBusToPendingMergeSet(setNonCoalesced, bus, nil)
 
 	filter := bson.M{"businessKey": businessKey}
 	update := bson.M{"$set": setNonCoalesced}
@@ -231,7 +261,7 @@ func bsonMapToStructPending(m bson.M, out interface{}) error {
 	return bson.Unmarshal(data, out)
 }
 
-func upsertCoalescedCrmPendingMerge(ctx context.Context, coll *mongo.Collection, collectionName, operation string, docMap bson.M, ownerOrgID primitive.ObjectID, coalesceKey, inboxCustomerID string, debounceSec int, now, updatedAtNew, updatedAtOld, updatedAtDeltaMs int64, traceID, correlationID string) error {
+func upsertCoalescedCrmPendingMerge(ctx context.Context, coll *mongo.Collection, collectionName, operation string, docMap bson.M, ownerOrgID primitive.ObjectID, coalesceKey, inboxCustomerID string, debounceSec int, now, updatedAtNew, updatedAtOld, updatedAtDeltaMs int64, traceID, correlationID string, bus *crmqueue.DomainQueueBusFields) error {
 	entityPart, ok := extractEntityPartFromDocMap(collectionName, docMap)
 	if !ok {
 		return fmt.Errorf("không trích entity part cho snapshot coalesce")
@@ -278,6 +308,16 @@ func upsertCoalescedCrmPendingMerge(ctx context.Context, coll *mongo.Collection,
 			TraceID:             strings.TrimSpace(traceID),
 			CorrelationID:       strings.TrimSpace(correlationID),
 		}
+		if bus != nil {
+			job.EventType = strings.TrimSpace(bus.EventType)
+			job.EventSource = strings.TrimSpace(bus.EventSource)
+			job.PipelineStage = strings.TrimSpace(bus.PipelineStage)
+			job.OwnerDomain = strings.TrimSpace(bus.OwnerDomain)
+			job.ProcessorDomain = strings.TrimSpace(bus.ProcessorDomain)
+			job.EnqueueSourceDomain = strings.TrimSpace(bus.EnqueueSourceDomain)
+			job.E2EStage = strings.TrimSpace(bus.E2EStage)
+			job.E2EStepID = strings.TrimSpace(bus.E2EStepID)
+		}
 		_, insErr := coll.InsertOne(ctx, job)
 		return insErr
 	}
@@ -322,6 +362,7 @@ func upsertCoalescedCrmPendingMerge(ctx context.Context, coll *mongo.Collection,
 	if cid != "" {
 		setCoalesced["correlationId"] = cid
 	}
+	applyDomainQueueBusToPendingMergeSet(setCoalesced, bus, &cur)
 
 	_, err = coll.UpdateOne(ctx, bson.M{"_id": cur.ID}, bson.M{"$set": setCoalesced})
 	return err

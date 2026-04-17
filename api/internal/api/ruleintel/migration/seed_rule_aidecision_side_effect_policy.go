@@ -89,12 +89,21 @@ var scriptDatachangedSideEffectPolicy = `function evaluate(ctx) {
     } else if (startsWith(et, 'fb_message_item.') && endsWith(et, '.inserted')) {
       u = 1;
       reason = 'eventType_fb_message_item_inserted';
+    } else if (startsWith(et, 'fb_message_item.') && endsWith(et, '.changed')) {
+      u = (op === 'insert') ? 1 : 2;
+      reason = 'eventType_fb_message_item_changed';
     } else if (startsWith(et, 'message.') && endsWith(et, '.inserted')) {
       u = 1;
       reason = 'eventType_message_inserted';
+    } else if (startsWith(et, 'message.') && endsWith(et, '.changed')) {
+      u = (op === 'insert') ? 1 : 2;
+      reason = 'eventType_message_changed';
     } else if (startsWith(et, 'order.') && endsWith(et, '.inserted')) {
       u = 1;
       reason = 'eventType_order_inserted';
+    } else if (startsWith(et, 'order.') && endsWith(et, '.changed')) {
+      u = (op === 'insert' || op === 'upsert') ? 1 : 2;
+      reason = 'eventType_order_changed';
     } else if (startsWith(et, 'meta_') || startsWith(et, 'fb_page.') || startsWith(et, 'fb_post.') ||
       startsWith(et, 'pos_product.') || startsWith(et, 'pos_shop.') || startsWith(et, 'webhook_log.')) {
       u = 3;

@@ -334,6 +334,24 @@ func processEvent(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt
 	}
 	tr := newQueueProcessTracer(evt)
 	oid := ownerOrgIDFromDecisionEvent(evt)
+	// Sau merge L2: wire l2_datachanged + <prefix>.changed — không Lookup handler .changed (tránh orchestrate L1); dùng cùng debounce crm intel như recompute_requested.
+	if crmqueue.IsPostL2MergeCrmIntelEnvelope(evt) {
+		if svc.ShouldSkipDispatchForRoutingRule(ctx, oid, evt.EventType) {
+			tr.noteRoutingSkipped()
+			publishQueueRoutingSkipped(oid, evt, tr.snapshotTree())
+			return aidecisionmodels.ConsumerCompletionKindRoutingSkipped, nil, nil
+		}
+		tr.noteRoutingAllowDispatch()
+		tr.noteDispatchLookup()
+		tr.noteHandlerInvoke()
+		err := processCrmIntelligenceRecomputeRequested(ctx, evt)
+		if err != nil {
+			tr.noteHandlerError(err)
+		} else {
+			tr.noteHandlerSuccess()
+		}
+		return aidecisionmodels.ConsumerCompletionKindProcessed, err, tr.snapshotTree()
+	}
 	// Vision L1: side-effect từ CRUD (queue crm_pending_merge, Report MarkDirty, Ads debounce) chỉ chạy trong consumer sau event L1 datachanged.
 	if eventtypes.IsL1DatachangedEventSource(evt.EventSource) {
 		dcChildren := applyDatachangedSideEffects(ctx, svc, evt)
@@ -386,7 +404,8 @@ func processAdsIntelligenceRecomputeRequested(ctx context.Context, evt *aidecisi
 		return nil
 	}
 	causalMs := crmqueue.ExtractCausalOrderingAtMs(evt.Payload)
-	return metasvc.EnqueueAdsIntelCompute(ctx, objectType, objectId, adAccountId, ownerOrgID, source, recomputeMode, evt.EventID, causalMs, evt.TraceID, evt.CorrelationID)
+	bus := crmqueue.CompleteDomainJobBus(crmqueue.DomainQueueBusFieldsPtrFromDecisionEvent(evt), crmqueue.ProcessorDomainAds, crmqueue.EnqueueSourceAIDecision)
+	return metasvc.EnqueueAdsIntelCompute(ctx, objectType, objectId, adAccountId, ownerOrgID, source, recomputeMode, evt.EventID, causalMs, evt.TraceID, evt.CorrelationID, bus)
 }
 
 // processAdsIntelligenceRecalculateAllRequested — consumer chỉ enqueue ads_intel_compute; batch chạy tại worker domain ads.
@@ -405,7 +424,8 @@ func processAdsIntelligenceRecalculateAllRequested(ctx context.Context, evt *aid
 	}
 	limit := payloadIntFromDecisionPayload(evt.Payload, "limit")
 	causalMs := crmqueue.ExtractCausalOrderingAtMs(evt.Payload)
-	return metasvc.EnqueueAdsIntelComputeRecalculateAll(ctx, ownerOrgID, limit, evt.EventID, causalMs, evt.TraceID, evt.CorrelationID)
+	bus := crmqueue.CompleteDomainJobBus(crmqueue.DomainQueueBusFieldsPtrFromDecisionEvent(evt), crmqueue.ProcessorDomainAds, crmqueue.EnqueueSourceAIDecision)
+	return metasvc.EnqueueAdsIntelComputeRecalculateAll(ctx, ownerOrgID, limit, evt.EventID, causalMs, evt.TraceID, evt.CorrelationID, bus)
 }
 
 func payloadIntFromDecisionPayload(m map[string]interface{}, key string) int {
@@ -460,6 +480,7 @@ func processCixAnalysisRequested(ctx context.Context, evt *aidecisionmodels.Deci
 	if causal <= 0 {
 		causal = time.Now().UnixMilli()
 	}
+	cixBus := crmqueue.CompleteDomainJobBus(crmqueue.DomainQueueBusFieldsPtrFromDecisionEvent(evt), crmqueue.ProcessorDomainCIX, crmqueue.EnqueueSourceAIDecision)
 	return queueSvc.EnqueueAnalysis(ctx, cixsvc.EnqueueAnalysisInput{
 		ConversationID:      convID,
 		CustomerID:          custID,
@@ -470,6 +491,7 @@ func processCixAnalysisRequested(ctx context.Context, evt *aidecisionmodels.Deci
 		CorrelationID:       strings.TrimSpace(evt.CorrelationID),
 		CausalOrderingAtMs:  causal,
 		DecisionEventID:     strings.TrimSpace(evt.EventID),
+		BusEnvelope:         cixBus,
 	})
 }
 
@@ -487,7 +509,8 @@ func processCrmIntelligenceComputeRequested(ctx context.Context, evt *aidecision
 			}
 		}
 	}
-	return crmvc.EnqueueCrmIntelComputeFromDecisionEvent(ctx, evt.EventID, ownerOrgID, evt.Payload, evt.TraceID, evt.CorrelationID)
+	bus := crmqueue.CompleteDomainJobBus(crmqueue.DomainQueueBusFieldsPtrFromDecisionEvent(evt), crmqueue.ProcessorDomainCRM, crmqueue.EnqueueSourceAIDecision)
+	return crmvc.EnqueueCrmIntelComputeFromDecisionEvent(ctx, evt.EventID, ownerOrgID, evt.Payload, evt.TraceID, evt.CorrelationID, bus)
 }
 
 // processCrmIntelligenceRecomputeRequested — crm.intelligence.recompute_requested (như ads.intelligence.recompute_requested): debounce theo org+unifiedId rồi xếp crm_intel_compute (refresh); gấp → enqueue ngay.
@@ -519,12 +542,13 @@ func processCrmIntelligenceRecomputeRequested(ctx context.Context, evt *aidecisi
 	if cm := crmqueue.ExtractCausalOrderingAtMs(evt.Payload); cm > 0 {
 		payload[crmqueue.PayloadKeyCausalOrderingAtMs] = cm
 	}
+	bus := crmqueue.CompleteDomainJobBus(crmqueue.DomainQueueBusFieldsPtrFromDecisionEvent(evt), crmqueue.ProcessorDomainCRM, crmqueue.EnqueueSourceAIDecision)
 	if eventintake.PayloadMarksIntelUrgent(evt.Payload) {
-		return crmvc.EnqueueCrmIntelComputeFromDecisionEvent(ctx, evt.EventID, ownerOrgID, payload, evt.TraceID, evt.CorrelationID)
+		return crmvc.EnqueueCrmIntelComputeFromDecisionEvent(ctx, evt.EventID, ownerOrgID, payload, evt.TraceID, evt.CorrelationID, bus)
 	}
 	win := eventintake.CrmIntelAfterIngestDebounceWindow()
 	if win <= 0 {
-		return crmvc.EnqueueCrmIntelComputeFromDecisionEvent(ctx, evt.EventID, ownerOrgID, payload, evt.TraceID, evt.CorrelationID)
+		return crmvc.EnqueueCrmIntelComputeFromDecisionEvent(ctx, evt.EventID, ownerOrgID, payload, evt.TraceID, evt.CorrelationID, bus)
 	}
 	return eventintake.ScheduleCrmIntelligenceRecomputeDebounce(ctx, ownerOrgID.Hex(), unifiedID, win, evt.TraceID, evt.CorrelationID, evt.EventID, crmqueue.ExtractCausalOrderingAtMs(evt.Payload))
 }
@@ -571,7 +595,7 @@ func processSyncedSourceWithDebounce(ctx context.Context, svc *aidecisionsvc.AID
 	return processSourceEvent(ctx, svc, evt, true)
 }
 
-// processOrderEvent xử lý order.inserted, order.updated — hydrate + CRM + Decision case order_risk + enqueue Order Intelligence (domain worker).
+// processOrderEvent xử lý order.changed (legacy order.inserted|.updated qua Lookup) — hydrate + CRM + Decision case order_risk + enqueue Order Intelligence (domain worker).
 func processOrderEvent(ctx context.Context, svc *aidecisionsvc.AIDecisionService, evt *aidecisionmodels.DecisionEvent) error {
 	return OrchestrateOrderSourceEvent(ctx, svc, evt)
 }
@@ -785,7 +809,8 @@ func processAdsContextRequested(ctx context.Context, evt *aidecisionmodels.Decis
 		orgID = ownerOrgID.Hex()
 	}
 	causalMs := crmqueue.ExtractCausalOrderingAtMs(evt.Payload)
-	return metasvc.EnqueueAdsIntelComputeContextReady(ctx, evt.EventID, orgID, evt.TraceID, evt.CorrelationID, campaignID, adAccountID, ownerOrgID, causalMs)
+	adsBus := crmqueue.CompleteDomainJobBus(crmqueue.DomainQueueBusFieldsPtrFromDecisionEvent(evt), crmqueue.ProcessorDomainAds, crmqueue.EnqueueSourceAIDecision)
+	return metasvc.EnqueueAdsIntelComputeContextReady(ctx, evt.EventID, orgID, evt.TraceID, evt.CorrelationID, campaignID, adAccountID, ownerOrgID, causalMs, adsBus)
 }
 
 // processAdsContextReady — bước 5: snapshot đã có trong payload (ads.context_ready).

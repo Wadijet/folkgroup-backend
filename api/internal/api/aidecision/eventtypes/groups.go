@@ -2,16 +2,13 @@ package eventtypes
 
 // ConversationLifecycleEventTypes — datachanged hội thoại / tin nhắn → debounce orchestrate.
 var ConversationLifecycleEventTypes = []string{
-	ConversationInserted,
-	ConversationUpdated,
-	MessageInserted,
-	MessageUpdated,
+	ConversationChanged,
+	MessageChanged,
 }
 
 // OrderLifecycleEventTypes — datachanged đơn → orchestrate order.
 var OrderLifecycleEventTypes = []string{
-	OrderInserted,
-	OrderUpdated,
+	OrderChanged,
 }
 
 // MessageFastPathEventTypes — xử lý nguồn tin (không debounce cùng nhóm trên).
@@ -20,9 +17,8 @@ var MessageFastPathEventTypes = []string{
 	MessageBatchReady,
 }
 
-// MetaCampaignPipelineHookEventTypes — campaign_intel_recomputed hoặc legacy meta_campaign.* → ProcessMetaCampaignDataChanged.
+// MetaCampaignPipelineHookEventTypes — campaign_intel_recomputed hoặc meta_campaign.* → ProcessMetaCampaignDataChanged.
 var MetaCampaignPipelineHookEventTypes = []string{
 	CampaignIntelRecomputed,
-	MetaCampaignInserted,
-	MetaCampaignUpdated,
+	MetaCampaignChanged,
 }

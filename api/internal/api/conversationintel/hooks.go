@@ -5,6 +5,8 @@ import (
 	"context"
 	"strings"
 
+	crmqueue "meta_commerce/internal/api/aidecision/crmqueue"
+	"meta_commerce/internal/api/aidecision/eventtypes"
 	cixsvc "meta_commerce/internal/api/cix/service"
 	"meta_commerce/internal/api/events"
 	"meta_commerce/internal/global"
@@ -68,7 +70,8 @@ func resolveCustomerIDForConversation(ctx context.Context, conversationID string
 }
 
 // EnqueueCixIntelComputeFromDatachanged — Luồng 1: xếp thẳng job cix_intel_compute khi nguồn là fb_message_items.
-func EnqueueCixIntelComputeFromDatachanged(ctx context.Context, e events.DataChangeEvent, normalizedRecordUid, traceID, correlationID string) error {
+// bus — bản sao envelope bus AID (có thể nil; nil → gán mặc định L1 datachanged).
+func EnqueueCixIntelComputeFromDatachanged(ctx context.Context, e events.DataChangeEvent, normalizedRecordUid, traceID, correlationID string, bus *crmqueue.DomainQueueBusFields) error {
 	if e.Document == nil {
 		return nil
 	}
@@ -96,6 +99,16 @@ func EnqueueCixIntelComputeFromDatachanged(ctx context.Context, e events.DataCha
 	if causal <= 0 {
 		causal = int64Field(raw, "createdAt")
 	}
+	if bus == nil {
+		bus = &crmqueue.DomainQueueBusFields{
+			EventSource:   eventtypes.EventSourceL1Datachanged,
+			PipelineStage: eventtypes.PipelineStageAfterL1Change,
+		}
+		if et, ok := eventtypes.EventTypeChangedForCollection(global.MongoDB_ColNames.FbMessageItems); ok {
+			bus.EventType = et
+		}
+	}
+	busOut := crmqueue.CompleteDomainJobBus(bus, crmqueue.ProcessorDomainCIX, crmqueue.EnqueueSourceConversationIntel)
 	return svc.EnqueueAnalysis(ctx, cixsvc.EnqueueAnalysisInput{
 		ConversationID:      convID,
 		CustomerID:          customerID,
@@ -105,5 +118,6 @@ func EnqueueCixIntelComputeFromDatachanged(ctx context.Context, e events.DataCha
 		TraceID:             strings.TrimSpace(traceID),
 		CorrelationID:       strings.TrimSpace(correlationID),
 		CausalOrderingAtMs:  causal,
+		BusEnvelope:         busOut,
 	})
 }

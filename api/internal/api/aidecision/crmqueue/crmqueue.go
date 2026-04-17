@@ -109,7 +109,75 @@ func EmitCrmIntelligenceRefreshRequested(ctx context.Context, unifiedId string, 
 	}, aidecisionmodels.EventLaneFast)
 }
 
-// EmitCrmIntelligenceRecomputeRequested — sau CrmPendingMergeWorker merge L1→L2 → queue AID (debounce → crm_intel_compute).
+// IsPostL2MergeCrmIntelEnvelope — sau merge L2: cần debounce → crm_intel_compute; không đi consumerreg.Lookup theo .changed (tránh nhầm orchestrate L1).
+// Wire: eventSource l2_datachanged + pipeline after_l2_merge + unifiedId; eventType = <prefix>.changed hoặc (tạm) crm.intelligence.recompute_requested.
+func IsPostL2MergeCrmIntelEnvelope(evt *aidecisionmodels.DecisionEvent) bool {
+	if evt == nil || evt.Payload == nil {
+		return false
+	}
+	if !eventtypes.IsL2DatachangedEventSource(evt.EventSource) {
+		return false
+	}
+	if strings.TrimSpace(evt.PipelineStage) != eventtypes.PipelineStageAfterL2Merge {
+		return false
+	}
+	uid, ok := evt.Payload["unifiedId"].(string)
+	if !ok || strings.TrimSpace(uid) == "" {
+		return false
+	}
+	et := strings.TrimSpace(evt.EventType)
+	if et == EventTypeCrmIntelligenceRecomputeRequested {
+		return true
+	}
+	dot := strings.LastIndexByte(et, '.')
+	return dot > 0 && strings.HasSuffix(et, ".changed")
+}
+
+// EmitAfterL2MergeForCrmIntel — sau CrmPendingMergeWorker merge L1→L2: wire đồng bộ catalog G2-S05 (l2_datachanged, after_l2_merge); eventType thường <prefix>.changed từ collection nguồn.
+func EmitAfterL2MergeForCrmIntel(ctx context.Context, eventType string, unifiedID string, ownerOrgID primitive.ObjectID, sourceCollection, pendingMergeJobHex string, causalOrderingAtMs int64, traceID, correlationID string) (string, error) {
+	unifiedID = strings.TrimSpace(unifiedID)
+	if unifiedID == "" || ownerOrgID.IsZero() {
+		return "", nil
+	}
+	et := strings.TrimSpace(eventType)
+	if et == "" {
+		et = EventTypeCrmIntelligenceRecomputeRequested
+	}
+	payload := map[string]interface{}{
+		"unifiedId":     unifiedID,
+		"ownerOrgIdHex": ownerOrgID.Hex(),
+	}
+	if causalOrderingAtMs > 0 {
+		payload[PayloadKeyCausalOrderingAtMs] = causalOrderingAtMs
+	}
+	if strings.TrimSpace(sourceCollection) != "" {
+		payload["sourceCollection"] = strings.TrimSpace(sourceCollection)
+	}
+	if strings.TrimSpace(pendingMergeJobHex) != "" {
+		payload["pendingMergeJobId"] = strings.TrimSpace(pendingMergeJobHex)
+	}
+	res, err := eventemit.EmitDecisionEvent(ctx, &eventemit.EmitInput{
+		EventType:       et,
+		EventSource:     eventtypes.EventSourceL2Datachanged,
+		PipelineStage:   eventtypes.PipelineStageAfterL2Merge,
+		EntityType:      "crm_customer",
+		EntityID:        unifiedID,
+		OrgID:           ownerOrgID.Hex(),
+		OwnerOrgID:      ownerOrgID,
+		Priority:        "normal",
+		Lane:            aidecisionmodels.EventLaneNormal,
+		TraceID:         strings.TrimSpace(traceID),
+		CorrelationID:   strings.TrimSpace(correlationID),
+		Payload:         payload,
+	})
+	if err != nil {
+		return "", err
+	}
+	_ = queuedepth.RefreshOrg(ctx, ownerOrgID)
+	return res.EventID, nil
+}
+
+// EmitCrmIntelligenceRecomputeRequested — enqueue recompute CRM intel với eventSource crm_merge_queue (luồng defer/legacy, không phải wire L2-datachanged mới sau merge).
 // causalOrderingAtMs: thời điểm nghiệp vụ (thường updatedAt nguồn L1 ms); 0 = không gửi (worker dùng mặc định khi persist).
 // traceID / correlationID — nối timeline với luồng datachanged / merge queue (có thể rỗng).
 func EmitCrmIntelligenceRecomputeRequested(ctx context.Context, unifiedID string, ownerOrgID primitive.ObjectID, sourceCollection, pendingMergeJobHex string, causalOrderingAtMs int64, traceID, correlationID string) (string, error) {

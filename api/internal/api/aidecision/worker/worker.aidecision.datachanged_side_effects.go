@@ -219,7 +219,12 @@ func flushCrmIntelAfterIngestDue(ctx context.Context) {
 		if j.CausalOrderingAtMs > 0 {
 			payload[crmqueue.PayloadKeyCausalOrderingAtMs] = j.CausalOrderingAtMs
 		}
-		if err := crmvc.EnqueueCrmIntelComputeFromDecisionEvent(ctx, parentID, ownerOID, payload, j.TraceID, j.CorrelationID); err != nil {
+		debounceBus := crmqueue.CompleteDomainJobBus(&crmqueue.DomainQueueBusFields{
+			EventType:     eventtypes.CrmIntelligenceRecomputeRequested,
+			EventSource:   eventtypes.EventSourceDebounce,
+			PipelineStage: eventtypes.PipelineStageAIDCoordination,
+		}, crmqueue.ProcessorDomainCRM, crmqueue.EnqueueSourceSystemDebounce)
+		if err := crmvc.EnqueueCrmIntelComputeFromDecisionEvent(ctx, parentID, ownerOID, payload, j.TraceID, j.CorrelationID, debounceBus); err != nil {
 			logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
 				"orgHex": j.OrgHex, "unifiedId": unified,
 			}).Warn("📋 [CRM_INTEL_DEBOUNCE] Không xếp job crm_intel_compute sau debounce ingest")
@@ -264,7 +269,13 @@ func flushDeferredDatachangedSideEffects(ctx context.Context, svc *aidecisionsvc
 		case eventintake.DeferredKindReport:
 			rptdec.RecordTouchFromDataChange(ctx, e)
 		case eventintake.DeferredKindCrmMergeQueue:
-			crmdec.EnqueueCrmMergeFromDataChange(ctx, e, j.TraceID, j.CorrelationID)
+			evt.EventSource = eventtypes.EventSourceL1Datachanged
+			evt.PipelineStage = eventtypes.PipelineStageAfterL1Change
+			if et, ok := eventtypes.EventTypeChangedForCollection(j.Coll); ok {
+				evt.EventType = et
+			}
+			mergeBus := crmqueue.CompleteDomainJobBus(crmqueue.DomainQueueBusFieldsPtrFromDecisionEvent(evt), crmqueue.ProcessorDomainCRM, crmqueue.EnqueueSourceAIDecision)
+			crmdec.EnqueueCrmMergeFromDataChange(ctx, e, j.TraceID, j.CorrelationID, mergeBus)
 		case eventintake.DeferredKindCrmRefresh:
 			uid := resolveUnifiedIDForCrmIntelRecompute(ctx, ownerOID, evt.Payload)
 			if uid != "" {
@@ -285,13 +296,26 @@ func flushDeferredDatachangedSideEffects(ctx context.Context, svc *aidecisionsvc
 			if strings.TrimSpace(j.CorrelationID) != "" {
 				evt.CorrelationID = strings.TrimSpace(j.CorrelationID)
 			}
-			if err := orderinteldec.EnqueueIntelligenceFromParentEvent(ctx, evt); err != nil {
+			evt.EventSource = eventtypes.EventSourceL1Datachanged
+			evt.PipelineStage = eventtypes.PipelineStageAfterL1Change
+			if et, ok := eventtypes.EventTypeChangedForCollection(j.Coll); ok {
+				evt.EventType = et
+			}
+			if err := orderinteldec.EnqueueIntelligenceFromAIDWorker(ctx, evt); err != nil {
 				logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
 					"orgHex": j.OrgHex, "coll": j.Coll, "idHex": j.IDHex,
 				}).Warn("📋 [ORDER_INTEL] Flush defer: không xếp job order_intel_compute")
 			}
 		case eventintake.DeferredKindCixIntelCompute:
-			if err := cixdec.EnqueueCixComputeFromDataChange(ctx, e, j.IDHex, j.TraceID, j.CorrelationID); err != nil {
+			cixBase := &crmqueue.DomainQueueBusFields{
+				EventSource:   eventtypes.EventSourceL1Datachanged,
+				PipelineStage: eventtypes.PipelineStageAfterL1Change,
+			}
+			if et, ok := eventtypes.EventTypeChangedForCollection(j.Coll); ok {
+				cixBase.EventType = et
+			}
+			cixBus := crmqueue.CompleteDomainJobBus(cixBase, crmqueue.ProcessorDomainCIX, crmqueue.EnqueueSourceAIDecision)
+			if err := cixdec.EnqueueCixComputeFromDataChange(ctx, e, j.IDHex, j.TraceID, j.CorrelationID, cixBus); err != nil {
 				logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
 					"orgHex": j.OrgHex, "coll": j.Coll, "idHex": j.IDHex,
 				}).Warn("📋 [CIX_INTEL] Flush defer: không xếp job cix_intel_compute")

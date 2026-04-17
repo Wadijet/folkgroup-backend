@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	cixmodels "meta_commerce/internal/api/cix/models"
 	crmqueue "meta_commerce/internal/api/aidecision/crmqueue"
+	cixmodels "meta_commerce/internal/api/cix/models"
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
 
@@ -38,14 +38,16 @@ func NewCixQueueService() (*CixQueueService, error) {
 // EnqueueAnalysisInput input để enqueue job phân tích.
 type EnqueueAnalysisInput struct {
 	ConversationID      string
-	CustomerID           string
-	Channel              string
-	CioEventUid          string
-	OwnerOrganizationID  primitive.ObjectID
-	TraceID              string
-	CorrelationID        string
-	CausalOrderingAtMs   int64
-	DecisionEventID      string
+	CustomerID          string
+	Channel             string
+	CioEventUid         string
+	OwnerOrganizationID primitive.ObjectID
+	TraceID             string
+	CorrelationID       string
+	CausalOrderingAtMs  int64
+	DecisionEventID     string
+	// BusEnvelope — bản sao eventType/eventSource/pipelineStage từ decision_events_queue (có thể nil).
+	BusEnvelope *crmqueue.DomainQueueBusFields
 }
 
 // EnqueueAnalysis thêm job vào cix_intel_compute (upsert theo conversationId).
@@ -73,23 +75,60 @@ func (s *CixQueueService) EnqueueAnalysis(ctx context.Context, input EnqueueAnal
 		RetryCount:          0,
 		CreatedAt:           now,
 	}
+	if input.BusEnvelope != nil {
+		job.EventType = strings.TrimSpace(input.BusEnvelope.EventType)
+		job.EventSource = strings.TrimSpace(input.BusEnvelope.EventSource)
+		job.PipelineStage = strings.TrimSpace(input.BusEnvelope.PipelineStage)
+		job.OwnerDomain = strings.TrimSpace(input.BusEnvelope.OwnerDomain)
+		job.ProcessorDomain = strings.TrimSpace(input.BusEnvelope.ProcessorDomain)
+		job.EnqueueSourceDomain = strings.TrimSpace(input.BusEnvelope.EnqueueSourceDomain)
+		job.E2EStage = strings.TrimSpace(input.BusEnvelope.E2EStage)
+		job.E2EStepID = strings.TrimSpace(input.BusEnvelope.E2EStepID)
+	}
 	filter := bson.M{
-		"conversationId":       job.ConversationID,
+		"conversationId":      job.ConversationID,
 		"ownerOrganizationId": job.OwnerOrganizationID,
 	}
+	setDoc := bson.M{
+		"customerId":                          job.CustomerID,
+		"channel":                             job.Channel,
+		"cioEventUid":                         job.CioEventUid,
+		crmqueue.PayloadKeyCausalOrderingAtMs: causal,
+		"traceId":                             job.TraceID,
+		"correlationId":                       job.CorrelationID,
+		"decisionEventId":                     job.DecisionEventID,
+		"processedAt":                         nil,
+		"processError":                        "",
+		"retryCount":                          job.RetryCount,
+	}
+	if input.BusEnvelope != nil {
+		if v := strings.TrimSpace(input.BusEnvelope.EventType); v != "" {
+			setDoc["eventType"] = v
+		}
+		if v := strings.TrimSpace(input.BusEnvelope.EventSource); v != "" {
+			setDoc["eventSource"] = v
+		}
+		if v := strings.TrimSpace(input.BusEnvelope.PipelineStage); v != "" {
+			setDoc["pipelineStage"] = v
+		}
+		if v := strings.TrimSpace(input.BusEnvelope.OwnerDomain); v != "" {
+			setDoc["ownerDomain"] = v
+		}
+		if v := strings.TrimSpace(input.BusEnvelope.ProcessorDomain); v != "" {
+			setDoc["processorDomain"] = v
+		}
+		if v := strings.TrimSpace(input.BusEnvelope.EnqueueSourceDomain); v != "" {
+			setDoc["enqueueSourceDomain"] = v
+		}
+		if v := strings.TrimSpace(input.BusEnvelope.E2EStage); v != "" {
+			setDoc["e2eStage"] = v
+		}
+		if v := strings.TrimSpace(input.BusEnvelope.E2EStepID); v != "" {
+			setDoc["e2eStepId"] = v
+		}
+	}
 	update := bson.M{
-		"$set": bson.M{
-			"customerId":    job.CustomerID,
-			"channel":       job.Channel,
-			"cioEventUid":   job.CioEventUid,
-			crmqueue.PayloadKeyCausalOrderingAtMs: causal,
-			"traceId":       job.TraceID,
-			"correlationId": job.CorrelationID,
-			"decisionEventId": job.DecisionEventID,
-			"processedAt":  nil,
-			"processError":  "",
-			"retryCount":   job.RetryCount,
-		},
+		"$set": setDoc,
 		"$setOnInsert": bson.M{
 			"createdAt": now,
 		},

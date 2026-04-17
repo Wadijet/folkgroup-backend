@@ -65,7 +65,7 @@ func DomainNarrativeFromQueueEvent(evt *aidecisionmodels.DecisionEvent) DomainNa
 		if convID != "" {
 			out.EntityBullets = append(out.EntityBullets, "Hội thoại: "+convID)
 		}
-	case eventtypes.MetaCampaignInserted, eventtypes.MetaCampaignUpdated:
+	case eventtypes.MetaCampaignChanged, eventtypes.MetaCampaignInserted, eventtypes.MetaCampaignUpdated:
 		out.StepTitle = "Đồng bộ chiến dịch quảng cáo (Meta)"
 		out.BusinessOneLine = "Cập nhật thông tin chiến dịch từ Meta; có thể dùng cho báo cáo và gợi ý tối ưu."
 		if campaignID != "" {
@@ -84,13 +84,14 @@ func DomainNarrativeFromQueueEvent(evt *aidecisionmodels.DecisionEvent) DomainNa
 		out.StepTitle = "Đã đủ thông tin để gợi ý quảng cáo"
 		out.BusinessOneLine = "Số liệu đã sẵn sàng; hệ thống sẽ đánh giá và tạo gợi ý nếu thấy phù hợp."
 		out.EntityBullets = append(out.EntityBullets, "Có thể không có gợi ý nếu chưa đạt điều kiện.")
-	case eventtypes.OrderInserted, eventtypes.OrderUpdated:
+	case eventtypes.OrderChanged, eventtypes.OrderInserted, eventtypes.OrderUpdated:
 		out.StepTitle = "Thay đổi đơn hàng"
 		out.BusinessOneLine = "Đơn mới hoặc vừa sửa; có thể cập nhật cảnh báo và theo dõi rủi ro."
 		if orderID != "" {
 			out.EntityBullets = append(out.EntityBullets, "Đơn: "+orderID)
 		}
-	case eventtypes.ConversationInserted, eventtypes.ConversationUpdated, eventtypes.MessageInserted, eventtypes.MessageUpdated:
+	case eventtypes.ConversationChanged, eventtypes.MessageChanged,
+		eventtypes.ConversationInserted, eventtypes.ConversationUpdated, eventtypes.MessageInserted, eventtypes.MessageUpdated:
 		out.StepTitle = "Có tin nhắn hoặc hội thoại mới"
 		out.BusinessOneLine = "Sau khi bạn lưu tin nhắn, hệ thống sẽ đồng bộ và có thể phân tích, gợi ý trả lời hoặc việc cần làm."
 		if convID != "" {

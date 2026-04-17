@@ -20,8 +20,17 @@ type CixIntelComputeJob struct {
 	CausalOrderingAtMs int64 `json:"causalOrderingAtMs,omitempty" bson:"causalOrderingAtMs,omitempty"`
 	// DecisionEventID — eventId decision_events_queue đã enqueue job (audit).
 	DecisionEventID string `json:"decisionEventId,omitempty" bson:"decisionEventId,omitempty"`
-	ProcessedAt         *int64             `json:"processedAt,omitempty" bson:"processedAt,omitempty" index:"single:1,compound:cix_intel_compute_poll"`
-	ProcessError        string             `json:"processError,omitempty" bson:"processError,omitempty"`
-	RetryCount          int                `json:"retryCount" bson:"retryCount"`
-	CreatedAt           int64              `json:"createdAt" bson:"createdAt" index:"single:-1,compound:cix_intel_compute_poll,order:1"`
+	// EventType / EventSource / PipelineStage — bản sao envelope bus AID (tùy chọn).
+	EventType     string `json:"eventType,omitempty" bson:"eventType,omitempty"`
+	EventSource   string `json:"eventSource,omitempty" bson:"eventSource,omitempty"`
+	PipelineStage string `json:"pipelineStage,omitempty" bson:"pipelineStage,omitempty"`
+	OwnerDomain           string `json:"ownerDomain,omitempty" bson:"ownerDomain,omitempty"`
+	ProcessorDomain       string `json:"processorDomain,omitempty" bson:"processorDomain,omitempty"`
+	EnqueueSourceDomain   string `json:"enqueueSourceDomain,omitempty" bson:"enqueueSourceDomain,omitempty"`
+	E2EStage              string `json:"e2eStage,omitempty" bson:"e2eStage,omitempty"`
+	E2EStepID             string `json:"e2eStepId,omitempty" bson:"e2eStepId,omitempty"`
+	ProcessedAt   *int64 `json:"processedAt,omitempty" bson:"processedAt,omitempty" index:"single:1,compound:cix_intel_compute_poll"`
+	ProcessError  string `json:"processError,omitempty" bson:"processError,omitempty"`
+	RetryCount    int    `json:"retryCount" bson:"retryCount"`
+	CreatedAt     int64  `json:"createdAt" bson:"createdAt" index:"single:-1,compound:cix_intel_compute_poll,order:1"`
 }

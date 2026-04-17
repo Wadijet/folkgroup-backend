@@ -17,7 +17,8 @@ import (
 )
 
 // EnqueueOrderIntelligenceFromParent đưa job vào order_intel_compute sau order.inserted/updated (đã hydrate).
-func EnqueueOrderIntelligenceFromParent(ctx context.Context, parent *aidecisionmodels.DecisionEvent) error {
+// enqueueSourceDomain rỗng → aidecision (consumer AID).
+func EnqueueOrderIntelligenceFromParent(ctx context.Context, parent *aidecisionmodels.DecisionEvent, enqueueSourceDomain string) error {
 	if parent == nil || parent.Payload == nil {
 		return nil
 	}
@@ -63,7 +64,26 @@ func EnqueueOrderIntelligenceFromParent(ctx context.Context, parent *aidecisionm
 	if job.OrderUid == "" && job.MongoRecordIdHex == "" {
 		return nil
 	}
+	copyOrderIntelBusMeta(parent, job, enqueueSourceDomain)
 	return upsertOrderIntelComputeJob(ctx, job)
+}
+
+func copyOrderIntelBusMeta(evt *aidecisionmodels.DecisionEvent, job *orderintelmodels.OrderIntelComputeJob, enqueueSourceDomain string) {
+	if evt == nil || job == nil {
+		return
+	}
+	job.EventType = strings.TrimSpace(evt.EventType)
+	job.EventSource = strings.TrimSpace(evt.EventSource)
+	job.PipelineStage = strings.TrimSpace(evt.PipelineStage)
+	job.OwnerDomain = crmqueue.OwnerDomainFromDecisionPayload(evt.Payload)
+	job.ProcessorDomain = crmqueue.ProcessorDomainOrder
+	if es := strings.TrimSpace(enqueueSourceDomain); es != "" {
+		job.EnqueueSourceDomain = es
+	} else {
+		job.EnqueueSourceDomain = crmqueue.EnqueueSourceAIDecision
+	}
+	job.E2EStage = strings.TrimSpace(evt.E2EStage)
+	job.E2EStepID = strings.TrimSpace(evt.E2EStepID)
 }
 
 // EnqueueFromRecomputeDecisionEvent — consumer AI Decision chỉ chuyển job sang domain (không tính toán tại đây).
@@ -139,6 +159,7 @@ func enqueueFromGenericAIDecisionPayload(ctx context.Context, evt *aidecisionmod
 	if job.OrderUid == "" && job.MongoRecordIdHex == "" {
 		return nil
 	}
+	copyOrderIntelBusMeta(evt, job, crmqueue.EnqueueSourceAIDecision)
 	return upsertOrderIntelComputeJob(ctx, job)
 }
 
@@ -155,17 +176,25 @@ func upsertOrderIntelComputeJob(ctx context.Context, job *orderintelmodels.Order
 		filter["mongoRecordIdHex"] = job.MongoRecordIdHex
 	}
 	set := bson.M{
-		"orgId":                 job.OrgID,
-		"traceId":               job.TraceID,
-		"correlationId":         job.CorrelationID,
-		"parentEventId":         job.ParentEventID,
-		"parentEventType":       job.ParentEventType,
-		"source":                job.Source,
-		"normalizedRecordUid":     job.NormalizedRecordUid,
-		"causalOrderingAtMs":    job.CausalOrderingAtMs,
+		"orgId":               job.OrgID,
+		"traceId":             job.TraceID,
+		"correlationId":       job.CorrelationID,
+		"parentEventId":       job.ParentEventID,
+		"parentEventType":     job.ParentEventType,
+		"source":              job.Source,
+		"normalizedRecordUid": job.NormalizedRecordUid,
+		"causalOrderingAtMs":  job.CausalOrderingAtMs,
+		"eventType":             job.EventType,
+		"eventSource":           job.EventSource,
+		"pipelineStage":         job.PipelineStage,
+		"ownerDomain":           job.OwnerDomain,
+		"processorDomain":       job.ProcessorDomain,
+		"enqueueSourceDomain":   job.EnqueueSourceDomain,
+		"e2eStage":              job.E2EStage,
+		"e2eStepId":             job.E2EStepID,
 		"processedAt":           nil,
-		"processError":          "",
-		"retryCount":            0,
+		"processError":        "",
+		"retryCount":          0,
 	}
 	update := bson.M{
 		"$set": set,

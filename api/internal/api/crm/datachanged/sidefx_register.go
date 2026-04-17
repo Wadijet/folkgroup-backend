@@ -6,6 +6,7 @@ package datachanged
 import (
 	"strings"
 
+	"meta_commerce/internal/api/aidecision/crmqueue"
 	"meta_commerce/internal/api/aidecision/datachangedsidefx"
 	"meta_commerce/internal/api/aidecision/eventintake"
 )
@@ -31,7 +32,8 @@ func init() {
 			tid = strings.TrimSpace(ac.Evt.TraceID)
 			cid = strings.TrimSpace(ac.Evt.CorrelationID)
 		}
-		EnqueueCrmMergeFromDataChange(ac.Ctx, ac.E, tid, cid)
+		mergeBus := crmqueue.CompleteDomainJobBus(crmqueue.DomainQueueBusFieldsPtrFromDecisionEvent(ac.Evt), crmqueue.ProcessorDomainCRM, crmqueue.EnqueueSourceCRMDataChanged)
+		EnqueueCrmMergeFromDataChange(ac.Ctx, ac.E, tid, cid, mergeBus)
 		return nil
 	})
 }

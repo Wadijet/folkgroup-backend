@@ -17,5 +17,5 @@ const EventTypeOrderRecomputeRequested = eventtypes.OrderRecomputeRequested
 
 // EmitOrderIntelligenceRequested đưa job vào order_intel_compute sau order.inserted/updated (đã hydrate). Không ghi decision_events_queue.
 func EmitOrderIntelligenceRequested(ctx context.Context, _ *aidecisionsvc.AIDecisionService, parent *aidecisionmodels.DecisionEvent) error {
-	return EnqueueOrderIntelligenceFromParent(ctx, parent)
+	return EnqueueOrderIntelligenceFromParent(ctx, parent, "")
 }

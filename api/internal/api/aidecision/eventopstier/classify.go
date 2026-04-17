@@ -31,7 +31,7 @@ func LabelVi(tier string) string {
 	return labelVi[TierUnknown]
 }
 
-// pipelineEntityPrefixes — tiền tố entity (datachanged: *.inserted|*.updated) dẫn vào intel / ngữ cảnh quyết định.
+// pipelineEntityPrefixes — tiền tố entity (datachanged: *.changed hoặc legacy *.inserted|*.updated) dẫn vào intel / ngữ cảnh quyết định.
 // Đồng bộ khái niệm với hooks/source_sync_registry.go: CRM + đơn + hội thoại + CIX; không gồm POS catalog / Meta sync / webhook thô.
 var pipelineEntityPrefixes = map[string]struct{}{
 	"conversation":        {},
@@ -73,12 +73,13 @@ var exactTier = map[string]string{
 	eventtypes.CrmIntelligenceRecomputeRequested:     TierOperational,
 	eventtypes.AdsIntelligenceRecomputeRequested:     TierOperational,
 	eventtypes.AdsIntelligenceRecalculateAllRequested: TierOperational,
+	eventtypes.MetaCampaignChanged:      TierOperational,
 	eventtypes.MetaCampaignInserted:     TierOperational,
 	eventtypes.MetaCampaignUpdated:      TierOperational,
 	eventtypes.CampaignIntelRecomputed:  TierOperational,
 	eventtypes.CrmIntelRecomputed:       TierOperational,
 	eventtypes.CixIntelRecomputed:       TierOperational,
-	// Các prefix meta_*, pos_*, fb_page, fb_post, fb_message_item, webhook_log (*.inserted|*.updated)
+	// Các prefix meta_*, pos_*, fb_page, fb_post, fb_message_item, webhook_log (*.changed / legacy *.inserted|*.updated)
 	// không nằm trong pipelineEntityPrefixes → ClassifyEventType xếp operational qua nhánh suffix (không cần lặp từng dòng).
 }
 
@@ -93,7 +94,7 @@ func ClassifyEventType(eventType string) (tier string, labelViOut string) {
 	}
 	if i := strings.LastIndexByte(et, '.'); i > 0 {
 		sfx := et[i+1:]
-		if sfx == "inserted" || sfx == "updated" {
+		if sfx == "changed" || sfx == "inserted" || sfx == "updated" {
 			pfx := et[:i]
 			if _, ok := pipelineEntityPrefixes[pfx]; ok {
 				return TierPipeline, LabelVi(TierPipeline)

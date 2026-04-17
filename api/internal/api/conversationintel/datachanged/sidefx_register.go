@@ -4,6 +4,7 @@ package datachanged
 import (
 	"strings"
 
+	"meta_commerce/internal/api/aidecision/crmqueue"
 	"meta_commerce/internal/api/aidecision/datachangedsidefx"
 	"meta_commerce/internal/api/aidecision/eventintake"
 	"meta_commerce/internal/global"
@@ -31,7 +32,8 @@ func init() {
 			tid = strings.TrimSpace(ac.Evt.TraceID)
 			cid = strings.TrimSpace(ac.Evt.CorrelationID)
 		}
-		if err := EnqueueCixComputeFromDataChange(ac.Ctx, ac.E, ac.IDHex, tid, cid); err != nil {
+		cixBus := crmqueue.CompleteDomainJobBus(crmqueue.DomainQueueBusFieldsPtrFromDecisionEvent(ac.Evt), crmqueue.ProcessorDomainCIX, crmqueue.EnqueueSourceConversationIntel)
+		if err := EnqueueCixComputeFromDataChange(ac.Ctx, ac.E, ac.IDHex, tid, cid, cixBus); err != nil {
 			logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
 				"eventId": ac.Evt.EventID, "orgHex": ac.OrgHex, "sourceCollection": ac.Src,
 			}).Warn("📋 [CIX_INTEL] Không xếp job cix_intel_compute từ fb_message_items datachanged")

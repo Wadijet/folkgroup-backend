@@ -11,6 +11,7 @@ import (
 	"time"
 
 	adsmodels "meta_commerce/internal/api/ads_meta/models"
+	crmqueue "meta_commerce/internal/api/aidecision/crmqueue"
 	"meta_commerce/internal/api/aidecision/eventemit"
 	"meta_commerce/internal/api/aidecision/eventtypes"
 	"meta_commerce/internal/global"
@@ -18,9 +19,23 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
+func applyDomainBusToAdsIntelJob(job *adsmodels.AdsIntelComputeJob, bus *crmqueue.DomainQueueBusFields) {
+	if job == nil || bus == nil {
+		return
+	}
+	job.EventType = strings.TrimSpace(bus.EventType)
+	job.EventSource = strings.TrimSpace(bus.EventSource)
+	job.PipelineStage = strings.TrimSpace(bus.PipelineStage)
+	job.OwnerDomain = strings.TrimSpace(bus.OwnerDomain)
+	job.ProcessorDomain = strings.TrimSpace(bus.ProcessorDomain)
+	job.EnqueueSourceDomain = strings.TrimSpace(bus.EnqueueSourceDomain)
+	job.E2EStage = strings.TrimSpace(bus.E2EStage)
+	job.E2EStepID = strings.TrimSpace(bus.E2EStepID)
+}
+
 // EnqueueAdsIntelCompute đưa job recompute một entity vào ads_intel_compute (không tính toán tại đây).
-// causalOrderingAtMs: mốc nghiệp vụ từ payload event; 0 = gán bằng thời điểm enqueue.
-func EnqueueAdsIntelCompute(ctx context.Context, objectType, objectID, adAccountID string, ownerOrgID primitive.ObjectID, source, recomputeMode, parentDecisionEventID string, causalOrderingAtMs int64, parentTraceID, parentCorrelationID string) error {
+// bus — bản sao envelope bus AID (có thể nil).
+func EnqueueAdsIntelCompute(ctx context.Context, objectType, objectID, adAccountID string, ownerOrgID primitive.ObjectID, source, recomputeMode, parentDecisionEventID string, causalOrderingAtMs int64, parentTraceID, parentCorrelationID string, bus *crmqueue.DomainQueueBusFields) error {
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.AdsIntelCompute)
 	if !ok {
 		return fmt.Errorf("collection AdsIntelCompute chưa đăng ký")
@@ -41,12 +56,13 @@ func EnqueueAdsIntelCompute(ctx context.Context, objectType, objectID, adAccount
 		CausalOrderingAtMs:    normalizeAdsIntelCausalMs(causalOrderingAtMs),
 		CreatedAt:             now,
 	}
+	applyDomainBusToAdsIntelJob(job, bus)
 	_, err := coll.InsertOne(ctx, job)
 	return err
 }
 
 // EnqueueAdsIntelComputeRecalculateAll đưa job batch RecalculateAll vào ads_intel_compute.
-func EnqueueAdsIntelComputeRecalculateAll(ctx context.Context, ownerOrgID primitive.ObjectID, limit int, parentDecisionEventID string, causalOrderingAtMs int64, parentTraceID, parentCorrelationID string) error {
+func EnqueueAdsIntelComputeRecalculateAll(ctx context.Context, ownerOrgID primitive.ObjectID, limit int, parentDecisionEventID string, causalOrderingAtMs int64, parentTraceID, parentCorrelationID string, bus *crmqueue.DomainQueueBusFields) error {
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.AdsIntelCompute)
 	if !ok {
 		return fmt.Errorf("collection AdsIntelCompute chưa đăng ký")
@@ -63,12 +79,13 @@ func EnqueueAdsIntelComputeRecalculateAll(ctx context.Context, ownerOrgID primit
 		CausalOrderingAtMs:    normalizeAdsIntelCausalMs(causalOrderingAtMs),
 		CreatedAt:             now,
 	}
+	applyDomainBusToAdsIntelJob(job, bus)
 	_, err := coll.InsertOne(ctx, job)
 	return err
 }
 
 // EnqueueAdsIntelComputeContextReady đưa job đọc snapshot Intelligence + emit ads.context_ready vào ads_intel_compute (consumer không đọc meta_campaigns).
-func EnqueueAdsIntelComputeContextReady(ctx context.Context, parentDecisionEventID, orgID, traceID, correlationID, campaignID, adAccountID string, ownerOrgID primitive.ObjectID, causalOrderingAtMs int64) error {
+func EnqueueAdsIntelComputeContextReady(ctx context.Context, parentDecisionEventID, orgID, traceID, correlationID, campaignID, adAccountID string, ownerOrgID primitive.ObjectID, causalOrderingAtMs int64, bus *crmqueue.DomainQueueBusFields) error {
 	campaignID = strings.TrimSpace(campaignID)
 	if campaignID == "" || ownerOrgID.IsZero() {
 		return nil
@@ -94,6 +111,7 @@ func EnqueueAdsIntelComputeContextReady(ctx context.Context, parentDecisionEvent
 	if job.ContextEmitOrgID == "" {
 		job.ContextEmitOrgID = ownerOrgID.Hex()
 	}
+	applyDomainBusToAdsIntelJob(job, bus)
 	_, err := coll.InsertOne(ctx, job)
 	return err
 }
@@ -143,10 +161,10 @@ func emitAdsContextReadyFromIntelJob(ctx context.Context, job *adsmodels.AdsInte
 		orgID = job.OwnerOrganizationID.Hex()
 	}
 	_, err := eventemit.EmitDecisionEvent(ctx, &eventemit.EmitInput{
-		EventType:       eventtypes.AdsContextReady,
-		EventSource:     eventtypes.EventSourceMetaAdsIntel,
-		PipelineStage:   eventtypes.PipelineStageDomainIntel,
-		EntityType:      "ad_account",
+		EventType:     eventtypes.AdsContextReady,
+		EventSource:   eventtypes.EventSourceMetaAdsIntel,
+		PipelineStage: eventtypes.PipelineStageDomainIntel,
+		EntityType:    "ad_account",
 		EntityID:      entityID,
 		OrgID:         orgID,
 		OwnerOrgID:    job.OwnerOrganizationID,

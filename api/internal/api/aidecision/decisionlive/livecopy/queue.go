@@ -205,11 +205,12 @@ func queueFriendlyEventLabel(evt *aidecisionmodels.DecisionEvent) string {
 	}
 	et := strings.TrimSpace(evt.EventType)
 	switch et {
-	case eventtypes.OrderInserted, eventtypes.OrderUpdated:
+	case eventtypes.OrderChanged, eventtypes.OrderInserted, eventtypes.OrderUpdated:
 		return "Đơn hàng"
 	case eventtypes.OrderIntelRecomputed:
 		return "Phân tích đơn"
-	case eventtypes.ConversationInserted, eventtypes.ConversationUpdated, eventtypes.MessageInserted, eventtypes.MessageUpdated:
+	case eventtypes.ConversationChanged, eventtypes.MessageChanged,
+		eventtypes.ConversationInserted, eventtypes.ConversationUpdated, eventtypes.MessageInserted, eventtypes.MessageUpdated:
 		return "Hội thoại / tin nhắn"
 	case eventtypes.ConversationMessageInserted, eventtypes.MessageBatchReady:
 		return "Tin nhắn (gom lô)"
@@ -219,7 +220,7 @@ func queueFriendlyEventLabel(evt *aidecisionmodels.DecisionEvent) string {
 		return "Phân tích khách"
 	case eventtypes.CixIntelRecomputed:
 		return "Phân tích hội thoại"
-	case eventtypes.CampaignIntelRecomputed, eventtypes.MetaCampaignInserted, eventtypes.MetaCampaignUpdated:
+	case eventtypes.CampaignIntelRecomputed, eventtypes.MetaCampaignChanged, eventtypes.MetaCampaignInserted, eventtypes.MetaCampaignUpdated:
 		return "Quảng cáo / chiến dịch"
 	case eventtypes.AdsContextRequested, eventtypes.AdsContextReady:
 		return "Ngữ cảnh quảng cáo"

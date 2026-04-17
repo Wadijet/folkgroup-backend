@@ -435,13 +435,13 @@ func queueConsumerHandlerUserExplanationVi(eventType string) string {
 		return "Kết quả phân tích hội thoại mới đã về — cập nhật gợi ý tiếp theo."
 	case eventtypes.CampaignIntelRecomputed:
 		return "Số liệu chiến dịch vừa được làm mới — có thể có bước gợi ý quảng cáo sau."
-	case eventtypes.MetaCampaignInserted, eventtypes.MetaCampaignUpdated:
+	case eventtypes.MetaCampaignChanged, eventtypes.MetaCampaignInserted, eventtypes.MetaCampaignUpdated:
 		return "Đồng bộ thông tin chiến dịch từ Meta để báo cáo và gợi ý luôn mới."
-	case eventtypes.MessageInserted, eventtypes.MessageUpdated, eventtypes.ConversationMessageInserted:
+	case eventtypes.MessageChanged, eventtypes.MessageInserted, eventtypes.MessageUpdated, eventtypes.ConversationMessageInserted:
 		return "Cập nhật theo tin nhắn mới — có thể gom nhiều tin trong chốc lát để xử lý gọn."
-	case eventtypes.ConversationInserted, eventtypes.ConversationUpdated:
+	case eventtypes.ConversationChanged, eventtypes.ConversationInserted, eventtypes.ConversationUpdated:
 		return "Cập nhật theo hội thoại — hệ thống sắp xếp thời điểm xử lý hợp lý."
-	case eventtypes.OrderInserted, eventtypes.OrderUpdated:
+	case eventtypes.OrderChanged, eventtypes.OrderInserted, eventtypes.OrderUpdated:
 		return "Cập nhật theo đơn hàng — có thể kèm phân tích hoặc hồ sơ liên quan."
 	default:
 		if strings.HasPrefix(et, eventtypes.PrefixMessage) || strings.HasPrefix(et, eventtypes.PrefixConversation) {

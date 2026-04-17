@@ -46,10 +46,10 @@ import (
 // Bảng collection + bật ghi queue mặc định: xem comment đầu file package.
 var (
 	sourceSyncOnce       sync.Once
-	sourceSyncCollPrefix map[string]string // collection name → event prefix (vd fb_page → fb_page.inserted)
+	sourceSyncCollPrefix map[string]string // collection name → tiền tố entity (vd conversation — wire: conversation.changed)
 )
 
-// sourceSyncPrefixesMap trả về map collection → tiền tố event (entity.inserted / entity.updated).
+// sourceSyncPrefixesMap trả về map collection → tiền tố entity (wire: <prefix>.changed).
 // Không gồm: auth, notification, delivery, CTA, agent, content, AI, report, queue worker CRM,
 // approval/ads internal, decision/learning/rule (trừ cix_analysis_results — fan-in AID sau tính CIX).
 func sourceSyncPrefixesMap() map[string]string {
@@ -96,7 +96,7 @@ func sourceSyncPrefixesMap() map[string]string {
 	return sourceSyncCollPrefix
 }
 
-// IsSourceSyncDataChangedEvent trả về true nếu eventType có dạng <prefix>.inserted|.updated
+// IsSourceSyncDataChangedEvent trả về true nếu eventType có dạng <prefix>.changed|.inserted|.updated
 // với prefix thuộc registry (dùng cho worker / lane sau này).
 func IsSourceSyncDataChangedEvent(eventType string) bool {
 	dot := strings.LastIndexByte(eventType, '.')
@@ -105,7 +105,7 @@ func IsSourceSyncDataChangedEvent(eventType string) bool {
 	}
 	pfx := eventType[:dot]
 	sfx := eventType[dot+1:]
-	if sfx != "inserted" && sfx != "updated" {
+	if sfx != "changed" && sfx != "inserted" && sfx != "updated" {
 		return false
 	}
 	for _, v := range sourceSyncPrefixesMap() {

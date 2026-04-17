@@ -15,7 +15,7 @@ func TestBuildQueueConsumerTraceStep_RefsHandlerDone(t *testing.T) {
 	org := primitive.NewObjectID()
 	evt := &aidecisionmodels.DecisionEvent{
 		EventID:             "evt_1",
-		EventType:           eventtypes.MessageInserted,
+		EventType:           eventtypes.MessageChanged,
 		EventSource:         eventtypes.EventSourceDatachanged,
 		PipelineStage:       eventtypes.PipelineStageAfterL1Change,
 		TraceID:             "tr_1",
@@ -85,7 +85,7 @@ func TestBuildQueueConsumerTraceStep_HandlerError(t *testing.T) {
 func TestBuildQueueConsumerEvent_HasStructuredStep(t *testing.T) {
 	evt := &aidecisionmodels.DecisionEvent{
 		EventID:     "evt_x",
-		EventType:   eventtypes.OrderUpdated,
+		EventType:   eventtypes.OrderChanged,
 		EventSource: eventtypes.EventSourceDatachanged,
 	}
 	ev := BuildQueueConsumerEvent(evt, QueueMilestoneHandlerDone, nil, nil, nil)

@@ -10,6 +10,8 @@ import "strings"
 const (
 	// EventSourceL1Datachanged — enqueue sau ghi L1 / hook datachanged (ưu tiên emit mới).
 	EventSourceL1Datachanged = "l1_datachanged"
+	// EventSourceL2Datachanged — enqueue sau cập nhật canonical L2 (minh hoạ: CRM merge xong → AID), wire thường <prefix>.changed giống G1-S04.
+	EventSourceL2Datachanged = "l2_datachanged"
 	// EventSourceDatachanged — giá trị lịch sử trên queue; consumer vẫn chấp nhận khi đọc bản ghi cũ.
 	EventSourceDatachanged   = "datachanged"
 	EventSourceAIDecision    = "aidecision"
@@ -35,4 +37,9 @@ func IsL1DatachangedEventSource(s string) bool {
 	default:
 		return false
 	}
+}
+
+// IsL2DatachangedEventSource — true nếu eventSource là báo thay đổi sau merge L2 (đối chiếu l1_datachanged).
+func IsL2DatachangedEventSource(s string) bool {
+	return strings.TrimSpace(s) == EventSourceL2Datachanged
 }

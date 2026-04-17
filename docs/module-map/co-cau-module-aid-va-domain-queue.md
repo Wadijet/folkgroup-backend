@@ -66,7 +66,7 @@ Domain worker (D) → persist L2 / intel / side-effect
 | Cổng datachanged → queue | `aidecision/hooks/` | `RegisterAIDecisionOnDataChanged`, `source_sync_registry`, lọc emit |
 | Policy defer / intake | `aidecision/eventintake/` | Defer side-effect, dedupe, rule |
 | Consumer | `aidecision/worker/` | `processEvent`, `applyDatachangedSideEffects`, `dispatchConsumerEvent` |
-| Adapter CRM ↔ bus | `aidecision/crmqueue/` | Event type / payload gắn luồng CRM trên queue AID |
+| Adapter CRM ↔ bus + meta job miền | `aidecision/crmqueue/` | `crmqueue.go` — event type / payload trên bus AID; **`domain_queue_bus.go`** — struct/meta đồng bộ envelope lên document `*_intel_compute` / `crm_pending_merge` ([bang-pha-buoc-event-e2e §1.4](../flows/bang-pha-buoc-event-e2e.md#14-meta-trên-document-job-hàng-đợi-miền-đồng-bộ-bus--chuẩn-gộp-một-nguồn)) |
 
 **Chốt:** **`decision_events_queue` thuộc nhóm C.** Đây là **bus điều phối**, không thay cho **queue job nặng** của miền (merge, intel compute, …).
 
@@ -94,6 +94,10 @@ Mỗi dòng là một **bounded context**; mở rộng feature ưu tiên giữ l
 - `handler/`, `service/`, `router/` (nếu có HTTP)
 - `models/` hoặc dùng `models/mongodb/`
 - **`datachanged/`** — chỉ **enqueue job miền** hoặc **gọi service mỏng**; không đóng vai trò orchestrator toàn hệ
+
+### Meta job miền — đồng bộ envelope bus AID
+
+Các collection job nặng của nhóm D (`crm_intel_compute`, `cix_intel_compute`, `order_intel_compute`, `ads_intel_compute`, `crm_pending_merge`, …) có thể lưu thêm **bản sao envelope** và **vai trò** (`eventType`, `eventSource`, `pipelineStage`, `ownerDomain`, `processorDomain`, `enqueueSourceDomain`, `e2eStage`, `e2eStepId`) — một nguồn helper: `aidecision/crmqueue/domain_queue_bus.go`. Mục đích: khi **gộp tra cứu / warehouse** một nguồn, vẫn lọc được bus vs miền, ai enqueue vs ai chạy worker. Chi tiết bảng field và quy ước: [bang-pha-buoc-event-e2e.md — §1.4](../flows/bang-pha-buoc-event-e2e.md#14-meta-trên-document-job-hàng-đợi-miền-đồng-bộ-bus--chuẩn-gộp-một-nguồn).
 
 ---
 

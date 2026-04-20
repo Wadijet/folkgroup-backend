@@ -57,7 +57,7 @@ func applyBusinessDomainLabelVi(ev *DecisionLiveEvent) {
 	}
 	code := strings.TrimSpace(ev.BusinessDomain)
 	if code == "" {
-		ev.BusinessDomainLabelVi = "Chưa rõ module"
+		ev.BusinessDomainLabelVi = eventtypes.ResolveLiveBusinessDomainLabelVi("")
 		return
 	}
 	ev.BusinessDomainLabelVi = businessDomainDisplayLabelVi(code)
@@ -65,42 +65,7 @@ func applyBusinessDomainLabelVi(ev *DecisionLiveEvent) {
 
 // businessDomainDisplayLabelVi — «Tên đọc được (mã kỹ thuật)» để UI không phụ thuộc map cứng phía client.
 func businessDomainDisplayLabelVi(code string) string {
-	switch strings.ToLower(strings.TrimSpace(code)) {
-	case BusinessDomainCIO:
-		return "CIO (cio)"
-	case BusinessDomainPC:
-		return "Pancake / POS (pc)"
-	case BusinessDomainFB:
-		return "Facebook (fb)"
-	case BusinessDomainWebhook:
-		return "Webhook (webhook)"
-	case BusinessDomainMeta:
-		return "Meta (meta)"
-	case BusinessDomainAds:
-		return "Ads (ads)"
-	case BusinessDomainCRM:
-		return "CRM (crm)"
-	case BusinessDomainOrder:
-		return "Đơn hàng (order)"
-	case BusinessDomainConversation:
-		return "Hội thoại (conversation)"
-	case BusinessDomainCIX:
-		return "CIX (cix)"
-	case BusinessDomainReport:
-		return "Báo cáo (report)"
-	case BusinessDomainNotification:
-		return "Thông báo (notification)"
-	case BusinessDomainAIDecision:
-		return "AI Decision (aidecision)"
-	case BusinessDomainExecutor:
-		return "Executor (executor)"
-	case BusinessDomainLearning:
-		return "Learning (learning)"
-	case BusinessDomainUnknown:
-		return "Chưa rõ module (unknown)"
-	default:
-		return code
-	}
+	return eventtypes.ResolveLiveBusinessDomainLabelVi(code)
 }
 
 func normalizeBusinessDomainCode(s string) string {

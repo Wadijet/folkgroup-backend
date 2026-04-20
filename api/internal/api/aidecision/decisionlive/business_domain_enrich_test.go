@@ -18,7 +18,7 @@ func TestEnrichLiveBusinessDomain_IntelMergeCRM(t *testing.T) {
 	if ev.BusinessDomain != BusinessDomainCRM {
 		t.Fatalf("got %q", ev.BusinessDomain)
 	}
-	if ev.BusinessDomainLabelVi != "CRM (crm)" {
+	if ev.BusinessDomainLabelVi != eventtypes.ResolveLiveBusinessDomainLabelVi(BusinessDomainCRM) {
 		t.Fatalf("label got %q", ev.BusinessDomainLabelVi)
 	}
 }
@@ -37,7 +37,7 @@ func TestEnrichLiveBusinessDomain_QueueCrmRecompute(t *testing.T) {
 	if ev.BusinessDomain != BusinessDomainAIDecision {
 		t.Fatalf("got %q want aidecision (consumer decision_events_queue)", ev.BusinessDomain)
 	}
-	if ev.BusinessDomainLabelVi != "AI Decision (aidecision)" {
+	if ev.BusinessDomainLabelVi != eventtypes.ResolveLiveBusinessDomainLabelVi(BusinessDomainAIDecision) {
 		t.Fatalf("label got %q", ev.BusinessDomainLabelVi)
 	}
 }
@@ -55,7 +55,7 @@ func TestEnrichLiveBusinessDomain_PosSync(t *testing.T) {
 	if ev.BusinessDomain != BusinessDomainAIDecision {
 		t.Fatalf("got %q want aidecision (consumer decision_events_queue)", ev.BusinessDomain)
 	}
-	if ev.BusinessDomainLabelVi != "AI Decision (aidecision)" {
+	if ev.BusinessDomainLabelVi != eventtypes.ResolveLiveBusinessDomainLabelVi(BusinessDomainAIDecision) {
 		t.Fatalf("label got %q", ev.BusinessDomainLabelVi)
 	}
 }
@@ -68,7 +68,7 @@ func TestEnrichLiveBusinessDomain_RefsOverride(t *testing.T) {
 	if ev.BusinessDomain != BusinessDomainOrder {
 		t.Fatalf("got %q", ev.BusinessDomain)
 	}
-	if ev.BusinessDomainLabelVi != "Đơn hàng (order)" {
+	if ev.BusinessDomainLabelVi != eventtypes.ResolveLiveBusinessDomainLabelVi(BusinessDomainOrder) {
 		t.Fatalf("label got %q", ev.BusinessDomainLabelVi)
 	}
 }
@@ -80,7 +80,7 @@ func TestEnrichLiveBusinessDomain_ExecutePipeline(t *testing.T) {
 	if ev.BusinessDomain != BusinessDomainAIDecision {
 		t.Fatalf("got %q", ev.BusinessDomain)
 	}
-	if ev.BusinessDomainLabelVi != "AI Decision (aidecision)" {
+	if ev.BusinessDomainLabelVi != eventtypes.ResolveLiveBusinessDomainLabelVi(BusinessDomainAIDecision) {
 		t.Fatalf("label got %q", ev.BusinessDomainLabelVi)
 	}
 }

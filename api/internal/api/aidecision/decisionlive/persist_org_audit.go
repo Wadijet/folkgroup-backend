@@ -7,53 +7,12 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"meta_commerce/internal/api/aidecision/eventtypes"
 )
 
 // phaseLabelVi nhãn giai đoạn thân thiện UI (Tiếng Việt).
 func phaseLabelVi(phase string) string {
-	switch strings.TrimSpace(phase) {
-	case PhaseQueued:
-		return "Đang chờ tới lượt xử lý"
-	case PhaseConsuming:
-		return "Đang phân tích và đưa ra gợi ý"
-	case PhaseSkipped:
-		return "Không cần xử lý thêm"
-	case PhaseParse:
-		return "Đang đọc gợi ý từ hội thoại"
-	case PhaseLLM:
-		return "Đang tinh chỉnh bằng AI"
-	case PhaseDecision:
-		return "Đang chọn hướng xử lý"
-	case PhasePolicy:
-		return "Đang phân loại cần duyệt hay tự động"
-	case PhasePropose:
-		return "Đang tạo đề xuất hoặc việc cần làm"
-	case PhaseEmpty:
-		return "Không có việc cần làm tiếp"
-	case PhaseDone:
-		return "Đã xong"
-	case PhaseError:
-		return "Có lỗi xảy ra"
-	case PhaseQueueProcessing:
-		return "Hệ thống vừa nhận việc"
-	case PhaseQueueDone:
-		return "Đã xử lý xong việc này"
-	case PhaseQueueError:
-		return "Xử lý gặp lỗi"
-	case PhaseDatachangedEffects:
-		return "Đang đồng bộ sau khi bạn lưu dữ liệu"
-	case PhaseOrchestrate:
-		return "Đang sắp xếp hồ sơ xử lý"
-	case PhaseCixIntegrated:
-		return "Đã có phân tích hội thoại mới"
-	case PhaseExecuteReady:
-		return "Đã đủ thông tin để đưa ra gợi ý"
-	default:
-		if phase == "" {
-			return "Bước luồng"
-		}
-		return phase
-	}
+	return eventtypes.ResolveLivePhaseLabelVi(phase)
 }
 
 func stepKindFromEvent(ev DecisionLiveEvent) string {
@@ -150,46 +109,46 @@ func mergeAuditRefsForPersist(ev DecisionLiveEvent) map[string]string {
 func BuildOrgLivePersistDocument(ownerOrgID primitive.ObjectID, docID primitive.ObjectID, createdAt int64, ev DecisionLiveEvent) bson.M {
 	payload := mustMarshalPayload(ev)
 	return bson.M{
-		"_id":                 docID,
+		"_id":                   docID,
 		"ownerOrganizationId":   ownerOrgID,
-		"createdAt":           createdAt,
+		"createdAt":             createdAt,
 		"docSchemaVersion":      2,
-		"traceId":             ev.TraceID,
-		"w3cTraceId":          ev.W3CTraceID,
-		"spanId":              ev.SpanID,
-		"parentSpanId":        ev.ParentSpanID,
-		"correlationId":       ev.CorrelationID,
-		"decisionCaseId":      ev.DecisionCaseID,
-		"phase":               ev.Phase,
-		"phaseLabelVi":        firstNonEmpty(strings.TrimSpace(ev.PhaseLabelVi), phaseLabelVi(ev.Phase)),
-		"severity":            ev.Severity,
-		"seq":                 ev.Seq,
-		"feedSeq":             ev.FeedSeq,
-		"stream":              ev.Stream,
-		"sourceKind":          ev.SourceKind,
-		"sourceTitle":         ev.SourceTitle,
+		"traceId":               ev.TraceID,
+		"w3cTraceId":            ev.W3CTraceID,
+		"spanId":                ev.SpanID,
+		"parentSpanId":          ev.ParentSpanID,
+		"correlationId":         ev.CorrelationID,
+		"decisionCaseId":        ev.DecisionCaseID,
+		"phase":                 ev.Phase,
+		"phaseLabelVi":          firstNonEmpty(strings.TrimSpace(ev.PhaseLabelVi), phaseLabelVi(ev.Phase)),
+		"severity":              ev.Severity,
+		"seq":                   ev.Seq,
+		"feedSeq":               ev.FeedSeq,
+		"stream":                ev.Stream,
+		"sourceKind":            ev.SourceKind,
+		"sourceTitle":           ev.SourceTitle,
 		"feedSourceCategory":    ev.FeedSourceCategory,
 		"feedSourceLabelVi":     ev.FeedSourceLabelVi,
 		"businessDomain":        strings.TrimSpace(ev.BusinessDomain),
 		"businessDomainLabelVi": strings.TrimSpace(ev.BusinessDomainLabelVi),
 		"opsTier":               ev.OpsTier,
 		"opsTierLabelVi":        ev.OpsTierLabelVi,
-		"decisionMode":        ev.DecisionMode,
-		"uiTitle":             firstNonEmpty(strings.TrimSpace(ev.UiTitle), uiTitleForLiveEvent(ev)),
-		"uiSummary":           firstNonEmpty(strings.TrimSpace(ev.UiSummary), strings.TrimSpace(firstNonEmpty(ev.Summary, ev.ReasoningSummary))),
-		"stepKind":            stepKindFromEvent(ev),
-		"stepTitle":           stepTitleFromEvent(ev),
-		"e2eStage":            strings.TrimSpace(ev.E2EStage),
-		"e2eStepId":           strings.TrimSpace(ev.E2EStepID),
-		"e2eStepLabelVi":      strings.TrimSpace(ev.E2EStepLabelVi),
-		"outcomeKind":         strings.TrimSpace(ev.OutcomeKind),
-		"outcomeAbnormal":     ev.OutcomeAbnormal,
-		"outcomeLabelVi":      strings.TrimSpace(ev.OutcomeLabelVi),
-		"refs":                mergeAuditRefsForPersist(ev),
-		"detailBullets":       ev.DetailBullets,
-		"detailSections":      detailSectionsToBSON(ev.DetailSections),
-		"processTrace":        processTraceToBSON(ev.ProcessTrace),
-		"payload":             payload,
+		"decisionMode":          ev.DecisionMode,
+		"uiTitle":               firstNonEmpty(strings.TrimSpace(ev.UiTitle), uiTitleForLiveEvent(ev)),
+		"uiSummary":             firstNonEmpty(strings.TrimSpace(ev.UiSummary), strings.TrimSpace(firstNonEmpty(ev.Summary, ev.ReasoningSummary))),
+		"stepKind":              stepKindFromEvent(ev),
+		"stepTitle":             stepTitleFromEvent(ev),
+		"e2eStage":              strings.TrimSpace(ev.E2EStage),
+		"e2eStepId":             strings.TrimSpace(ev.E2EStepID),
+		"e2eStepLabelVi":        strings.TrimSpace(ev.E2EStepLabelVi),
+		"outcomeKind":           strings.TrimSpace(ev.OutcomeKind),
+		"outcomeAbnormal":       ev.OutcomeAbnormal,
+		"outcomeLabelVi":        strings.TrimSpace(ev.OutcomeLabelVi),
+		"refs":                  mergeAuditRefsForPersist(ev),
+		"detailBullets":         ev.DetailBullets,
+		"detailSections":        detailSectionsToBSON(ev.DetailSections),
+		"processTrace":          processTraceToBSON(ev.ProcessTrace),
+		"payload":               payload,
 	}
 }
 

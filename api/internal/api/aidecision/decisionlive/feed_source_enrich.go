@@ -21,25 +21,8 @@ const (
 	FeedSourceOther        = "other"        // Khác
 )
 
-var feedSourceLabelVi = map[string]string{
-	FeedSourceConversation: "Hội thoại",
-	FeedSourceOrder:        "Đơn hàng",
-	FeedSourceDecision:     "Quyết định",
-	FeedSourceIntel:        "Chuẩn bị intel",
-	FeedSourceAds:          "Ads",
-	FeedSourceMetaSync:     "Đồng bộ Meta",
-	FeedSourcePosSync:      "Đồng bộ POS",
-	FeedSourceCrm:          "CRM",
-	FeedSourceWebhook:      "Webhook",
-	FeedSourceQueue:        "Hàng đợi",
-	FeedSourceOther:        "Khác",
-}
-
 func labelFeedSource(cat string) string {
-	if s, ok := feedSourceLabelVi[cat]; ok {
-		return s
-	}
-	return feedSourceLabelVi[FeedSourceOther]
+	return eventtypes.ResolveLiveFeedSourceLabelVi(cat)
 }
 
 // applySourceKindForFeedCategory ghi đè sourceKind bằng nhóm nguồn hiển thị.

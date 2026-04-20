@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"meta_commerce/internal/api/aidecision/eventtypes"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"meta_commerce/internal/api/aidecision/eventtypes"
 )
 
 const (
@@ -197,8 +197,18 @@ func enrichPublishE2ERef(ev *DecisionLiveEvent) {
 	}
 }
 
-// resolveE2ERefForPublish — ưu tiên envelope queue (refs), sau đó phase engine.
+// resolveE2ERefForPublish — bám §5.3 / E2ELivePhaseCatalog: nếu field phase map được một bước catalog đầy đủ (stageId + stepId), ưu tiên ResolveE2EForLivePhase; ngược lại mới dùng envelope queue trong Refs (eventType…), cuối cùng lại phase (nhãn thiếu map / phase rỗng).
 func resolveE2ERefForPublish(ev *DecisionLiveEvent) eventtypes.E2ERef {
+	if ev == nil {
+		return eventtypes.E2ERef{}
+	}
+	phase := strings.TrimSpace(ev.Phase)
+	if phase != "" {
+		liveRef := eventtypes.ResolveE2EForLivePhase(phase)
+		if liveRef.Stage != "" && liveRef.StepID != "" {
+			return liveRef
+		}
+	}
 	if ev.Refs != nil {
 		et := strings.TrimSpace(ev.Refs["eventType"])
 		if et != "" {
@@ -208,28 +218,19 @@ func resolveE2ERefForPublish(ev *DecisionLiveEvent) eventtypes.E2ERef {
 			}
 		}
 	}
-	return eventtypes.ResolveE2EForLivePhase(ev.Phase)
+	return eventtypes.ResolveE2EForLivePhase(phase)
 }
 
 func detailBulletsHaveE2EPrefix(bullets []string) bool {
 	if len(bullets) == 0 {
 		return false
 	}
-	first := strings.TrimSpace(bullets[0])
-	return strings.HasPrefix(first, "E2E:") || strings.HasPrefix(first, "E2E ") ||
-		strings.Contains(first, "Tham chiếu E2E") || strings.HasPrefix(first, "Trong quy trình:")
+	return eventtypes.IsLiveDetailBulletE2ENarrative(bullets[0])
 }
 
 // prependE2EPublishNarrative chèn một dòng ngắn (Gx-Syy + nhãn) thân thiện người dùng; mã E2E vẫn nằm trong refs/e2e*.
 func prependE2EPublishNarrative(bullets []string, ref eventtypes.E2ERef) []string {
-	line := "Trong quy trình"
-	if ref.StepID != "" {
-		line += ": " + ref.StepID
-	}
-	if ref.LabelVi != "" {
-		line += " — " + ref.LabelVi
-	}
-	line += "."
+	line := eventtypes.ResolveLiveE2EPublishNarrative(ref)
 	return append([]string{line}, bullets...)
 }
 

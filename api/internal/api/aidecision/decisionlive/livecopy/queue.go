@@ -137,59 +137,51 @@ func isDatachangedCustomerMirrorOnly(evt *aidecisionmodels.DecisionEvent) bool {
 }
 
 func queueSummaryForMilestone(ms QueueMilestone, dn DomainNarrative, evt *aidecisionmodels.DecisionEvent, processErr error) (phase, severity, summary, reasoningSummary string) {
-	reasoningSummary = dn.BusinessOneLine
+	mileKey := queueMilestoneToE2EKey(ms)
+	frame := PublishCatalogUserViForQueueConsumerMilestone(evt, mileKey)
+	reasoningSummary = frame
+	var situation string
+	if evt != nil {
+		if fl := queueFriendlyEventLabel(evt); fl != "" {
+			situation = "Loại: " + fl
+		}
+	}
 	switch ms {
 	case QueueMilestoneProcessingStart:
 		phase = decisionlive.PhaseQueueProcessing
 		severity = decisionlive.SeverityInfo
-		// Không tiền tố G2 ở summary: neo G2-Sxx nằm ở DetailBullets (Publish/enrichPublishE2ERef) + e2e*.
-		summary = fmt.Sprintf("Đang bắt đầu: %s", dn.StepTitle)
-		reasoningSummary = dn.BusinessOneLine
 	case QueueMilestoneDatachangedDone:
 		phase = decisionlive.PhaseDatachangedEffects
 		severity = decisionlive.SeverityInfo
 		if isDatachangedCustomerMirrorOnly(evt) {
-			summary = fmt.Sprintf("Đã đồng bộ %s — không cần bước tự động thêm trên trợ lý.", queueFriendlyEventLabel(evt))
-			reasoningSummary = dn.BusinessOneLine
-		} else {
-			summary = fmt.Sprintf("Đã đồng bộ sau khi lưu dữ liệu — tiếp tục: %s", dn.StepTitle)
-			reasoningSummary = dn.BusinessOneLine
+			situation = PublishWithSituation(situation, "mirror khách — không thêm handler consumer")
 		}
 	case QueueMilestoneHandlerDone:
 		phase = decisionlive.PhaseQueueDone
 		severity = decisionlive.SeverityInfo
-		summary = fmt.Sprintf("Đã xử lý xong: %s", dn.StepTitle)
-		reasoningSummary = dn.BusinessOneLine
 	case QueueMilestoneHandlerError:
 		phase = decisionlive.PhaseQueueError
 		severity = decisionlive.SeverityError
-		errStr := ""
 		if processErr != nil {
-			errStr = truncateRunes(processErr.Error(), maxQueueErrRunes)
+			situation = PublishWithSituation(situation, truncateRunes(processErr.Error(), maxQueueErrRunes))
 		}
-		summary = fmt.Sprintf("Không xử lý được «%s»: %s", dn.StepTitle, errStr)
-		reasoningSummary = dn.BusinessOneLine
 	case QueueMilestoneRoutingSkipped:
 		phase = decisionlive.PhaseSkipped
 		severity = decisionlive.SeverityInfo
-		summary = fmt.Sprintf("Đã bỏ qua theo cài đặt — «%s»", dn.StepTitle)
-		reasoningSummary = dn.BusinessOneLine
 	case QueueMilestoneNoHandler:
 		phase = decisionlive.PhaseSkipped
 		if isDatachangedCustomerMirrorOnly(evt) {
 			severity = decisionlive.SeverityInfo
-			summary = fmt.Sprintf("Chỉ cần đồng bộ — %s", queueFriendlyEventLabel(evt))
-			reasoningSummary = dn.BusinessOneLine
+			situation = PublishWithSituation(situation, "mirror khách — chỉ đồng bộ")
 		} else {
 			severity = decisionlive.SeverityWarn
-			summary = fmt.Sprintf("Chưa hỗ trợ loại cập nhật này — %s", queueFriendlyEventLabel(evt))
-			reasoningSummary = dn.BusinessOneLine
+			situation = PublishWithSituation(situation, "chưa có handler")
 		}
 	default:
 		phase = decisionlive.PhaseQueueProcessing
 		severity = decisionlive.SeverityInfo
-		summary = dn.StepTitle
 	}
+	summary = PublishWithSituation(frame, strings.TrimSpace(situation))
 	return phase, severity, summary, reasoningSummary
 }
 
@@ -203,108 +195,23 @@ func queueFriendlyEventLabel(evt *aidecisionmodels.DecisionEvent) string {
 	if evt == nil {
 		return ""
 	}
-	et := strings.TrimSpace(evt.EventType)
-	switch et {
-	case eventtypes.OrderChanged, eventtypes.OrderInserted, eventtypes.OrderUpdated:
-		return "Đơn hàng"
-	case eventtypes.OrderIntelRecomputed:
-		return "Phân tích đơn"
-	case eventtypes.ConversationChanged, eventtypes.MessageChanged,
-		eventtypes.ConversationInserted, eventtypes.ConversationUpdated, eventtypes.MessageInserted, eventtypes.MessageUpdated:
-		return "Hội thoại / tin nhắn"
-	case eventtypes.ConversationMessageInserted, eventtypes.MessageBatchReady:
-		return "Tin nhắn (gom lô)"
-	case eventtypes.CustomerContextReady:
-		return "Thông tin khách"
-	case eventtypes.CrmIntelRecomputed:
-		return "Phân tích khách"
-	case eventtypes.CixIntelRecomputed:
-		return "Phân tích hội thoại"
-	case eventtypes.CampaignIntelRecomputed, eventtypes.MetaCampaignChanged, eventtypes.MetaCampaignInserted, eventtypes.MetaCampaignUpdated:
-		return "Quảng cáo / chiến dịch"
-	case eventtypes.AdsContextRequested, eventtypes.AdsContextReady:
-		return "Ngữ cảnh quảng cáo"
-	case eventtypes.CrmIntelligenceComputeRequested, eventtypes.CrmIntelligenceRecomputeRequested:
-		return "Cập nhật chỉ số khách"
-	case eventtypes.PosCustomerInserted, eventtypes.PosCustomerUpdated:
-		return "Khách hàng POS"
-	case eventtypes.FbCustomerInserted, eventtypes.FbCustomerUpdated:
-		return "Khách hàng Facebook"
-	case eventtypes.CrmCustomerInserted, eventtypes.CrmCustomerUpdated:
-		return "Khách hàng (đã gộp dữ liệu)"
-	default:
-		if et != "" {
-			return "Cập nhật tự động"
-		}
-		return "Cập nhật hệ thống"
-	}
+	return eventtypes.ResolveLiveQueueEventTypeLabelVi(evt.EventType)
 }
 
 func queueStructuredBullets(evt *aidecisionmodels.DecisionEvent, ms QueueMilestone, dn DomainNarrative, processErr error) []string {
 	var parts []string
-	switch ms {
-	case QueueMilestoneProcessingStart:
-		if evt != nil && eventtypes.IsL1DatachangedEventSource(evt.EventSource) {
-			parts = append(parts, fmt.Sprintf("«%s» — sau khi lưu dữ liệu, hệ thống đồng bộ rồi chuyển bước tiếp.", dn.StepTitle))
-		} else {
-			parts = append(parts, fmt.Sprintf("«%s» — hệ thống đang chuyển tới bước xử lý phù hợp.", dn.StepTitle))
-		}
-	case QueueMilestoneDatachangedDone:
-		if isDatachangedCustomerMirrorOnly(evt) {
-			parts = append(parts, fmt.Sprintf("Đã đồng bộ %s — không cần thêm bước tự động trên trợ lý.", queueFriendlyEventLabel(evt)))
-		} else {
-			parts = append(parts, fmt.Sprintf("Đã đồng bộ xong — tiếp tục với «%s».", dn.StepTitle))
-		}
-	default:
-		switch ms {
-		case QueueMilestoneHandlerDone:
-			parts = append(parts, fmt.Sprintf("Đã hoàn tất «%s».", dn.StepTitle))
-		case QueueMilestoneHandlerError:
-			line := fmt.Sprintf("Gặp sự cố khi xử lý «%s».", dn.StepTitle)
-			if processErr != nil {
-				line += " " + truncateRunes(processErr.Error(), 180)
-			}
-			parts = append(parts, line)
-		case QueueMilestoneRoutingSkipped:
-			parts = append(parts, fmt.Sprintf("Theo cài đặt, bỏ qua bước tự động cho «%s».", dn.StepTitle))
-		case QueueMilestoneNoHandler:
-			if isDatachangedCustomerMirrorOnly(evt) {
-				parts = append(parts, fmt.Sprintf("Với %s chỉ cần đồng bộ dữ liệu — không có thêm bước trợ lý.", queueFriendlyEventLabel(evt)))
-			} else {
-				parts = append(parts, fmt.Sprintf("Loại cập nhật «%s» chưa được hỗ trợ tự động.", queueFriendlyEventLabel(evt)))
-			}
-		default:
-			parts = append(parts, dn.StepTitle)
-		}
-	}
 	if len(dn.EntityBullets) > 0 {
 		parts = append(parts, dn.EntityBullets...)
+	}
+	if ms == QueueMilestoneHandlerError && processErr != nil {
+		parts = append(parts, truncateRunes(processErr.Error(), 180))
 	}
 	return parts
 }
 
-// queueE2EPositionAuditLine — mốc timeline này map bước E2E nào (để audit đối chiếu bang-pha-buoc-event-e2e).
+// queueE2EPositionAuditLine — một dòng khung §5.3 (mốc consumer G2 theo milestone).
 func queueE2EPositionAuditLine(ms QueueMilestone, evt *aidecisionmodels.DecisionEvent) string {
-	// Một dòng neo với luồng G2 trong docs/flows/bang-pha-buoc-event-e2e (consumer queue).
-	switch ms {
-	case QueueMilestoneProcessingStart:
-		return "G2 — nhận job từ hàng đợi nội bộ; bắt đầu xử lý."
-	case QueueMilestoneDatachangedDone:
-		if evt != nil && isDatachangedCustomerMirrorOnly(evt) {
-			return "G2 — đồng bộ mirror khách xong; thường không còn handler trên consumer."
-		}
-		return "G2 — đồng bộ sau lưu xong; tiếp routing/handler nếu có."
-	case QueueMilestoneHandlerDone:
-		return "G2 — handler nghiệp vụ chạy xong."
-	case QueueMilestoneHandlerError:
-		return "G2 — lỗi handler; có thể retry; gửi hỗ trợ kèm mã việc/trace."
-	case QueueMilestoneRoutingSkipped:
-		return "G2 — routing bỏ qua handler (theo cấu hình)."
-	case QueueMilestoneNoHandler:
-		return "G2 — chưa có handler cho loại sự kiện (có thể bổ sung sau)."
-	default:
-		return "Các mốc cùng traceId xếp theo thời gian."
-	}
+	return PublishCatalogUserViForQueueConsumerMilestone(evt, queueMilestoneToE2EKey(ms))
 }
 
 func queueDetailSectionTechnicalTitle() string {

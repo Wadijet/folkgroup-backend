@@ -10,22 +10,25 @@ import (
 
 // DomainNarrative mô tả nghiệp vụ cố định theo loại sự kiện queue (tiếng Việt).
 type DomainNarrative struct {
-	StepTitle       string   // Tiêu đề bước (TraceStep.Title)
-	BusinessOneLine string   // Một dòng bối cảnh nghiệp vụ (ReasoningSummary / Step.Reasoning)
-	EntityBullets   []string // Gạch đầu dòng tham chiếu entity (không trùng eventId)
+	StepTitle       string   // Tiêu đề bước (TraceStep.Title) — khung từ catalog §5.3 (descriptionUserVi) theo bước E2E đã resolve
+	BusinessOneLine string   // Một dòng bối cảnh (ReasoningSummary) — cùng khung catalog; chi tiết tình huống ở EntityBullets
+	EntityBullets   []string // Gạch đầu dòng tham chiếu entity / bối cảnh cụ thể (không trùng eventId)
 }
 
 // DomainNarrativeFromQueueEvent trích narrative từ envelope decision_events_queue.
+// Khung chữ (StepTitle, BusinessOneLine) lấy từ luồng chuẩn §5.3 / E2EStepCatalog (descriptionUserVi) qua resolver; switch chỉ bổ sung phần cụ thể (entity, gạch đầu dòng).
 func DomainNarrativeFromQueueEvent(evt *aidecisionmodels.DecisionEvent) DomainNarrative {
-	out := DomainNarrative{
-		StepTitle:       "Đang xử lý tự động",
-		BusinessOneLine: "Hệ thống đã nhận một cập nhật và sẽ xử lý theo đúng loại thông tin.",
-	}
+	var out DomainNarrative
 	if evt == nil {
+		out.StepTitle = "Thiếu thông tin sự kiện"
+		out.BusinessOneLine = "Không có bản ghi job hàng đợi để mô tả."
 		return out
 	}
 	et := strings.TrimSpace(evt.EventType)
 	src := strings.TrimSpace(evt.EventSource)
+	ps := strings.TrimSpace(evt.PipelineStage)
+	applyQueueNarrativeCatalogFramework(&out, et, src, ps)
+
 	p := evt.Payload
 	campaignID := strFromPayload(p, "campaignId", "campaign_id")
 	adAccountID := strFromPayload(p, "adAccountId", "ad_account_id")
@@ -36,8 +39,6 @@ func DomainNarrativeFromQueueEvent(evt *aidecisionmodels.DecisionEvent) DomainNa
 
 	switch et {
 	case eventtypes.CampaignIntelRecomputed:
-		out.StepTitle = "Số liệu quảng cáo vừa được làm mới"
-		out.BusinessOneLine = "Bức tranh chiến dịch vừa được cập nhật; tiếp theo có thể có gợi ý tối ưu nếu phù hợp."
 		if campaignID != "" {
 			out.EntityBullets = append(out.EntityBullets, "Chiến dịch: "+campaignID)
 		}
@@ -45,14 +46,10 @@ func DomainNarrativeFromQueueEvent(evt *aidecisionmodels.DecisionEvent) DomainNa
 			out.EntityBullets = append(out.EntityBullets, "Tài khoản quảng cáo: "+adAccountID)
 		}
 	case eventtypes.CrmIntelRecomputed:
-		out.StepTitle = "Thông tin khách hàng vừa được làm mới"
-		out.BusinessOneLine = "Hệ thống vừa cập nhật bức tranh khách; có thể có gợi ý tiếp theo khi đủ dữ liệu."
 		if u := strFromPayload(p, "unifiedId", "unified_id"); u != "" {
 			out.EntityBullets = append(out.EntityBullets, "Khách (unified): "+u)
 		}
 	case eventtypes.OrderIntelRecomputed:
-		out.StepTitle = "Thông tin đơn hàng vừa được làm mới"
-		out.BusinessOneLine = "Tóm tắt đơn (trạng thái, rủi ro nếu có) đã cập nhật để các bước sau dùng số mới nhất."
 		if orderID != "" {
 			out.EntityBullets = append(out.EntityBullets, "Đơn: "+orderID)
 		}
@@ -60,14 +57,10 @@ func DomainNarrativeFromQueueEvent(evt *aidecisionmodels.DecisionEvent) DomainNa
 			out.EntityBullets = append(out.EntityBullets, "Hội thoại: "+convID)
 		}
 	case eventtypes.CixIntelRecomputed:
-		out.StepTitle = "Phân tích hội thoại đã xong"
-		out.BusinessOneLine = "Hệ thống đã đọc ý nghĩa tin nhắn; có thể cập nhật hồ sơ và gợi ý việc tiếp theo."
 		if convID != "" {
 			out.EntityBullets = append(out.EntityBullets, "Hội thoại: "+convID)
 		}
 	case eventtypes.MetaCampaignChanged, eventtypes.MetaCampaignInserted, eventtypes.MetaCampaignUpdated:
-		out.StepTitle = "Đồng bộ chiến dịch quảng cáo (Meta)"
-		out.BusinessOneLine = "Cập nhật thông tin chiến dịch từ Meta; có thể dùng cho báo cáo và gợi ý tối ưu."
 		if campaignID != "" {
 			out.EntityBullets = append(out.EntityBullets, "Chiến dịch: "+campaignID)
 		}
@@ -75,25 +68,17 @@ func DomainNarrativeFromQueueEvent(evt *aidecisionmodels.DecisionEvent) DomainNa
 			out.EntityBullets = append(out.EntityBullets, "Tài khoản quảng cáo: "+adAccountID)
 		}
 	case eventtypes.AdsContextRequested:
-		out.StepTitle = "Đang thu thập số liệu quảng cáo"
-		out.BusinessOneLine = "Hệ thống đang gom số liệu chiến dịch để đánh giá và gợi ý nếu cần."
 		if campaignID != "" {
 			out.EntityBullets = append(out.EntityBullets, "Chiến dịch: "+campaignID)
 		}
 	case eventtypes.AdsContextReady:
-		out.StepTitle = "Đã đủ thông tin để gợi ý quảng cáo"
-		out.BusinessOneLine = "Số liệu đã sẵn sàng; hệ thống sẽ đánh giá và tạo gợi ý nếu thấy phù hợp."
 		out.EntityBullets = append(out.EntityBullets, "Có thể không có gợi ý nếu chưa đạt điều kiện.")
 	case eventtypes.OrderChanged, eventtypes.OrderInserted, eventtypes.OrderUpdated:
-		out.StepTitle = "Thay đổi đơn hàng"
-		out.BusinessOneLine = "Đơn mới hoặc vừa sửa; có thể cập nhật cảnh báo và theo dõi rủi ro."
 		if orderID != "" {
 			out.EntityBullets = append(out.EntityBullets, "Đơn: "+orderID)
 		}
 	case eventtypes.ConversationChanged, eventtypes.MessageChanged,
 		eventtypes.ConversationInserted, eventtypes.ConversationUpdated, eventtypes.MessageInserted, eventtypes.MessageUpdated:
-		out.StepTitle = "Có tin nhắn hoặc hội thoại mới"
-		out.BusinessOneLine = "Sau khi bạn lưu tin nhắn, hệ thống sẽ đồng bộ và có thể phân tích, gợi ý trả lời hoặc việc cần làm."
 		if convID != "" {
 			out.EntityBullets = append(out.EntityBullets, "Hội thoại: "+convID)
 		}
@@ -101,45 +86,18 @@ func DomainNarrativeFromQueueEvent(evt *aidecisionmodels.DecisionEvent) DomainNa
 			out.EntityBullets = append(out.EntityBullets, "Khách: "+custID)
 		}
 	case eventtypes.ConversationMessageInserted, eventtypes.MessageBatchReady:
-		out.StepTitle = "Đang gom tin nhắn để phân tích"
-		out.BusinessOneLine = "Hệ thống đang chuẩn bị nhóm tin nhắn trước khi phân tích sâu."
 		if convID != "" {
 			out.EntityBullets = append(out.EntityBullets, "Hội thoại: "+convID)
 		}
 	case eventtypes.CustomerContextReady:
-		out.StepTitle = "Thông tin khách đã đủ"
-		out.BusinessOneLine = "Đủ thông tin khách để kết hợp với phân tích và quyết định."
 		if custID != "" {
 			out.EntityBullets = append(out.EntityBullets, "Khách: "+custID)
 		}
 	case eventtypes.ExecutorProposeRequested, eventtypes.AdsProposeRequested:
-		out.StepTitle = "Tạo đề xuất chờ duyệt"
-		out.BusinessOneLine = "Đưa gợi ý vào bước duyệt hoặc thực hiện."
 		out.EntityBullets = append(out.EntityBullets, "Bước sau: duyệt / thực hiện trên hệ thống.")
-	case eventtypes.PosVariationUpdated, eventtypes.PosProductUpdated, eventtypes.PosCustomerUpdated, eventtypes.PosShopUpdated, eventtypes.PosWarehouseUpdated:
-		out.StepTitle = "Đồng bộ POS / kho / sản phẩm"
-		out.BusinessOneLine = "Dữ liệu cửa hàng hoặc kho thay đổi; có thể cập nhật báo cáo liên quan."
-	case eventtypes.MetaAdUpdated, eventtypes.MetaAdsetUpdated, eventtypes.MetaAdInsightUpdated, eventtypes.MetaAdAccountUpdated:
-		out.StepTitle = "Đồng bộ quảng cáo Meta (chi tiết)"
-		out.BusinessOneLine = "Cập nhật quảng cáo hoặc số liệu từ Meta cho báo cáo."
-	case eventtypes.CrmIntelligenceComputeRequested:
-		out.StepTitle = "Yêu cầu cập nhật chỉ số khách"
-		out.BusinessOneLine = "Đã xếp hàng tính lại chỉ số / intelligence gắn với khách hàng."
 	case eventtypes.CrmIntelligenceRecomputeRequested:
-		out.StepTitle = "Yêu cầu làm mới thông tin khách"
-		out.BusinessOneLine = "Hệ thống sẽ tính lại chỉ số khách sau khi dữ liệu thay đổi (có thể gom nhiều lần cập nhật gần nhau)."
 		if u := strFromPayload(p, "unifiedId", "unified_id"); u != "" {
 			out.EntityBullets = append(out.EntityBullets, "Khách (unified): "+u)
-		}
-	default:
-		if strings.HasPrefix(et, "meta_") {
-			out.StepTitle = "Đồng bộ Meta"
-			out.BusinessOneLine = "Cập nhật thông tin liên quan Meta Ads."
-		} else if strings.HasPrefix(et, "pos_") {
-			out.StepTitle = "Đồng bộ POS"
-			out.BusinessOneLine = "Cập nhật dữ liệu cửa hàng hoặc kho."
-		} else {
-			out.BusinessOneLine = "Xử lý theo loại sự kiện đã cấu hình trên hàng đợi."
 		}
 	}
 	if decisionCaseID != "" && !strings.Contains(strings.Join(out.EntityBullets, " "), decisionCaseID) {
@@ -158,6 +116,42 @@ func DomainNarrativeFromQueueEvent(evt *aidecisionmodels.DecisionEvent) DomainNa
 		out.EntityBullets = append(out.EntityBullets, "Nguồn sự kiện: "+srcLabel)
 	}
 	return out
+}
+
+// applyQueueNarrativeCatalogFramework — một khung chữ từ §5.3: descriptionUserVi của bước E2E envelope (ResolveE2EForQueueEnvelope).
+func applyQueueNarrativeCatalogFramework(out *DomainNarrative, eventType, eventSource, pipelineStage string) {
+	if out == nil {
+		return
+	}
+	ref := eventtypes.ResolveE2EForQueueEnvelope(eventType, eventSource, pipelineStage)
+	frame := ""
+	if ref.StepID != "" {
+		frame = eventtypes.E2ECatalogDescriptionUserViForStep(ref.StepID)
+	}
+	if frame == "" && strings.TrimSpace(ref.LabelVi) != "" && !strings.HasPrefix(strings.TrimSpace(ref.LabelVi), "Chưa map E2E") {
+		frame = strings.TrimSpace(ref.LabelVi)
+	}
+	if frame == "" && strings.TrimSpace(eventType) != "" {
+		frame = "Cập nhật trên hàng đợi — " + queueEventTypeDisplayVi(eventType)
+	}
+	if frame == "" {
+		frame = "Việc trên hàng đợi AI Decision"
+	}
+	out.StepTitle = frame
+	out.BusinessOneLine = frame
+}
+
+// queueEventTypeDisplayVi — nhãn ngắn từ eventType khi chưa map catalog (chỉ dễ đọc hơn mã máy).
+func queueEventTypeDisplayVi(eventType string) string {
+	s := strings.TrimSpace(eventType)
+	if s == "" {
+		return ""
+	}
+	s = strings.ReplaceAll(s, ".", " · ")
+	if len(s) > 72 {
+		return s[:69] + "…"
+	}
+	return s
 }
 
 func strFromPayload(p map[string]interface{}, keys ...string) string {

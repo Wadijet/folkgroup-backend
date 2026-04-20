@@ -60,10 +60,10 @@ func (s *AIDecisionService) EmitExecuteRequested(ctx context.Context, req *Execu
 		entityID = "execute"
 	}
 	res, err := s.EmitEvent(ctx, &EmitEventInput{
-		EventType:       EventTypeExecuteRequested,
-		EventSource:     eventtypes.EventSourceAIDecision,
-		PipelineStage:   eventtypes.PipelineStageAIDCoordination,
-		EntityType:      "decision_execution",
+		EventType:     EventTypeExecuteRequested,
+		EventSource:   eventtypes.EventSourceAIDecision,
+		PipelineStage: eventtypes.PipelineStageAIDCoordination,
+		EntityType:    "decision_execution",
 		EntityID:      entityID,
 		OrgID:         orgID,
 		OwnerOrgID:    ownerOrgID,
@@ -77,23 +77,24 @@ func (s *AIDecisionService) EmitExecuteRequested(ctx context.Context, req *Execu
 		return nil, err
 	}
 	sk, st := decisionlive.InferSourceForFeed(req.CIXPayload, req.SessionUid, req.CustomerUid)
-	queuedSummary := "Đã thêm vào hàng đợi; hệ thống sẽ xử lý trong giây lát."
+	// Chỉ phần tình huống — khung catalog §5.3 do livecopy.BuildExecuteQueuedEvent gắn theo phase queued.
+	queuedSummary := ""
 	switch sk {
 	case decisionlive.SourceOrder:
 		if st != "" {
-			queuedSummary = "Có đơn hàng cần quyết định (" + st + "). Đã xếp hàng, đang chờ xử lý."
+			queuedSummary = "Đơn · " + st
 		} else {
-			queuedSummary = "Có đơn hàng cần quyết định. Đã xếp hàng, đang chờ xử lý."
+			queuedSummary = "Đơn hàng cần quyết định"
 		}
 	case decisionlive.SourceConversation:
 		if st != "" {
-			queuedSummary = "Có tin nhắn hoặc tình huống mới (" + st + "). Đã xếp hàng, đang chờ xử lý."
+			queuedSummary = "Hội thoại / tin · " + st
 		} else {
-			queuedSummary = "Có tin nhắn hoặc tình huống mới. Đã xếp hàng, đang chờ xử lý."
+			queuedSummary = "Hội thoại hoặc tin nhắn mới"
 		}
 	default:
 		if st != "" {
-			queuedSummary = "Có yêu cầu xử lý thông minh (" + st + "). Đã xếp hàng, đang chờ xử lý."
+			queuedSummary = "Yêu cầu · " + st
 		}
 	}
 	evQueued := livecopy.BuildExecuteQueuedEvent(sk, st, queuedSummary, decisionCaseID, res.EventID, req.W3CTraceID, req.CorrelationID)
@@ -132,9 +133,9 @@ func (s *AIDecisionService) ProcessExecuteRequestedEvent(ctx context.Context, ev
 	}
 	if req.TraceID != "" {
 		sk, st := decisionlive.InferSourceForFeed(req.CIXPayload, req.SessionUid, req.CustomerUid)
-		sum := "Trợ lý đang đọc tình huống và chuẩn bị gợi ý…"
+		sum := ""
 		if st != "" {
-			sum = "Đang xử lý " + st + " — xem ngữ cảnh và gợi ý việc nên làm tiếp."
+			sum = "Ngữ cảnh nguồn (" + sk + "): " + st
 		}
 		w3cLive := strings.TrimSpace(evt.W3CTraceID)
 		if w3cLive == "" {

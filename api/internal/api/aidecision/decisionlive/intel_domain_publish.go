@@ -4,15 +4,17 @@ package decisionlive
 import (
 	"strings"
 
+	"meta_commerce/internal/api/aidecision/eventtypes"
+
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // Giá trị intelDomain trên Refs (ổn định cho lọc / tài liệu).
 const (
-	IntelDomainCIX       = "cix"
-	IntelDomainCRMIntel  = "customer_intel" // timeline / lọc domain (đồng bộ tiền tố customer_*)
+	IntelDomainCIX        = "cix"
+	IntelDomainCRMIntel   = "customer_intel" // timeline / lọc domain (đồng bộ tiền tố customer_*)
 	IntelDomainOrderIntel = "order_intel"
-	IntelDomainAdsIntel  = "ads_intel"
+	IntelDomainAdsIntel   = "ads_intel"
 	IntelDomainCrmContext = "customer_context"
 	// IntelDomainCrmPendingMerge — worker merge L1→L2 (customer_pending_merge), sau datachanged.
 	IntelDomainCrmPendingMerge = "customer_pending_merge"
@@ -71,13 +73,22 @@ func PublishIntelDomainMilestone(ownerOrgID primitive.ObjectID, traceID, correla
 		refs[k] = v
 	}
 	bullets := detailBullets
-	if len(bullets) == 0 && strings.TrimSpace(summaryVi) != "" {
-		bullets = []string{strings.TrimSpace(summaryVi)}
+	ref := eventtypes.ResolveE2EForLivePhase(phase)
+	frame := eventtypes.E2ECatalogDescriptionUserViForStep(ref.StepID)
+	if strings.TrimSpace(frame) == "" {
+		frame = strings.TrimSpace(ref.LabelVi)
+	}
+	summaryMerged := strings.TrimSpace(summaryVi)
+	if summaryMerged != "" && frame != "" {
+		summaryMerged = frame + " — " + summaryMerged
+	} else if summaryMerged == "" {
+		summaryMerged = frame
 	}
 	ev := DecisionLiveEvent{
 		Phase:              phase,
 		Severity:           sev,
-		Summary:            strings.TrimSpace(summaryVi),
+		Summary:            summaryMerged,
+		ReasoningSummary:   frame,
 		CorrelationID:      strings.TrimSpace(correlationID),
 		SourceKind:         FeedSourceIntel,
 		FeedSourceCategory: FeedSourceIntel,

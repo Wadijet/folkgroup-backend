@@ -18,10 +18,13 @@ func BuildAdsOptimizationLiveEvent(
 	extraRefs map[string]string,
 	campaignID, adAccountID string,
 ) decisionlive.DecisionLiveEvent {
+	frame := PublishCatalogUserViForLivePhase(strings.TrimSpace(phase))
+	if frame == "" {
+		frame = PublishCatalogUserViForLivePhase(decisionlive.PhaseAdsEvaluate)
+	}
 	adsSections := []decisionlive.DecisionLiveDetailSection{
-		{Title: "Thông tin thêm", Items: []string{
-			"Đối chiếu chiến dịch và tài khoản quảng cáo trong phần tham chiếu với dữ liệu đã lưu.",
-			"Nếu cần hỗ trợ, gửi kèm mã luồng (trace) trong sự kiện.",
+		{Title: "Tham chiếu", Items: []string{
+			"Neo catalog: " + frame,
 		}},
 	}
 	outcomeK := decisionlive.OutcomeNominal
@@ -31,11 +34,15 @@ func BuildAdsOptimizationLiveEvent(
 	case decisionlive.SeverityWarn:
 		outcomeK = decisionlive.OutcomeNoActions
 	}
+	sumOut := PublishWithSituation(frame, strings.TrimSpace(summary))
+	if strings.TrimSpace(summary) == "" {
+		sumOut = frame
+	}
 	ev := decisionlive.DecisionLiveEvent{
 		Phase:          phase,
 		Severity:       severity,
 		OutcomeKind:    outcomeK,
-		Summary:        summary,
+		Summary:        sumOut,
 		SourceKind:     decisionlive.FeedSourceAds,
 		SourceTitle:    "Chiến dịch Meta Ads",
 		DetailBullets:  adsMergeStructuredBullets(campaignID, adAccountID, queueEvt, detailBullets),
@@ -46,9 +53,8 @@ func BuildAdsOptimizationLiveEvent(
 		ev.CorrelationID = caseDoc.CorrelationID
 		decisionlive.EnrichLiveEventFromCase(caseDoc.DecisionCaseID, caseDoc.TraceID, &ev)
 	}
-	rs := "Hệ thống đang so sánh số liệu chiến dịch với quy tắc đã cài; nếu phù hợp sẽ có gợi ý để bạn duyệt."
 	if strings.TrimSpace(ev.ReasoningSummary) == "" {
-		ev.ReasoningSummary = rs
+		ev.ReasoningSummary = frame
 	}
 	decisionlive.MergeRefsFromDecisionEnvelope(&ev, queueEvt)
 	if queueEvt != nil && strings.TrimSpace(ev.CorrelationID) == "" {
@@ -57,7 +63,9 @@ func BuildAdsOptimizationLiveEvent(
 	mergeExtraRefsInto(&ev, extraRefs)
 	title := strings.TrimSpace(stepTitle)
 	if title == "" {
-		title = "Tối ưu quảng cáo"
+		title = frame
+	} else {
+		title = PublishWithSituation(frame, title)
 	}
 	ev.Step = &decisionlive.TraceStep{
 		Kind:      "ads_rule",
@@ -68,15 +76,14 @@ func BuildAdsOptimizationLiveEvent(
 }
 
 func adsMergeStructuredBullets(campaignID, adAccountID string, queueEvt *aidecisionmodels.DecisionEvent, detail []string) []string {
-	line := "Đang đánh giá chiến dịch quảng cáo đã lưu theo quy tắc của bạn."
+	var core []string
 	if cid := firstNonEmpty(campaignID, refVal(queueEvt, "campaignId")); cid != "" {
-		line = "Chiến dịch " + cid
+		line := "Chiến dịch: " + cid
 		if aa := firstNonEmpty(adAccountID, refVal(queueEvt, "adAccountId")); aa != "" {
-			line += " · tài khoản " + aa
+			line += " · Tài khoản QC: " + aa
 		}
-		line += " — kết quả tóm tắt ở dòng phía trên."
+		core = append(core, line)
 	}
-	core := []string{line}
 	if len(detail) == 0 {
 		return core
 	}

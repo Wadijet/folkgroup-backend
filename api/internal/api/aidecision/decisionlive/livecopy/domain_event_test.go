@@ -22,6 +22,32 @@ func TestDomainNarrativeFromQueueEvent_MetaCampaign(t *testing.T) {
 	if d.BusinessOneLine == "" {
 		t.Fatal("BusinessOneLine rỗng")
 	}
+	want := eventtypes.E2ECatalogDescriptionUserViForStep("G4-S01")
+	if want != "" && d.StepTitle != want {
+		t.Fatalf("khung catalog G4-S01, got %q want %q", d.StepTitle, want)
+	}
+	if d.StepTitle != d.BusinessOneLine {
+		t.Fatalf("StepTitle và BusinessOneLine cùng khung catalog, got %q / %q", d.StepTitle, d.BusinessOneLine)
+	}
+}
+
+func TestDomainNarrativeFromQueueEvent_KhongConTieuDeChungChung(t *testing.T) {
+	evt := &aidecisionmodels.DecisionEvent{
+		EventType:     eventtypes.ConversationChanged,
+		EventSource:   eventtypes.EventSourceL1Datachanged,
+		PipelineStage: eventtypes.PipelineStageAfterL1Change,
+	}
+	d := DomainNarrativeFromQueueEvent(evt)
+	if d.StepTitle == "" {
+		t.Fatal("StepTitle rỗng")
+	}
+	if d.StepTitle == "Đang xử lý tự động" {
+		t.Fatalf("không còn tiêu đề chung chung, got %q", d.StepTitle)
+	}
+	want := eventtypes.E2ECatalogDescriptionUserViForStep("G1-S04")
+	if want != "" && d.StepTitle != want {
+		t.Fatalf("neo khung G1-S04 catalog, got %q want %q", d.StepTitle, want)
+	}
 }
 
 func TestBuildQueueConsumerEvent_Done(t *testing.T) {

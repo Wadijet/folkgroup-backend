@@ -2,11 +2,9 @@
 package livecopy
 
 import (
-	"fmt"
 	"strings"
 
 	"meta_commerce/internal/api/aidecision/decisionlive"
-	"meta_commerce/internal/api/aidecision/eventtypes"
 	aidecisionmodels "meta_commerce/internal/api/aidecision/models"
 )
 
@@ -45,10 +43,11 @@ func queueMilestoneTraceKey(ms QueueMilestone) string {
 func buildQueueConsumerTraceStep(evt *aidecisionmodels.DecisionEvent, ms QueueMilestone, dn DomainNarrative, processErr error) *decisionlive.TraceStep {
 	in := queueConsumerTraceStepInputRef(evt, ms)
 	out := queueConsumerTraceStepOutputRef(evt, ms, processErr)
+	frame := PublishCatalogUserViForQueueConsumerMilestone(evt, queueMilestoneToE2EKey(ms))
 	return &decisionlive.TraceStep{
 		Index:     0,
 		Kind:      "queue",
-		Title:     dn.StepTitle,
+		Title:     frame,
 		Reasoning: buildQueueConsumerTraceStepNarrativeVi(evt, ms, dn, processErr),
 		InputRef:  in,
 		OutputRef: out,
@@ -166,111 +165,13 @@ func queueConsumerTraceStepOutputRef(evt *aidecisionmodels.DecisionEvent, ms Que
 	return refPairsToMap(pairs)
 }
 
-// buildQueueConsumerTraceStepNarrativeVi — Reasoning theo khung: Mục đích / Đầu vào / Đã xét / Kết quả / Tiếp theo (docs bang-pha-buoc-event-e2e).
+// buildQueueConsumerTraceStepNarrativeVi — khung §5.3 theo milestone consumer; bổ sung lỗi kỹ thuật nếu có.
 func buildQueueConsumerTraceStepNarrativeVi(evt *aidecisionmodels.DecisionEvent, ms QueueMilestone, dn DomainNarrative, processErr error) string {
-	purpose := queueTraceStepPurposeVi(ms, dn)
-	inputSum := queueTraceStepInputSummaryVi(evt)
-	logic := queueTraceStepLogicVi(ms, dn, evt, processErr)
-	result := queueTraceStepResultSummaryVi(ms, processErr)
-	next := queueTraceStepNextHintVi(ms, evt)
-	return decisionlive.FormatLiveStepNarrativeVi(purpose, inputSum, logic, result, next)
-}
-
-func queueTraceStepPurposeVi(ms QueueMilestone, _ DomainNarrative) string {
-	// Một câu — bám khung purpose trong docs/flows/bang-pha-buoc-event-e2e §4.1; bối cảnh nghiệp vụ nằm ở summary / reasoningSummary / title.
-	switch ms {
-	case QueueMilestoneProcessingStart:
-		return "Xác nhận hệ thống đã nhận việc từ hàng đợi nội bộ và sắp xử lý."
-	case QueueMilestoneDatachangedDone:
-		return "Đọc snapshot mới nhất và chạy các side-effect đã đăng ký sau khi dữ liệu nguồn thay đổi."
-	case QueueMilestoneHandlerDone:
-		return "Hoàn tất bước nghiệp vụ đã đăng ký cho loại cập nhật này."
-	case QueueMilestoneHandlerError:
-		return "Ghi nhận lỗi kỹ thuật khi chạy handler nghiệp vụ."
-	case QueueMilestoneRoutingSkipped:
-		return "Áp dụng quy tắc routing: lần này không chạy handler tự động."
-	case QueueMilestoneNoHandler:
-		return "Không có handler đăng ký cho loại sự kiện trên consumer."
-	default:
-		return "Mốc xử lý job trên hàng đợi (G2 — consumer)."
+	base := PublishCatalogUserViForQueueConsumerMilestone(evt, queueMilestoneToE2EKey(ms))
+	if ms == QueueMilestoneHandlerError && processErr != nil {
+		return PublishWithSituation(base, "Lỗi: "+truncateRunes(processErr.Error(), 220))
 	}
-}
-
-func queueTraceStepInputSummaryVi(evt *aidecisionmodels.DecisionEvent) string {
-	if evt == nil {
-		return "Thiếu envelope queue."
-	}
-	friendly := queueFriendlyEventLabel(evt)
-	et := strings.TrimSpace(evt.EventType)
-	es := strings.TrimSpace(evt.EventSource)
-	if friendly != "" && et != "" {
-		return fmt.Sprintf("Loại việc: %s; mã loại `%s`; nguồn `%s`. Tham chiếu đầy đủ trong inputRef.", friendly, et, es)
-	}
-	if et != "" {
-		return fmt.Sprintf("Mã loại `%s`; nguồn `%s`. Tham chiếu trong inputRef.", et, es)
-	}
-	return "Tham chiếu đầy đủ trong inputRef."
-}
-
-func queueTraceStepLogicVi(ms QueueMilestone, _ DomainNarrative, _ *aidecisionmodels.DecisionEvent, processErr error) string {
-	// Bám ý logicSummary §4.1: kiểm tra / thứ tự — không nhồi tên hàm; audit kỹ thuật nằm inputRef/outputRef.
-	switch ms {
-	case QueueMilestoneRoutingSkipped:
-		return "Đã kiểm tra quy tắc routing theo tổ chức và loại sự kiện — lần này bỏ qua dispatch handler."
-	case QueueMilestoneNoHandler:
-		return "Đã tra bảng handler đăng ký — không có mục phù hợp loại sự kiện."
-	case QueueMilestoneHandlerError:
-		if processErr != nil {
-			return fmt.Sprintf("Handler báo lỗi: %s", truncateRunes(processErr.Error(), 220))
-		}
-		return "Handler báo lỗi (không có thông điệp chi tiết)."
-	case QueueMilestoneDatachangedDone:
-		return "Kiểm tra loại nguồn và policy; chạy chuỗi đồng bộ đã đăng ký (chi tiết từng bước trong processTrace)."
-	case QueueMilestoneHandlerDone:
-		return "Đã dispatch handler đăng ký; handler trả về không lỗi."
-	case QueueMilestoneProcessingStart:
-		return "Đã giữ lock job trên hàng đợi; bắt đầu processEvent theo thứ tự chuẩn consumer."
-	default:
-		return ""
-	}
-}
-
-func queueTraceStepResultSummaryVi(ms QueueMilestone, processErr error) string {
-	switch ms {
-	case QueueMilestoneProcessingStart:
-		return "Job đã được nhận; consumer bắt đầu xử lý (mốc timeline kế tiếp)."
-	case QueueMilestoneDatachangedDone:
-		return "Đã chạy xong đồng bộ sau lưu và side-effect đã đăng ký."
-	case QueueMilestoneHandlerDone:
-		return "Handler chạy xong, không lỗi."
-	case QueueMilestoneHandlerError:
-		if processErr != nil {
-			return "Xử lý thất bại; có thể thử lại — xem errorMessage trong outputRef."
-		}
-		return "Xử lý thất bại ở handler."
-	case QueueMilestoneRoutingSkipped:
-		return "Không gọi handler; mốc được ghi trên timeline theo chính sách bỏ qua."
-	case QueueMilestoneNoHandler:
-		return "Không chạy handler; dữ liệu nguồn vẫn được lưu bình thường."
-	default:
-		return ""
-	}
-}
-
-func queueTraceStepNextHintVi(ms QueueMilestone, evt *aidecisionmodels.DecisionEvent) string {
-	switch ms {
-	case QueueMilestoneProcessingStart:
-		if evt != nil && eventtypes.IsL1DatachangedEventSource(evt.EventSource) {
-			return "Chuyển sang bước đồng bộ sau lưu (nếu có), rồi routing và dispatch handler."
-		}
-		return "Chuyển sang routing và dispatch handler (nếu có)."
-	case QueueMilestoneDatachangedDone:
-		return "Chuyển sang routing / handler nghiệp vụ, hoặc kết thúc nếu bỏ qua hoặc không có handler."
-	case QueueMilestoneHandlerDone, QueueMilestoneHandlerError, QueueMilestoneRoutingSkipped, QueueMilestoneNoHandler:
-		return "Kết thúc bước consumer; cập nhật trạng thái job trên hàng đợi."
-	default:
-		return ""
-	}
+	return base
 }
 
 func refPairsToMap(pairs []traceRefPair) map[string]interface{} {

@@ -36,73 +36,82 @@ func DecisionModeLabelVi(mode string) string {
 
 // BuildEngineSkippedNoCix — PhaseSkipped khi thiếu CIX payload.
 func BuildEngineSkippedNoCix(correlationID string) decisionlive.DecisionLiveEvent {
+	frame := PublishCatalogUserViForLivePhase(decisionlive.PhaseSkipped)
+	sit := "Thiếu phân tích hội thoại (CIX) — không chạy tiếp engine."
 	return decisionlive.DecisionLiveEvent{
-		Phase:         decisionlive.PhaseSkipped,
-		OutcomeKind:   decisionlive.OutcomeDataIncomplete,
-		Summary:       "Chưa đủ dữ liệu phân tích hội thoại — tạm thời không đưa ra gợi ý.",
-		CorrelationID: correlationID,
-		ReasoningSummary: "Cần có kết quả phân tích tin nhắn trước; vui lòng chờ bước phân tích hoàn tất hoặc kiểm tra kết nối.",
-		DetailBullets: []string{"Hệ thống chưa nhận được bản phân tích hội thoại cần thiết — không chạy các bước gợi ý tiếp theo."},
+		Phase:            decisionlive.PhaseSkipped,
+		OutcomeKind:      decisionlive.OutcomeDataIncomplete,
+		Summary:          PublishWithSituation(frame, sit),
+		CorrelationID:    correlationID,
+		ReasoningSummary: frame,
+		DetailBullets:    []string{sit},
 		Step: &decisionlive.TraceStep{
 			Kind:      "rule",
-			Title:     "Kiểm tra dữ liệu đầu vào",
-			Reasoning: "Chưa có nội dung phân tích — không thể tiếp tục các bước sau.",
+			Title:     frame,
+			Reasoning: frame,
 		},
 	}
 }
 
 // BuildEngineParseEvent — PhaseParse.
 func BuildEngineParseEvent(correlationID string, suggestionCount int) decisionlive.DecisionLiveEvent {
+	frame := PublishCatalogUserViForLivePhase(decisionlive.PhaseParse)
+	sit := fmt.Sprintf("Đã đọc %d gợi ý ban đầu.", suggestionCount)
 	return decisionlive.DecisionLiveEvent{
-		Phase:         decisionlive.PhaseParse,
-		OutcomeKind:   decisionlive.OutcomeNominal,
-		Summary:       fmt.Sprintf("Đã đọc %d gợi ý từ phân tích hội thoại.", suggestionCount),
-		CorrelationID: correlationID,
-		ReasoningSummary: "Các gợi ý này sẽ được lọc bằng quy tắc và có thể bổ sung bằng AI nếu cần.",
-		DetailBullets: []string{fmt.Sprintf("Có %d hành động gợi ý ban đầu để hệ thống xem xét.", suggestionCount)},
+		Phase:            decisionlive.PhaseParse,
+		OutcomeKind:      decisionlive.OutcomeNominal,
+		Summary:          PublishWithSituation(frame, sit),
+		CorrelationID:    correlationID,
+		ReasoningSummary: frame,
+		DetailBullets:    []string{fmt.Sprintf("Số gợi ý ban đầu: %d", suggestionCount)},
 		Step: &decisionlive.TraceStep{
 			Kind:      "rule",
-			Title:     "Đọc gợi ý hành động",
+			Title:     frame,
 			InputRef:  map[string]interface{}{"suggestionCount": suggestionCount},
-			Reasoning: "Trích các hành động được đề xuất sẵn trong dữ liệu đầu vào.",
+			Reasoning: frame,
 		},
 	}
 }
 
 // BuildEngineEmptyActions — PhaseEmpty khi không còn action sau rule/LLM.
 func BuildEngineEmptyActions(correlationID, decisionMode string, confidence float64, reasoningSummary string) decisionlive.DecisionLiveEvent {
+	frame := PublishCatalogUserViForLivePhase(decisionlive.PhaseEmpty)
+	sit := fmt.Sprintf("Chế độ %s · độ tin %.2f · không còn hành động ứng viên.", DecisionModeLabelVi(decisionMode), confidence)
 	return decisionlive.DecisionLiveEvent{
 		Phase:            decisionlive.PhaseEmpty,
 		OutcomeKind:      decisionlive.OutcomeNoActions,
-		Summary:          "Không có việc cần làm tiếp — không tạo đề xuất mới.",
+		Summary:          PublishWithSituation(frame, sit),
 		CorrelationID:    correlationID,
 		DecisionMode:     decisionMode,
 		Confidence:       confidence,
 		Severity:         decisionlive.SeverityWarn,
-		ReasoningSummary: reasoningSummary,
-		DetailBullets: []string{"Sau khi áp quy tắc và AI (nếu có), không còn hành động phù hợp để đề xuất."},
+		ReasoningSummary: PublishReasoningCatalogPlusEngineLine(decisionlive.PhaseEmpty, reasoningSummary),
+		DetailBullets:    []string{sit},
 	}
 }
 
 // BuildEngineDecisionEvent — PhaseDecision.
 func BuildEngineDecisionEvent(correlationID, decisionMode string, confidence float64, reasoningSummary string, actionSuggestions []string) decisionlive.DecisionLiveEvent {
+	frame := PublishCatalogUserViForLivePhase(decisionlive.PhaseDecision)
+	sit := fmt.Sprintf("%d hướng ứng viên · %s · độ tin %.2f", len(actionSuggestions), DecisionModeLabelVi(decisionMode), confidence)
+	rs := PublishReasoningCatalogPlusEngineLine(decisionlive.PhaseDecision, reasoningSummary)
 	return decisionlive.DecisionLiveEvent{
 		Phase:            decisionlive.PhaseDecision,
 		OutcomeKind:      decisionlive.OutcomeNominal,
-		Summary:          fmt.Sprintf("Đã chọn %d hướng xử lý (%s).", len(actionSuggestions), DecisionModeLabelVi(decisionMode)),
+		Summary:          PublishWithSituation(frame, sit),
 		CorrelationID:    correlationID,
 		DecisionMode:     decisionMode,
 		Confidence:       confidence,
-		ReasoningSummary: reasoningSummary,
+		ReasoningSummary: rs,
 		Detail: map[string]interface{}{
 			"selectedActions": actionSuggestions,
 		},
-		DetailBullets: []string{fmt.Sprintf("Đã có %d hành động ứng viên — bước sau: kiểm tra cần duyệt hay chạy tự động.", len(actionSuggestions))},
+		DetailBullets:  []string{fmt.Sprintf("Số hành động ứng viên: %d", len(actionSuggestions))},
 		DetailSections: engineDecisionSections(actionSuggestions),
 		Step: &decisionlive.TraceStep{
 			Kind:      "rule",
-			Title:     "Tổng hợp kết quả phân tích",
-			Reasoning: reasoningSummary,
+			Title:     frame,
+			Reasoning: rs,
 			OutputRef: map[string]interface{}{"actions": actionSuggestions, "mode": decisionMode},
 		},
 	}
@@ -110,22 +119,23 @@ func BuildEngineDecisionEvent(correlationID, decisionMode string, confidence flo
 
 // BuildEnginePolicyEvent — PhasePolicy.
 func BuildEnginePolicyEvent(correlationID string, needApproval, autoActions int) decisionlive.DecisionLiveEvent {
-	policyBullets := []string{fmt.Sprintf("%d việc cần bạn hoặc quản trị duyệt · %d việc có thể chạy tự động.", needApproval, autoActions)}
+	frame := PublishCatalogUserViForLivePhase(decisionlive.PhasePolicy)
+	sit := fmt.Sprintf("Chờ duyệt: %d · Tự động: %d", needApproval, autoActions)
 	return decisionlive.DecisionLiveEvent{
-		Phase:         decisionlive.PhasePolicy,
-		OutcomeKind:   decisionlive.OutcomeNominal,
-		Summary:       fmt.Sprintf("Đã phân loại: %d việc chờ duyệt, %d việc tự động.", needApproval, autoActions),
-		CorrelationID: correlationID,
-		DetailBullets: policyBullets,
-		ReasoningSummary: "Danh mục «cần duyệt» do cấu hình hệ thống quyết định; phần còn lại có thể thực hiện ngay nếu cho phép.",
+		Phase:            decisionlive.PhasePolicy,
+		OutcomeKind:      decisionlive.OutcomeNominal,
+		Summary:          PublishWithSituation(frame, sit),
+		CorrelationID:    correlationID,
+		DetailBullets:    []string{sit},
+		ReasoningSummary: frame,
 		Step: &decisionlive.TraceStep{
 			Kind:  "policy",
-			Title: "Phân loại theo quy tắc duyệt",
+			Title: frame,
 			InputRef: map[string]interface{}{
 				"canApproval": needApproval,
 				"auto":        autoActions,
 			},
-			Reasoning: "Hành động thuộc danh mục cần duyệt sẽ chờ xác nhận; các hành động còn lại có thể chạy tự động.",
+			Reasoning: frame,
 		},
 	}
 }
@@ -135,17 +145,20 @@ func BuildEngineProposeSuccess(correlationID string, actionIDs []string, detail 
 	if detail == nil {
 		detail = map[string]interface{}{"actionIds": actionIDs, "count": len(actionIDs)}
 	}
+	frame := PublishCatalogUserViForLivePhase(decisionlive.PhasePropose)
+	sit := fmt.Sprintf("Đã ghi %d mục (đề xuất / việc).", len(actionIDs))
 	return decisionlive.DecisionLiveEvent{
-		Phase:         decisionlive.PhasePropose,
-		OutcomeKind:   decisionlive.OutcomeSuccess,
-		Summary:       fmt.Sprintf("Đã tạo %d đề xuất hoặc việc cần làm.", len(actionIDs)),
-		CorrelationID: correlationID,
-		Detail:        detail,
-		ReasoningSummary: "Bạn có thể xem và duyệt trong màn hình đề xuất hoặc việc được giao.",
-		DetailBullets: []string{fmt.Sprintf("Có %d mục đã ghi nhận — chi tiết nằm trong phần mở rộng (nếu có).", len(actionIDs))},
+		Phase:            decisionlive.PhasePropose,
+		OutcomeKind:      decisionlive.OutcomeSuccess,
+		Summary:          PublishWithSituation(frame, sit),
+		CorrelationID:    correlationID,
+		Detail:           detail,
+		ReasoningSummary: frame,
+		DetailBullets:    []string{fmt.Sprintf("Số mục: %d", len(actionIDs))},
 		Step: &decisionlive.TraceStep{
 			Kind:      "propose",
-			Title:     "Ghi nhận đề xuất",
+			Title:     frame,
+			Reasoning: frame,
 			OutputRef: detail,
 		},
 	}
@@ -153,64 +166,68 @@ func BuildEngineProposeSuccess(correlationID string, actionIDs []string, detail 
 
 // BuildEngineProposeNone — PhasePropose khi không tạo được bản ghi.
 func BuildEngineProposeNone(correlationID string) decisionlive.DecisionLiveEvent {
+	frame := PublishCatalogUserViForLivePhase(decisionlive.PhasePropose)
+	sit := "Không ghi nhận được mục sau bước đề xuất."
 	return decisionlive.DecisionLiveEvent{
-		Phase:         decisionlive.PhasePropose,
-		OutcomeKind:   decisionlive.OutcomeProposalFailed,
-		Summary:       "Chưa tạo được đề xuất — có thể do quyền hoặc kết nối hệ thống.",
-		CorrelationID: correlationID,
-		Severity:      decisionlive.SeverityWarn,
-		ReasoningSummary: "Vui lòng thử lại sau hoặc liên hệ quản trị nếu lặp lại nhiều lần.",
-		DetailBullets: []string{"Hệ thống không ghi nhận được mã việc sau bước đề xuất — đội kỹ thuật có thể tra log nội bộ."},
+		Phase:            decisionlive.PhasePropose,
+		OutcomeKind:      decisionlive.OutcomeProposalFailed,
+		Summary:          PublishWithSituation(frame, sit),
+		CorrelationID:    correlationID,
+		Severity:         decisionlive.SeverityWarn,
+		ReasoningSummary: frame,
+		DetailBullets:    []string{sit},
 	}
 }
 
 // BuildEngineDoneEvent — PhaseDone cuối engine.
 func BuildEngineDoneEvent(correlationID, srcTitle string) decisionlive.DecisionLiveEvent {
-	doneSummary := "Đã hoàn tất phân tích và gợi ý cho lượt này."
-	if strings.TrimSpace(srcTitle) != "" {
-		doneSummary = fmt.Sprintf("Đã xử lý xong %s.", strings.TrimSpace(srcTitle))
-	}
+	frame := PublishCatalogUserViForLivePhase(decisionlive.PhaseDone)
+	sit := strings.TrimSpace(srcTitle)
 	return decisionlive.DecisionLiveEvent{
-		Phase:         decisionlive.PhaseDone,
-		OutcomeKind:   decisionlive.OutcomeSuccess,
-		Summary:       doneSummary,
-		CorrelationID: correlationID,
-		ReasoningSummary: "Các bước tiếp theo (nếu có) là duyệt hoặc thực hiện — tùy cấu hình cửa hàng.",
-		DetailBullets: []string{"Vòng phân tích tự động đã kết thúc; việc gửi tin hoặc cập nhật hệ thống khác do bước sau đảm nhiệm."},
+		Phase:            decisionlive.PhaseDone,
+		OutcomeKind:      decisionlive.OutcomeSuccess,
+		Summary:          PublishWithSituation(frame, sit),
+		CorrelationID:    correlationID,
+		ReasoningSummary: frame,
+		DetailBullets:    nil,
 	}
 }
 
 // BuildLLMEmptySuggestions — PhaseLLM khi không có gợi ý ban đầu.
 func BuildLLMEmptySuggestions(correlationID string) decisionlive.DecisionLiveEvent {
+	frame := PublishCatalogUserViForLivePhase(decisionlive.PhaseLLM)
+	sit := "Chưa có danh sách gợi ý từ phân tích — bổ sung bằng AI trong tập hành động được phép."
 	return decisionlive.DecisionLiveEvent{
-		Phase:         decisionlive.PhaseLLM,
-		OutcomeKind:   decisionlive.OutcomeNominal,
-		Summary:       "Đang dùng AI để gợi ý hành động vì chưa có danh sách từ phân tích hội thoại.",
-		CorrelationID: correlationID,
-		ReasoningSummary: "AI chỉ chọn trong các hành động được phép — an toàn theo cấu hình.",
-		DetailBullets: []string{"Hệ thống bổ sung gợi ý bằng AI khi chưa có đủ gợi ý ban đầu."},
+		Phase:            decisionlive.PhaseLLM,
+		OutcomeKind:      decisionlive.OutcomeNominal,
+		Summary:          PublishWithSituation(frame, sit),
+		CorrelationID:    correlationID,
+		ReasoningSummary: frame,
+		DetailBullets:    []string{sit},
 		Step: &decisionlive.TraceStep{
 			Kind:      "llm",
-			Title:     "Gợi ý khi chưa có danh sách ban đầu",
-			Reasoning: "Chưa có gợi ý từ tình huống — hệ thống dùng AI để chọn trong các hành động được phép.",
+			Title:     frame,
+			Reasoning: frame,
 		},
 	}
 }
 
 // BuildLLMRefineSuggestions — PhaseLLM khi tinh chỉnh nhiều gợi ý.
 func BuildLLMRefineSuggestions(correlationID string, suggestionCount int) decisionlive.DecisionLiveEvent {
+	frame := PublishCatalogUserViForLivePhase(decisionlive.PhaseLLM)
+	sit := fmt.Sprintf("Đang rút gọn từ %d gợi ý ban đầu (AI).", suggestionCount)
 	return decisionlive.DecisionLiveEvent{
-		Phase:         decisionlive.PhaseLLM,
-		OutcomeKind:   decisionlive.OutcomeNominal,
-		Summary:       "Đang dùng AI để rút gọn danh sách gợi ý cho phù hợp hơn.",
-		CorrelationID: correlationID,
-		ReasoningSummary: "Khi có nhiều gợi ý, AI giúp chọn bộ hành động gọn và đúng ngữ cảnh hơn.",
-		DetailBullets: []string{fmt.Sprintf("Đang xem xét %d gợi ý ban đầu.", suggestionCount)},
+		Phase:            decisionlive.PhaseLLM,
+		OutcomeKind:      decisionlive.OutcomeNominal,
+		Summary:          PublishWithSituation(frame, sit),
+		CorrelationID:    correlationID,
+		ReasoningSummary: frame,
+		DetailBullets:    []string{fmt.Sprintf("Số gợi ý ban đầu: %d", suggestionCount)},
 		Step: &decisionlive.TraceStep{
 			Kind:      "llm",
-			Title:     "Tinh chỉnh danh sách gợi ý",
+			Title:     frame,
 			InputRef:  map[string]interface{}{"suggestionCount": suggestionCount},
-			Reasoning: "Có nhiều gợi ý — dùng AI để chọn bộ hành động phù hợp nhất.",
+			Reasoning: frame,
 		},
 	}
 }

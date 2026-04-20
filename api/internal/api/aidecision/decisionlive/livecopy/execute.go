@@ -22,35 +22,34 @@ func BuildExecuteQueuedEvent(
 	if w3cTraceID != "" {
 		refs["w3cTraceId"] = w3cTraceID
 	}
-	bullets := []string{
-		"Đã đủ thông tin cần thiết — hệ thống sẽ phân tích và gợi ý trong giây lát.",
-		"Các bước tiếp theo sẽ hiện thêm trên dòng thời gian (đọc gợi ý, duyệt, tạo việc…).",
-	}
+	var bullets []string
 	if decisionCaseID != "" {
 		bullets = append(bullets, "Mã hồ sơ xử lý: "+decisionCaseID)
 	}
+	frame := PublishCatalogUserViForLivePhase(decisionlive.PhaseQueued)
 	queuedSections := []decisionlive.DecisionLiveDetailSection{
-		{Title: "Thông tin thêm", Items: []string{
-			"Thứ tự thường gặp: nhận việc → đọc gợi ý → (có thể) hỗ trợ AI → chọn hành động → tạo đề xuất.",
-			"Nếu cần hỗ trợ, gửi kèm mã trong phần tham chiếu của sự kiện.",
+		{Title: "Tham chiếu", Items: []string{
+			"Neo catalog: " + frame,
+			"Mã sự kiện enqueue: " + emitEventID,
 		}},
 	}
 	return decisionlive.DecisionLiveEvent{
-		Phase:           decisionlive.PhaseQueued,
-		OutcomeKind:     decisionlive.OutcomeNominal,
-		SourceKind:      sourceKind,
-		SourceTitle:     sourceTitle,
-		Summary:         queuedSummary,
-		CorrelationID:   correlationID,
-		DecisionCaseID:  decisionCaseID,
-		W3CTraceID:      strings.TrimSpace(w3cTraceID),
-		Refs:            refs,
-		DetailBullets:   bullets,
-		DetailSections:  queuedSections,
-		ReasoningSummary: "Mỗi lượt xử lý tương ứng một vòng phân tích và gợi ý hoàn chỉnh.",
+		Phase:            decisionlive.PhaseQueued,
+		OutcomeKind:      decisionlive.OutcomeNominal,
+		SourceKind:       sourceKind,
+		SourceTitle:      sourceTitle,
+		Summary:          PublishWithSituation(frame, strings.TrimSpace(queuedSummary)),
+		CorrelationID:    correlationID,
+		DecisionCaseID:   decisionCaseID,
+		W3CTraceID:       strings.TrimSpace(w3cTraceID),
+		Refs:             refs,
+		DetailBullets:    bullets,
+		DetailSections:   queuedSections,
+		ReasoningSummary: frame,
 		Step: &decisionlive.TraceStep{
-			Kind:  "queue",
-			Title: "Đang chờ phân tích trợ lý",
+			Kind:      "queue",
+			Title:     frame,
+			Reasoning: frame,
 		},
 	}
 }
@@ -60,10 +59,15 @@ func BuildExecuteConsumingEvent(
 	sourceKind, sourceTitle, summary, caseID, correlationID, w3cLive string,
 	evt *aidecisionmodels.DecisionEvent,
 ) decisionlive.DecisionLiveEvent {
+	eid, esrc := "", ""
+	if evt != nil {
+		eid = evt.EventID
+		esrc = evt.EventSource
+	}
 	consRefs := map[string]string{
-		"eventId":     evt.EventID,
+		"eventId":     eid,
 		"eventType":   "aidecision.execute_requested",
-		"eventSource": evt.EventSource,
+		"eventSource": esrc,
 	}
 	if caseID != "" {
 		consRefs["decisionCaseId"] = caseID
@@ -71,33 +75,34 @@ func BuildExecuteConsumingEvent(
 	if w3c := strings.TrimSpace(w3cLive); w3c != "" {
 		consRefs["w3cTraceId"] = w3c
 	}
-	bullets := []string{
-		"Trợ lý đã bắt đầu phân tích — các bước tiếp theo sẽ hiện dưới dạng dòng thời gian.",
-	}
+	var bullets []string
 	if caseID != "" {
 		bullets = append(bullets, "Hồ sơ: "+caseID)
 	}
+	frame := PublishCatalogUserViForLivePhase(decisionlive.PhaseConsuming)
 	consumingSections := []decisionlive.DecisionLiveDetailSection{
-		{Title: "Thông tin thêm", Items: []string{
-			"Thời điểm hiển thị giúp bạn đối chiếu thứ tự; mã hồ sơ nằm trong phần tham chiếu nếu cần gửi hỗ trợ.",
+		{Title: "Tham chiếu", Items: []string{
+			"Neo catalog: " + frame,
+			"Mã việc queue: " + eid,
 		}},
 	}
 	return decisionlive.DecisionLiveEvent{
-		Phase:           decisionlive.PhaseConsuming,
-		OutcomeKind:     decisionlive.OutcomeNominal,
-		SourceKind:      sourceKind,
-		SourceTitle:     sourceTitle,
-		Summary:         summary,
-		CorrelationID:   correlationID,
-		DecisionCaseID:  caseID,
-		W3CTraceID:      strings.TrimSpace(w3cLive),
-		Refs:            consRefs,
-		DetailBullets:   bullets,
-		DetailSections:  consumingSections,
-		ReasoningSummary: "Hệ thống đang phân tích trực tiếp, không còn chờ trong hàng đợi.",
+		Phase:            decisionlive.PhaseConsuming,
+		OutcomeKind:      decisionlive.OutcomeNominal,
+		SourceKind:       sourceKind,
+		SourceTitle:      sourceTitle,
+		Summary:          PublishWithSituation(frame, strings.TrimSpace(summary)),
+		CorrelationID:    correlationID,
+		DecisionCaseID:   caseID,
+		W3CTraceID:       strings.TrimSpace(w3cLive),
+		Refs:             consRefs,
+		DetailBullets:    bullets,
+		DetailSections:   consumingSections,
+		ReasoningSummary: frame,
 		Step: &decisionlive.TraceStep{
-			Kind:  "execute",
-			Title: "Đang phân tích và chuẩn bị gợi ý",
+			Kind:      "execute",
+			Title:     frame,
+			Reasoning: frame,
 		},
 	}
 }

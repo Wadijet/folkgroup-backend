@@ -51,8 +51,9 @@ func TestBuildQueueConsumerTraceStep_RefsHandlerDone(t *testing.T) {
 	if step.OutputRef["consumerPhase"] != "handler_completed" {
 		t.Fatalf("output: %+v", step.OutputRef)
 	}
-	if !strings.Contains(step.Reasoning, "dispatch handler") || !strings.Contains(step.Reasoning, "không lỗi") {
-		t.Fatalf("reasoning: %q", step.Reasoning)
+	want := eventtypes.E2ECatalogDescriptionUserViForStep("G2-S02")
+	if want == "" || step.Reasoning != want || step.Title != want {
+		t.Fatalf("Title/Reasoning phải khớp descriptionUserVi G2-S02: Title=%q Reasoning=%q", step.Title, step.Reasoning)
 	}
 }
 
@@ -67,8 +68,9 @@ func TestBuildQueueConsumerTraceStep_RoutingSkipped(t *testing.T) {
 	if step.OutputRef["consumerPhase"] != "routing_skipped" {
 		t.Fatalf("out: %+v", step.OutputRef)
 	}
-	if !strings.Contains(step.Reasoning, "bỏ qua dispatch") {
-		t.Fatalf("reasoning: %q", step.Reasoning)
+	want := eventtypes.E2ECatalogDescriptionUserViForStep("G2-S02")
+	if want == "" || step.Reasoning != want {
+		t.Fatalf("reasoning phải khớp catalog G2-S02: %q", step.Reasoning)
 	}
 }
 
@@ -79,6 +81,9 @@ func TestBuildQueueConsumerTraceStep_HandlerError(t *testing.T) {
 	step := buildQueueConsumerTraceStep(evt, QueueMilestoneHandlerError, dn, err)
 	if step.OutputRef["errorMessage"] == "" {
 		t.Fatalf("missing error: %+v", step.OutputRef)
+	}
+	if !strings.Contains(step.Reasoning, "Lỗi:") || !strings.Contains(step.Reasoning, "thử nghiệm lỗi handler") {
+		t.Fatalf("reasoning phải gồm khung catalog và lỗi: %q", step.Reasoning)
 	}
 }
 

@@ -125,3 +125,16 @@ func TestResolveE2EForLivePhase_IntelDomainComputeDoneNeoG3S05(t *testing.T) {
 		t.Fatalf("intel_domain_compute_done phải neo G3-S05 (persist sau worker): got %+v", r)
 	}
 }
+
+func TestResolveE2EForLivePhase_UnknownPhaseKhongSinhStepIdCatalog(t *testing.T) {
+	r := ResolveE2EForLivePhase("phase_khong_ton_tai_xyz")
+	if r.StepID != "" {
+		t.Fatalf("phase lạ không được gán e2eStepId giả dạng catalog, got %q", r.StepID)
+	}
+	if r.Stage != "" {
+		t.Fatalf("phase lạ không gán stage mặc định, got %q", r.Stage)
+	}
+	if r.LabelVi == "" {
+		t.Fatal("vẫn cần label giải thích")
+	}
+}

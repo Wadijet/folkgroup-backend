@@ -11,9 +11,7 @@ import (
 
 // BuildCixIntegratedEvent — PhaseCixIntegrated sau ReceiveCixPayload.
 func BuildCixIntegratedEvent(traceID string, caseDoc *aidecisionmodels.DecisionCase, result *cixmodels.CixAnalysisResult) decisionlive.DecisionLiveEvent {
-	bullets := []string{
-		fmt.Sprintf("Có %d gợi ý hành động từ phân tích hội thoại (phiên: %s · khách: %s).", len(result.ActionSuggestions), result.SessionUid, result.CustomerUid),
-	}
+	var bullets []string
 	if strings.TrimSpace(result.TraceID) != "" {
 		bullets = append(bullets, "Mã tham chiếu phân tích: "+strings.TrimSpace(result.TraceID))
 	}
@@ -29,18 +27,21 @@ func BuildCixIntegratedEvent(traceID string, caseDoc *aidecisionmodels.DecisionC
 	if caseDoc != nil {
 		refs["decisionCaseId"] = caseDoc.DecisionCaseID
 	}
+	frame := PublishCatalogUserViForLivePhase(decisionlive.PhaseCixIntegrated)
+	sit := fmt.Sprintf("%d gợi ý hành động · phiên %s · khách %s", len(result.ActionSuggestions), result.SessionUid, result.CustomerUid)
 	ev := decisionlive.DecisionLiveEvent{
-		Phase:          decisionlive.PhaseCixIntegrated,
-		OutcomeKind:    decisionlive.OutcomeNominal,
-		Severity:       decisionlive.SeverityInfo,
-		Summary:        "Đã có kết quả phân tích hội thoại — sẵn sàng đưa vào gợi ý.",
-		DetailBullets:  bullets,
-		DetailSections: sections,
-		Refs:           refs,
-		ReasoningSummary: "Các gợi ý bên dưới là đầu vào để trợ lý đề xuất bước tiếp theo.",
+		Phase:            decisionlive.PhaseCixIntegrated,
+		OutcomeKind:      decisionlive.OutcomeNominal,
+		Severity:         decisionlive.SeverityInfo,
+		Summary:          PublishWithSituation(frame, sit),
+		DetailBullets:    bullets,
+		DetailSections:   sections,
+		Refs:             refs,
+		ReasoningSummary: frame,
 		Step: &decisionlive.TraceStep{
-			Kind:  "cix",
-			Title: "Đã gắn phân tích vào hồ sơ xử lý",
+			Kind:      "cix",
+			Title:     frame,
+			Reasoning: frame,
 		},
 	}
 	if caseDoc != nil {
@@ -52,10 +53,7 @@ func BuildCixIntegratedEvent(traceID string, caseDoc *aidecisionmodels.DecisionC
 
 // BuildExecuteReadyEvent — PhaseExecuteReady trước EmitExecuteRequested.
 func BuildExecuteReadyEvent(traceID, correlationID string, caseDoc *aidecisionmodels.DecisionCase) decisionlive.DecisionLiveEvent {
-	bullets := []string{
-		"Đã đủ thông tin cần thiết và phân tích hội thoại — chuẩn bị chạy trợ lý gợi ý.",
-		"Hồ sơ: " + caseDoc.DecisionCaseID,
-	}
+	bullets := []string{"Hồ sơ: " + caseDoc.DecisionCaseID}
 	var reqList []string
 	if len(caseDoc.RequiredContexts) > 0 {
 		reqList = append(reqList, caseDoc.RequiredContexts...)
@@ -69,20 +67,22 @@ func BuildExecuteReadyEvent(traceID, correlationID string, caseDoc *aidecisionmo
 		"traceId":        traceID,
 		"decisionCaseId": caseDoc.DecisionCaseID,
 	}
+	frame := PublishCatalogUserViForLivePhase(decisionlive.PhaseExecuteReady)
 	return decisionlive.DecisionLiveEvent{
-		Phase:          decisionlive.PhaseExecuteReady,
-		OutcomeKind:    decisionlive.OutcomeNominal,
-		Severity:       decisionlive.SeverityInfo,
-		Summary:        "Sẵn sàng nhận gợi ý — đã đủ ngữ cảnh và phân tích.",
-		CorrelationID:  correlationID,
-		DecisionCaseID: caseDoc.DecisionCaseID,
-		DetailBullets:  bullets,
-		DetailSections: sections,
-		Refs:           refs,
-		ReasoningSummary: "Bước tiếp theo là hệ thống phân tích và có thể tạo đề xuất cho bạn.",
+		Phase:            decisionlive.PhaseExecuteReady,
+		OutcomeKind:      decisionlive.OutcomeNominal,
+		Severity:         decisionlive.SeverityInfo,
+		Summary:          PublishWithSituation(frame, caseDoc.DecisionCaseID),
+		CorrelationID:    correlationID,
+		DecisionCaseID:   caseDoc.DecisionCaseID,
+		DetailBullets:    bullets,
+		DetailSections:   sections,
+		Refs:             refs,
+		ReasoningSummary: frame,
 		Step: &decisionlive.TraceStep{
-			Kind:  "gate",
-			Title: "Đã kiểm tra đủ điều kiện trước khi gợi ý",
+			Kind:      "gate",
+			Title:     frame,
+			Reasoning: frame,
 		},
 	}
 }
@@ -147,18 +147,20 @@ func BuildOrchestrateConversationEvent(
 	if caseDoc != nil {
 		refs["decisionCaseId"] = caseDoc.DecisionCaseID
 	}
+	frame := PublishCatalogUserViForLivePhase(decisionlive.PhaseOrchestrate)
 	ev := decisionlive.DecisionLiveEvent{
-		Phase:          decisionlive.PhaseOrchestrate,
-		OutcomeKind:    decisionlive.OutcomeNominal,
-		Severity:       decisionlive.SeverityInfo,
-		Summary:        "Đã sắp xếp xử lý cho tin nhắn / hội thoại.",
-		CorrelationID:  evt.CorrelationID,
-		DetailBullets:  bullets,
-		DetailSections: sections,
-		ReasoningSummary: "Tùy dữ liệu đủ hay thiếu, hệ thống sẽ lấy thêm ngữ cảnh hoặc phân tích hội thoại.",
+		Phase:            decisionlive.PhaseOrchestrate,
+		OutcomeKind:      decisionlive.OutcomeNominal,
+		Severity:         decisionlive.SeverityInfo,
+		Summary:          PublishWithSituation(frame, "Hội thoại / tin nhắn"),
+		CorrelationID:    evt.CorrelationID,
+		DetailBullets:    bullets,
+		DetailSections:   sections,
+		ReasoningSummary: frame,
 		Step: &decisionlive.TraceStep{
-			Kind:  "orchestrate",
-			Title: "Sắp xếp bước tiếp theo sau tin nhắn",
+			Kind:      "orchestrate",
+			Title:     frame,
+			Reasoning: frame,
 		},
 		Refs: refs,
 	}
@@ -216,17 +218,19 @@ func BuildOrchestrateOrderEvent(
 	if orderUid != "" && !enqueuedOrderIntelOK {
 		orderOutcome = decisionlive.OutcomePartialFailure
 	}
+	frame := PublishCatalogUserViForLivePhase(decisionlive.PhaseOrchestrate)
 	ev := decisionlive.DecisionLiveEvent{
-		Phase:         decisionlive.PhaseOrchestrate,
-		OutcomeKind:   orderOutcome,
-		Severity:      decisionlive.SeverityInfo,
-		Summary:       "Đã cập nhật theo dõi đơn hàng và rủi ro.",
-		CorrelationID: evt.CorrelationID,
-		DetailBullets: bullets,
-		ReasoningSummary: "Thông tin đơn có thể được làm mới để cảnh báo hoặc gợi ý sau này.",
+		Phase:            decisionlive.PhaseOrchestrate,
+		OutcomeKind:      orderOutcome,
+		Severity:         decisionlive.SeverityInfo,
+		Summary:          PublishWithSituation(frame, "Theo dõi đơn / rủi ro"),
+		CorrelationID:    evt.CorrelationID,
+		DetailBullets:    bullets,
+		ReasoningSummary: frame,
 		Step: &decisionlive.TraceStep{
-			Kind:  "orchestrate",
-			Title: "Theo dõi đơn và rủi ro",
+			Kind:      "orchestrate",
+			Title:     frame,
+			Reasoning: frame,
 		},
 		Refs: refs,
 	}

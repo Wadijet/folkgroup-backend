@@ -127,3 +127,17 @@ func TestE2EQueueMilestoneCatalog_G2(t *testing.T) {
 		}
 	}
 }
+
+func TestE2ECatalogDescriptionUserViForStep_ResolverStepIDsDayDu(t *testing.T) {
+	ids := []string{
+		"G1-S04", "G2-S01", "G2-S02", "G2-S05-E01",
+		"G3-S01", "G3-S03", "G3-S04", "G3-S05",
+		"G4-S01", "G4-S02", "G4-S03", "G4-S03-E01", "G4-S03-E02", "G4-S03-E03",
+	}
+	for _, id := range ids {
+		got := E2ECatalogDescriptionUserViForStep(id)
+		if strings.TrimSpace(got) == "" {
+			t.Fatalf("step %q thiếu descriptionUserVi catalog — LabelVi resolver sẽ rỗng", id)
+		}
+	}
+}

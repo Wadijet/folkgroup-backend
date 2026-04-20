@@ -5,6 +5,8 @@
 // Khung G1–G6 là tham chiếu toàn trình; event thực tế có thể vào/thoát luồng ở bất kỳ bước — xem docs/flows/bang-pha-buoc-event-e2e.md (mục «Khung tham chiếu vs thực tế»).
 package eventtypes
 
+import "strings"
+
 // E2ECatalogSchemaVersion — tăng khi đổi hình dạng JSON hoặc cắt bớt cột (client cache).
 const E2ECatalogSchemaVersion = 35 // v35: bỏ bước catalog G4-S04 — gộp execute/propose (E01–E03) vào G4-S03; resolver/livePhase e2eStepId G4-S03-E*; v34: batch→G2-S02; v33: G4-S02 context một dòng; v31: *_intel_recomputed → G4-S01; v30: G3-S02 + G3-S06; v29–v10: …
 
@@ -79,6 +81,42 @@ func E2EStepCatalog() []E2EStepCatalogEntry {
 		{StageID: E2EStageG6, StepID: "G6-S07", DescriptionTechnicalVi: "Sinh param_suggestions, rule_candidate, insight", DescriptionUserVi: "Sinh gợi ý chỉnh tham số hoặc quy tắc dựa trên dữ liệu thực tế.", ResponsibilityGroup: "Feedback"},
 		{StageID: E2EStageG6, StepID: "G6-S08", DescriptionTechnicalVi: "Đẩy ngược cải tiến lên Rule/Policy/AID (có thể có bước duyệt người)", DescriptionUserVi: "Gợi ý cải tiến được đưa lên bảng điều khiển quy tắc (có thể cần người duyệt).", ResponsibilityGroup: "Feedback"},
 	}
+}
+
+// E2ECatalogResolvedStepIDs — tập id bước hợp lệ từ E2EStepCatalog: mỗi stepId và mỗi eventDetailId (Gx-Syy-Ezz) nếu có.
+// Dùng trong test để đảm bảo resolver (envelope, live phase) không phát sinh e2eStepId ngoài catalog (ví dụ không còn "G4" thuần).
+func E2ECatalogResolvedStepIDs() map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, row := range E2EStepCatalog() {
+		if row.StepID != "" {
+			out[row.StepID] = struct{}{}
+		}
+		if row.EventDetailID != "" {
+			out[row.EventDetailID] = struct{}{}
+		}
+	}
+	return out
+}
+
+// E2ECatalogDescriptionUserViForStep — `descriptionUserVi` trong §5.3 / `E2EStepCatalog()` cho một id bước đã resolve
+// (`Gx-Syy-Ezz` ưu tiên khớp cột eventDetailId; không có thì khớp stepId với dòng không có eventDetailId).
+// Dùng cho `E2ERef.LabelVi` / payload `e2eStepLabelVi` để một nguồn với JSON catalog.
+func E2ECatalogDescriptionUserViForStep(resolvedStepID string) string {
+	s := strings.TrimSpace(resolvedStepID)
+	if s == "" {
+		return ""
+	}
+	for _, row := range E2EStepCatalog() {
+		if strings.TrimSpace(row.EventDetailID) == s {
+			return strings.TrimSpace(row.DescriptionUserVi)
+		}
+	}
+	for _, row := range E2EStepCatalog() {
+		if strings.TrimSpace(row.StepID) == s && strings.TrimSpace(row.EventDetailID) == "" {
+			return strings.TrimSpace(row.DescriptionUserVi)
+		}
+	}
+	return ""
 }
 
 // E2EQueueMilestoneCatalogEntry — mốc consumer (timeline) khớp ResolveE2EForQueueConsumerMilestone.

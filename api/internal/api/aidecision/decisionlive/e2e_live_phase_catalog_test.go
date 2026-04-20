@@ -1,6 +1,10 @@
 package decisionlive
 
-import "testing"
+import (
+	"testing"
+
+	"meta_commerce/internal/api/aidecision/eventtypes"
+)
 
 func TestE2ELivePhaseCatalog_CoversPhases(t *testing.T) {
 	rows := E2ELivePhaseCatalog()
@@ -19,5 +23,17 @@ func TestE2ELivePhaseCatalog_CoversPhases(t *testing.T) {
 	}
 	if !seen[PhaseQueueProcessing] || !seen[PhaseLLM] {
 		t.Fatal("thiếu phase queue hoặc llm")
+	}
+}
+
+func TestE2ELivePhaseCatalog_E2EStepIdNamTrongStepCatalog(t *testing.T) {
+	valid := eventtypes.E2ECatalogResolvedStepIDs()
+	for _, row := range E2ELivePhaseCatalog() {
+		if row.E2EStepID == "" {
+			t.Fatalf("phase %q: thiếu e2eStepId", row.LivePhase)
+		}
+		if _, ok := valid[row.E2EStepID]; !ok {
+			t.Fatalf("phase %q: e2eStepId %q không có trong E2EStepCatalog (eventDetailId/stepId)", row.LivePhase, row.E2EStepID)
+		}
 	}
 }

@@ -4,7 +4,8 @@
 // Pha ghi thô G1: CIO (S01–S04) — không debounce CIO trong catalog. Job message.batch_ready (debounce emit) không còn dòng catalog pha G4; ResolveE2EForQueueEnvelope neo G2-S02 (consumer processEvent).
 // Pha merge G2: G2-S01 = consumer lease một job queue — trên trục merge điển hình l1_datachanged (sau G1-S04); cùng lease cho mọi job khác. G2-S02: processEvent (gom/gấp, side-effect…). Worker miền (G2-S03–S04) merge L1→L2; G2-S05-E01 enqueue lại — l2_datachanged + <prefix>.changed + after_l2_merge (đối chiếu G1-S04); bản ghi cũ crm_merge_queue + recompute_requested. Gom debounce; gấp chỉ bỏ/rút ngắn gom.
 // Pha intel G3: G3-S01 nhận job queue (điển hình l2_datachanged); G3-S02 AID xếp job *_intel_compute; G3-S03…S05 worker miền; G3-S06 catalog — miền phát <domain>_intel_recomputed lên queue.
-// Pha quyết định G4: envelope decision_events_queue loại *_intel_recomputed → G4-S01 (AID nhận — ResolveOrCreate / điều phối case), LabelVi theo eventType.
+// Pha quyết định G4: envelope decision_events_queue loại *_intel_recomputed → G4-S01 (AID nhận — ResolveOrCreate / điều phối case).
+// LabelVi (e2eStepLabelVi) lấy từ E2EStepCatalog.descriptionUserVi — một nguồn với §5.3 / JSON `steps` (E2ECatalogDescriptionUserViForStep).
 // Hai chế độ:
 //   - Envelope queue: vị trí nghiệp vụ theo eventType (G1 enqueue, G3 intel, G4 quyết định…).
 //   - Timeline consumer: mốc vòng đời worker — Stage G2; mốc sau lease đều neo G2-S02 (trừ processing_start = G2-S01).
@@ -36,7 +37,16 @@ const (
 type E2ERef struct {
 	Stage   string // G1…G6 (rỗng = chưa gán)
 	StepID  string // Ví dụ G1-S04, G4-S01
-	LabelVi string // Mô tả ngắn tiếng Việt
+	LabelVi string // Theo §5.3: descriptionUserVi catalog cho stepId (trừ nhánh lỗi/thiếu map tùy chỉnh)
+}
+
+// e2eRefCatalog — stage + stepId máy; LabelVi = descriptionUserVi trong E2EStepCatalog (§5.3).
+func e2eRefCatalog(stage, stepID string) E2ERef {
+	return E2ERef{
+		Stage:   stage,
+		StepID:  stepID,
+		LabelVi: E2ECatalogDescriptionUserViForStep(stepID),
+	}
 }
 
 // ResolveE2EForQueueEnvelope map envelope decision_events_queue → tham chiếu E2E (vị trí nghiệp vụ).
@@ -50,7 +60,7 @@ func ResolveE2EForQueueEnvelope(eventType, eventSource, pipelineStage string) E2
 
 	// --- G1 pha ghi thô: l1_datachanged (tương thích datachanged) → queue (G1-S04) ---
 	if IsL1DatachangedEventSource(es) && IsPipelineStageAfterL1Change(ps) {
-		return E2ERef{Stage: E2EStageG1, StepID: "G1-S04", LabelVi: "Enqueue sau CRUD / hook datachanged"}
+		return e2eRefCatalog(E2EStageG1, "G1-S04")
 	}
 
 	// --- G2 pha merge: sau merge L2 (wire mới l2_datachanged + <prefix>.changed; legacy crm_merge_queue + recompute_requested) ---
@@ -58,71 +68,71 @@ func ResolveE2EForQueueEnvelope(eventType, eventSource, pipelineStage string) E2
 		if es == EventSourceL2Datachanged {
 			etTrim := strings.TrimSpace(et)
 			if etTrim == CrmIntelligenceRecomputeRequested || (strings.LastIndexByte(etTrim, '.') > 0 && strings.HasSuffix(etTrim, ".changed")) {
-				return E2ERef{Stage: E2EStageG2, StepID: "G2-S05-E01", LabelVi: "Báo cập nhật sau L2 (canonical) — enqueue AID"}
+				return e2eRefCatalog(E2EStageG2, "G2-S05-E01")
 			}
 		}
 		if et == CrmIntelligenceRecomputeRequested && es == EventSourceCrmMergeQueue {
-			return E2ERef{Stage: E2EStageG2, StepID: "G2-S05-E01", LabelVi: "Yêu cầu tính lại CRM intel sau merge L2 (bản ghi cũ)"}
+			return e2eRefCatalog(E2EStageG2, "G2-S05-E01")
 		}
 	}
 
 	// --- G3: yêu cầu intel / CIX / order recompute ---
 	switch et {
 	case CrmIntelligenceComputeRequested:
-		return E2ERef{Stage: E2EStageG3, StepID: "G3-S01", LabelVi: "Yêu cầu compute CRM intel"}
+		return e2eRefCatalog(E2EStageG3, "G3-S01")
 	case CrmIntelligenceRecomputeRequested:
-		return E2ERef{Stage: E2EStageG3, StepID: "G3-S01", LabelVi: "Yêu cầu recompute CRM intel"}
+		return e2eRefCatalog(E2EStageG3, "G3-S01")
 	case AdsIntelligenceRecomputeRequested, AdsIntelligenceRecalculateAllRequested:
-		return E2ERef{Stage: E2EStageG3, StepID: "G3-S01", LabelVi: "Yêu cầu recompute Ads intel"}
+		return e2eRefCatalog(E2EStageG3, "G3-S01")
 	case OrderRecomputeRequested:
-		return E2ERef{Stage: E2EStageG3, StepID: "G3-S01", LabelVi: "Yêu cầu recompute Order intel"}
+		return e2eRefCatalog(E2EStageG3, "G3-S01")
 	case CixAnalysisRequested:
-		return E2ERef{Stage: E2EStageG3, StepID: "G3-S01", LabelVi: "Yêu cầu phân tích CIX"}
+		return e2eRefCatalog(E2EStageG3, "G3-S01")
 	case OrderIntelligenceRequested:
-		return E2ERef{Stage: E2EStageG3, StepID: "G3-S01", LabelVi: "Order intelligence (legacy)"}
+		return e2eRefCatalog(E2EStageG3, "G3-S01")
 	}
 
 	// --- G4: AID nhận handoff intel trên queue + ngữ cảnh + ra quyết định (gom debounce message.batch_ready neo G2-S02) ---
 	switch et {
 	case CixIntelRecomputed:
-		return E2ERef{Stage: E2EStageG4, StepID: "G4-S01", LabelVi: "AID nhận cix_intel_recomputed — ResolveOrCreate / điều phối case"}
+		return e2eRefCatalog(E2EStageG4, "G4-S01")
 	case CrmIntelRecomputed:
-		return E2ERef{Stage: E2EStageG4, StepID: "G4-S01", LabelVi: "AID nhận crm_intel_recomputed — ResolveOrCreate / điều phối case"}
+		return e2eRefCatalog(E2EStageG4, "G4-S01")
 	case OrderIntelRecomputed:
-		return E2ERef{Stage: E2EStageG4, StepID: "G4-S01", LabelVi: "AID nhận order_intel_recomputed — ResolveOrCreate / điều phối case"}
+		return e2eRefCatalog(E2EStageG4, "G4-S01")
 	case CampaignIntelRecomputed:
-		return E2ERef{Stage: E2EStageG4, StepID: "G4-S01", LabelVi: "AID nhận campaign_intel_recomputed — ResolveOrCreate / điều phối case"}
+		return e2eRefCatalog(E2EStageG4, "G4-S01")
 	case CustomerContextRequested:
-		return E2ERef{Stage: E2EStageG4, StepID: "G4-S02", LabelVi: "Yêu cầu context khách hàng"}
+		return e2eRefCatalog(E2EStageG4, "G4-S02")
 	case CustomerContextReady:
-		return E2ERef{Stage: E2EStageG4, StepID: "G4-S02", LabelVi: "Context khách hàng sẵn sàng"}
+		return e2eRefCatalog(E2EStageG4, "G4-S02")
 	case AdsContextRequested:
-		return E2ERef{Stage: E2EStageG4, StepID: "G4-S02", LabelVi: "Yêu cầu context ads"}
+		return e2eRefCatalog(E2EStageG4, "G4-S02")
 	case AdsContextReady:
-		return E2ERef{Stage: E2EStageG4, StepID: "G4-S02", LabelVi: "Context ads sẵn sàng"}
+		return e2eRefCatalog(E2EStageG4, "G4-S02")
 	case MessageBatchReady:
-		return E2ERef{Stage: E2EStageG2, StepID: "G2-S02", LabelVi: "Job message.batch_ready — xử lý trên consumer (gom debounce)"}
+		return e2eRefCatalog(E2EStageG2, "G2-S02")
 	case AIDecisionExecuteRequested:
-		return E2ERef{Stage: E2EStageG4, StepID: "G4-S03-E01", LabelVi: "Phát lệnh thực thi AID"}
+		return e2eRefCatalog(E2EStageG4, "G4-S03-E01")
 	case ExecutorProposeRequested:
-		return E2ERef{Stage: E2EStageG4, StepID: "G4-S03-E02", LabelVi: "Yêu cầu đề xuất Executor"}
+		return e2eRefCatalog(E2EStageG4, "G4-S03-E02")
 	case AdsProposeRequested:
-		return E2ERef{Stage: E2EStageG4, StepID: "G4-S03-E03", LabelVi: "Đề xuất Ads (legacy)"}
+		return e2eRefCatalog(E2EStageG4, "G4-S03-E03")
 	}
 
 	// --- Prefix / l1 datachanged còn lại (an toàn) ---
 	if IsL1DatachangedEventSource(es) {
-		return E2ERef{Stage: E2EStageG1, StepID: "G1-S04", LabelVi: "Enqueue từ L1 datachanged (chi tiết bước xem eventType)"}
+		return e2eRefCatalog(E2EStageG1, "G1-S04")
 	}
 	if strings.HasPrefix(et, PrefixConversation) || strings.HasPrefix(et, PrefixMessage) {
-		return E2ERef{Stage: E2EStageG1, StepID: "G1-S04", LabelVi: "Sự kiện domain → queue (conversation/message)"}
+		return e2eRefCatalog(E2EStageG1, "G1-S04")
 	}
 	if strings.HasPrefix(et, PrefixOrder) && et != OrderRecomputeRequested && et != OrderIntelligenceRequested {
-		return E2ERef{Stage: E2EStageG1, StepID: "G1-S04", LabelVi: "Sự kiện domain → queue (order)"}
+		return e2eRefCatalog(E2EStageG1, "G1-S04")
 	}
 	if strings.HasPrefix(et, PrefixCrmDot) || strings.HasPrefix(et, "pos_") || strings.HasPrefix(et, "fb_") ||
 		strings.HasPrefix(et, "meta_") {
-		return E2ERef{Stage: E2EStageG1, StepID: "G1-S04", LabelVi: "Sự kiện domain / Meta / POS → queue"}
+		return e2eRefCatalog(E2EStageG1, "G1-S04")
 	}
 
 	return E2ERef{
@@ -132,25 +142,30 @@ func ResolveE2EForQueueEnvelope(eventType, eventSource, pipelineStage string) E2
 	}
 }
 
+// e2eRefFromQueueMilestoneKey — đọc stage/step từ E2EQueueMilestoneCatalog; LabelVi = descriptionUserVi §5.3 cho stepId (fallback userLabelVi / labelVi milestone).
+func e2eRefFromQueueMilestoneKey(milestoneKey string) (E2ERef, bool) {
+	for _, row := range E2EQueueMilestoneCatalog() {
+		if row.Key == milestoneKey {
+			lv := E2ECatalogDescriptionUserViForStep(row.StepID)
+			if lv == "" {
+				lv = strings.TrimSpace(row.UserLabelVi)
+			}
+			if lv == "" {
+				lv = row.LabelVi
+			}
+			return E2ERef{Stage: row.StageID, StepID: row.StepID, LabelVi: lv}, true
+		}
+	}
+	return E2ERef{}, false
+}
+
 // ResolveE2EForQueueConsumerMilestone — mốc timeline worker (pha merge G2 — consumer một cửa): đặt lên trên envelope cùng job.
 func ResolveE2EForQueueConsumerMilestone(eventType, eventSource, pipelineStage, milestone string) E2ERef {
 	ms := strings.TrimSpace(milestone)
-	switch ms {
-	case E2EQueueMilestoneProcessingStart:
-		return E2ERef{Stage: E2EStageG2, StepID: "G2-S01", LabelVi: "Consumer lease job — điển hình l1_datachanged (trục merge); mọi job queue khác cũng qua bước này"}
-	case E2EQueueMilestoneDatachangedDone:
-		return E2ERef{Stage: E2EStageG2, StepID: "G2-S02", LabelVi: "Hoàn tất tác vụ sau datachanged (consumer)"}
-	case E2EQueueMilestoneHandlerDone:
-		return E2ERef{Stage: E2EStageG2, StepID: "G2-S02", LabelVi: "Đóng job consumer — handler hoàn tất"}
-	case E2EQueueMilestoneHandlerError:
-		return E2ERef{Stage: E2EStageG2, StepID: "G2-S02", LabelVi: "Lỗi xử lý trên consumer"}
-	case E2EQueueMilestoneRoutingSkipped:
-		return E2ERef{Stage: E2EStageG2, StepID: "G2-S02", LabelVi: "Routing bỏ qua handler (noop)"}
-	case E2EQueueMilestoneNoHandler:
-		return E2ERef{Stage: E2EStageG2, StepID: "G2-S02", LabelVi: "Chưa có handler đăng ký cho eventType"}
-	default:
-		return ResolveE2EForQueueEnvelope(eventType, eventSource, pipelineStage)
+	if ref, ok := e2eRefFromQueueMilestoneKey(ms); ok {
+		return ref
 	}
+	return ResolveE2EForQueueEnvelope(eventType, eventSource, pipelineStage)
 }
 
 // ResolveE2EForLivePhase — khi Publish chỉ có phase (engine / orchestrate), không có envelope queue.
@@ -160,52 +175,57 @@ func ResolveE2EForLivePhase(phase string) E2ERef {
 	p := strings.TrimSpace(phase)
 	switch p {
 	case "queue_processing":
-		return E2ERef{Stage: E2EStageG2, StepID: "G2-S01", LabelVi: "Consumer đang xử lý job queue (thường l1_datachanged trên trục merge)"}
+		return e2eRefCatalog(E2EStageG2, "G2-S01")
 	case "datachanged_effects":
-		return E2ERef{Stage: E2EStageG2, StepID: "G2-S02", LabelVi: "Tác vụ sau datachanged"}
+		return e2eRefCatalog(E2EStageG2, "G2-S02")
 	case "queue_done", "queue_error":
-		return E2ERef{Stage: E2EStageG2, StepID: "G2-S02", LabelVi: "Kết thúc xử lý job trên consumer"}
+		return e2eRefCatalog(E2EStageG2, "G2-S02")
 	case "orchestrate":
-		return E2ERef{Stage: E2EStageG4, StepID: "G4-S01", LabelVi: "ResolveOrCreate case — điều phối (orchestrate)"}
+		return e2eRefCatalog(E2EStageG4, "G4-S01")
 	case "execute_ready":
-		return E2ERef{Stage: E2EStageG4, StepID: "G4-S03", LabelVi: "Đủ ngữ cảnh — chuẩn bị execute (gate)"}
+		return e2eRefCatalog(E2EStageG4, "G4-S03")
 	case "cix_integrated":
-		return E2ERef{Stage: E2EStageG4, StepID: "G4-S02", LabelVi: "Đã tích hợp phân tích CIX vào case"}
+		return e2eRefCatalog(E2EStageG4, "G4-S02")
 	case "queued":
-		return E2ERef{Stage: E2EStageG4, StepID: "G4-S03-E01", LabelVi: "Đã xếp hàng thực thi (execute_requested)"}
+		return e2eRefCatalog(E2EStageG4, "G4-S03-E01")
 	case "consuming":
-		return E2ERef{Stage: E2EStageG4, StepID: "G4-S03", LabelVi: "Engine đang chạy (ExecuteWithCase)"}
+		return e2eRefCatalog(E2EStageG4, "G4-S03")
 	case "parse":
-		return E2ERef{Stage: E2EStageG4, StepID: "G4-S03", LabelVi: "Đọc gợi ý từ tình huống (parse)"}
+		return e2eRefCatalog(E2EStageG4, "G4-S03")
 	case "llm":
-		return E2ERef{Stage: E2EStageG4, StepID: "G4-S03", LabelVi: "LLM / tinh chỉnh gợi ý"}
+		return e2eRefCatalog(E2EStageG4, "G4-S03")
 	case "decision":
-		return E2ERef{Stage: E2EStageG4, StepID: "G4-S03", LabelVi: "Tổng hợp quyết định"}
+		return e2eRefCatalog(E2EStageG4, "G4-S03")
 	case "policy":
-		return E2ERef{Stage: E2EStageG4, StepID: "G4-S03", LabelVi: "Áp policy duyệt / tự động"}
+		return e2eRefCatalog(E2EStageG4, "G4-S03")
 	case "propose":
-		return E2ERef{Stage: E2EStageG4, StepID: "G4-S03-E02", LabelVi: "Đề xuất vào Executor (propose)"}
+		return e2eRefCatalog(E2EStageG4, "G4-S03-E02")
 	case "empty":
-		return E2ERef{Stage: E2EStageG4, StepID: "G4-S03", LabelVi: "Không có hành động sau quyết định"}
+		return e2eRefCatalog(E2EStageG4, "G4-S03")
 	case "skipped":
-		return E2ERef{Stage: E2EStageG4, StepID: "G4-S03", LabelVi: "Bỏ qua bước (ví dụ thiếu CIX)"}
+		return e2eRefCatalog(E2EStageG4, "G4-S03")
 	case "ads_evaluate":
-		return E2ERef{Stage: E2EStageG4, StepID: "G4-S03", LabelVi: "Đánh giá quy tắc Ads / tối ưu chiến dịch"}
+		return e2eRefCatalog(E2EStageG4, "G4-S03")
 	case "intel_domain_compute_start":
-		return E2ERef{Stage: E2EStageG3, StepID: "G3-S03", LabelVi: "Worker domain — bắt đầu tính Intelligence / ngữ cảnh"}
+		return e2eRefCatalog(E2EStageG3, "G3-S03")
 	case "intel_domain_compute_done":
-		return E2ERef{Stage: E2EStageG3, StepID: "G3-S05", LabelVi: "Worker domain — hoàn tất bước Intelligence / ngữ cảnh (sau persist read model)"}
+		return e2eRefCatalog(E2EStageG3, "G3-S05")
 	case "intel_domain_compute_error":
-		return E2ERef{Stage: E2EStageG3, StepID: "G3-S04", LabelVi: "Worker domain — lỗi khi chạy Intelligence / ngữ cảnh"}
+		return e2eRefCatalog(E2EStageG3, "G3-S04")
 	case "done":
-		return E2ERef{Stage: E2EStageG4, StepID: "G4-S03", LabelVi: "Hoàn tất pipeline engine (mốc live)"}
+		return e2eRefCatalog(E2EStageG4, "G4-S03")
 	case "error":
-		return E2ERef{Stage: E2EStageG4, StepID: "G4-S03", LabelVi: "Lỗi trong pipeline live"}
+		return e2eRefCatalog(E2EStageG4, "G4-S03")
 	default:
 		if p == "" {
 			return E2ERef{LabelVi: "Thiếu phase — chưa gán bước chuẩn"}
 		}
-		return E2ERef{Stage: E2EStageG4, StepID: "G4", LabelVi: "Luồng live AID — phase " + p}
+		// Không gán e2eStepId kiểu "G4" (không có trong E2EStepCatalog); để trống stage/step để UI/lọc không nhầm với bước chuẩn Gx-Syy.
+		return E2ERef{
+			Stage:   "",
+			StepID:  "",
+			LabelVi: "Phase live chưa map E2E (Gx-Syy) — " + p + " — bổ sung ResolveE2EForLivePhase / constants Phase* trong decisionlive",
+		}
 	}
 }
 

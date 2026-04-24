@@ -47,12 +47,12 @@ func ProcessDataChangeForAdsProfile(ctx context.Context, e events.DataChangeEven
 			AdAccountID:      acc,
 			RecalcObjectType: recalcOT,
 			RecalcObjectID:   recalcOID,
-			SourceKind:       "meta_ad_insights",
+			SourceKind:       global.MongoDB_ColNames.MetaAdInsights,
 			Urgent:           urgent,
 		})
 		return
 
-	case global.MongoDB_ColNames.PcPosOrders:
+	case global.MongoDB_ColNames.PcPosOrders, global.MongoDB_ColNames.ManualPosOrders, global.MongoDB_ColNames.OrderCanonical:
 		adId := events.GetNestedStringField(e.Document, "posData", "ad_id")
 		if adId == "" {
 			adId = events.GetNestedStringField(e.Document, "PosData", "ad_id")
@@ -69,7 +69,7 @@ func ProcessDataChangeForAdsProfile(ctx context.Context, e events.DataChangeEven
 			AdAccountID:      adAccountId,
 			RecalcObjectType: "campaign",
 			RecalcObjectID:   campaignId,
-			SourceKind:       "pc_pos_orders",
+			SourceKind:       e.CollectionName,
 			Urgent:           false,
 		})
 		return
@@ -102,7 +102,7 @@ func ProcessDataChangeForAdsProfile(ctx context.Context, e events.DataChangeEven
 				AdAccountID:      adAccountId,
 				RecalcObjectType: "campaign",
 				RecalcObjectID:   campaignId,
-				SourceKind:       "fb_conversations",
+				SourceKind:       global.MongoDB_ColNames.FbConvesations,
 				Urgent:           false,
 			})
 		}

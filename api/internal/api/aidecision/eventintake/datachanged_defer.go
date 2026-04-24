@@ -43,8 +43,8 @@ const (
 	DeferredKindReport            DeferredSideEffectKind = "report"
 	DeferredKindCrmRefresh        DeferredSideEffectKind = "crm_refresh"
 	DeferredKindCrmMergeQueue     DeferredSideEffectKind = "crm_merge_queue"
-	DeferredKindOrderIntelCompute DeferredSideEffectKind = "order_intel_compute"
-	DeferredKindCixIntelCompute   DeferredSideEffectKind = "cix_intel_compute"
+	DeferredKindOrderIntelCompute DeferredSideEffectKind = "order_job_intel"
+	DeferredKindCixIntelCompute   DeferredSideEffectKind = "cix_job_intel"
 )
 
 // DeferredSideEffectFlushJob một việc đến hạn cần chạy trong worker (đọc lại Mongo rồi gọi report/ingest/refresh).

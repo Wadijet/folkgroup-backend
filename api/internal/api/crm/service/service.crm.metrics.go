@@ -1,4 +1,4 @@
-// Package crmvc - Aggregate metrics từ pc_pos_orders cho crm_customers.
+// Package crmvc - Aggregate metrics từ order_canonical (L2) cho crm_customers.
 package crmvc
 
 import (
@@ -35,9 +35,9 @@ type orderMetrics struct {
 	OwnedSkuQuantities  map[string]int
 }
 
-// aggregateOrderMetricsForCustomer aggregate từ pc_pos_orders. asOf > 0: chỉ đơn có orderDate <= asOf (cho snapshot đúng timeline).
+// aggregateOrderMetricsForCustomer aggregate từ order_canonical. asOf > 0: chỉ đơn có orderDate <= asOf (cho snapshot đúng timeline).
 func (s *CrmCustomerService) aggregateOrderMetricsForCustomer(ctx context.Context, customerIds []string, ownerOrgID primitive.ObjectID, phoneNumbers []string, asOf int64) orderMetrics {
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderCanonical)
 	if !ok {
 		return orderMetrics{}
 	}
@@ -72,13 +72,13 @@ func (s *CrmCustomerService) aggregateOrderMetricsForCustomer(ctx context.Contex
 	if len(ids) > 0 {
 		orConditions = append(orConditions,
 			bson.M{"customerId": bson.M{"$in": ids}},
-			bson.M{"links.customer.uid": bson.M{"$in": ids}}, // Identity 4 lớp — pc_pos_orders
+			bson.M{"links.customer.uid": bson.M{"$in": ids}}, // Identity 4 lớp — order_canonical
 			bson.M{"posData.customer.id": bson.M{"$in": ids}},
 			bson.M{"posData.customer_id": bson.M{"$in": ids}}, // fallback khi API trả customer_id dạng flat
 		)
 	}
 	if len(phoneVariants) > 0 {
-		orConditions = append(orConditions, bson.M{"billPhoneNumber": bson.M{"$in": phoneVariants}}, bson.M{"posData.bill_phone_number": bson.M{"$in": phoneVariants}})
+		orConditions = append(orConditions, bson.M{"posData.bill_phone_number": bson.M{"$in": phoneVariants}})
 	}
 	matchFilter := bson.M{
 		"ownerOrganizationId": ownerOrgID,
@@ -93,7 +93,7 @@ func (s *CrmCustomerService) aggregateOrderMetricsForCustomer(ctx context.Contex
 		andList := matchFilter["$and"].([]bson.M)
 		andList = append(andList, bson.M{
 			"$expr": bson.M{"$lte": bson.A{
-				bson.M{"$ifNull": bson.A{"$insertedAt", bson.M{"$ifNull": bson.A{"$posCreatedAt", "$posData.inserted_at"}}}},
+				bson.M{"$ifNull": bson.A{"$insertedAt", "$posData.inserted_at"}},
 				asOf,
 			}},
 		})
@@ -108,7 +108,7 @@ func (s *CrmCustomerService) aggregateOrderMetricsForCustomer(ctx context.Contex
 	cutoff90 := refTime - 90*24*60*60*1000
 
 	addFieldsStage := bson.M{
-		"orderDate": bson.M{"$ifNull": bson.A{"$insertedAt", bson.M{"$ifNull": bson.A{"$posCreatedAt", "$posData.inserted_at"}}}},
+		"orderDate": bson.M{"$ifNull": bson.A{"$insertedAt", "$posData.inserted_at"}},
 		"amount":    bson.M{"$ifNull": bson.A{"$posData.total_price_after_sub_discount", bson.M{"$ifNull": bson.A{"$posData.total_price", 0}}}},
 	}
 	pipeStages := []bson.D{
@@ -217,7 +217,7 @@ func (s *CrmCustomerService) aggregateOrderMetricsForCustomer(ctx context.Contex
 		andList := cancelledFilter["$and"].([]bson.M)
 		andList = append(andList, bson.M{
 			"$expr": bson.M{"$lte": bson.A{
-				bson.M{"$ifNull": bson.A{"$insertedAt", bson.M{"$ifNull": bson.A{"$posCreatedAt", "$posData.inserted_at"}}}},
+				bson.M{"$ifNull": bson.A{"$insertedAt", "$posData.inserted_at"}},
 				asOf,
 			}},
 		})
@@ -606,7 +606,7 @@ func (s *CrmCustomerService) getAddressesFromFirstOrderAsOf(ctx context.Context,
 	if asOf <= 0 {
 		return nil
 	}
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderCanonical)
 	if !ok {
 		return nil
 	}
@@ -635,12 +635,13 @@ func (s *CrmCustomerService) getAddressesFromFirstOrderAsOf(ctx context.Context,
 	if len(ids) > 0 {
 		orConditions = append(orConditions,
 			bson.M{"customerId": bson.M{"$in": ids}},
+			bson.M{"links.customer.uid": bson.M{"$in": ids}},
 			bson.M{"posData.customer.id": bson.M{"$in": ids}},
 			bson.M{"posData.customer_id": bson.M{"$in": ids}},
 		)
 	}
 	if len(phoneVariants) > 0 {
-		orConditions = append(orConditions, bson.M{"billPhoneNumber": bson.M{"$in": phoneVariants}}, bson.M{"posData.bill_phone_number": bson.M{"$in": phoneVariants}})
+		orConditions = append(orConditions, bson.M{"posData.bill_phone_number": bson.M{"$in": phoneVariants}})
 	}
 	matchFilter := bson.M{
 		"ownerOrganizationId": ownerOrgID,
@@ -649,13 +650,13 @@ func (s *CrmCustomerService) getAddressesFromFirstOrderAsOf(ctx context.Context,
 			{"status": bson.M{"$nin": cancelledStatuses}},
 			{"posData.status": bson.M{"$nin": cancelledStatuses}},
 			{"$expr": bson.M{"$lte": bson.A{
-				bson.M{"$ifNull": bson.A{"$insertedAt", bson.M{"$ifNull": bson.A{"$posCreatedAt", "$posData.inserted_at"}}}},
+				bson.M{"$ifNull": bson.A{"$insertedAt", "$posData.inserted_at"}},
 				asOf,
 			}}},
 		},
 	}
 	addFieldsStage := bson.M{
-		"orderDate": bson.M{"$ifNull": bson.A{"$insertedAt", bson.M{"$ifNull": bson.A{"$posCreatedAt", "$posData.inserted_at"}}}},
+		"orderDate": bson.M{"$ifNull": bson.A{"$insertedAt", "$posData.inserted_at"}},
 	}
 	pipeStages := []bson.D{
 		{{Key: "$match", Value: matchFilter}},
@@ -670,11 +671,13 @@ func (s *CrmCustomerService) getAddressesFromFirstOrderAsOf(ctx context.Context,
 	}
 	defer cursor.Close(ctx)
 	for cursor.Next(ctx) {
-		var ord pcmodels.PcPosOrder
+		var ord struct {
+			PosData map[string]interface{} `bson:"posData"`
+		}
 		if cursor.Decode(&ord) != nil {
 			continue
 		}
-		custData := extractCustomerDataFromOrder(&ord)
+		custData := extractCustomerDataFromOrder(&pcmodels.PcPosOrder{PosData: ord.PosData})
 		if len(custData.Addresses) > 0 {
 			return custData.Addresses
 		}

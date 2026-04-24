@@ -49,6 +49,7 @@ func ClassifyDatachangedBusinessUrgency(evt *aidecisionmodels.DecisionEvent, sou
 	switch src {
 	case c.MetaCampaigns, c.MetaAdSets, c.MetaAds, c.MetaAdInsights, c.MetaAdInsightsDailySnapshots, c.MetaAdAccounts,
 		c.PcPosProducts, c.PcPosVariations, c.PcPosCategories, c.PcPosShops, c.PcPosWarehouses,
+		c.ManualPosProducts, c.ManualPosVariations, c.ManualPosCategories, c.ManualPosShops, c.ManualPosWarehouses,
 		c.FbPages, c.FbPosts, c.WebhookLogs:
 		return UrgencyBackground
 	}
@@ -75,13 +76,13 @@ func ClassifyDatachangedBusinessUrgency(evt *aidecisionmodels.DecisionEvent, sou
 			return UrgencyRealtime
 		}
 		return UrgencyOperational
-	case c.PcPosOrders:
+	case c.PcPosOrders, c.ManualPosOrders:
 		// Đơn mới: risk / báo cáo doanh thu cần gần real-time; sửa đơn vẫn quan trọng nhưng cho phép gom ngắn.
 		if op == events.OpInsert || op == events.OpUpsert {
 			return UrgencyRealtime
 		}
 		return UrgencyOperational
-	case c.FbCustomers, c.PcPosCustomers:
+	case c.FbCustomers, c.PcPosCustomers, c.ManualPosCustomers:
 		// Lead / khách mới: Realtime; cập nhật sync từ ngoài: Operational.
 		if op == events.OpInsert || op == events.OpUpsert {
 			return UrgencyRealtime

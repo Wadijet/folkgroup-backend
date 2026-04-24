@@ -60,5 +60,48 @@ func Register(v1 fiber.Router, r *apirouter.Router) error {
 	}
 	r.RegisterCRUDRoutes(v1, "/pancake-pos/order", pcPosOrderHandler, apirouter.ReadWriteConfig, "PcPosOrder")
 
+	// Nhập tay / mirror L1 tách khỏi Pancake (cùng model + quyền tương ứng PcPos*).
+	manualOrder, err := pchdl.NewManualPosOrderHandler()
+	if err != nil {
+		return fmt.Errorf("create manual pos order handler: %w", err)
+	}
+	r.RegisterCRUDRoutes(v1, "/manual-pos/order", manualOrder, apirouter.ReadWriteConfig, "PcPosOrder")
+
+	manualProduct, err := pchdl.NewManualPosProductHandler()
+	if err != nil {
+		return fmt.Errorf("create manual pos product handler: %w", err)
+	}
+	r.RegisterCRUDRoutes(v1, "/manual-pos/product", manualProduct, apirouter.ReadWriteConfig, "PcPosProduct")
+
+	manualVariation, err := pchdl.NewManualPosVariationHandler()
+	if err != nil {
+		return fmt.Errorf("create manual pos variation handler: %w", err)
+	}
+	r.RegisterCRUDRoutes(v1, "/manual-pos/variation", manualVariation, apirouter.ReadWriteConfig, "PcPosVariation")
+
+	manualCategory, err := pchdl.NewManualPosCategoryHandler()
+	if err != nil {
+		return fmt.Errorf("create manual pos category handler: %w", err)
+	}
+	r.RegisterCRUDRoutes(v1, "/manual-pos/category", manualCategory, apirouter.ReadWriteConfig, "PcPosCategory")
+
+	manualCustomer, err := pchdl.NewManualPosCustomerHandler()
+	if err != nil {
+		return fmt.Errorf("create manual pos customer handler: %w", err)
+	}
+	r.RegisterCRUDRoutes(v1, "/manual-pos/customer", manualCustomer, apirouter.ReadWriteConfig, "PcPosCustomer")
+
+	manualShop, err := pchdl.NewManualPosShopHandler()
+	if err != nil {
+		return fmt.Errorf("create manual pos shop handler: %w", err)
+	}
+	r.RegisterCRUDRoutes(v1, "/manual-pos/shop", manualShop, apirouter.ReadWriteConfig, "PcPosShop")
+
+	manualWh, err := pchdl.NewManualPosWarehouseHandler()
+	if err != nil {
+		return fmt.Errorf("create manual pos warehouse handler: %w", err)
+	}
+	r.RegisterCRUDRoutes(v1, "/manual-pos/warehouse", manualWh, apirouter.ReadWriteConfig, "PcPosWarehouse")
+
 	return nil
 }

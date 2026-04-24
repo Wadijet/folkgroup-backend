@@ -9,20 +9,29 @@ import (
 
 // Đảm bảo key registry không phụ thuộc global.MongoDB_ColNames lúc package init (luôn "" trước InitGlobal).
 func TestShouldEnrichPcPosOrdersKhongCanInitGlobal(t *testing.T) {
-	if !ShouldEnrich("pc_pos_orders") {
-		t.Fatal("ShouldEnrich(pc_pos_orders) phải true ngay khi load package")
+	if !ShouldEnrich("order_src_pcpos_orders") {
+		t.Fatal("ShouldEnrich(order_src_pcpos_orders) phải true ngay khi load package")
 	}
-	if _, ok := GetConfig("pc_pos_orders"); !ok {
-		t.Fatal("GetConfig(pc_pos_orders) phải ok")
+	if _, ok := GetConfig("order_src_pcpos_orders"); !ok {
+		t.Fatal("GetConfig(order_src_pcpos_orders) phải ok")
+	}
+}
+
+func TestShouldEnrichManualPosOrdersKhongCanInitGlobal(t *testing.T) {
+	if !ShouldEnrich("order_src_manual_orders") {
+		t.Fatal("ShouldEnrich(order_src_manual_orders) phải true ngay khi load package")
+	}
+	if _, ok := GetConfig("order_src_manual_orders"); !ok {
+		t.Fatal("GetConfig(order_src_manual_orders) phải ok")
 	}
 }
 
 func TestShouldEnrichOrderCanonicalKhongCanInitGlobal(t *testing.T) {
-	if !ShouldEnrich("order_canonical") {
-		t.Fatal("ShouldEnrich(order_canonical) phải true ngay khi load package")
+	if !ShouldEnrich("order_core_records") {
+		t.Fatal("ShouldEnrich(order_core_records) phải true ngay khi load package")
 	}
-	if _, ok := GetConfig("order_canonical"); !ok {
-		t.Fatal("GetConfig(order_canonical) phải ok")
+	if _, ok := GetConfig("order_core_records"); !ok {
+		t.Fatal("GetConfig(order_core_records) phải ok")
 	}
 }
 
@@ -40,7 +49,7 @@ func TestEnrichPcPosCustomersBonTangIdentity(t *testing.T) {
 			"fb_id":       "109003588125335_26512669371686543",
 		},
 	}
-	if err := EnrichIdentity4Layers(context.Background(), "pc_pos_customers", doc, nil); err != nil {
+	if err := EnrichIdentity4Layers(context.Background(), "pc_pos_src_customers", doc, nil); err != nil {
 		t.Fatal(err)
 	}
 	sids, _ := doc["sourceIds"].(map[string]interface{})

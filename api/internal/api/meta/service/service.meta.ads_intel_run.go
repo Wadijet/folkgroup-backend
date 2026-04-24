@@ -181,7 +181,7 @@ func persistAdsMetaIntelAfterRecomputeOne(ctx context.Context, job *adsmodels.Ad
 
 	op := strings.TrimSpace(job.Source)
 	if op == "" {
-		op = "ads_intel_compute"
+		op = "ads_job_intel"
 	}
 
 	run := &adsmodels.AdsMetaIntelRun{

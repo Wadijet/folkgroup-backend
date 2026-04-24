@@ -7,6 +7,7 @@ import (
 	"time"
 
 	adsconfig "meta_commerce/internal/api/ads_meta/config"
+	canonicalquery "meta_commerce/internal/api/order/canonicalquery"
 	"meta_commerce/internal/global"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -14,15 +15,13 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-// GetROASYesterday S1: ROAS Pancake hôm qua = revenue / spend. Nguồn: meta_ad_insights (spend) + pc_pos_orders (revenue).
+// GetROASYesterday S1: ROAS Pancake hôm qua = revenue / spend. Nguồn: meta_ad_insights (spend) + order_canonical (revenue).
 func GetROASYesterday(ctx context.Context, adAccountId string, ownerOrgID primitive.ObjectID) (roas float64, ok bool) {
 	loc, _ := time.LoadLocation("Asia/Ho_Chi_Minh")
 	now := time.Now().In(loc)
 	yesterday := now.AddDate(0, 0, -1)
 	startOfDay := time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), 0, 0, 0, 0, loc)
 	endOfDay := startOfDay.Add(24*time.Hour - time.Second)
-	startSec := startOfDay.Unix()
-	endSec := endOfDay.Unix()
 
 	// Spend từ meta_ad_insights (ad_account, yesterday)
 	insightColl, okInsight := global.RegistryCollections.Get(global.MongoDB_ColNames.MetaAdInsights)
@@ -47,25 +46,26 @@ func GetROASYesterday(ctx context.Context, adAccountId string, ownerOrgID primit
 		return 0, false
 	}
 
-	// Revenue từ pc_pos_orders — aggregate theo tất cả ad_ids thuộc account
+	// Revenue từ order_canonical — aggregate theo tất cả ad_ids thuộc account
 	adIds, okAds := getAdIdsForAccount(ctx, adAccountId, ownerOrgID)
 	if !okAds || len(adIds) == 0 {
 		return 0, false
 	}
 
-	posColl, okPos := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
-	if !okPos {
+	posColl, err := canonicalquery.CollOrderCanonical()
+	if err != nil {
 		return 0, false
 	}
+	startMs := startOfDay.UnixMilli()
+	endMs := endOfDay.UnixMilli()
+	tw := canonicalquery.MatchInsertedAtTimeWindowOr(startMs, endMs)
+	match := bson.M{
+		"ownerOrganizationId": ownerOrgID,
+		"posData.ad_id":       bson.M{"$in": adIds},
+		"$or":                 tw["$or"],
+	}
 	pipeline := mongo.Pipeline{
-		{{Key: "$match", Value: bson.M{
-			"ownerOrganizationId": ownerOrgID,
-			"posData.ad_id":       bson.M{"$in": adIds},
-			"$or": []bson.M{
-				{"posCreatedAt": bson.M{"$gte": startSec, "$lte": endSec}},
-				{"insertedAt": bson.M{"$gte": startSec, "$lte": endSec}},
-			},
-		}}},
+		{{Key: "$match", Value: match}},
 		{{Key: "$group", Value: bson.M{
 			"_id":     nil,
 			"revenue": bson.M{"$sum": bson.M{"$convert": bson.M{"input": bson.M{"$ifNull": bson.A{"$posData.total_price_after_sub_discount", 0}}, "to": "double", "onError": 0, "onNull": 0}}},
@@ -266,8 +266,8 @@ func GetOrdersForCampaignSlot(ctx context.Context, campaignId, adAccountId strin
 	if !ok || len(adIds) == 0 {
 		return 0, false
 	}
-	posColl, okPos := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
-	if !okPos {
+	posColl, errColl := canonicalquery.CollOrderCanonical()
+	if errColl != nil {
 		return 0, false
 	}
 	loc, _ := time.LoadLocation("Asia/Ho_Chi_Minh")
@@ -275,16 +275,15 @@ func GetOrdersForCampaignSlot(ctx context.Context, campaignId, adAccountId strin
 	endSlot := time.Date(date.Year(), date.Month(), date.Day(), endHour, 0, 0, 0, loc)
 	startSec := startSlot.Unix()
 	endSec := endSlot.Unix()
+	tw := canonicalquery.MatchInsertedAtExclusiveSlotOr(startSec, endSec)
+	match := bson.M{
+		"ownerOrganizationId": ownerOrgID,
+		"posData.ad_id":       bson.M{"$in": adIds},
+		"$or":                 tw["$or"],
+	}
 
 	pipeline := mongo.Pipeline{
-		{{Key: "$match", Value: bson.M{
-			"ownerOrganizationId": ownerOrgID,
-			"posData.ad_id":       bson.M{"$in": adIds},
-			"$or": []bson.M{
-				{"posCreatedAt": bson.M{"$gte": startSec, "$lt": endSec}},
-				{"insertedAt": bson.M{"$gte": startSec, "$lt": endSec}},
-			},
-		}}},
+		{{Key: "$match", Value: match}},
 		{{Key: "$count", Value: "n"}},
 	}
 	cursor, err := posColl.Aggregate(ctx, pipeline)
@@ -368,21 +367,20 @@ func GetMonthlyRevenuePace(ctx context.Context, adAccountId string, ownerOrgID p
 	if !okAds || len(adIds) == 0 {
 		return 0, false
 	}
-	posColl, okPos := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
-	if !okPos {
+	posColl, errColl := canonicalquery.CollOrderCanonical()
+	if errColl != nil {
 		return 0, false
 	}
-	startSec := startOfMonth.Unix()
-	endSec := now.Unix()
+	startMs := startOfMonth.UnixMilli()
+	endMs := now.UnixMilli()
+	tw := canonicalquery.MatchInsertedAtTimeWindowOr(startMs, endMs)
+	match := bson.M{
+		"ownerOrganizationId": ownerOrgID,
+		"posData.ad_id":       bson.M{"$in": adIds},
+		"$or":                 tw["$or"],
+	}
 	pipeline := mongo.Pipeline{
-		{{Key: "$match", Value: bson.M{
-			"ownerOrganizationId": ownerOrgID,
-			"posData.ad_id":       bson.M{"$in": adIds},
-			"$or": []bson.M{
-				{"posCreatedAt": bson.M{"$gte": startSec, "$lte": endSec}},
-				{"insertedAt": bson.M{"$gte": startSec, "$lte": endSec}},
-			},
-		}}},
+		{{Key: "$match", Value: match}},
 		{{Key: "$group", Value: bson.M{
 			"_id":     nil,
 			"revenue": bson.M{"$sum": bson.M{"$convert": bson.M{"input": bson.M{"$ifNull": bson.A{"$posData.total_price_after_sub_discount", 0}}, "to": "double", "onError": 0, "onNull": 0}}},
@@ -483,30 +481,29 @@ func GetCampaignDailyOrdersMap(ctx context.Context, campaignId, adAccountId stri
 	if !ok || len(adIds) == 0 {
 		return nil, false
 	}
-	posColl, okPos := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
-	if !okPos {
+	posColl, errColl := canonicalquery.CollOrderCanonical()
+	if errColl != nil {
 		return nil, false
 	}
 	loc, _ := time.LoadLocation("Asia/Ho_Chi_Minh")
 	startT, _ := time.ParseInLocation("2006-01-02", dateStart, loc)
 	endT, _ := time.ParseInLocation("2006-01-02", dateEnd, loc)
-	startSec := startT.Unix()
-	endSec := endT.Add(24*time.Hour - time.Second).Unix()
+	startMs := startT.UnixMilli()
+	endMs := endT.Add(24*time.Hour - time.Second).UnixMilli()
+	tw := canonicalquery.MatchInsertedAtTimeWindowOr(startMs, endMs)
+	match := bson.M{
+		"ownerOrganizationId": ownerOrgID,
+		"posData.ad_id":       bson.M{"$in": adIds},
+		"$or":                 tw["$or"],
+	}
 	pipeline := mongo.Pipeline{
-		{{Key: "$match", Value: bson.M{
-			"ownerOrganizationId": ownerOrgID,
-			"posData.ad_id":       bson.M{"$in": adIds},
-			"$or": []bson.M{
-				{"posCreatedAt": bson.M{"$gte": startSec, "$lte": endSec}},
-				{"insertedAt": bson.M{"$gte": startSec, "$lte": endSec}},
-			},
-		}}},
+		{{Key: "$match", Value: match}},
 		{{Key: "$addFields", Value: bson.M{
 			"_ts": bson.M{
-				"$cond": bson.M{
-					"if":   bson.M{"$gt": bson.A{bson.M{"$ifNull": bson.A{"$posCreatedAt", 0}}, 0}},
-					"then": bson.M{"$multiply": bson.A{"$posCreatedAt", 1000}},
-					"else": bson.M{"$multiply": bson.A{bson.M{"$ifNull": bson.A{"$insertedAt", 0}}, 1000}},
+				"$cond": bson.A{
+					bson.M{"$gte": bson.A{bson.M{"$ifNull": bson.A{"$insertedAt", 0}}, 1e12}},
+					"$insertedAt",
+					bson.M{"$multiply": bson.A{bson.M{"$toLong": bson.M{"$ifNull": bson.A{"$insertedAt", 0}}}, 1000}},
 				},
 			},
 		}}},
@@ -671,17 +668,15 @@ func getOrdersForAccountSlot(ctx context.Context, adAccountId string, ownerOrgID
 	if !ok || len(adIds) == 0 {
 		return 0, false
 	}
-	posColl, okPos := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
-	if !okPos {
+	posColl, errColl := canonicalquery.CollOrderCanonical()
+	if errColl != nil {
 		return 0, false
 	}
+	tw := canonicalquery.MatchInsertedAtExclusiveSlotOr(startSec, endSec)
 	n, err := posColl.CountDocuments(ctx, bson.M{
 		"ownerOrganizationId": ownerOrgID,
 		"posData.ad_id":       bson.M{"$in": adIds},
-		"$or": []bson.M{
-			{"posCreatedAt": bson.M{"$gte": startSec, "$lt": endSec}},
-			{"insertedAt": bson.M{"$gte": startSec, "$lt": endSec}},
-		},
+		"$or":                 tw["$or"],
 	})
 	if err != nil {
 		return 0, false

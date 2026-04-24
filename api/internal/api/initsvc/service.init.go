@@ -3764,7 +3764,7 @@ var orderReportMetadata = map[string]interface{}{
 }
 
 // InitReportDefinitions tạo hoặc cập nhật mẫu báo cáo đơn hàng (order_daily, order_weekly, order_monthly) trong report_definitions.
-// Báo cáo: thời gian theo posCreatedAt; chỉ tiêu: số lượng đơn, tổng số tiền; thống kê theo posData.tags (chia đều nếu nhiều tag).
+// Báo cáo: thời gian theo insertedAt trên order_canonical (L2); chỉ tiêu: số lượng đơn, tổng số tiền; thống kê theo posData.tags (chia đều nếu nhiều tag).
 func (h *InitService) InitReportDefinitions() error {
 	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.ReportDefinitions)
 	if !ok {
@@ -3802,8 +3802,8 @@ func (h *InitService) InitReportDefinitions() error {
 			Name:             s.name,
 			PeriodType:       s.periodType,
 			PeriodLabel:      s.periodLabel,
-			SourceCollection: global.MongoDB_ColNames.PcPosOrders,
-			TimeField:        "posCreatedAt",
+			SourceCollection: global.MongoDB_ColNames.OrderCanonical,
+			TimeField:        "insertedAt",
 			TimeFieldUnit:    "millisecond",
 			Dimensions:       []string{"ownerOrganizationId"},
 			Metrics:          metrics,
@@ -3820,7 +3820,7 @@ func (h *InitService) InitReportDefinitions() error {
 	}
 
 	// Báo cáo khách hàng theo chu kỳ (customer_daily, customer_weekly, ...) — dùng engine riêng ComputeCustomerReport.
-	// sourceCollection = pc_pos_orders để hook MarkDirty khi đơn thay đổi.
+	// sourceCollection = order_canonical để hook MarkDirty khi đơn (L2) thay đổi.
 	customerSeeds := []struct {
 		key         string
 		name        string
@@ -3843,8 +3843,8 @@ func (h *InitService) InitReportDefinitions() error {
 			Name:             s.name,
 			PeriodType:       s.periodType,
 			PeriodLabel:      s.periodLabel,
-			SourceCollection: global.MongoDB_ColNames.PcPosOrders,
-			TimeField:        "posCreatedAt",
+			SourceCollection: global.MongoDB_ColNames.OrderCanonical,
+			TimeField:        "insertedAt",
 			TimeFieldUnit:    "millisecond",
 			Dimensions:       []string{"ownerOrganizationId"},
 			Metrics:          customerMetrics,
@@ -3864,7 +3864,7 @@ func (h *InitService) InitReportDefinitions() error {
 	// Aggregate từ meta_ad_insights (phát sinh spend, clicks, impressions...) + meta_campaigns (activeCampaigns).
 	adsDailyMetadata := map[string]interface{}{
 		"description": "Snapshot ads theo ngày: phát sinh từ Meta (spend, clicks, impressions...), activeCampaigns. Dùng cho CEO Dashboard.",
-		"triggerCollections": []string{"meta_ad_insights", "meta_campaigns"},
+		"triggerCollections": []string{"meta_src_ad_insights", "meta_src_campaigns"},
 	}
 	adsDailySeed := reportmodels.ReportDefinition{
 		Key:              "ads_daily",

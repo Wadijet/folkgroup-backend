@@ -16,6 +16,7 @@ import (
 	adsconfig "meta_commerce/internal/api/ads_meta/config"
 	"meta_commerce/internal/api/events"
 	"meta_commerce/internal/api/meta/models"
+	canonicalquery "meta_commerce/internal/api/order/canonicalquery"
 	"meta_commerce/internal/common/activity"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/logger"
@@ -289,7 +290,7 @@ func updateRawAndLayersForAd(ctx context.Context, adId, adAccountId string, owne
 	window2hMs := int64(2 * 60 * 60 * 1000)
 	window1hMs := int64(60 * 60 * 1000)
 
-	// raw.7d — Theo FolkForm 01: Pancake (orders) + FB (mess). Source: meta_ad_insights (FB) + pc_pos_orders (Pancake)
+	// raw.7d — Theo FolkForm 01: Pancake (orders) + FB (mess). Source: meta_ad_insights (FB) + order_canonical
 	// Dùng calendar range (startMs, endMs) để align với meta — cùng khoảng thời gian theo múi giờ.
 	start7dMs, end7dMs := getWindowMsRangeFromDates(DefaultWindowDays)
 	raw7d := make(map[string]interface{})
@@ -322,12 +323,12 @@ func updateRawAndLayersForAd(ctx context.Context, adId, adAccountId string, owne
 	raw7d["window"] = map[string]interface{}{"dateStart": dateStart, "dateStop": dateStop}
 	raw7d["metaCreatedAt"] = fetchAdMetaCreatedAt(ctx, adId, adAccountId, ownerOrgID)
 
-	// raw.2h — Theo FolkForm 04: Conv_Rate_now = Pancake_orders_2h / FB_Mess_2h. Source: pc_pos_orders (Pancake) + fb_conversations (FB mess)
+	// raw.2h — Theo FolkForm 04: Conv_Rate_now = Pancake_orders_2h / FB_Mess_2h. Source: order_canonical + fb_conversations (FB mess)
 	// Dùng khoảng align theo boundary 2h (slot đã hoàn thành gần nhất).
 	start2hMs, end2hMs := getWindowMsRangeForShortCycle(120)
 	raw2h := fetchRawForShortWindow(ctx, adId, ownerOrgID, window2hMs, start2hMs, end2hMs)
 
-	// raw.1h — Theo FolkForm PATCH 03 HB-3: FB_Mess_1h, Pancake_orders_1h. Source: pc_pos_orders (Pancake) + fb_conversations (FB mess)
+	// raw.1h — Theo FolkForm PATCH 03 HB-3: FB_Mess_1h, Pancake_orders_1h. Source: order_canonical + fb_conversations (FB mess)
 	start1hMs, end1hMs := getWindowMsRangeForShortCycle(60)
 	raw1h := fetchRawForShortWindow(ctx, adId, ownerOrgID, window1hMs, start1hMs, end1hMs)
 
@@ -776,14 +777,10 @@ func toInt64FromBson(d bson.M, k string) int64 {
 	return 0
 }
 
-// fetchRawPosFromOrders aggregate pc_pos_orders có posData.ad_id = adId trong window → raw.pancake.pos.
+// fetchRawPosFromOrders aggregate order_canonical có posData.ad_id = adId trong window → raw.pancake.pos.
 // Theo FolkForm v4.1: Conv_Rate_7day = Pancake_orders_7d / FB_Mess_7d — orders phải filter cùng chu kỳ với Meta insights.
 // Khi startEndMs có 2 phần tử: dùng calendar range (align với meta). Ngược lại: dùng rolling window (now - windowMs đến now).
 func fetchRawPosFromOrders(ctx context.Context, adId string, ownerOrgID primitive.ObjectID, windowMs int64, startEndMs ...int64) (map[string]interface{}, error) {
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
-	if !ok {
-		return nil, fmt.Errorf("không tìm thấy collection pc_pos_orders")
-	}
 	var startMs, endMs int64
 	if len(startEndMs) >= 2 && startEndMs[0] > 0 && startEndMs[1] > 0 {
 		startMs, endMs = startEndMs[0], startEndMs[1]
@@ -792,48 +789,15 @@ func fetchRawPosFromOrders(ctx context.Context, adId string, ownerOrgID primitiv
 		startMs = nowMs - windowMs
 		endMs = nowMs
 	}
-	startSec := startMs / 1000
-	endSec := endMs / 1000
-
-	filter := bson.M{
-		"ownerOrganizationId": ownerOrgID,
-		"posData.ad_id":       adId,
-		"$or": []bson.M{
-			{"posCreatedAt": bson.M{"$gte": startSec, "$lte": endSec}},
-			{"insertedAt": bson.M{"$gte": startSec, "$lte": endSec}},
-			{"posCreatedAt": bson.M{"$gte": startMs, "$lte": endMs}},
-			{"insertedAt": bson.M{"$gte": startMs, "$lte": endMs}},
-		},
-	}
-
-	pipeline := mongo.Pipeline{
-		{{Key: "$match", Value: filter}},
-		{{Key: "$group", Value: bson.M{
-			"_id":    nil,
-			"orders": bson.M{"$sum": 1},
-			"revenue": bson.M{"$sum": bson.M{"$convert": bson.M{"input": bson.M{"$ifNull": bson.A{"$posData.total_price_after_sub_discount", 0}}, "to": "double", "onError": 0, "onNull": 0}}},
-		}}},
-	}
-	cursor, err := coll.Aggregate(ctx, pipeline)
+	orders, revenue, err := canonicalquery.AggregateOrdersRevenueByAdID(ctx, adId, ownerOrgID, startMs, endMs)
 	if err != nil {
 		return nil, err
 	}
-	defer cursor.Close(ctx)
-
-	raw := map[string]interface{}{"orders": int64(0), "revenue": 0.0}
-	if cursor.Next(ctx) {
-		var doc bson.M
-		if err := cursor.Decode(&doc); err != nil {
-			return nil, err
-		}
-		raw["orders"] = toInt64FromBson(doc, "orders")
-		raw["revenue"] = toFloatFromBson(doc, "revenue")
-	}
-	return raw, nil
+	return map[string]interface{}{"orders": orders, "revenue": revenue}, nil
 }
 
 // fetchRawForShortWindow lấy raw cho window ngắn (2h, 1h, 30p) theo FolkForm 04, PATCH 03.
-// Orders: pc_pos_orders (Pancake). Mess: fb_conversations (FB — hội thoại từ ad, meta_ad_insights chỉ có daily).
+// Orders: order_canonical. Mess: fb_conversations (FB — hội thoại từ ad, meta_ad_insights chỉ có daily).
 // Khi startEndMs có 2 phần tử: dùng khoảng align theo boundary (đúng chu kỳ). Ngược lại: rolling window.
 func fetchRawForShortWindow(ctx context.Context, adId string, ownerOrgID primitive.ObjectID, windowMs int64, startEndMs ...int64) map[string]interface{} {
 	out := map[string]interface{}{"orders": int64(0), "revenue": 0.0, "mess": int64(0)}

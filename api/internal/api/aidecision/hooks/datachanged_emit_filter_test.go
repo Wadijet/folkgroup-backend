@@ -8,49 +8,49 @@ import (
 )
 
 func TestShouldEmitDatachangedToDecisionQueue_mapOverride(t *testing.T) {
-	global.MongoDB_ColNames.MetaAdInsights = "meta_ad_insights"
-	global.MongoDB_ColNames.MetaCampaigns = "meta_campaigns"
-	global.MongoDB_ColNames.FbConvesations = "fb_conversations"
+	global.MongoDB_ColNames.MetaAdInsights = "meta_src_ad_insights"
+	global.MongoDB_ColNames.MetaCampaigns = "meta_src_campaigns"
+	global.MongoDB_ColNames.FbConvesations = "fb_src_conversations"
 	saved := datachangedemit.EmitPerCollection
 	t.Cleanup(func() {
 		datachangedemit.EmitPerCollection = saved
 	})
 	datachangedemit.EmitPerCollection = map[string]bool{
-		"meta_campaigns":   true,
-		"fb_conversations": false,
+		"meta_src_campaigns": true,
+		"fb_src_conversations": false,
 	}
-	if !ShouldEmitDatachangedToDecisionQueue("meta_campaigns") {
+	if !ShouldEmitDatachangedToDecisionQueue("meta_src_campaigns") {
 		t.Fatal("map phải bật meta_campaigns")
 	}
-	if ShouldEmitDatachangedToDecisionQueue("fb_conversations") {
+	if ShouldEmitDatachangedToDecisionQueue("fb_src_conversations") {
 		t.Fatal("map phải tắt fb_conversations")
 	}
 }
 
 func TestShouldEmitDatachangedToDecisionQueue_metaInsightOnlyDefault(t *testing.T) {
-	global.MongoDB_ColNames.MetaAdInsights = "meta_ad_insights"
-	global.MongoDB_ColNames.MetaCampaigns = "meta_campaigns"
+	global.MongoDB_ColNames.MetaAdInsights = "meta_src_ad_insights"
+	global.MongoDB_ColNames.MetaCampaigns = "meta_src_campaigns"
 	saved := datachangedemit.EmitPerCollection
 	t.Cleanup(func() {
 		datachangedemit.EmitPerCollection = saved
 	})
 	datachangedemit.EmitPerCollection = nil
-	if ShouldEmitDatachangedToDecisionQueue("meta_campaigns") {
+	if ShouldEmitDatachangedToDecisionQueue("meta_src_campaigns") {
 		t.Fatal("mặc định Meta (không trong map) chỉ insight emit")
 	}
-	if !ShouldEmitDatachangedToDecisionQueue("meta_ad_insights") {
+	if !ShouldEmitDatachangedToDecisionQueue("meta_src_ad_insights") {
 		t.Fatal("meta_ad_insights phải emit")
 	}
 }
 
 func TestShouldEmitDatachangedToDecisionQueue_nonMetaDefaultTrue(t *testing.T) {
-	global.MongoDB_ColNames.MetaAdInsights = "meta_ad_insights"
+	global.MongoDB_ColNames.MetaAdInsights = "meta_src_ad_insights"
 	saved := datachangedemit.EmitPerCollection
 	t.Cleanup(func() {
 		datachangedemit.EmitPerCollection = saved
 	})
 	datachangedemit.EmitPerCollection = nil
-	if !ShouldEmitDatachangedToDecisionQueue("pc_pos_orders") {
+	if !ShouldEmitDatachangedToDecisionQueue("order_src_pcpos_orders") {
 		t.Fatal("non-Meta không trong map phải emit")
 	}
 }

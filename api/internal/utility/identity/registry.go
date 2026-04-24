@@ -23,13 +23,24 @@ type LinkKeyConfig struct {
 }
 
 // registry — key phải là tên collection thật (khớp cmd/server/init.go initColNames).
-// Không dùng global.MongoDB_ColNames.Xxx làm key: lúc init package các field đó vẫn "" → mọi entry gộp thành một key rỗng → ShouldEnrich("pc_pos_orders") luôn false.
+// Không dùng global.MongoDB_ColNames.Xxx làm key: lúc init package các field đó vẫn "" → mọi entry gộp thành một key rỗng → ShouldEnrich("order_src_pcpos_orders") luôn false.
 var registry = map[string]ColConfig{
-	"customer_customers": {
+	"customer_core_records": {
 		Prefix: utility.UIDPrefixCustomer,
 		// sourceIds đã có struct riêng, không extract từ payload
 	},
-	"pc_pos_customers": {
+	"order_src_manual_customers": {
+		Prefix: utility.UIDPrefixCustomer,
+		SourceKeys: []SourceKeyConfig{
+			{Path: "posData.id", Source: "pos"},
+			{Path: "posData.customer_id", Source: "pancake_customer"},
+			{Path: "posData.fb_id", Source: "facebook"},
+		},
+		LinkKeys: []LinkKeyConfig{
+			{Path: "shopId", Key: "shop", Source: "pos"},
+		},
+	},
+	"pc_pos_src_customers": {
 		Prefix: utility.UIDPrefixCustomer,
 		// sourceIds: mọi định danh ngoài của cùng entity khách (POS API id, khách inbox Pancake, PSID ghép page).
 		SourceKeys: []SourceKeyConfig{
@@ -42,11 +53,11 @@ var registry = map[string]ColConfig{
 			{Path: "shopId", Key: "shop", Source: "pos"},
 		},
 	},
-	"fb_customers": {
+	"fb_src_customers": {
 		Prefix:     utility.UIDPrefixCustomer,
 		SourceKeys: []SourceKeyConfig{{Path: "panCakeData.id", Source: "facebook"}},
 	},
-	"pc_pos_orders": {
+	"order_src_pcpos_orders": {
 		Prefix:     utility.UIDPrefixOrder,
 		SourceKeys: []SourceKeyConfig{{Path: "posData.id", Source: "pos"}},
 		LinkKeys: []LinkKeyConfig{
@@ -55,8 +66,8 @@ var registry = map[string]ColConfig{
 			{Path: "posData.customer_id", Key: "customer", Source: "pos"},
 		},
 	},
-	// order_canonical — đơn canonical đa nguồn; posData giữ layout Pancake khi source=pancake_pos (enrich/CRUD sau này).
-	"order_canonical": {
+	// order_src_manual_orders — L1 nhập tay; cùng extract/link như mirror Pancake.
+	"order_src_manual_orders": {
 		Prefix:     utility.UIDPrefixOrder,
 		SourceKeys: []SourceKeyConfig{{Path: "posData.id", Source: "pos"}},
 		LinkKeys: []LinkKeyConfig{
@@ -65,21 +76,45 @@ var registry = map[string]ColConfig{
 			{Path: "posData.customer_id", Key: "customer", Source: "pos"},
 		},
 	},
-	"pc_pos_products": {
+	// order_core_records — đơn canonical đa nguồn; posData giữ layout Pancake khi source=pancake_pos (enrich/CRUD sau này).
+	"order_core_records": {
+		Prefix:     utility.UIDPrefixOrder,
+		SourceKeys: []SourceKeyConfig{{Path: "posData.id", Source: "pos"}},
+		LinkKeys: []LinkKeyConfig{
+			{Path: "customerId", Key: "customer", Source: "pos"},
+			{Path: "posData.customer.id", Key: "customer", Source: "pos"},
+			{Path: "posData.customer_id", Key: "customer", Source: "pos"},
+		},
+	},
+	"order_src_pcpos_products": {
 		Prefix:     utility.UIDPrefixPosProduct,
 		SourceKeys: []SourceKeyConfig{{Path: "posData.id", Source: "pos"}},
 		LinkKeys: []LinkKeyConfig{
 			{Path: "shopId", Key: "shop", Source: "pos"},
 		},
 	},
-	"pc_pos_categories": {
+	"order_src_manual_products": {
+		Prefix:     utility.UIDPrefixPosProduct,
+		SourceKeys: []SourceKeyConfig{{Path: "posData.id", Source: "pos"}},
+		LinkKeys: []LinkKeyConfig{
+			{Path: "shopId", Key: "shop", Source: "pos"},
+		},
+	},
+	"order_src_pcpos_categories": {
 		Prefix:     utility.UIDPrefixPosCategory,
 		SourceKeys: []SourceKeyConfig{{Path: "posData.id", Source: "pos"}},
 		LinkKeys: []LinkKeyConfig{
 			{Path: "shopId", Key: "shop", Source: "pos"},
 		},
 	},
-	"pc_pos_variations": {
+	"order_src_manual_categories": {
+		Prefix:     utility.UIDPrefixPosCategory,
+		SourceKeys: []SourceKeyConfig{{Path: "posData.id", Source: "pos"}},
+		LinkKeys: []LinkKeyConfig{
+			{Path: "shopId", Key: "shop", Source: "pos"},
+		},
+	},
+	"order_src_pcpos_variations": {
 		Prefix:     utility.UIDPrefixPosVariation,
 		SourceKeys: []SourceKeyConfig{{Path: "posData.id", Source: "pos"}},
 		LinkKeys: []LinkKeyConfig{
@@ -87,29 +122,48 @@ var registry = map[string]ColConfig{
 			{Path: "shopId", Key: "shop", Source: "pos"},
 		},
 	},
-	"pc_pos_warehouses": {
+	"order_src_manual_variations": {
+		Prefix:     utility.UIDPrefixPosVariation,
+		SourceKeys: []SourceKeyConfig{{Path: "posData.id", Source: "pos"}},
+		LinkKeys: []LinkKeyConfig{
+			{Path: "productId", Key: "product", Source: "pos"},
+			{Path: "shopId", Key: "shop", Source: "pos"},
+		},
+	},
+	"pc_pos_src_warehouses": {
 		Prefix:     utility.UIDPrefixPosWarehouse,
 		SourceKeys: []SourceKeyConfig{{Path: "panCakeData.id", Source: "pos"}},
 		LinkKeys: []LinkKeyConfig{
 			{Path: "shopId", Key: "shop", Source: "pos"},
 		},
 	},
-	"pc_pos_shops": {
+	"order_src_manual_warehouses": {
+		Prefix:     utility.UIDPrefixPosWarehouse,
+		SourceKeys: []SourceKeyConfig{{Path: "panCakeData.id", Source: "pos"}},
+		LinkKeys: []LinkKeyConfig{
+			{Path: "shopId", Key: "shop", Source: "pos"},
+		},
+	},
+	"pc_pos_src_shops": {
 		Prefix:     utility.UIDPrefixPosShop,
 		SourceKeys: []SourceKeyConfig{{Path: "panCakeData.id", Source: "pos"}},
 	},
-	"meta_ad_accounts": {
+	"order_src_manual_shops": {
+		Prefix:     utility.UIDPrefixPosShop,
+		SourceKeys: []SourceKeyConfig{{Path: "panCakeData.id", Source: "pos"}},
+	},
+	"meta_src_ad_accounts": {
 		Prefix:     utility.UIDPrefixMetaAdAccount,
 		SourceKeys: []SourceKeyConfig{{Path: "metaData.id", Source: "meta"}},
 	},
-	"meta_campaigns": {
+	"meta_src_campaigns": {
 		Prefix:     utility.UIDPrefixMetaCampaign,
 		SourceKeys: []SourceKeyConfig{{Path: "metaData.id", Source: "meta"}},
 		LinkKeys: []LinkKeyConfig{
 			{Path: "adAccountId", Key: "adAccount", Source: "meta"},
 		},
 	},
-	"meta_adsets": {
+	"meta_src_adsets": {
 		Prefix:     utility.UIDPrefixMetaAdSet,
 		SourceKeys: []SourceKeyConfig{{Path: "metaData.id", Source: "meta"}},
 		LinkKeys: []LinkKeyConfig{
@@ -117,7 +171,7 @@ var registry = map[string]ColConfig{
 			{Path: "adAccountId", Key: "adAccount", Source: "meta"},
 		},
 	},
-	"meta_ads": {
+	"meta_src_ads": {
 		Prefix:     utility.UIDPrefixMetaAd,
 		SourceKeys: []SourceKeyConfig{{Path: "metaData.id", Source: "meta"}},
 		LinkKeys: []LinkKeyConfig{
@@ -126,21 +180,21 @@ var registry = map[string]ColConfig{
 			{Path: "adAccountId", Key: "adAccount", Source: "meta"},
 		},
 	},
-	"meta_ad_insights": {
+	"meta_src_ad_insights": {
 		Prefix:     utility.UIDPrefixMetaInsight,
 		SourceKeys: []SourceKeyConfig{{Path: "objectId", Source: "meta"}},
 		LinkKeys: []LinkKeyConfig{
 			{Path: "adAccountId", Key: "adAccount", Source: "meta"},
 		},
 	},
-	"meta_ad_insights_daily_snapshots": {
+	"meta_rm_ad_insights_daily_snapshots": {
 		Prefix:     utility.UIDPrefixMetaInsight,
 		SourceKeys: []SourceKeyConfig{{Path: "objectId", Source: "meta"}},
 		LinkKeys: []LinkKeyConfig{
 			{Path: "adAccountId", Key: "adAccount", Source: "meta"},
 		},
 	},
-	"fb_conversations": {
+	"fb_src_conversations": {
 		Prefix: utility.UIDPrefixConversation,
 		LinkKeys: []LinkKeyConfig{
 			{Path: "customerId", Key: "customer", Source: "facebook"},
@@ -149,7 +203,7 @@ var registry = map[string]ColConfig{
 			{Path: "panCakeData.page_customer.id", Key: "customer", Source: "facebook"},
 		},
 	},
-	"fb_messages": {
+	"fb_src_messages": {
 		Prefix:     utility.UIDPrefixFbMessage,
 		SourceKeys: []SourceKeyConfig{{Path: "conversationId", Source: "facebook"}},
 		LinkKeys: []LinkKeyConfig{
@@ -157,18 +211,18 @@ var registry = map[string]ColConfig{
 			{Path: "conversationId", Key: "conversation", Source: "facebook"},
 		},
 	},
-	"fb_message_items": {
+	"fb_src_message_items": {
 		Prefix:     utility.UIDPrefixFbMessageItem,
 		SourceKeys: []SourceKeyConfig{{Path: "messageId", Source: "facebook"}},
 		LinkKeys: []LinkKeyConfig{
 			{Path: "conversationId", Key: "conversation", Source: "facebook"},
 		},
 	},
-	"customer_activity_history": {
+	"customer_run_activity_history": {
 		Prefix: utility.UIDPrefixActivity,
 		// links từ unifiedId trong activity
 	},
-	"customer_notes": {
+	"customer_core_notes": {
 		Prefix: utility.UIDPrefixNote,
 		LinkKeys: []LinkKeyConfig{
 			{Path: "customerId", Key: "customer", Source: ""},

@@ -9,6 +9,7 @@ import (
 	"meta_commerce/internal/api/aidecision/crmqueue"
 	"meta_commerce/internal/api/aidecision/datachangedrouting"
 	"meta_commerce/internal/api/aidecision/datachangedsidefx"
+	_ "meta_commerce/internal/api/aidecision/eventpipeline" // cùng nạp side-effect với init.registry; cần khi binary chỉ import worker
 	"meta_commerce/internal/api/aidecision/decisionlive"
 	"meta_commerce/internal/api/aidecision/eventintake"
 	"meta_commerce/internal/api/aidecision/eventtypes"
@@ -18,7 +19,7 @@ import (
 	crmdec "meta_commerce/internal/api/crm/datachanged"
 	crmvc "meta_commerce/internal/api/crm/service"
 	"meta_commerce/internal/api/events"
-	_ "meta_commerce/internal/api/meta/datachanged" // sidefx_register: meta_ads_profile
+	// datachanged side-effect registration: gom ở internal/api/aidecision/eventpipeline (import _ + Ensure từ init.registry)
 	orderdatachanged "meta_commerce/internal/api/order/datachanged"
 	orderinteldec "meta_commerce/internal/api/orderintel/datachanged"
 	rptdec "meta_commerce/internal/api/report/datachanged"
@@ -29,7 +30,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// orderIntelTrailingDebounce — Order intelligence từ pc_pos_orders: mặc định 5 phút; Realtime/gấp → ngay.
+// orderIntelTrailingDebounce — Order intelligence (tính trên L2): debounce từ datachanged đơn (L1 mirror hoặc order_canonical).
 const orderIntelTrailingDebounce = 5 * time.Minute
 
 // cixIntelTrailingDebounce — CIX từ fb_message_items: mặc định 1 phút.
@@ -94,16 +95,32 @@ func applyDatachangedSideEffects(ctx context.Context, svc *aidecisionsvc.AIDecis
 	if !ok {
 		return datachangedTraceSourceUnreadable(src, idHex)
 	}
-	pancakeLine := ""
-	// Chiếu đơn Pancake → order_canonical trước policy intel — Order Intel đọc từ order_canonical.
+	orderL2SyncLine := ""
+	// Chiếu L1 đơn → order_core_records trước policy intel — Order Intel chỉ đọc L2.
 	if src == global.MongoDB_ColNames.PcPosOrders {
 		if err := orderdatachanged.SyncCommerceOrderFromPancakeDataChange(ctx, e); err != nil {
 			logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
 				"eventId": evt.EventID, "sourceCollection": src,
-			}).Warn("📋 [ORDER_CANONICAL] Không đồng bộ order_canonical từ pc_pos_orders")
-			pancakeLine = "Không cập nhật được đơn từ Pancake — " + truncateProcessTraceErr(err.Error())
+			}).Warn("📋 [ORDER_CANONICAL] Không đồng bộ order_core_records từ order_src_pcpos_orders")
+			orderL2SyncLine = "Không cập nhật được đơn Pancake lên L2 — " + truncateProcessTraceErr(err.Error())
 		} else {
-			pancakeLine = "Đã cập nhật đơn hàng từ Pancake để các bước sau dùng đúng số liệu."
+			orderL2SyncLine = "Đã cập nhật đơn Pancake lên L2 để các bước sau dùng đúng số liệu."
+		}
+	}
+	if src == global.MongoDB_ColNames.ManualPosOrders {
+		if err := orderdatachanged.SyncCommerceOrderFromManualDataChange(ctx, e); err != nil {
+			logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
+				"eventId": evt.EventID, "sourceCollection": src,
+			}).Warn("📋 [ORDER_CANONICAL] Không đồng bộ order_core_records từ order_src_manual_orders")
+			if orderL2SyncLine != "" {
+				orderL2SyncLine += " "
+			}
+			orderL2SyncLine += "Không cập nhật được đơn nhập tay lên L2 — " + truncateProcessTraceErr(err.Error())
+		} else {
+			if orderL2SyncLine != "" {
+				orderL2SyncLine += " "
+			}
+			orderL2SyncLine += "Đã cập nhật đơn nhập tay lên L2."
 		}
 	}
 	orgHex := evt.OrgID
@@ -138,7 +155,7 @@ func applyDatachangedSideEffects(ctx context.Context, svc *aidecisionsvc.AIDecis
 		cixIntelDefer = cixIntelDeferWindow(evt, rawMsg)
 	}
 	orderIntelDefer := time.Duration(0)
-	if src == global.MongoDB_ColNames.PcPosOrders {
+	if src == global.MongoDB_ColNames.PcPosOrders || src == global.MongoDB_ColNames.ManualPosOrders || src == global.MongoDB_ColNames.OrderCanonical {
 		orderIntelDefer = orderIntelDeferWindow(evt, src, op)
 	}
 
@@ -160,7 +177,7 @@ func applyDatachangedSideEffects(ctx context.Context, svc *aidecisionsvc.AIDecis
 	}
 	datachangedsidefx.Run(ac)
 	// Tính lại CRM intelligence: không enqueue trực tiếp từ đây — chỉ sau CrmPendingMergeWorker (crm.intelligence.recompute_requested + debounce consumer).
-	return buildDatachangedSideEffectTraceNodes(ac, pancakeLine)
+	return buildDatachangedSideEffectTraceNodes(ac, orderL2SyncLine)
 }
 
 // resolveUnifiedIDForCrmIntelRecompute — từ payload datachanged đã hydrate (customerId / unifiedId).

@@ -37,19 +37,19 @@ func main() {
 	defer client.Disconnect(ctx)
 
 	// Init registry — cần Rule Engine collections cho computeSuggestedActions
-	global.MongoDB_ColNames.AdsMetaConfig = "ads_meta_config"
-	global.MongoDB_ColNames.MetaCampaigns = "meta_campaigns"
-	global.MongoDB_ColNames.ActionPendingApproval = "action_pending_approval"
-	global.MongoDB_ColNames.RuleDefinitions = "rule_definitions"
-	global.MongoDB_ColNames.RuleLogicDefinitions = "rule_logic_definitions"
-	global.MongoDB_ColNames.RuleParamSets = "rule_param_sets"
-	global.MongoDB_ColNames.RuleOutputDefinitions = "rule_output_definitions"
-	global.MongoDB_ColNames.RuleExecutionLogs = "rule_execution_logs"
+	global.MongoDB_ColNames.AdsMetaConfig = "ads_cfg_meta"
+	global.MongoDB_ColNames.MetaCampaigns = "meta_src_campaigns"
+	global.MongoDB_ColNames.ActionPendingApproval = "approval_job_pending_actions"
+	global.MongoDB_ColNames.RuleDefinitions = "rule_cfg_definitions"
+	global.MongoDB_ColNames.RuleLogicDefinitions = "rule_cfg_logic_definitions"
+	global.MongoDB_ColNames.RuleParamSets = "rule_cfg_param_sets"
+	global.MongoDB_ColNames.RuleOutputDefinitions = "rule_cfg_output_definitions"
+	global.MongoDB_ColNames.RuleExecutionLogs = "rule_run_execution_logs"
 	db := client.Database(cfg.MongoDB_DBName_Auth)
 	for _, name := range []string{
-		"ads_meta_config", "meta_campaigns", "action_pending_approval",
-		"rule_definitions", "rule_logic_definitions", "rule_param_sets",
-		"rule_output_definitions", "rule_execution_logs",
+		"ads_cfg_meta", "meta_src_campaigns", "approval_job_pending_actions",
+		"rule_cfg_definitions", "rule_cfg_logic_definitions", "rule_cfg_param_sets",
+		"rule_cfg_output_definitions", "rule_run_execution_logs",
 	} {
 		_, _ = global.RegistryCollections.Register(name, db.Collection(name))
 	}

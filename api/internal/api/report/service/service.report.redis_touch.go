@@ -167,7 +167,7 @@ func RecordReportTouchFromDataChange(ctx context.Context, e events.DataChangeEve
 	orgHex := ownerOrgID.Hex()
 
 	switch e.CollectionName {
-	case global.MongoDB_ColNames.PcPosOrders:
+	case global.MongoDB_ColNames.PcPosOrders, global.MongoDB_ColNames.ManualPosOrders, global.MongoDB_ColNames.OrderCanonical:
 		if e.Operation == events.OpUpdate && e.PreviousDocument != nil {
 			tsNew := events.GetPeriodTimestamp(e.Document, e.CollectionName)
 			tsPrev := events.GetPeriodTimestamp(e.PreviousDocument, e.CollectionName)

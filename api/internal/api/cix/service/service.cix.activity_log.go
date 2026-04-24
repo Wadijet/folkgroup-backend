@@ -100,7 +100,7 @@ func logCixIntelActivityAfterSuccess(ctx context.Context, ownerOrgID primitive.O
 
 	snap := crmvc.BuildSnapshotForNewCustomer(ctx, &cust, activityAt, false, nil)
 	metadata := map[string]interface{}{
-		"trigger":          "cix_intel_compute",
+		"trigger":          "cix_job_intel",
 		"analysisResultId": result.ID.Hex(),
 		"sessionUid":       sessionUid,
 	}
@@ -124,7 +124,7 @@ func logCixIntelActivityAfterSuccess(ctx context.Context, ownerOrgID primitive.O
 		OwnerOrgID:   ownerOrgID,
 		Domain:       crmmodels.ActivityDomainConversation,
 		ActivityType: "cix_conversation_intel",
-		Source:       "cix_intel_compute",
+		Source:       "cix_job_intel",
 		Metadata:     metadata,
 		DisplayLabel: "Phân tích hội thoại CIX",
 		DisplayIcon:  "chat-intelligence",
@@ -163,7 +163,7 @@ func logCixIntelActivityAfterFailure(ctx context.Context, ownerOrgID primitive.O
 		activityAt = failed.CreatedAt
 	}
 	metadata := map[string]interface{}{
-		"trigger":           "cix_intel_compute",
+		"trigger":           "cix_job_intel",
 		"analysisResultId":  failed.ID.Hex(),
 		"sessionUid":        sessionUid,
 		"metricsSnapshot": map[string]interface{}{
@@ -184,7 +184,7 @@ func logCixIntelActivityAfterFailure(ctx context.Context, ownerOrgID primitive.O
 		OwnerOrgID:     ownerOrgID,
 		Domain:         crmmodels.ActivityDomainConversation,
 		ActivityType:   "cix_conversation_intel_failed",
-		Source:         "cix_intel_compute",
+		Source:         "cix_job_intel",
 		Metadata:       metadata,
 		DisplayLabel:   "Phân tích CIX thất bại",
 		DisplayIcon:    "chat-intelligence",

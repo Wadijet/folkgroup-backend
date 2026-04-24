@@ -1,11 +1,10 @@
-// Package orderintelsvc — View tối thiểu để tính Order Intelligence từ order_canonical hoặc fallback pc_pos_orders.
+// Package orderintelsvc — View tối thiểu để tính Order Intelligence từ order_canonical (L2).
 package orderintelsvc
 
 import (
 	"strings"
 
 	ordermodels "meta_commerce/internal/api/order/models"
-	pcmodels "meta_commerce/internal/api/pc/models"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -18,17 +17,17 @@ type intelOrderView struct {
 	CustomerId       string
 	LinksCustomerUid string
 	OrderId          int64
-	// ID — _id bản ghi dùng làm nguồn tính intel (order_canonical khi có, không thì pc_pos_orders).
+	// ID — _id bản ghi dùng làm nguồn tính intel (order_canonical).
 	ID primitive.ObjectID
-	// OrderCanonicalMongoID — _id order_canonical khi nguồn là canonical (để trace).
+	// OrderCanonicalMongoID — _id order_canonical.
 	OrderCanonicalMongoID primitive.ObjectID
-	// PancakeSourceMongoID — _id pc_pos_orders (luôn set khi biết).
+	// PancakeSourceMongoID — _id bản ghi POS gốc (sourceRecordMongoID khi source là Pancake).
 	PancakeSourceMongoID primitive.ObjectID
-	Status           int
-	InsertedAt       int64
-	PosUpdatedAt     int64
-	PosData          map[string]interface{}
-	OwnerOrganizationID primitive.ObjectID
+	Status                int
+	InsertedAt            int64
+	PosUpdatedAt          int64
+	PosData               map[string]interface{}
+	OwnerOrganizationID   primitive.ObjectID
 }
 
 func newIntelViewFromCommerce(c *ordermodels.CommerceOrder) *intelOrderView {
@@ -42,41 +41,19 @@ func newIntelViewFromCommerce(c *ordermodels.CommerceOrder) *intelOrderView {
 		}
 	}
 	return &intelOrderView{
-		Uid:                  strings.TrimSpace(c.Uid),
-		PageId:               c.PageId,
-		PostId:               c.PostId,
-		CustomerId:           c.CustomerId,
-		LinksCustomerUid:     linksCust,
-		OrderId:              c.OrderId,
-		ID:                   c.ID,
+		Uid:                   strings.TrimSpace(c.Uid),
+		PageId:                c.PageId,
+		PostId:                c.PostId,
+		CustomerId:            c.CustomerId,
+		LinksCustomerUid:      linksCust,
+		OrderId:               c.OrderId,
+		ID:                    c.ID,
 		OrderCanonicalMongoID: c.ID,
-		PancakeSourceMongoID: c.SourceRecordMongoID,
-		Status:               c.Status,
-		InsertedAt:           c.InsertedAt,
-		PosUpdatedAt:         c.PosUpdatedAt,
-		PosData:              c.PosData,
-		OwnerOrganizationID:  c.OwnerOrganizationID,
-	}
-}
-
-func newIntelViewFromPC(o *pcmodels.PcPosOrder) *intelOrderView {
-	if o == nil {
-		return nil
-	}
-	return &intelOrderView{
-		Uid:                  strings.TrimSpace(o.Uid),
-		PageId:               o.PageId,
-		PostId:               o.PostId,
-		CustomerId:           o.CustomerId,
-		LinksCustomerUid:     strings.TrimSpace(o.LinksCustomerUid),
-		OrderId:              o.OrderId,
-		ID:                   o.ID,
-		OrderCanonicalMongoID: primitive.NilObjectID,
-		PancakeSourceMongoID: o.ID,
-		Status:               o.Status,
-		InsertedAt:           o.InsertedAt,
-		PosUpdatedAt:         o.PosUpdatedAt,
-		PosData:              o.PosData,
-		OwnerOrganizationID:  o.OwnerOrganizationID,
+		PancakeSourceMongoID:  c.SourceRecordMongoID,
+		Status:                c.Status,
+		InsertedAt:            c.InsertedAt,
+		PosUpdatedAt:          c.PosUpdatedAt,
+		PosData:               c.PosData,
+		OwnerOrganizationID:   c.OwnerOrganizationID,
 	}
 }

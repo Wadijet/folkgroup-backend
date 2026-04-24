@@ -87,7 +87,7 @@ func extractCustomerIDFromPendingMergeDoc(collectionName string, doc bson.M) str
 			return ""
 		}
 		return strings.TrimSpace(d.CustomerId)
-	case global.MongoDB_ColNames.PcPosOrders:
+	case global.MongoDB_ColNames.PcPosOrders, global.MongoDB_ColNames.ManualPosOrders:
 		var d pcmodels.PcPosOrder
 		if err := bsonMapToStructForNotify(doc, &d); err != nil {
 			return ""

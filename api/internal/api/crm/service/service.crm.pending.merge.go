@@ -139,11 +139,22 @@ func EnqueueCrmPendingMerge(ctx context.Context, collectionName, operation strin
 
 func extractEntityPartFromDocMap(collectionName string, docMap bson.M) (part string, ok bool) {
 	switch collectionName {
-	case global.MongoDB_ColNames.PcPosCustomers, global.MongoDB_ColNames.FbCustomers:
+	case global.MongoDB_ColNames.PcPosCustomers, global.MongoDB_ColNames.ManualPosCustomers, global.MongoDB_ColNames.FbCustomers:
 		part, _ = getStringFromMap(docMap, "customerId")
 	case global.MongoDB_ColNames.PcPosOrders:
 		if v, ok := docMap["orderId"]; ok {
 			part = fmt.Sprintf("%v", v)
+		}
+	case global.MongoDB_ColNames.ManualPosOrders:
+		if v, ok := docMap["orderId"]; ok && fmt.Sprintf("%v", v) != "0" {
+			part = fmt.Sprintf("%v", v)
+		}
+		if part == "" {
+			if v, ok := docMap["_id"]; ok {
+				if oid, ok := v.(primitive.ObjectID); ok {
+					part = oid.Hex()
+				}
+			}
 		}
 	case global.MongoDB_ColNames.FbConvesations:
 		part, _ = getStringFromMap(docMap, "conversationId")
@@ -213,13 +224,13 @@ func extractInboxCustomerIDFromDocMap(collectionName string, docMap bson.M) stri
 	}
 	cn := strings.TrimSpace(collectionName)
 	switch cn {
-	case global.MongoDB_ColNames.PcPosCustomers:
+	case global.MongoDB_ColNames.PcPosCustomers, global.MongoDB_ColNames.ManualPosCustomers:
 		s, _ := getStringFromMap(docMap, "customerId")
 		return strings.TrimSpace(s)
 	case global.MongoDB_ColNames.FbCustomers:
 		s, _ := getStringFromMap(docMap, "customerId")
 		return strings.TrimSpace(s)
-	case global.MongoDB_ColNames.PcPosOrders:
+	case global.MongoDB_ColNames.PcPosOrders, global.MongoDB_ColNames.ManualPosOrders:
 		var d pcmodels.PcPosOrder
 		if err := bsonMapToStructPending(docMap, &d); err != nil {
 			return ""

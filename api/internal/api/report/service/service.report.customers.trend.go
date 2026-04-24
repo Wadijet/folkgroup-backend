@@ -12,6 +12,7 @@ import (
 
 	crmvc "meta_commerce/internal/api/crm/service"
 	reportdto "meta_commerce/internal/api/report/dto"
+	"meta_commerce/internal/global"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -43,7 +44,7 @@ func (s *ReportService) GetCustomersTrendFromSnapshots(ctx context.Context, owne
 	if snapData != nil {
 		currentSnapshot.CeoGroupIn = snapData.CeoGroupIn
 		currentSnapshot.CeoGroupOut = snapData.CeoGroupOut
-		currentSnapshot.SnapshotSource = "report_snapshots"
+		currentSnapshot.SnapshotSource = global.MongoDB_ColNames.ReportSnapshots
 	}
 	if endMs, err := s.GetEndMsForCustomersParams(params); err == nil {
 		startMs, _ := s.GetStartMsForCustomersParams(params)

@@ -25,7 +25,7 @@ func resolveBase(collection string) routecontract.Decision {
 		ReportTouchPipeline:               true,
 		AdsProfilePipeline:                true,
 		CixIntelPipeline:                  c == global.MongoDB_ColNames.FbMessageItems,
-		OrderIntelPipeline:                c == global.MongoDB_ColNames.PcPosOrders,
+		OrderIntelPipeline:                c == global.MongoDB_ColNames.PcPosOrders || c == global.MongoDB_ColNames.ManualPosOrders || c == global.MongoDB_ColNames.OrderCanonical,
 		CustomerIntelRefreshDeferPipeline: true,
 	}
 }
@@ -33,8 +33,10 @@ func resolveBase(collection string) routecontract.Decision {
 func isCustomerPendingMergeCollection(name string) bool {
 	switch name {
 	case global.MongoDB_ColNames.PcPosCustomers,
+		global.MongoDB_ColNames.ManualPosCustomers,
 		global.MongoDB_ColNames.FbCustomers,
 		global.MongoDB_ColNames.PcPosOrders,
+		global.MongoDB_ColNames.ManualPosOrders,
 		global.MongoDB_ColNames.FbConvesations,
 		global.MongoDB_ColNames.CustomerNotes:
 		return true

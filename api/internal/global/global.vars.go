@@ -29,11 +29,19 @@ type MongoDB_Auth_CollectionName struct {
 	PcPosCustomers          string // Tên collection cho khách hàng từ Pancake POS
 	PcPosShops              string // Tên collection cho cửa hàng từ Pancake POS API
 	PcPosWarehouses         string // Tên collection cho kho hàng từ Pancake POS API
-	PcPosProducts           string // Tên collection cho sản phẩm từ Pancake POS API
-	PcPosVariations         string // Tên collection cho biến thể sản phẩm từ Pancake POS API
-	PcPosCategories         string // Tên collection cho danh mục sản phẩm từ Pancake POS API
-	PcPosOrders             string // Tên collection cho đơn hàng từ Pancake POS API (mirror Pancake)
-	OrderCanonical          string // order_canonical: đơn canonical đa nguồn (Order Intel đọc từ đây; cùng domain order_* với intel)
+	PcPosProducts           string // order_src_pcpos_products: mirror sản phẩm từ Pancake POS API
+	PcPosVariations         string // order_src_pcpos_variations: mirror biến thể từ Pancake POS API
+	PcPosCategories         string // order_src_pcpos_categories: mirror danh mục từ Pancake POS API
+	PcPosOrders             string // order_src_pcpos_orders: mirror đơn hàng từ Pancake POS API
+	OrderCanonical          string // order_core_records: canonical đơn đa nguồn (Order Intel đọc từ đây)
+	// L1 mirror nhập tay — cùng layout model với Pancake (PcPosOrder / PcPosProduct / …); đơn đồng bộ → order_core_records với source=manual.
+	ManualPosOrders     string // order_src_manual_orders
+	ManualPosProducts   string // order_src_manual_products
+	ManualPosVariations string // order_src_manual_variations
+	ManualPosCategories string // order_src_manual_categories
+	ManualPosCustomers  string // order_src_manual_customers
+	ManualPosShops      string // order_src_manual_shops
+	ManualPosWarehouses string // order_src_manual_warehouses
 
 	// Notification System Collections (Hệ thống 2 - Routing/Template)
 	NotificationSenders      string // Tên collection cho notification senders
@@ -153,10 +161,10 @@ type MongoDB_Auth_CollectionName struct {
 	CixIntelCompute    string // cix_intel_compute: job phân tích (CIO → enqueue; WorkerCixIntelCompute), cùng quy ước *_intel_compute
 
 	// Module Order Intelligence — Vision 07 (Raw→L1→L2→L3→Flags per order)
-	OrderIntelSnapshots string // order_intel_snapshots: read model B theo đơn (upsert theo orderUid + org)
-	OrderIntelCompute   string // order_intel_compute — worker tính Raw→L3→Flags, không tính trong consumer AI Decision
-	// OrderIntelRuns — lớp A: mỗi lần worker kết thúc (thành công/thất bại); order_canonical giữ pointer mới nhất.
-	OrderIntelRuns string // order_intel_runs
+	OrderIntelSnapshots string // order_rm_intel: read model B theo đơn (upsert theo orderUid + org)
+	OrderIntelCompute   string // order_job_intel — worker tính Raw→L3→Flags, không tính trong consumer AI Decision
+	// OrderIntelRuns — lớp A: mỗi lần worker kết thúc (thành công/thất bại); order_core_records giữ pointer mới nhất.
+	OrderIntelRuns string // order_run_intel
 
 	// Module AI Decision — Event & Decision Case (PLATFORM_L1_EVENT_DECISION_SUPPLEMENT)
 	DecisionEventsQueue   string // decision_events_queue: hàng đợi event chờ AI Decision xử lý

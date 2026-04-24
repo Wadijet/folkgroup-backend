@@ -1,4 +1,4 @@
-// Package worker — Pancake Heartbeat: kiểm tra pc_pos_orders có nhận dữ liệu gần đây không.
+// Package worker — Pancake Heartbeat: kiểm tra order_canonical (L2) có cập nhật gần đây không (đồng bộ từ L1).
 // Nếu không có order trong 2h (giờ hành chính 7-22h) → set KillRulesEnabled=false (Pancake có thể down).
 package worker
 
@@ -138,8 +138,8 @@ func (w *AdsPancakeHeartbeatWorker) process(ctx context.Context) {
 		}
 	}
 
-	// [HB-2] Không có order 2h — Pancake down
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
+	// [HB-2] Không có đơn canonical cập nhật 2h — coi như nguồn đơn không phát sinh (trước đây: pc_pos_orders).
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderCanonical)
 	if !ok {
 		return
 	}

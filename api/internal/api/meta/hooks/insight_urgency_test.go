@@ -8,9 +8,9 @@ import (
 )
 
 func TestIsUrgentMetaInsightDataChange(t *testing.T) {
-	global.MongoDB_ColNames.MetaAdInsights = "meta_ad_insights"
+	global.MongoDB_ColNames.MetaAdInsights = "meta_src_ad_insights"
 	base := events.DataChangeEvent{
-		CollectionName: "meta_ad_insights",
+		CollectionName: "meta_src_ad_insights",
 		Operation:      events.OpUpsert,
 		Document: map[string]interface{}{
 			"objectType":  "ad",
@@ -22,7 +22,7 @@ func TestIsUrgentMetaInsightDataChange(t *testing.T) {
 		t.Fatal("không có chỉ số bất thường thì không gấp")
 	}
 	urgentMeta := events.DataChangeEvent{
-		CollectionName: "meta_ad_insights",
+		CollectionName: "meta_src_ad_insights",
 		Operation:      events.OpUpsert,
 		Document: map[string]interface{}{
 			"objectType":  "ad",
@@ -37,7 +37,7 @@ func TestIsUrgentMetaInsightDataChange(t *testing.T) {
 		t.Fatal("metaData.insightUrgent=true phải gấp")
 	}
 	highSpend := events.DataChangeEvent{
-		CollectionName: "meta_ad_insights",
+		CollectionName: "meta_src_ad_insights",
 		Operation:      events.OpUpsert,
 		Document: map[string]interface{}{
 			"objectType":  "ad",

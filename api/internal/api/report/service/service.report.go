@@ -305,7 +305,7 @@ func (s *ReportService) FindSnapshotsForTrendByDayRange(ctx context.Context, own
 	return []reportmodels.ReportSnapshot{}, nil
 }
 
-// GetOrderTrendFromDb trả về order trend aggregate trực tiếp từ pc_pos_orders (PHỤ, đối chiếu — query DB nặng).
+// GetOrderTrendFromDb trả về order trend aggregate trực tiếp từ order_canonical (PHỤ, đối chiếu — query DB nặng).
 // Cùng format với FindSnapshotsForTrendByDayRange: []ReportSnapshot (reportKey, periodKey, periodType, metrics).
 func (s *ReportService) GetOrderTrendFromDb(ctx context.Context, ownerOrganizationID primitive.ObjectID, startMs, endMs int64) ([]reportmodels.ReportSnapshot, error) {
 	candidates := getCandidateReportKeysAndRanges(startMs, endMs, reportKeyOrderOrder)

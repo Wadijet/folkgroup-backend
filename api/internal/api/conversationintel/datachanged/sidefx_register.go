@@ -12,7 +12,7 @@ import (
 )
 
 func init() {
-	datachangedsidefx.Register(40, "cix_intel_compute", func(ac *datachangedsidefx.ApplyContext) error {
+	datachangedsidefx.Register(40, "cix_job_intel", func(ac *datachangedsidefx.ApplyContext) error {
 		if ac.Src != global.MongoDB_ColNames.FbMessageItems {
 			return nil
 		}

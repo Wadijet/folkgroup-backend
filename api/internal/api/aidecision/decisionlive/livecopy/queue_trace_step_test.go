@@ -22,7 +22,7 @@ func TestBuildQueueConsumerTraceStep_RefsHandlerDone(t *testing.T) {
 		CorrelationID:       "co_1",
 		OwnerOrganizationID: org,
 		Payload: map[string]interface{}{
-			"sourceCollection":    "fb_message_items",
+			"sourceCollection":    "fb_src_message_items",
 			"normalizedRecordUid": "abc123",
 			"dataChangeOperation": "update",
 			"conversationId":      "conv_x",
@@ -45,7 +45,7 @@ func TestBuildQueueConsumerTraceStep_RefsHandlerDone(t *testing.T) {
 	if step.InputRef["queueMilestone"] != "handler_done" {
 		t.Fatalf("milestone in: %v", step.InputRef["queueMilestone"])
 	}
-	if step.InputRef["eventId"] != "evt_1" || step.InputRef["sourceCollection"] != "fb_message_items" {
+	if step.InputRef["eventId"] != "evt_1" || step.InputRef["sourceCollection"] != "fb_src_message_items" {
 		t.Fatalf("input: %+v", step.InputRef)
 	}
 	if step.OutputRef["consumerPhase"] != "handler_completed" {

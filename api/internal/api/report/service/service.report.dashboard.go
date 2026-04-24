@@ -83,9 +83,9 @@ type RecentOrderItem struct {
 // GetOrderFunnelSnapshot trả về funnel đơn hàng lũy kế (snapshot).
 // Tham số by=stage (mặc định) hoặc by=status. Dùng cho TAB 6 Order Processing.
 func (s *ReportService) GetOrderFunnelSnapshot(ctx context.Context, ownerOrganizationID primitive.ObjectID, by string) ([]OrderFunnelItem, []StageFunnelItem, error) {
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderCanonical)
 	if !ok {
-		return nil, nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.PcPosOrders, common.ErrNotFound)
+		return nil, nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.OrderCanonical, common.ErrNotFound)
 	}
 
 	filter := bson.M{"ownerOrganizationId": ownerOrganizationID}
@@ -176,9 +176,9 @@ func (s *ReportService) GetRecentOrders(ctx context.Context, ownerOrganizationID
 		limit = 100
 	}
 
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderCanonical)
 	if !ok {
-		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.PcPosOrders, common.ErrNotFound)
+		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.OrderCanonical, common.ErrNotFound)
 	}
 
 	filter := bson.M{"ownerOrganizationId": ownerOrganizationID}
@@ -186,13 +186,14 @@ func (s *ReportService) GetRecentOrders(ctx context.Context, ownerOrganizationID
 		SetSort(bson.D{{Key: "orderId", Value: -1}}).
 		SetLimit(int64(limit)).
 		SetProjection(bson.M{
-			"orderId":        1,
-			"billFullName":   1,
-			"insertedAt":     1,
-			"posData.status": 1,
-			"posData.status_name": 1,
+			"orderId":                1,
+			"billFullName":           1,
+			"insertedAt":             1,
+			"posData.status":         1,
+			"posData.status_name":    1,
 			"posData.assigning_seller": 1,
-			"posData.status_history":  1,
+			"posData.status_history":   1,
+			"posData.bill_full_name":   1,
 		})
 	cursor, err := coll.Find(ctx, filter, opts)
 	if err != nil {
@@ -213,12 +214,13 @@ func (s *ReportService) GetRecentOrders(ctx context.Context, ownerOrganizationID
 	var result []RecentOrderItem
 	for cursor.Next(ctx) {
 		var doc struct {
-			OrderID    int64 `bson:"orderId"`
+			OrderID      int64  `bson:"orderId"`
 			BillFullName string `bson:"billFullName"`
-			InsertedAt int64  `bson:"insertedAt"`
-			PosData    struct {
-				Status        *int     `bson:"status"`
-				StatusName    string   `bson:"status_name"`
+			InsertedAt   int64  `bson:"insertedAt"`
+			PosData      struct {
+				Status        *int   `bson:"status"`
+				StatusName    string `bson:"status_name"`
+				BillFullName  string `bson:"bill_full_name"`
 				AssigningSeller *struct {
 					Name string `bson:"name"`
 				} `bson:"assigning_seller"`
@@ -253,9 +255,14 @@ func (s *ReportService) GetRecentOrders(ctx context.Context, ownerOrganizationID
 			createdAtStr = t.Format("2006-01-02T15:04:05")
 		}
 
+		custName := doc.BillFullName
+		if custName == "" {
+			custName = doc.PosData.BillFullName
+		}
+
 		result = append(result, RecentOrderItem{
 			OrderID:               doc.OrderID,
-			CustomerName:          doc.BillFullName,
+			CustomerName:          custName,
 			CreatedAt:             createdAtStr,
 			Status:                status,
 			StatusName:            statusName,
@@ -276,9 +283,9 @@ func (s *ReportService) GetRecentOrders(ctx context.Context, ownerOrganizationID
 // Stage aging = now - stage_entered_at (thời điểm đơn vào stage hiện tại, từ status_history).
 // Chỉ tính cho các stage có SLA: NEW, CONFIRMATION, FULFILLMENT, SHIPPING.
 func (s *ReportService) GetStageAgingSnapshot(ctx context.Context, ownerOrganizationID primitive.ObjectID) ([]StageAgingItem, error) {
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderCanonical)
 	if !ok {
-		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.PcPosOrders, common.ErrNotFound)
+		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.OrderCanonical, common.ErrNotFound)
 	}
 
 	// Chỉ lấy đơn đang ở các stage xử lý (có SLA)
@@ -407,9 +414,9 @@ func (s *ReportService) GetStuckOrders(ctx context.Context, ownerOrganizationID 
 		limit = 200
 	}
 
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderCanonical)
 	if !ok {
-		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.PcPosOrders, common.ErrNotFound)
+		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.OrderCanonical, common.ErrNotFound)
 	}
 
 	statusesToFetch := []int{0, 17, 11, 12, 13, 20, 1, 8, 9, 2}
@@ -425,6 +432,7 @@ func (s *ReportService) GetStuckOrders(ctx context.Context, ownerOrganizationID 
 		"posData.status":                        1,
 		"posData.status_history":                1,
 		"posData.assigning_seller":              1,
+		"posData.bill_full_name":                1,
 		"posData.money_to_collect":              1,
 		"posData.total_price_after_sub_discount": 1,
 		"posData.total_price":                   1,
@@ -451,6 +459,7 @@ func (s *ReportService) GetStuckOrders(ctx context.Context, ownerOrganizationID 
 			InsertedAt   interface{}   `bson:"insertedAt"`
 			PosData      struct {
 				Status        *int `bson:"status"`
+				BillFullName  string `bson:"bill_full_name"`
 				StatusHistory []struct {
 					Status    *int   `bson:"status"`
 					UpdatedAt string `bson:"updated_at"`
@@ -508,9 +517,13 @@ func (s *ReportService) GetStuckOrders(ctx context.Context, ownerOrganizationID 
 			}
 		}
 		createdAt := formatInsertedAt(doc.InsertedAt, doc.PosData.InsertedAt)
+		custName := doc.BillFullName
+		if custName == "" {
+			custName = doc.PosData.BillFullName
+		}
 		stuck = append(stuck, StuckOrderItem{
 			OrderID:      doc.OrderID,
-			CustomerName: doc.BillFullName,
+			CustomerName: custName,
 			Stage:        stg,
 			StageName:    cfg.StageName,
 			AgingMinutes: agingMins,

@@ -89,9 +89,9 @@ func friendlyCollectionVi(src string) string {
 		return "tin nhắn"
 	case g.FbConvesations:
 		return "hội thoại"
-	case g.FbCustomers, g.PcPosCustomers, g.CustomerCustomers:
+	case g.FbCustomers, g.PcPosCustomers, g.ManualPosCustomers, g.CustomerCustomers:
 		return "khách hàng"
-	case g.PcPosOrders, g.OrderCanonical:
+	case g.PcPosOrders, g.ManualPosOrders, g.OrderCanonical:
 		return "đơn hàng"
 	case g.MetaCampaigns, g.MetaAds, g.MetaAdSets:
 		return "quảng cáo / chiến dịch"
@@ -133,7 +133,8 @@ func datachangedTraceSourceUnreadable(src, idHex string) []decisionlive.Decision
 }
 
 // buildDatachangedSideEffectTraceNodes — Các bước con sau khi đã chạy datachangedsidefx.Run (đúng thứ tự thực tế trong worker).
-func buildDatachangedSideEffectTraceNodes(ac *datachangedsidefx.ApplyContext, pancakeLine string) []decisionlive.DecisionLiveProcessNode {
+// orderL2SyncNote — mô tả bước chiếu L1 đơn (Pancake / nhập tay) → order_core_records; rỗng nếu không áp dụng.
+func buildDatachangedSideEffectTraceNodes(ac *datachangedsidefx.ApplyContext, orderL2SyncNote string) []decisionlive.DecisionLiveProcessNode {
 	if ac == nil {
 		return nil
 	}
@@ -146,15 +147,15 @@ func buildDatachangedSideEffectTraceNodes(ac *datachangedsidefx.ApplyContext, pa
 		DetailVi: truncateProcessTraceDetail(fmt.Sprintf("Loại: %s · Thao tác: %s.", friendlyCollectionVi(ac.Src), friendlyDataOpVi(ac.Op))),
 	})
 
-	if pl := strings.TrimSpace(pancakeLine); pl != "" {
+	if pl := strings.TrimSpace(orderL2SyncNote); pl != "" {
 		kind := decisionlive.ProcessTraceKindStep
-		if strings.HasPrefix(pl, "Không cập nhật được đơn từ Pancake") {
+		if strings.Contains(pl, "Không cập nhật được") {
 			kind = decisionlive.ProcessTraceKindError
 		}
 		out = append(out, decisionlive.DecisionLiveProcessNode{
 			Kind:     kind,
-			Key:      "dc_pancake_order_sync",
-			LabelVi:  "Đồng bộ đơn hàng từ Pancake",
+			Key:      "dc_order_l1_to_l2_sync",
+			LabelVi:  "Chiếu đơn L1 → L2 (order_core_records)",
 			DetailVi: truncateProcessTraceDetail(pl),
 		})
 	}

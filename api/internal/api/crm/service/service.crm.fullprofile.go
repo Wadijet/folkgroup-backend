@@ -149,12 +149,12 @@ func buildCustomerIdsForQuery(c *crmmodels.CrmCustomer) []string {
 	return ids
 }
 
-// fetchRecentOrders lấy đơn hàng gần đây từ pc_pos_orders.
+// fetchRecentOrders lấy đơn hàng gần đây từ order_canonical.
 func (s *CrmCustomerService) fetchRecentOrders(ctx context.Context, customerIds []string, ownerOrgID primitive.ObjectID) []crmdto.CrmOrderSummary {
 	if len(customerIds) == 0 {
 		return []crmdto.CrmOrderSummary{}
 	}
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderCanonical)
 	if !ok {
 		return []crmdto.CrmOrderSummary{}
 	}

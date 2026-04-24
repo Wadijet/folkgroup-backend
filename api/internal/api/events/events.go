@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 
+	"meta_commerce/internal/global"
+
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -162,7 +164,7 @@ func GetPeriodTimestamp(doc interface{}, collectionName string) int64 {
 		return 0
 	}
 	switch collectionName {
-	case "pc_pos_orders":
+	case global.MongoDB_ColNames.PcPosOrders, global.MongoDB_ColNames.ManualPosOrders:
 		ts := GetInt64Field(doc, "PosCreatedAt")
 		if ts == 0 {
 			ts = GetInt64Field(doc, "InsertedAt")
@@ -174,7 +176,16 @@ func GetPeriodTimestamp(doc interface{}, collectionName string) int64 {
 			ts = ts / 1000
 		}
 		return ts
-	case "pc_pos_customers":
+	case global.MongoDB_ColNames.OrderCanonical: // order_canonical (L2)
+		ts := GetInt64Field(doc, "InsertedAt")
+		if ts == 0 {
+			ts = GetInt64Field(doc, "CreatedAt")
+		}
+		if ts > 1e12 {
+			ts = ts / 1000
+		}
+		return ts
+	case "pc_pos_src_customers":
 		ts := GetInt64Field(doc, "UpdatedAt")
 		if ts == 0 {
 			ts = GetInt64Field(doc, "LastOrderAt")
@@ -186,7 +197,7 @@ func GetPeriodTimestamp(doc interface{}, collectionName string) int64 {
 			ts = ts / 1000
 		}
 		return ts
-	case "customer_activity_history", "crm_activity_history": // crm_* — tên collection cũ
+	case "customer_run_activity_history", "crm_activity_history": // crm_* — tên collection cũ
 		ts := GetInt64Field(doc, "ActivityAt")
 		if ts == 0 {
 			ts = GetInt64Field(doc, "CreatedAt")
@@ -195,10 +206,10 @@ func GetPeriodTimestamp(doc interface{}, collectionName string) int64 {
 			ts = ts / 1000
 		}
 		return ts
-	case "meta_ad_insights": // global.MongoDB_ColNames.MetaAdInsights
+	case "meta_src_ad_insights": // global.MongoDB_ColNames.MetaAdInsights
 		// dateStart là string YYYY-MM-DD — không dùng timestamp; hook dùng trực tiếp dateStart làm periodKey.
 		return 0
-	case "meta_campaigns", "meta_ad_accounts", "meta_adsets", "meta_ads":
+	case "meta_src_campaigns", "meta_src_ad_accounts", "meta_src_adsets", "meta_src_ads":
 		ts := GetInt64Field(doc, "UpdatedAt")
 		if ts == 0 {
 			ts = GetInt64Field(doc, "CreatedAt")

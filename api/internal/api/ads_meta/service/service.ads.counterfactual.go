@@ -9,6 +9,7 @@ import (
 
 	adsconfig "meta_commerce/internal/api/ads_meta/config"
 	adsmodels "meta_commerce/internal/api/ads_meta/models"
+	canonicalquery "meta_commerce/internal/api/order/canonicalquery"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/logger"
 
@@ -334,10 +335,9 @@ func getSiblingsMetrics4h(ctx context.Context, adAccountId string, ownerOrgID pr
 	if len(campIds) == 0 {
 		return 0, 0, 0
 	}
-	// Lấy từ meta_campaigns currentMetrics — raw.2h/1h có thể không đủ 4h. Cần aggregate từ pc_pos_orders + fb_conversations.
-	// Đơn giản: dùng pc_pos_orders cho orders, fb_conversations cho mess trong window [startMs, endMs]
-	posColl, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
-	if !ok {
+	// Lấy từ meta_campaigns currentMetrics — raw.2h/1h có thể không đủ 4h. Cần aggregate từ order_canonical + fb_conversations.
+	posColl, errColl := canonicalquery.CollOrderCanonical()
+	if errColl != nil {
 		return 0, 0, 0
 	}
 	// Cần ad_ids của các campaign
@@ -345,8 +345,7 @@ func getSiblingsMetrics4h(ctx context.Context, adAccountId string, ownerOrgID pr
 	if len(adIds) == 0 {
 		return 0, 0, 0
 	}
-	startSec := startMs / 1000
-	endSec := endMs / 1000
+	tw := canonicalquery.MatchInsertedAtTimeWindowOr(startMs, endMs)
 	var ordDoc struct {
 		Orders int64 `bson:"orders"`
 	}
@@ -354,12 +353,7 @@ func getSiblingsMetrics4h(ctx context.Context, adAccountId string, ownerOrgID pr
 		{{Key: "$match", Value: bson.M{
 			"ownerOrganizationId": ownerOrgID,
 			"posData.ad_id":       bson.M{"$in": adIds},
-			"$or": []bson.M{
-				{"posCreatedAt": bson.M{"$gte": startSec, "$lte": endSec}},
-				{"insertedAt": bson.M{"$gte": startSec, "$lte": endSec}},
-				{"posCreatedAt": bson.M{"$gte": startMs, "$lte": endMs}},
-				{"insertedAt": bson.M{"$gte": startMs, "$lte": endMs}},
-			},
+			"$or":                 tw["$or"],
 		}}},
 		{{Key: "$group", Value: bson.M{"_id": nil, "orders": bson.M{"$sum": 1}}}},
 	}
@@ -431,19 +425,16 @@ func getSiblingsRevenue4h(ctx context.Context, ownerOrgID primitive.ObjectID, ca
 	if len(adIds) == 0 {
 		return 0
 	}
-	posColl, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
-	if !ok {
+	posColl, errColl := canonicalquery.CollOrderCanonical()
+	if errColl != nil {
 		return 0
 	}
-	startSec, endSec := startMs/1000, endMs/1000
+	tw := canonicalquery.MatchInsertedAtTimeWindowOr(startMs, endMs)
 	pipe := mongo.Pipeline{
 		{{Key: "$match", Value: bson.M{
 			"ownerOrganizationId": ownerOrgID,
 			"posData.ad_id":       bson.M{"$in": adIds},
-			"$or": []bson.M{
-				{"posCreatedAt": bson.M{"$gte": startSec, "$lte": endSec}},
-				{"insertedAt": bson.M{"$gte": startSec, "$lte": endSec}},
-			},
+			"$or":                 tw["$or"],
 		}}},
 		{{Key: "$group", Value: bson.M{
 			"_id":    nil,

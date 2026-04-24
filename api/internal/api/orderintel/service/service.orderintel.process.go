@@ -12,7 +12,6 @@ import (
 	"meta_commerce/internal/api/aidecision/intelrecomputed"
 	orderintelmodels "meta_commerce/internal/api/orderintel/models"
 	ordermodels "meta_commerce/internal/api/order/models"
-	pcmodels "meta_commerce/internal/api/pc/models"
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/logger"
@@ -108,64 +107,20 @@ func RunOrderIntelComputeJob(ctx context.Context, job *orderintelmodels.OrderInt
 
 func loadOrderForJob(ctx context.Context, job *orderintelmodels.OrderIntelComputeJob) (*intelOrderView, error) {
 	canonicalColl, okCo := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderCanonical)
-	pcColl, okPc := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
-	if !okPc {
-		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.PcPosOrders, common.ErrNotFound)
+	if !okCo || canonicalColl == nil {
+		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.OrderCanonical, common.ErrNotFound)
 	}
 	ownerOrgID := job.OwnerOrganizationID
 
-	tryOrderCanonical := func() *intelOrderView {
-		if !okCo || canonicalColl == nil {
-			return nil
-		}
-		if job.OrderUid != "" {
-			var co ordermodels.CommerceOrder
-			err := canonicalColl.FindOne(ctx, bson.M{"uid": job.OrderUid, "ownerOrganizationId": ownerOrgID}).Decode(&co)
-			if err == nil {
-				return newIntelViewFromCommerce(&co)
-			}
-		}
-		idHex := strings.TrimSpace(job.MongoRecordIdHex)
-		if idHex == "" {
-			idHex = strings.TrimSpace(job.NormalizedRecordUid)
-		}
-		if idHex == "" {
-			return nil
-		}
-		oid, err := primitive.ObjectIDFromHex(idHex)
-		if err != nil {
-			return nil
-		}
-		var co ordermodels.CommerceOrder
-		err = canonicalColl.FindOne(ctx, bson.M{
-			"ownerOrganizationId": ownerOrgID,
-			"source":              ordermodels.SourcePancakePOS,
-			"sourceRecordMongoId": oid,
-		}).Decode(&co)
-		if err == nil {
-			return newIntelViewFromCommerce(&co)
-		}
-		if !errors.Is(err, mongo.ErrNoDocuments) {
-			return nil
-		}
-		return nil
-	}
-
-	if v := tryOrderCanonical(); v != nil {
-		return v, nil
-	}
-
-	// Fallback: bản ghi Pancake chưa kịp chiếu lên order_canonical (race hiếm / job cũ).
 	if job.OrderUid != "" {
-		var doc pcmodels.PcPosOrder
-		err := pcColl.FindOne(ctx, bson.M{"uid": job.OrderUid, "ownerOrganizationId": ownerOrgID}).Decode(&doc)
-		if err != nil {
-			if err == mongo.ErrNoDocuments {
-				return nil, nil
-			}
+		var co ordermodels.CommerceOrder
+		err := canonicalColl.FindOne(ctx, bson.M{"uid": job.OrderUid, "ownerOrganizationId": ownerOrgID}).Decode(&co)
+		if err == nil {
+			return newIntelViewFromCommerce(&co), nil
+		}
+		if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, err
 		}
-		return newIntelViewFromPC(&doc), nil
 	}
 	idHex := strings.TrimSpace(job.MongoRecordIdHex)
 	if idHex == "" {
@@ -178,15 +133,39 @@ func loadOrderForJob(ctx context.Context, job *orderintelmodels.OrderIntelComput
 	if err != nil {
 		return nil, nil
 	}
-	var doc pcmodels.PcPosOrder
-	err = pcColl.FindOne(ctx, bson.M{"_id": oid, "ownerOrganizationId": ownerOrgID}).Decode(&doc)
-	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			return nil, nil
-		}
+	var co ordermodels.CommerceOrder
+	// Job legacy: id = _id bản ghi L1 mirror → canonical theo sourceRecordMongoId (Pancake hoặc nhập tay).
+	err = canonicalColl.FindOne(ctx, bson.M{
+		"ownerOrganizationId": ownerOrgID,
+		"source":              ordermodels.SourcePancakePOS,
+		"sourceRecordMongoId": oid,
+	}).Decode(&co)
+	if err == nil {
+		return newIntelViewFromCommerce(&co), nil
+	}
+	if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
 		return nil, err
 	}
-	return newIntelViewFromPC(&doc), nil
+	err = canonicalColl.FindOne(ctx, bson.M{
+		"ownerOrganizationId": ownerOrgID,
+		"source":              ordermodels.SourceManual,
+		"sourceRecordMongoId": oid,
+	}).Decode(&co)
+	if err == nil {
+		return newIntelViewFromCommerce(&co), nil
+	}
+	if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, err
+	}
+	// Job từ L2: entity id = _id order_canonical.
+	err = canonicalColl.FindOne(ctx, bson.M{"_id": oid, "ownerOrganizationId": ownerOrgID}).Decode(&co)
+	if err == nil {
+		return newIntelViewFromCommerce(&co), nil
+	}
+	if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, err
+	}
+	return nil, nil
 }
 
 func strFromPayload(p map[string]interface{}, key string) string {

@@ -36,7 +36,7 @@ type AgentConfigService struct {
 
 // NewAgentConfigService tạo mới AgentConfigService
 func NewAgentConfigService() (*AgentConfigService, error) {
-	collection, exist := global.RegistryCollections.Get("agent_configs")
+	collection, exist := global.RegistryCollections.Get(global.MongoDB_ColNames.AgentConfigs)
 	if !exist {
 		return nil, fmt.Errorf("failed to get agent_configs collection")
 	}

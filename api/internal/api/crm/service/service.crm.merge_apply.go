@@ -17,11 +17,13 @@ import (
 )
 
 var crmMergeQueueCollectionApplyOrder = map[string]int{
-	global.MongoDB_ColNames.PcPosCustomers: 10,
-	global.MongoDB_ColNames.FbCustomers:    20,
-	global.MongoDB_ColNames.PcPosOrders:    30,
-	global.MongoDB_ColNames.FbConvesations: 40,
-	global.MongoDB_ColNames.CustomerNotes:       50,
+	global.MongoDB_ColNames.PcPosCustomers:   10,
+	global.MongoDB_ColNames.ManualPosCustomers: 11,
+	global.MongoDB_ColNames.FbCustomers:      20,
+	global.MongoDB_ColNames.PcPosOrders:       30,
+	global.MongoDB_ColNames.ManualPosOrders:    31,
+	global.MongoDB_ColNames.FbConvesations:   40,
+	global.MongoDB_ColNames.CustomerNotes:    50,
 }
 
 // ApplyCrmPendingMergeJob xử lý một job queue: đa snapshot (coalesce) hoặc một document (legacy).
@@ -74,7 +76,7 @@ func ApplyCrmMergeFromSourceDocument(ctx context.Context, customerSvc *CrmCustom
 	}
 	collectionName = strings.TrimSpace(collectionName)
 	switch collectionName {
-	case global.MongoDB_ColNames.PcPosCustomers:
+	case global.MongoDB_ColNames.PcPosCustomers, global.MongoDB_ColNames.ManualPosCustomers:
 		var d pcmodels.PcPosCustomer
 		if err := bsonMapToStructCRM(doc, &d); err != nil {
 			return err
@@ -88,7 +90,7 @@ func ApplyCrmMergeFromSourceDocument(ctx context.Context, customerSvc *CrmCustom
 		}
 		return customerSvc.MergeFromFbCustomer(ctx, &d, 0)
 
-	case global.MongoDB_ColNames.PcPosOrders:
+	case global.MongoDB_ColNames.PcPosOrders, global.MongoDB_ColNames.ManualPosOrders:
 		var d pcmodels.PcPosOrder
 		if err := bsonMapToStructCRM(doc, &d); err != nil {
 			return err

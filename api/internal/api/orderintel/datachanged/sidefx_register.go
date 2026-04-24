@@ -1,4 +1,4 @@
-// Package datachanged — Đăng ký side-effect Order Intelligence sau datachanged pc_pos_orders.
+// Package datachanged — Đăng ký side-effect Order Intelligence sau datachanged đơn (L1 mirror hoặc L2 canonical); tính toán chỉ đọc order_canonical trong worker.
 package datachanged
 
 import (
@@ -11,8 +11,8 @@ import (
 )
 
 func init() {
-	datachangedsidefx.Register(50, "order_intel_compute", func(ac *datachangedsidefx.ApplyContext) error {
-		if ac.Src != global.MongoDB_ColNames.PcPosOrders {
+	datachangedsidefx.Register(50, "order_job_intel", func(ac *datachangedsidefx.ApplyContext) error {
+		if ac.Src != global.MongoDB_ColNames.PcPosOrders && ac.Src != global.MongoDB_ColNames.ManualPosOrders && ac.Src != global.MongoDB_ColNames.OrderCanonical {
 			return nil
 		}
 		if !ac.Route.OrderIntelPipeline {
@@ -29,7 +29,7 @@ func init() {
 		if err := EnqueueIntelligenceFromParentEvent(ac.Ctx, ac.Evt); err != nil {
 			logger.GetAppLogger().WithError(err).WithFields(map[string]interface{}{
 				"eventId": ac.Evt.EventID, "orgHex": ac.OrgHex,
-			}).Warn("📋 [ORDER_INTEL] Không xếp job order_intel_compute từ pc_pos_orders datachanged")
+			}).Warn("📋 [ORDER_INTEL] Không xếp job order_intel_compute từ datachanged đơn hàng")
 		}
 		return nil
 	})

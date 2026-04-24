@@ -27,6 +27,7 @@
 | **webhook** | `/webhook` | Webhook endpoints | webhook/ |
 | **report** | `/report` | Definitions, snapshots, dirty periods; API trend/recompute/MarkDirty. **Dirty từ CRUD:** Redis touch (`ff:rt:*`) trong consumer AI Decision → worker `report_redis_touch_flush` → `report_dirty_periods` | report/ |
 | **crm** | `/crm` | Customers, CRM pending ingest, bulk jobs, rebuild, recalculate | crm/ |
+| **cio** | `/cio` | Ingest hub đa domain qua một endpoint (`/cio/ingest`) | cio/ |
 | **notification** | `/notification` | Channels, templates, routing, trigger | notification/ |
 | **cta** | `/cta` | CTA Library | cta/ |
 | **delivery** | `/delivery` | Delivery send, history | delivery/ |
@@ -49,6 +50,44 @@ Hầu hết collections dùng CRUD chuẩn qua `BaseHandler`:
 - `DELETE /:collection/:id` — DeleteById
 
 Chi tiết: [api-context.md](../../docs-shared/ai-context/folkform/api-context.md)
+
+---
+
+## Manual POS CRUD (L1 nhập tay)
+
+Các endpoint này ghi trực tiếp vào nhóm collection `order_src_manual_*`:
+
+- `GET/POST/PUT/DELETE /manual-pos/order`
+- `GET/POST/PUT/DELETE /manual-pos/product`
+- `GET/POST/PUT/DELETE /manual-pos/variation`
+- `GET/POST/PUT/DELETE /manual-pos/category`
+- `GET/POST/PUT/DELETE /manual-pos/customer`
+- `GET/POST/PUT/DELETE /manual-pos/shop`
+- `GET/POST/PUT/DELETE /manual-pos/warehouse`
+
+Ghi chú: sau khi ghi L1 manual, backend tiếp tục pipeline datachanged để chiếu đơn sang `order_core_records` (L2) và kích hoạt side-effects liên quan.
+
+---
+
+## CIO Ingest Hub
+
+Endpoint chung:
+
+- `POST /cio/ingest`
+
+Domain hỗ trợ manual:
+
+- `manual_order`
+- `manual_pos_product`
+- `manual_pos_variation`
+- `manual_pos_category`
+- `manual_pos_customer`
+- `manual_pos_shop`
+- `manual_pos_warehouse`
+
+Alias ngắn:
+
+- `m_order`, `m_pos_product`, `m_pos_variation`, `m_pos_category`, `m_pos_customer`, `m_pos_shop`, `m_pos_warehouse`
 
 ---
 

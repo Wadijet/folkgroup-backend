@@ -29,9 +29,9 @@ import (
 )
 
 const (
-	colQueue         = "decision_events_queue"
-	colMetaCampaigns = "meta_campaigns"
-	colDebounceQueue = "decision_recompute_debounce_queue"
+	colQueue         = "decision_job_events"
+	colMetaCampaigns = "meta_src_campaigns"
+	colDebounceQueue = "decision_state_recompute_debounce"
 )
 
 func main() {

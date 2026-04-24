@@ -830,7 +830,7 @@ func (s *ReportService) computeWithTagDimension(ctx context.Context, reportKey, 
 }
 
 // AggregateOrderReportForPeriod chạy aggregation order cho một kỳ, trả metrics (không upsert snapshot).
-// Dùng cho period-movements-from-db (PHỤ, đối chiếu) — query DB trực tiếp từ pc_pos_orders.
+// Dùng cho period-movements-from-db (PHỤ, đối chiếu) — query DB trực tiếp từ order_canonical (theo report_definitions).
 func (s *ReportService) AggregateOrderReportForPeriod(ctx context.Context, reportKey, periodKey string, ownerOrganizationID primitive.ObjectID) (map[string]interface{}, error) {
 	def, err := s.LoadDefinition(ctx, reportKey)
 	if err != nil {

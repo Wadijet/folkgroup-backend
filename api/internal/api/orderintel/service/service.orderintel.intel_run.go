@@ -84,7 +84,7 @@ func persistOrderIntelAfterJob(ctx context.Context, job *orderintelmodels.OrderI
 
 	op := job.Source
 	if op == "" {
-		op = "order_intel_compute"
+		op = "order_job_intel"
 	}
 
 	doc := orderintelmodels.OrderIntelRun{

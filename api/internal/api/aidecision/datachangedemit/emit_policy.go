@@ -11,18 +11,23 @@ import (
 // EmitPerCollection — tên collection Mongo → có ghi decision_events_queue sau datachanged hay không (chỉ key có trong map).
 // Collection không khai báo: non-Meta → bật; nhóm Meta Marketing → chỉ meta_ad_insights.
 var EmitPerCollection = map[string]bool{
-	"fb_posts":             false,
-	"fb_pages":             false,
-	"pc_pos_shops":         false,
-	"pc_pos_warehouses":    false,
-	"pc_pos_products":      false,
-	"pc_pos_variations":    false,
-	"pc_pos_categories":    false,
-	"customer_customers":        false,
-	"customer_activity_history": false,
-	"customer_notes":            false,
-	"cix_analysis_results": false,
-	"webhook_logs":         false,
+	"fb_src_posts":                  false,
+	"fb_src_pages":                  false,
+	"pc_pos_src_shops":              false,
+	"pc_pos_src_warehouses":         false,
+	"order_src_pcpos_products":      false,
+	"order_src_pcpos_variations":    false,
+	"order_src_pcpos_categories":    false,
+	"order_src_manual_products":     false,
+	"order_src_manual_variations":   false,
+	"order_src_manual_categories":   false,
+	"order_src_manual_shops":        false,
+	"order_src_manual_warehouses":   false,
+	"customer_core_records":         false,
+	"customer_run_activity_history": false,
+	"customer_core_notes":           false,
+	"cix_run_analysis_results":      false,
+	"webhook_run_logs":              false,
 }
 
 // DefaultShouldEmitToDecisionQueue — mặc định code (map + nhóm Meta); không áp YAML.

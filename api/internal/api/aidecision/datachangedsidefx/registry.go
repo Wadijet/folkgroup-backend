@@ -4,7 +4,6 @@ import (
 	"sort"
 	"sync"
 )
-
 // Contributor — một bước side-effect; không fail toàn bộ pipeline (lỗi ghi log tại contributor).
 type Contributor func(*ApplyContext) error
 
@@ -19,6 +18,12 @@ var (
 	entries []regEntry
 )
 
+// ContribInfo bản ghi tĩnh cho logging / tài liệu (thứ tự giống Run sau khi sort).
+type ContribInfo struct {
+	Order int
+	Name  string
+}
+
 // Register đăng ký contributor; Order nhỏ chạy trước. Chỉ gọi từ init package miền.
 func Register(order int, name string, fn Contributor) {
 	if fn == nil || name == "" {
@@ -27,6 +32,25 @@ func Register(order int, name string, fn Contributor) {
 	regMu.Lock()
 	entries = append(entries, regEntry{Order: order, Name: name, Fn: fn})
 	regMu.Unlock()
+}
+
+// Snapshot trả bản sao danh sách contributor đã đăng ký, đã sort giống Run (Order rồi Name).
+func Snapshot() []ContribInfo {
+	regMu.RLock()
+	cp := make([]regEntry, len(entries))
+	copy(cp, entries)
+	regMu.RUnlock()
+	sort.Slice(cp, func(i, j int) bool {
+		if cp[i].Order != cp[j].Order {
+			return cp[i].Order < cp[j].Order
+		}
+		return cp[i].Name < cp[j].Name
+	})
+	out := make([]ContribInfo, len(cp))
+	for i := range cp {
+		out[i] = ContribInfo{Order: cp[i].Order, Name: cp[i].Name}
+	}
+	return out
 }
 
 // Run chạy tất cả contributor đã đăng ký theo thứ tự Order.

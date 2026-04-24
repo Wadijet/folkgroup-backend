@@ -22,7 +22,7 @@ type AgentRegistryService struct {
 
 // NewAgentRegistryService tạo mới AgentRegistryService
 func NewAgentRegistryService() (*AgentRegistryService, error) {
-	collection, exist := global.RegistryCollections.Get("agent_registry")
+	collection, exist := global.RegistryCollections.Get(global.MongoDB_ColNames.AgentRegistry)
 	if !exist {
 		return nil, fmt.Errorf("failed to get agent_registry collection")
 	}

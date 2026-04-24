@@ -9,6 +9,7 @@ import (
 	"time"
 
 	reportdto "meta_commerce/internal/api/report/dto"
+	canonicalquery "meta_commerce/internal/api/order/canonicalquery"
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
 
@@ -939,27 +940,18 @@ func (s *ReportService) loadWarehouseNames(ctx context.Context, ownerOrgID primi
 }
 
 func (s *ReportService) aggregateDailySales(ctx context.Context, ownerOrgID primitive.ObjectID, fromTime, toTime time.Time, daysInPeriod int) (map[string]float64, error) {
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderCanonical)
 	if !ok {
-		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.PcPosOrders, common.ErrNotFound)
+		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.OrderCanonical, common.ErrNotFound)
 	}
-	// Thời gian: insertedAt/posCreatedAt có thể lưu Unix giây hoặc milliseconds (Pancake POS)
-	// Sample: insertedAt = 1767866197971 (ms) — phải hỗ trợ cả hai
-	fromSec := fromTime.Unix()
-	toSec := toTime.Unix()
-	fromMs := fromSec * 1000
-	toMs := toSec * 1000
+	// Thời gian: insertedAt trên order_canonical (chuẩn hóa từ L1; sec hoặc ms).
+	fromMs := fromTime.UnixMilli()
+	toMs := toTime.UnixMilli()
+	tw := canonicalquery.MatchInsertedAtTimeWindowOr(fromMs, toMs)
 	filter := bson.M{
 		"ownerOrganizationId": ownerOrgID,
 		"$and": []bson.M{
-			{
-				"$or": []bson.M{
-					{"insertedAt": bson.M{"$gte": fromSec, "$lte": toSec}},
-					{"posCreatedAt": bson.M{"$gte": fromSec, "$lte": toSec}},
-					{"insertedAt": bson.M{"$gte": fromMs, "$lte": toMs}},
-					{"posCreatedAt": bson.M{"$gte": fromMs, "$lte": toMs}},
-				},
-			},
+			tw,
 			// Trừ đơn hủy (6), xóa (7)
 			{"posData.status": bson.M{"$nin": orderStatusCancelled}},
 			{"status": bson.M{"$nin": orderStatusCancelled}},
@@ -1008,9 +1000,9 @@ func (s *ReportService) aggregateDailySales(ctx context.Context, ownerOrgID prim
 // getLastSaleDateByVariation trả về map variationId -> Unix timestamp (giây) của lần bán cuối cùng.
 // Dùng để tính daysSinceLastSale. Trả về map rỗng nếu lỗi.
 func (s *ReportService) getLastSaleDateByVariation(ctx context.Context, ownerOrgID primitive.ObjectID) (map[string]int64, error) {
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderCanonical)
 	if !ok {
-		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.PcPosOrders, common.ErrNotFound)
+		return nil, fmt.Errorf("không tìm thấy collection %s: %w", global.MongoDB_ColNames.OrderCanonical, common.ErrNotFound)
 	}
 	filter := bson.M{
 		"ownerOrganizationId": ownerOrgID,
@@ -1020,7 +1012,7 @@ func (s *ReportService) getLastSaleDateByVariation(ctx context.Context, ownerOrg
 			{"status": bson.M{"$nin": orderStatusCancelled}},
 		},
 	}
-	opts := options.Find().SetProjection(bson.M{"orderItems": 1, "posData": 1, "insertedAt": 1, "posCreatedAt": 1})
+	opts := options.Find().SetProjection(bson.M{"orderItems": 1, "posData": 1, "insertedAt": 1})
 	cursor, err := coll.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, common.ConvertMongoError(err)
@@ -1030,15 +1022,14 @@ func (s *ReportService) getLastSaleDateByVariation(ctx context.Context, ownerOrg
 	lastSaleByVariation := make(map[string]int64)
 	for cursor.Next(ctx) {
 		var doc struct {
-			OrderItems   []interface{}          `bson:"orderItems"`
-			PosData      map[string]interface{} `bson:"posData"`
-			InsertedAt   interface{}            `bson:"insertedAt"`
-			PosCreatedAt interface{}            `bson:"posCreatedAt"`
+			OrderItems []interface{}          `bson:"orderItems"`
+			PosData    map[string]interface{} `bson:"posData"`
+			InsertedAt interface{}            `bson:"insertedAt"`
 		}
 		if err := cursor.Decode(&doc); err != nil {
 			continue
 		}
-		orderTs := getOrderTimestamp(doc.InsertedAt, doc.PosCreatedAt, doc.PosData)
+		orderTs := getOrderTimestamp(doc.InsertedAt, nil, doc.PosData)
 		if orderTs <= 0 {
 			continue
 		}

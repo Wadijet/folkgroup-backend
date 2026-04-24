@@ -59,7 +59,10 @@ var scriptDatachangedSideEffectPolicy = `function evaluate(ctx) {
     src === 'meta_campaigns' || src === 'meta_adsets' || src === 'meta_ads' || src === 'meta_ad_insights' ||
     src === 'meta_ad_insights_daily_snapshots' || src === 'meta_ad_accounts' ||
     src === 'pc_pos_products' || src === 'pc_pos_variations' || src === 'pc_pos_categories' ||
+    src === 'order_src_pcpos_products' || src === 'order_src_pcpos_variations' || src === 'order_src_pcpos_categories' ||
+    src === 'order_src_manual_products' || src === 'order_src_manual_variations' || src === 'order_src_manual_categories' ||
     src === 'pc_pos_shops' || src === 'pc_pos_warehouses' ||
+    src === 'order_src_manual_shops' || src === 'order_src_manual_warehouses' ||
     src === 'fb_pages' || src === 'fb_posts' || src === 'webhook_logs'
   ) {
     u = 3;
@@ -76,10 +79,10 @@ var scriptDatachangedSideEffectPolicy = `function evaluate(ctx) {
   } else if (src === 'fb_conversations') {
     u = (op === 'insert') ? 1 : 2;
     reason = 'fb_conversations';
-  } else if (src === 'pc_pos_orders') {
+  } else if (src === 'pc_pos_orders' || src === 'order_src_pcpos_orders' || src === 'order_src_manual_orders') {
     u = (op === 'insert' || op === 'upsert') ? 1 : 2;
-    reason = 'pc_pos_orders';
-  } else if (src === 'fb_customers' || src === 'pc_pos_customers') {
+    reason = 'pcpos_orders';
+  } else if (src === 'fb_customers' || src === 'pc_pos_customers' || src === 'pc_pos_src_customers' || src === 'order_src_manual_customers') {
     u = (op === 'insert' || op === 'upsert') ? 1 : 2;
     reason = 'mirror_customers';
   } else {

@@ -14,6 +14,7 @@ import (
 	crmdto "meta_commerce/internal/api/crm/dto"
 	crmmodels "meta_commerce/internal/api/crm/models"
 	fbmodels "meta_commerce/internal/api/fb/models"
+	ordermodels "meta_commerce/internal/api/order/models"
 	pcmodels "meta_commerce/internal/api/pc/models"
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
@@ -40,7 +41,7 @@ type RecalculateCustomerResult struct {
 // Luồng:
 // 1. Lấy crm_customer hiện có (unifiedId, sourceIds, primarySource)
 // 2. Rebuild profile: merge từ POS (nếu có) + FB (nếu có), ưu tiên primarySource, fill gaps từ orders/conversations
-// 3. Aggregate metrics từ pc_pos_orders + fb_conversations
+// 3. Aggregate metrics từ order_canonical + fb_conversations
 // 4. Compute classification
 // 5. Update crm_customers
 //
@@ -926,12 +927,12 @@ func (s *CrmCustomerService) fetchFbCustomerById(ctx context.Context, customerId
 	return &doc
 }
 
-// fetchLatestOrderForCustomer lấy đơn hàng gần nhất của khách.
+// fetchLatestOrderForCustomer lấy đơn hàng gần nhất của khách (order_canonical).
 func (s *CrmCustomerService) fetchLatestOrderForCustomer(ctx context.Context, customerIds []string, ownerOrgID primitive.ObjectID) *pcmodels.PcPosOrder {
 	if len(customerIds) == 0 {
 		return nil
 	}
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderCanonical)
 	if !ok {
 		return nil
 	}
@@ -939,15 +940,16 @@ func (s *CrmCustomerService) fetchLatestOrderForCustomer(ctx context.Context, cu
 		"ownerOrganizationId": ownerOrgID,
 		"$or": []bson.M{
 			{"customerId": bson.M{"$in": customerIds}},
+			{"links.customer.uid": bson.M{"$in": customerIds}},
 			{"posData.customer.id": bson.M{"$in": customerIds}},
 		},
 	}
 	opts := mongoopts.FindOne().SetSort(bson.D{{Key: "insertedAt", Value: -1}})
-	var doc pcmodels.PcPosOrder
-	if err := coll.FindOne(ctx, filter, opts).Decode(&doc); err != nil {
+	var co ordermodels.CommerceOrder
+	if err := coll.FindOne(ctx, filter, opts).Decode(&co); err != nil {
 		return nil
 	}
-	return &doc
+	return commerceOrderAsPosViewForIngest(&co)
 }
 
 // fetchLatestConversationForCustomer lấy hội thoại gần nhất của khách.
@@ -1008,7 +1010,7 @@ func (s *CrmCustomerService) backfillConversationActivitiesForCustomer(ctx conte
 }
 
 // backfillOrderActivitiesForCustomer ghi order_created/order_completed cho các đơn hàng chưa có activity.
-// Filter đồng nhất với aggregateOrderMetricsForCustomer: customerId, posData.customer.id, posData.customer_id, billPhoneNumber.
+// Filter đồng nhất với aggregateOrderMetricsForCustomer (order_canonical).
 func (s *CrmCustomerService) backfillOrderActivitiesForCustomer(ctx context.Context, customerIds []string, phoneNumbers []string, ownerOrgID primitive.ObjectID) int {
 	var ids []string
 	for _, id := range customerIds {
@@ -1031,7 +1033,7 @@ func (s *CrmCustomerService) backfillOrderActivitiesForCustomer(ctx context.Cont
 		return 0
 	}
 
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderCanonical)
 	if !ok {
 		return 0
 	}
@@ -1040,14 +1042,13 @@ func (s *CrmCustomerService) backfillOrderActivitiesForCustomer(ctx context.Cont
 	if len(ids) > 0 {
 		orConditions = append(orConditions,
 			bson.M{"customerId": bson.M{"$in": ids}},
-			bson.M{"links.customer.uid": bson.M{"$in": ids}}, // Identity 4 lớp — pc_pos_orders
+			bson.M{"links.customer.uid": bson.M{"$in": ids}}, // Identity 4 lớp — order_canonical
 			bson.M{"posData.customer.id": bson.M{"$in": ids}},
 			bson.M{"posData.customer_id": bson.M{"$in": ids}},
 		)
 	}
 	if len(phoneVariants) > 0 {
 		orConditions = append(orConditions,
-			bson.M{"billPhoneNumber": bson.M{"$in": phoneVariants}},
 			bson.M{"posData.bill_phone_number": bson.M{"$in": phoneVariants}},
 		)
 	}
@@ -1070,8 +1071,12 @@ func (s *CrmCustomerService) backfillOrderActivitiesForCustomer(ctx context.Cont
 
 	backfilled := 0
 	for cursor.Next(ctx) {
-		var doc pcmodels.PcPosOrder
-		if err := cursor.Decode(&doc); err != nil {
+		var co ordermodels.CommerceOrder
+		if err := cursor.Decode(&co); err != nil {
+			continue
+		}
+		doc := commerceOrderAsPosViewForIngest(&co)
+		if doc == nil {
 			continue
 		}
 		customerId := doc.CustomerId
@@ -1098,7 +1103,7 @@ func (s *CrmCustomerService) backfillOrderActivitiesForCustomer(ctx context.Cont
 				channel = "online"
 			}
 		}
-		_ = s.IngestOrderTouchpoint(ctx, customerId, ownerOrgID, doc.OrderId, true, channel, true, &doc)
+		_ = s.IngestOrderTouchpoint(ctx, customerId, ownerOrgID, doc.OrderId, true, channel, true, doc)
 		backfilled++
 	}
 	return backfilled

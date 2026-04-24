@@ -7,11 +7,14 @@ import (
 	"meta_commerce/internal/utility/identity"
 )
 
-// SourcePancakePOS giá trị field Source cho đơn đồng bộ từ Pancake POS (pc_pos_orders).
+// SourcePancakePOS giá trị field Source cho đơn đồng bộ từ Pancake POS (order_src_pcpos_orders).
 const SourcePancakePOS = "pancake_pos"
 
+// SourceManual giá trị field Source cho đơn nhập tay / nhập thủ công (order_src_manual_orders → L2).
+const SourceManual = "manual"
+
 // CommerceOrder bản ghi đơn chuẩn trong hệ — Order Intelligence đọc từ đây.
-// Đồng bộ từ pc_pos_orders: 1:1 qua sourceRecordMongoId (không merge đa nguồn vào một đơn).
+// Mỗi nguồn L1 mirror 1:1 qua source + sourceRecordMongoId (Pancake: pancake_pos; nhập tay: manual).
 type CommerceOrder struct {
 	ID                  primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"`
 	Uid                 string             `json:"uid" bson:"uid" index:"compound:idx_order_canonical_uid_org"`
@@ -20,7 +23,7 @@ type CommerceOrder struct {
 	Links               map[string]identity.LinkItem `json:"links,omitempty" bson:"links,omitempty"`
 	OwnerOrganizationID primitive.ObjectID `json:"ownerOrganizationId" bson:"ownerOrganizationId" index:"compound:idx_order_canonical_uid_org,compound:idx_order_canonical_source_ref"`
 
-	// SourceRecordMongoID — _id của bản ghi nguồn (vd. pc_pos_orders).
+	// SourceRecordMongoID — _id bản ghi L1 mirror (order_src_pcpos_orders hoặc order_src_manual_orders).
 	SourceRecordMongoID primitive.ObjectID `json:"sourceRecordMongoId" bson:"sourceRecordMongoId" index:"compound:idx_order_canonical_source_ref"`
 
 	// Trường denormalized phục vụ intel (Pancake: copy từ PcPosOrder).

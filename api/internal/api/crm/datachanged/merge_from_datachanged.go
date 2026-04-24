@@ -26,8 +26,10 @@ func EnqueueCrmMergeFromDataChange(ctx context.Context, e events.DataChangeEvent
 
 	switch e.CollectionName {
 	case global.MongoDB_ColNames.PcPosCustomers,
+		global.MongoDB_ColNames.ManualPosCustomers,
 		global.MongoDB_ColNames.FbCustomers,
 		global.MongoDB_ColNames.PcPosOrders,
+		global.MongoDB_ColNames.ManualPosOrders,
 		global.MongoDB_ColNames.FbConvesations,
 		global.MongoDB_ColNames.CustomerNotes:
 		if err := crmvc.EnqueueCrmPendingMerge(ctx, e.CollectionName, e.Operation, e.Document, e.PreviousDocument, ownerOrgID, strings.TrimSpace(traceID), strings.TrimSpace(correlationID), bus); err != nil {

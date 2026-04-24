@@ -16,8 +16,8 @@ const (
 	IntelDomainOrderIntel = "order_intel"
 	IntelDomainAdsIntel   = "ads_intel"
 	IntelDomainCrmContext = "customer_context"
-	// IntelDomainCrmPendingMerge — worker merge L1→L2 (customer_pending_merge), sau datachanged.
-	IntelDomainCrmPendingMerge = "customer_pending_merge"
+	// IntelDomainCrmPendingMerge — worker merge L1→L2 (customer_job_pending_merge), sau datachanged.
+	IntelDomainCrmPendingMerge = "customer_job_pending_merge"
 )
 
 // IntelDomainMilestoneKind — bắt đầu / xong / lỗi (worker domain).

@@ -45,135 +45,142 @@ func InitGlobal() {
 
 // Hàm khởi tạo tên các collection trong database
 func initColNames() {
-	global.MongoDB_ColNames.Users = "auth_users"
-	global.MongoDB_ColNames.Permissions = "auth_permissions"
-	global.MongoDB_ColNames.Roles = "auth_roles"
-	global.MongoDB_ColNames.RolePermissions = "auth_role_permissions"
-	global.MongoDB_ColNames.UserRoles = "auth_user_roles"
-	global.MongoDB_ColNames.Organizations = "auth_organizations"
-	global.MongoDB_ColNames.OrganizationConfigItems = "auth_organization_config_items"
-	global.MongoDB_ColNames.AccessTokens = "access_tokens"
-	global.MongoDB_ColNames.FbPages = "fb_pages"
-	global.MongoDB_ColNames.FbConvesations = "fb_conversations"
-	global.MongoDB_ColNames.FbMessages = "fb_messages"
-	global.MongoDB_ColNames.FbMessageItems = "fb_message_items"
-	global.MongoDB_ColNames.FbPosts = "fb_posts"
-	global.MongoDB_ColNames.FbCustomers = "fb_customers"
-	global.MongoDB_ColNames.PcPosCustomers = "pc_pos_customers"
-	global.MongoDB_ColNames.PcPosShops = "pc_pos_shops"
-	global.MongoDB_ColNames.PcPosWarehouses = "pc_pos_warehouses"
-	global.MongoDB_ColNames.PcPosProducts = "pc_pos_products"
-	global.MongoDB_ColNames.PcPosVariations = "pc_pos_variations"
-	global.MongoDB_ColNames.PcPosCategories = "pc_pos_categories"
-	global.MongoDB_ColNames.PcPosOrders = "pc_pos_orders"
-	global.MongoDB_ColNames.OrderCanonical = "order_canonical"
+	global.MongoDB_ColNames.Users = "auth_core_users"
+	global.MongoDB_ColNames.Permissions = "auth_core_permissions"
+	global.MongoDB_ColNames.Roles = "auth_core_roles"
+	global.MongoDB_ColNames.RolePermissions = "auth_rel_role_permissions"
+	global.MongoDB_ColNames.UserRoles = "auth_rel_user_roles"
+	global.MongoDB_ColNames.Organizations = "auth_core_organizations"
+	global.MongoDB_ColNames.OrganizationConfigItems = "auth_cfg_organization_items"
+	global.MongoDB_ColNames.AccessTokens = "auth_core_access_tokens"
+	global.MongoDB_ColNames.FbPages = "fb_src_pages"
+	global.MongoDB_ColNames.FbConvesations = "fb_src_conversations"
+	global.MongoDB_ColNames.FbMessages = "fb_src_messages"
+	global.MongoDB_ColNames.FbMessageItems = "fb_src_message_items"
+	global.MongoDB_ColNames.FbPosts = "fb_src_posts"
+	global.MongoDB_ColNames.FbCustomers = "fb_src_customers"
+	global.MongoDB_ColNames.PcPosCustomers = "pc_pos_src_customers"
+	global.MongoDB_ColNames.PcPosShops = "pc_pos_src_shops"
+	global.MongoDB_ColNames.PcPosWarehouses = "pc_pos_src_warehouses"
+	global.MongoDB_ColNames.PcPosProducts = "order_src_pcpos_products"
+	global.MongoDB_ColNames.PcPosVariations = "order_src_pcpos_variations"
+	global.MongoDB_ColNames.PcPosCategories = "order_src_pcpos_categories"
+	global.MongoDB_ColNames.PcPosOrders = "order_src_pcpos_orders"
+	global.MongoDB_ColNames.OrderCanonical = "order_core_records"
+	global.MongoDB_ColNames.ManualPosOrders = "order_src_manual_orders"
+	global.MongoDB_ColNames.ManualPosProducts = "order_src_manual_products"
+	global.MongoDB_ColNames.ManualPosVariations = "order_src_manual_variations"
+	global.MongoDB_ColNames.ManualPosCategories = "order_src_manual_categories"
+	global.MongoDB_ColNames.ManualPosCustomers = "order_src_manual_customers"
+	global.MongoDB_ColNames.ManualPosShops = "order_src_manual_shops"
+	global.MongoDB_ColNames.ManualPosWarehouses = "order_src_manual_warehouses"
 
 	// Notification System Collections (Hệ thống 2 - Routing/Template)
-	global.MongoDB_ColNames.NotificationSenders = "notification_senders"
-	global.MongoDB_ColNames.NotificationChannels = "notification_channels"
-	global.MongoDB_ColNames.NotificationTemplates = "notification_templates"
-	global.MongoDB_ColNames.NotificationRoutingRules = "notification_routing_rules"
+	global.MongoDB_ColNames.NotificationSenders = "notification_cfg_senders"
+	global.MongoDB_ColNames.NotificationChannels = "notification_cfg_channels"
+	global.MongoDB_ColNames.NotificationTemplates = "notification_cfg_templates"
+	global.MongoDB_ColNames.NotificationRoutingRules = "notification_cfg_routing_rules"
 
 	// Delivery System Collections (Hệ thống 1 - Gửi)
-	global.MongoDB_ColNames.DeliveryQueue = "delivery_queue"
-	global.MongoDB_ColNames.DeliveryHistory = "delivery_history"
+	global.MongoDB_ColNames.DeliveryQueue = "delivery_job_queue"
+	global.MongoDB_ColNames.DeliveryHistory = "delivery_run_history"
 
 	// CTA Module Collections
-	global.MongoDB_ColNames.CTALibrary = "cta_library"
-	global.MongoDB_ColNames.CTATracking = "cta_tracking"
+	global.MongoDB_ColNames.CTALibrary = "cta_core_library"
+	global.MongoDB_ColNames.CTATracking = "cta_run_tracking"
 
 	// Agent Management System Collections (Bot Management)
-	global.MongoDB_ColNames.AgentRegistry = "agent_registry"
-	global.MongoDB_ColNames.AgentConfigs = "agent_configs"
-	global.MongoDB_ColNames.AgentCommands = "agent_commands"
+	global.MongoDB_ColNames.AgentRegistry = "agent_core_registry"
+	global.MongoDB_ColNames.AgentConfigs = "agent_cfg_configs"
+	global.MongoDB_ColNames.AgentCommands = "agent_job_commands"
 	// AgentStatus đã được ghép vào AgentRegistry, không cần collection riêng nữa
-	global.MongoDB_ColNames.AgentActivityLogs = "agent_activity_logs"
+	global.MongoDB_ColNames.AgentActivityLogs = "agent_run_activity_logs"
 
 	// Webhook Logs Collection
-	global.MongoDB_ColNames.WebhookLogs = "webhook_logs"
+	global.MongoDB_ColNames.WebhookLogs = "webhook_run_logs"
 
 	// Module 1: Content Storage Collections (tất cả đều có prefix "content_" để nhất quán)
-	global.MongoDB_ColNames.ContentNodes = "content_nodes"
-	global.MongoDB_ColNames.Videos = "content_videos"
-	global.MongoDB_ColNames.Publications = "content_publications"
+	global.MongoDB_ColNames.ContentNodes = "content_core_nodes"
+	global.MongoDB_ColNames.Videos = "content_core_videos"
+	global.MongoDB_ColNames.Publications = "content_core_publications"
 	global.MongoDB_ColNames.DraftContentNodes = "content_draft_nodes"
 	global.MongoDB_ColNames.DraftVideos = "content_draft_videos"
 	global.MongoDB_ColNames.DraftPublications = "content_draft_publications"
 	// Module 2: AI Service Collections (tất cả đều có prefix "ai_" để nhất quán)
-	global.MongoDB_ColNames.AIWorkflows = "ai_workflows"
-	global.MongoDB_ColNames.AISteps = "ai_steps"
-	global.MongoDB_ColNames.AIPromptTemplates = "ai_prompt_templates"
-	global.MongoDB_ColNames.AIProviderProfiles = "ai_provider_profiles"
-	global.MongoDB_ColNames.AIWorkflowRuns = "ai_workflow_runs"
-	global.MongoDB_ColNames.AIStepRuns = "ai_step_runs"
-	global.MongoDB_ColNames.AIGenerationBatches = "ai_generation_batches"
-	global.MongoDB_ColNames.AICandidates = "ai_candidates"
-	global.MongoDB_ColNames.AIRuns = "ai_runs"
-	global.MongoDB_ColNames.AIWorkflowCommands = "ai_workflow_commands"
+	global.MongoDB_ColNames.AIWorkflows = "ai_core_workflows"
+	global.MongoDB_ColNames.AISteps = "ai_core_steps"
+	global.MongoDB_ColNames.AIPromptTemplates = "ai_cfg_prompt_templates"
+	global.MongoDB_ColNames.AIProviderProfiles = "ai_cfg_provider_profiles"
+	global.MongoDB_ColNames.AIWorkflowRuns = "ai_run_workflows"
+	global.MongoDB_ColNames.AIStepRuns = "ai_run_steps"
+	global.MongoDB_ColNames.AIGenerationBatches = "ai_job_generation_batches"
+	global.MongoDB_ColNames.AICandidates = "ai_core_candidates"
+	global.MongoDB_ColNames.AIRuns = "ai_run_generations"
+	global.MongoDB_ColNames.AIWorkflowCommands = "ai_job_workflow_commands"
 
 	// Báo cáo theo chu kỳ (Phase 1)
-	global.MongoDB_ColNames.ReportDefinitions = "report_definitions"
-	global.MongoDB_ColNames.ReportSnapshots = "report_snapshots"
-	global.MongoDB_ColNames.ReportDirtyPeriods = "report_dirty_periods"
+	global.MongoDB_ColNames.ReportDefinitions = "report_cfg_definitions"
+	global.MongoDB_ColNames.ReportSnapshots = "report_rm_snapshots"
+	global.MongoDB_ColNames.ReportDirtyPeriods = "report_state_dirty_periods"
 
 	// Module Customer (tiền tố customer_)
-	global.MongoDB_ColNames.CustomerCustomers = "customer_customers"
-	global.MongoDB_ColNames.CustomerActivityHistory = "customer_activity_history"
-	global.MongoDB_ColNames.CustomerNotes = "customer_notes"
-	global.MongoDB_ColNames.CustomerPendingMerge = "customer_pending_merge"
-	global.MongoDB_ColNames.CustomerBulkJobs = "customer_bulk_jobs"
-	global.MongoDB_ColNames.CustomerIntelCompute = "customer_intel_compute"
-	global.MongoDB_ColNames.CustomerIntelRuns = "customer_intel_runs"
+	global.MongoDB_ColNames.CustomerCustomers = "customer_core_records"
+	global.MongoDB_ColNames.CustomerActivityHistory = "customer_run_activity_history"
+	global.MongoDB_ColNames.CustomerNotes = "customer_core_notes"
+	global.MongoDB_ColNames.CustomerPendingMerge = "customer_job_pending_merge"
+	global.MongoDB_ColNames.CustomerBulkJobs = "customer_job_bulk"
+	global.MongoDB_ColNames.CustomerIntelCompute = "customer_job_intel"
+	global.MongoDB_ColNames.CustomerIntelRuns = "customer_run_intel"
 
 	// Module Meta Ads
-	global.MongoDB_ColNames.MetaAdAccounts = "meta_ad_accounts"
-	global.MongoDB_ColNames.MetaCampaigns = "meta_campaigns"
-	global.MongoDB_ColNames.MetaAdSets = "meta_adsets"
-	global.MongoDB_ColNames.MetaAds = "meta_ads"
-	global.MongoDB_ColNames.MetaAdInsights = "meta_ad_insights"
-	global.MongoDB_ColNames.MetaAdInsightsDailySnapshots = "meta_ad_insights_daily_snapshots"
-	global.MongoDB_ColNames.ActionPendingApproval = "action_pending_approval"
-	global.MongoDB_ColNames.ApprovalModeConfig = "approval_mode_config"
-	global.MongoDB_ColNames.AdsApprovalConfig = "ads_approval_config"
-	global.MongoDB_ColNames.AdsActivityHistory = "ads_activity_history"
-	global.MongoDB_ColNames.AdsMetaConfig = "ads_meta_config"
-	global.MongoDB_ColNames.AdsMetricDefinitions = "ads_metric_definitions"
-	global.MongoDB_ColNames.AdsCampThresholds = "ads_camp_thresholds"
-	global.MongoDB_ColNames.AdsKillSnapshots = "ads_kill_snapshots"
-	global.MongoDB_ColNames.AdsCounterfactualOutcomes = "ads_counterfactual_outcomes"
-	global.MongoDB_ColNames.AdsCampaignHourly = "ads_campaign_hourly"
-	global.MongoDB_ColNames.AdsCampPeakProfiles = "ads_camp_peak_profiles"
-	global.MongoDB_ColNames.AdsThrottleState = "ads_throttle_state"
-	global.MongoDB_ColNames.RecomputeDebounceQueue = "decision_recompute_debounce_queue"
-	global.MongoDB_ColNames.AdsIntelCompute = "ads_intel_compute"
-	global.MongoDB_ColNames.AdsMetaIntelRuns = "ads_meta_intel_runs"
-	global.MongoDB_ColNames.LearningCases = "learning_cases"
-	global.MongoDB_ColNames.RuleSuggestions = "rule_suggestions"
+	global.MongoDB_ColNames.MetaAdAccounts = "meta_src_ad_accounts"
+	global.MongoDB_ColNames.MetaCampaigns = "meta_src_campaigns"
+	global.MongoDB_ColNames.MetaAdSets = "meta_src_adsets"
+	global.MongoDB_ColNames.MetaAds = "meta_src_ads"
+	global.MongoDB_ColNames.MetaAdInsights = "meta_src_ad_insights"
+	global.MongoDB_ColNames.MetaAdInsightsDailySnapshots = "meta_rm_ad_insights_daily_snapshots"
+	global.MongoDB_ColNames.ActionPendingApproval = "approval_job_pending_actions"
+	global.MongoDB_ColNames.ApprovalModeConfig = "approval_cfg_mode"
+	global.MongoDB_ColNames.AdsApprovalConfig = "ads_cfg_approval"
+	global.MongoDB_ColNames.AdsActivityHistory = "ads_run_activity_history"
+	global.MongoDB_ColNames.AdsMetaConfig = "ads_cfg_meta"
+	global.MongoDB_ColNames.AdsMetricDefinitions = "ads_cfg_metric_definitions"
+	global.MongoDB_ColNames.AdsCampThresholds = "ads_cfg_campaign_thresholds"
+	global.MongoDB_ColNames.AdsKillSnapshots = "ads_rm_kill_snapshots"
+	global.MongoDB_ColNames.AdsCounterfactualOutcomes = "ads_run_counterfactual_outcomes"
+	global.MongoDB_ColNames.AdsCampaignHourly = "ads_rm_campaign_hourly"
+	global.MongoDB_ColNames.AdsCampPeakProfiles = "ads_rm_campaign_peak_profiles"
+	global.MongoDB_ColNames.AdsThrottleState = "ads_state_throttle"
+	global.MongoDB_ColNames.RecomputeDebounceQueue = "decision_state_recompute_debounce"
+	global.MongoDB_ColNames.AdsIntelCompute = "ads_job_intel"
+	global.MongoDB_ColNames.AdsMetaIntelRuns = "ads_run_intel"
+	global.MongoDB_ColNames.LearningCases = "learning_core_cases"
+	global.MongoDB_ColNames.RuleSuggestions = "learning_rm_rule_suggestions"
 
 	// Module Rule Intelligence
-	global.MongoDB_ColNames.RuleDefinitions = "rule_definitions"
-	global.MongoDB_ColNames.RuleLogicDefinitions = "rule_logic_definitions"
-	global.MongoDB_ColNames.RuleParamSets = "rule_param_sets"
-	global.MongoDB_ColNames.RuleOutputDefinitions = "rule_output_definitions"
-	global.MongoDB_ColNames.RuleExecutionLogs = "rule_execution_logs"
+	global.MongoDB_ColNames.RuleDefinitions = "rule_cfg_definitions"
+	global.MongoDB_ColNames.RuleLogicDefinitions = "rule_cfg_logic_definitions"
+	global.MongoDB_ColNames.RuleParamSets = "rule_cfg_param_sets"
+	global.MongoDB_ColNames.RuleOutputDefinitions = "rule_cfg_output_definitions"
+	global.MongoDB_ColNames.RuleExecutionLogs = "rule_run_execution_logs"
 
 	// Module CIX — Contextual Conversation Intelligence
-	global.MongoDB_ColNames.CixAnalysisResults = "cix_analysis_results"
-	global.MongoDB_ColNames.CixIntelCompute = "cix_intel_compute"
+	global.MongoDB_ColNames.CixAnalysisResults = "cix_run_analysis_results"
+	global.MongoDB_ColNames.CixIntelCompute = "cix_job_intel"
 
 	// Module Order Intelligence — Vision 07
-	global.MongoDB_ColNames.OrderIntelSnapshots = "order_intel_snapshots"
-	global.MongoDB_ColNames.OrderIntelCompute = "order_intel_compute"
-	global.MongoDB_ColNames.OrderIntelRuns = "order_intel_runs"
+	global.MongoDB_ColNames.OrderIntelSnapshots = "order_rm_intel"
+	global.MongoDB_ColNames.OrderIntelCompute = "order_job_intel"
+	global.MongoDB_ColNames.OrderIntelRuns = "order_run_intel"
 
 	// Module AI Decision — Event & Decision Case (PLATFORM_L1_EVENT_DECISION_SUPPLEMENT)
-	global.MongoDB_ColNames.DecisionEventsQueue = "decision_events_queue"
-	global.MongoDB_ColNames.DecisionCasesRuntime = "decision_cases_runtime"
-	global.MongoDB_ColNames.DecisionDebounceState = "decision_debounce_state"
-	global.MongoDB_ColNames.DecisionTrailingDebounce = "decision_trailing_debounce"
-	global.MongoDB_ColNames.DecisionRoutingRules = "decision_routing_rules"
-	global.MongoDB_ColNames.DecisionContextPolicyOverrides = "decision_context_policy_overrides"
-	global.MongoDB_ColNames.AIDecisionOrgLiveEvents = "decision_org_live_events"
+	global.MongoDB_ColNames.DecisionEventsQueue = "decision_job_events"
+	global.MongoDB_ColNames.DecisionCasesRuntime = "decision_state_cases_runtime"
+	global.MongoDB_ColNames.DecisionDebounceState = "decision_state_debounce"
+	global.MongoDB_ColNames.DecisionTrailingDebounce = "decision_state_trailing_debounce"
+	global.MongoDB_ColNames.DecisionRoutingRules = "decision_cfg_routing_rules"
+	global.MongoDB_ColNames.DecisionContextPolicyOverrides = "decision_cfg_context_policy_overrides"
+	global.MongoDB_ColNames.AIDecisionOrgLiveEvents = "decision_run_org_live_events"
 
 	logrus.Info("Initialized collection names") // Ghi log thông báo đã khởi tạo tên các collection
 }
@@ -202,6 +209,11 @@ func initDatabase_MongoDB() {
 	}
 	logrus.Info("Connected to MongoDB") // Ghi log thông báo đã kết nối database thành công
 
+	// DB cũ (tên collection trước refactor): đổi tên sang chuẩn mới — bật MONGO_LEGACY_COLLECTION_RENAME=1
+	if err := database.InitRenameLegacyMongoCollectionsIfEnabled(global.MongoDB_Session, global.MongoDB_ServerConfig.MongoDB_DBName_Auth); err != nil {
+		logrus.Fatalf("Legacy rename collection: %v", err)
+	}
+
 	// Khởi tạo các db và collections nếu chưa có
 	database.EnsureDatabaseAndCollections(global.MongoDB_Session)
 	logrus.Info("Ensured database and collections") // Ghi log thông báo đã đảm bảo database và các collection
@@ -229,6 +241,13 @@ func initDatabase_MongoDB() {
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.PcPosVariations), pcmodels.PcPosVariation{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.PcPosCategories), pcmodels.PcPosCategory{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.PcPosOrders), pcmodels.PcPosOrder{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.ManualPosOrders), pcmodels.PcPosOrder{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.ManualPosProducts), pcmodels.PcPosProduct{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.ManualPosVariations), pcmodels.PcPosVariation{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.ManualPosCategories), pcmodels.PcPosCategory{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.ManualPosCustomers), pcmodels.PcPosCustomer{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.ManualPosShops), pcmodels.PcPosShop{})
+	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.ManualPosWarehouses), pcmodels.PcPosWarehouse{})
 	database.CreateIndexes(context.TODO(), global.MongoDB_Session.Database(dbName).Collection(global.MongoDB_ColNames.OrderCanonical), ordermodels.CommerceOrder{})
 
 	// Notification System Indexes (Hệ thống 2 - Routing/Template)

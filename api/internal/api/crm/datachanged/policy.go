@@ -14,8 +14,10 @@ func IsCustomerIntelligenceSourceCollection(src string) bool {
 	switch src {
 	case global.MongoDB_ColNames.FbCustomers,
 		global.MongoDB_ColNames.PcPosCustomers,
+		global.MongoDB_ColNames.ManualPosCustomers,
 		global.MongoDB_ColNames.FbConvesations,
 		global.MongoDB_ColNames.PcPosOrders,
+		global.MongoDB_ColNames.ManualPosOrders,
 		global.MongoDB_ColNames.CustomerCustomers:
 		return true
 	default:

@@ -1,5 +1,5 @@
 // Package reportsvc - Inbox Operations (Tab 7): KPI, bảng hội thoại, Sale performance, Alert zone.
-// Data source: fb_conversations, fb_message_items, fb_pages, pc_pos_orders (conversion).
+// Data source: fb_conversations, fb_message_items, fb_pages, order_canonical (conversion).
 package reportsvc
 
 import (
@@ -10,6 +10,7 @@ import (
 	"time"
 
 	reportdto "meta_commerce/internal/api/report/dto"
+	canonicalquery "meta_commerce/internal/api/order/canonicalquery"
 	"meta_commerce/internal/common"
 	"meta_commerce/internal/global"
 
@@ -507,21 +508,15 @@ func (s *ReportService) loadResponseTimesForConversations(ctx context.Context, o
 }
 
 func (s *ReportService) loadConvertedCustomers(ctx context.Context, ownerOrgID primitive.ObjectID, from, to time.Time) (map[string]bool, error) {
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderCanonical)
 	if !ok {
 		return make(map[string]bool), nil
 	}
-	fromSec := from.Unix()
-	toSec := to.Unix()
+	tw := canonicalquery.MatchInsertedAtTimeWindowOr(from.UnixMilli(), to.UnixMilli())
 	filter := bson.M{
 		"ownerOrganizationId": ownerOrgID,
 		"$and": []bson.M{
-			{
-				"$or": []bson.M{
-					{"insertedAt": bson.M{"$gte": fromSec, "$lte": toSec}},
-					{"posCreatedAt": bson.M{"$gte": fromSec, "$lte": toSec}},
-				},
-			},
+			tw,
 			{
 				"$or": []bson.M{
 					{"posData.status": bson.M{"$in": []int{2, 3, 16}}},
@@ -567,7 +562,7 @@ func (s *ReportService) loadConvertedCustomers(ctx context.Context, ownerOrgID p
 // loadCustomersWithOrders trả về map customerId → true cho khách đã có ít nhất 1 đơn hoàn thành (bất kỳ thời điểm).
 // Dùng để xác định Engaged: có conversation nhưng chưa có đơn.
 func (s *ReportService) loadCustomersWithOrders(ctx context.Context, ownerOrgID primitive.ObjectID) (map[string]bool, error) {
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderCanonical)
 	if !ok {
 		return make(map[string]bool), nil
 	}

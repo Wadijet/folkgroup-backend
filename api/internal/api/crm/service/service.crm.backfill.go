@@ -9,7 +9,7 @@ import (
 	crmdto "meta_commerce/internal/api/crm/dto"
 	crmmodels "meta_commerce/internal/api/crm/models"
 	fbmodels "meta_commerce/internal/api/fb/models"
-	pcmodels "meta_commerce/internal/api/pc/models"
+	ordermodels "meta_commerce/internal/api/order/models"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/logger"
 
@@ -163,7 +163,7 @@ func (s *CrmCustomerService) BackfillActivity(ctx context.Context, ownerOrgID pr
 // countBackfillSourceTotals đếm tổng số bản ghi mỗi nguồn backfill (để tính % tiến độ).
 func (s *CrmCustomerService) countBackfillSourceTotals(ctx context.Context, ownerOrgID primitive.ObjectID, runOrder, runConv, runNote bool) (ordersTotal, convTotal, notesTotal int64) {
 	if runOrder {
-		if coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders); ok {
+		if coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderCanonical); ok {
 			filter := bson.M{
 				"ownerOrganizationId": ownerOrgID,
 				"$and": []bson.M{
@@ -321,9 +321,9 @@ const backfillBatchSize = 1000 // Phân trang CRUD, tránh vượt memory limit
 // backfillOrdersWithProgress backfill đơn hàng theo thứ tự thời gian, hỗ trợ checkpoint.
 // Trả về (số đã xử lý, skip mới). onBatchDone gọi sau mỗi batch (nil = không dùng checkpoint).
 func (s *CrmCustomerService) backfillOrdersWithProgress(ctx context.Context, ownerOrgID primitive.ObjectID, limit int, useLimit bool, startSkip int64, onBatchDone func(int64)) (int, int64) {
-	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
+	coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderCanonical)
 	if !ok {
-		logger.GetAppLogger().Warn("[CRM] Backfill orders: không tìm thấy collection pc_pos_orders")
+		logger.GetAppLogger().Warn("[CRM] Backfill orders: không tìm thấy collection order_canonical")
 		return 0, startSkip
 	}
 	filter := bson.M{
@@ -333,7 +333,7 @@ func (s *CrmCustomerService) backfillOrdersWithProgress(ctx context.Context, own
 			{"posData.status": bson.M{"$nin": []int{6}}},
 		},
 	}
-	sortOpt := mongoopts.Find().SetSort(bson.D{{Key: "posData.inserted_at", Value: 1}, {Key: "posData.updated_at", Value: 1}, {Key: "_id", Value: 1}})
+	sortOpt := mongoopts.Find().SetSort(bson.D{{Key: "insertedAt", Value: 1}, {Key: "_id", Value: 1}})
 
 	count := 0
 	for skip := startSkip; ; skip += backfillBatchSize {
@@ -353,8 +353,12 @@ func (s *CrmCustomerService) backfillOrdersWithProgress(ctx context.Context, own
 		docsInBatch := 0
 		for cursor.Next(ctx) {
 			docsInBatch++
-			var doc pcmodels.PcPosOrder
-			if err := cursor.Decode(&doc); err != nil {
+			var co ordermodels.CommerceOrder
+			if err := cursor.Decode(&co); err != nil {
+				continue
+			}
+			doc := commerceOrderAsPosViewForIngest(&co)
+			if doc == nil {
 				continue
 			}
 			customerId := doc.CustomerId
@@ -374,7 +378,7 @@ func (s *CrmCustomerService) backfillOrdersWithProgress(ctx context.Context, own
 						channel = "online"
 					}
 				}
-				_ = s.IngestOrderTouchpoint(ctx, customerId, ownerOrgID, doc.OrderId, true, channel, true, &doc)
+				_ = s.IngestOrderTouchpoint(ctx, customerId, ownerOrgID, doc.OrderId, true, channel, true, doc)
 				count++
 			}
 		}
@@ -560,7 +564,7 @@ func (s *CrmCustomerService) backfillDiagnostic(ctx context.Context, ownerOrgID 
 	}
 
 	if runOrder {
-		if coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders); ok {
+		if coll, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.OrderCanonical); ok {
 			d.TotalOrders, _ = coll.CountDocuments(ctx, bson.M{})
 			d.OrdersWithOrg, _ = coll.CountDocuments(ctx, bson.M{"ownerOrganizationId": ownerOrgID})
 		}

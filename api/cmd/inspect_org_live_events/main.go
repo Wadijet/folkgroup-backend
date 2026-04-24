@@ -31,7 +31,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-const colOrgLive = "decision_org_live_events"
+const colOrgLive = "decision_run_org_live_events"
 
 // payloadLite — các trường thường dùng để đánh giá “dễ hiểu” trên UI.
 type payloadLite struct {

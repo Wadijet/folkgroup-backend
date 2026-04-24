@@ -24,7 +24,7 @@ type AgentCommandService struct {
 
 // NewAgentCommandService tạo mới AgentCommandService
 func NewAgentCommandService() (*AgentCommandService, error) {
-	collection, exist := global.RegistryCollections.Get("agent_commands")
+	collection, exist := global.RegistryCollections.Get(global.MongoDB_ColNames.AgentCommands)
 	if !exist {
 		return nil, fmt.Errorf("failed to get agent_commands collection")
 	}

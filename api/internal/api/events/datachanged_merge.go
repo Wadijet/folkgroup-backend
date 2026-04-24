@@ -20,6 +20,12 @@ func MergeRelevantDataKey(collectionName string) string {
 		return "panCakeData"
 	case global.MongoDB_ColNames.PcPosOrders:
 		return "posData"
+	case global.MongoDB_ColNames.ManualPosOrders:
+		return "posData"
+	case global.MongoDB_ColNames.ManualPosCustomers:
+		return "posData"
+	case global.MongoDB_ColNames.OrderCanonical:
+		return "posData"
 	case global.MongoDB_ColNames.FbConvesations:
 		return "panCakeData"
 	case global.MongoDB_ColNames.CustomerNotes:

@@ -26,7 +26,7 @@ const (
 // Các nguồn dữ liệu.
 const (
 	SourceMeta             = "meta"              // meta_ad_insights
-	SourcePancakePos       = "pancake.pos"       // pc_pos_orders
+	SourcePancakePos       = "pancake.pos"       // order_canonical (đồng bộ từ POS)
 	SourcePancakeConversation = "pancake.conversation" // fb_conversations
 	SourceDerived          = "derived"           // Tính từ raw
 )
@@ -46,7 +46,7 @@ type AdsMetricDefinition struct {
 	Type        string             `json:"type" bson:"type"`                                   // raw | derived
 	FormulaRef  string             `json:"formulaRef,omitempty" bson:"formulaRef,omitempty"`   // derived: "orders/mess", "spend/mess"
 	DependsOn   []string           `json:"dependsOn,omitempty" bson:"dependsOn,omitempty"`     // derived: ["orders_7d", "mess_7d"]
-	SourceCollection string        `json:"sourceCollection,omitempty" bson:"sourceCollection,omitempty"` // raw: meta_ad_insights, pc_pos_orders
+	SourceCollection string        `json:"sourceCollection,omitempty" bson:"sourceCollection,omitempty"` // raw: meta_ad_insights, order_canonical
 	TimeField   string             `json:"timeField,omitempty" bson:"timeField,omitempty"`     // raw: dateStart, posCreatedAt, panCakeUpdatedAt
 	AggregationField string        `json:"aggregationField,omitempty" bson:"aggregationField,omitempty"` // raw: posData.ad_id, panCakeData.ad_ids
 	OutputPath  string             `json:"outputPath,omitempty" bson:"outputPath,omitempty"`   // Đường dẫn trong raw: meta.spend, pancake.pos.orders

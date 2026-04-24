@@ -55,7 +55,7 @@ func (s *AIDecisionService) HydrateDatachangedPayload(ctx context.Context, evt *
 				}
 			}
 		}
-	case global.MongoDB_ColNames.PcPosOrders:
+	case global.MongoDB_ColNames.PcPosOrders, global.MongoDB_ColNames.ManualPosOrders:
 		hydratePcPosOrderFromRaw(p, raw)
 	case global.MongoDB_ColNames.CustomerCustomers:
 		mergeStringIfEmpty(p, raw, "unifiedId", "unifiedId")

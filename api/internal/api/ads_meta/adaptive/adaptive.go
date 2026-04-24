@@ -13,6 +13,7 @@ import (
 
 	adsconfig "meta_commerce/internal/api/ads_meta/config"
 	adsmodels "meta_commerce/internal/api/ads_meta/models"
+	canonicalquery "meta_commerce/internal/api/order/canonicalquery"
 	"meta_commerce/internal/global"
 	"meta_commerce/internal/logger"
 
@@ -175,29 +176,33 @@ func fetchDailyMetricsForCampaign(ctx context.Context, campaignId, adAccountId s
 		metaByDate[doc.Id] = dailyCampMetric{Date: doc.Id, Spend: doc.Spend, Mess: doc.Mess, Ctr: doc.Ctr}
 	}
 
-	ordersColl, ok := global.RegistryCollections.Get(global.MongoDB_ColNames.PcPosOrders)
-	if !ok {
-		return nil, fmt.Errorf("không tìm thấy collection pc_pos_orders")
+	ordersColl, errColl := canonicalquery.CollOrderCanonical()
+	if errColl != nil {
+		return nil, errColl
 	}
 	startSec := start.Unix()
 	endSec := end.Unix() + 86400
+	tw := canonicalquery.MatchInsertedAtExclusiveSlotOr(startSec, endSec)
+	match := bson.M{
+		"ownerOrganizationId": ownerOrgID,
+		"posData.ad_id":       bson.M{"$in": adIds},
+		"$or":                 tw["$or"],
+	}
 
 	ordersPipe := mongo.Pipeline{
-		{{Key: "$match", Value: bson.M{
-			"ownerOrganizationId": ownerOrgID,
-			"posData.ad_id":       bson.M{"$in": adIds},
-			"$or": []bson.M{
-				{"posCreatedAt": bson.M{"$gte": startSec, "$lt": endSec}},
-				{"insertedAt": bson.M{"$gte": startSec, "$lt": endSec}},
-			},
+		{{Key: "$match", Value: match}},
+		{{Key: "$addFields", Value: bson.M{
+			"_ts": bson.M{"$cond": bson.A{
+				bson.M{"$gte": bson.A{bson.M{"$ifNull": bson.A{"$insertedAt", 0}}, 1e12}},
+				"$insertedAt",
+				bson.M{"$multiply": bson.A{bson.M{"$toLong": bson.M{"$ifNull": bson.A{"$insertedAt", 0}}}, 1000}},
+			}},
 		}}},
 		{{Key: "$addFields", Value: bson.M{
-			"_day": bson.M{
-				"$dateToString": bson.M{
-					"format": "%Y-%m-%d",
-					"date":   bson.M{"$toDate": bson.M{"$multiply": bson.A{bson.M{"$ifNull": bson.A{"$posCreatedAt", "$insertedAt"}}, 1000}}},
-				},
-			},
+			"_day": bson.M{"$dateToString": bson.M{
+				"format": "%Y-%m-%d",
+				"date":   bson.M{"$toDate": "$_ts"},
+			}},
 		}}},
 		{{Key: "$group", Value: bson.M{
 			"_id":    "$_day",

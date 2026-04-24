@@ -146,14 +146,14 @@ func mapSourceKindsToPipelineDomain(sourceKinds []string) string {
 			continue
 		}
 		switch {
-		case strings.HasPrefix(sk, "customer_"), sk == "customer_customers", sk == "customer_activity",
+		case strings.HasPrefix(sk, "customer_"), sk == "customer_core_records", sk == "customer_activity",
 			strings.HasPrefix(sk, "crm_"), sk == "crm_customers", sk == "crm_activity": // legacy debounce keys
 			return PipelineDebounceDomainCrm
-		case strings.HasPrefix(sk, "cix_"), sk == "cix_analysis", sk == "fb_message_items":
+		case strings.HasPrefix(sk, "cix_"), sk == "cix_analysis", sk == "fb_src_message_items":
 			return PipelineDebounceDomainCix
 		case strings.HasPrefix(sk, "order_"), sk == "order_intel":
 			return PipelineDebounceDomainOrder
-		case sk == "pc_pos_orders", sk == "fb_conversations", strings.HasPrefix(sk, "meta_"):
+		case sk == global.MongoDB_ColNames.PcPosOrders, sk == global.MongoDB_ColNames.ManualPosOrders, sk == global.MongoDB_ColNames.OrderCanonical, sk == "fb_src_conversations", strings.HasPrefix(sk, "meta_"):
 			return PipelineDebounceDomainAds
 		}
 	}

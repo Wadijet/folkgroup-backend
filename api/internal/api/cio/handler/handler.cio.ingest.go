@@ -20,8 +20,10 @@ import (
 //	filter: tùy chọn — cùng ý nghĩa với query ?filter={} (JSON). Body filter được merge đè lên query.
 //	data: payload giống hệt body từng domain (order, pos_*, interaction_*, fb_customer, meta_*, …).
 //
-// Domain "order" (pc_pos_orders): filter cần orderId (và shopId nếu cần); ownerOrganizationId lấy từ JWT khi không gửi.
+// Domain "order" (order_src_pcpos_orders): filter cần orderId (và shopId nếu cần); ownerOrganizationId lấy từ JWT khi không gửi.
+// Domain "manual_order" (order_src_manual_orders): filter cần ownerOrganizationId + (orderId | _id | uid); tạo mới: gửi _id trong data hoặc filter.
 // data tối thiểu: { "posData": <order từ Pancake POS> } — backend extract flatten + uid/sourceIds/links (4 lớp).
+// Các domain "manual_pos_*" tương ứng collection order_src_manual_* (cùng payload nhánh Pancake tương ứng).
 //
 // Luồng: merge filter (?filter= + body.filter) → ProcessMergedFilter trên handler domain → SyncUpsertOneFromParts / UpsertMessagesFromParts
 // (handler gọi *Service.RunSyncUpsertOneFromJSON / RunUpsertMessagesFromJSON — logic nghiệp vụ nằm ở service).
@@ -48,6 +50,14 @@ type CioIngestHandler struct {
 	metaAdSet     *metahdl.MetaAdSetHandler
 	metaAd        *metahdl.MetaAdHandler
 	metaAdInsight *metahdl.MetaAdInsightHandler
+	// Nhập tay — L1 order_src_manual_* (cùng DTO/flow sync-upsert với PcPos*).
+	manualOrder     *pchdl.ManualPosOrderHandler
+	manualProduct   *pchdl.ManualPosProductHandler
+	manualVariation *pchdl.ManualPosVariationHandler
+	manualCategory  *pchdl.ManualPosCategoryHandler
+	manualCustomer  *pchdl.ManualPosCustomerHandler
+	manualShop      *pchdl.ManualPosShopHandler
+	manualWarehouse *pchdl.ManualPosWarehouseHandler
 }
 
 // NewCioIngestHandler khởi tạo handler CIO ingest.
@@ -112,6 +122,34 @@ func NewCioIngestHandler() (*CioIngestHandler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cio ingest: %w", err)
 	}
+	manualOrder, err := pchdl.NewManualPosOrderHandler()
+	if err != nil {
+		return nil, fmt.Errorf("cio ingest: %w", err)
+	}
+	manualProduct, err := pchdl.NewManualPosProductHandler()
+	if err != nil {
+		return nil, fmt.Errorf("cio ingest: %w", err)
+	}
+	manualVariation, err := pchdl.NewManualPosVariationHandler()
+	if err != nil {
+		return nil, fmt.Errorf("cio ingest: %w", err)
+	}
+	manualCategory, err := pchdl.NewManualPosCategoryHandler()
+	if err != nil {
+		return nil, fmt.Errorf("cio ingest: %w", err)
+	}
+	manualCustomer, err := pchdl.NewManualPosCustomerHandler()
+	if err != nil {
+		return nil, fmt.Errorf("cio ingest: %w", err)
+	}
+	manualShop, err := pchdl.NewManualPosShopHandler()
+	if err != nil {
+		return nil, fmt.Errorf("cio ingest: %w", err)
+	}
+	manualWarehouse, err := pchdl.NewManualPosWarehouseHandler()
+	if err != nil {
+		return nil, fmt.Errorf("cio ingest: %w", err)
+	}
 	return &CioIngestHandler{
 		pcOrder:       pcOrder,
 		pcShop:        pcShop,
@@ -128,6 +166,13 @@ func NewCioIngestHandler() (*CioIngestHandler, error) {
 		metaAdSet:     metaAdSet,
 		metaAd:        metaAd,
 		metaAdInsight: metaAdInsight,
+		manualOrder:     manualOrder,
+		manualProduct:   manualProduct,
+		manualVariation: manualVariation,
+		manualCategory:  manualCategory,
+		manualCustomer:  manualCustomer,
+		manualShop:      manualShop,
+		manualWarehouse: manualWarehouse,
 	}, nil
 }
 
@@ -140,6 +185,20 @@ func canonicalCioDomain(domain string) string {
 		return "interaction_message"
 	case "pc_pos_customer":
 		return "pos_customer"
+	case "m_order":
+		return "manual_order"
+	case "m_pos_shop":
+		return "manual_pos_shop"
+	case "m_pos_warehouse":
+		return "manual_pos_warehouse"
+	case "m_pos_product":
+		return "manual_pos_product"
+	case "m_pos_variation":
+		return "manual_pos_variation"
+	case "m_pos_category":
+		return "manual_pos_category"
+	case "m_pos_customer":
+		return "manual_pos_customer"
 	default:
 		return domain
 	}
@@ -179,6 +238,20 @@ func permissionForCioDomain(domain string) string {
 		return "MetaAd.Update"
 	case "meta_ad_insight":
 		return "MetaAdInsight.Update"
+	case "manual_order":
+		return "PcPosOrder.Update"
+	case "manual_pos_shop":
+		return "PcPosShop.Update"
+	case "manual_pos_warehouse":
+		return "PcPosWarehouse.Update"
+	case "manual_pos_product":
+		return "PcPosProduct.Update"
+	case "manual_pos_variation":
+		return "PcPosVariation.Update"
+	case "manual_pos_category":
+		return "PcPosCategory.Update"
+	case "manual_pos_customer":
+		return "PcPosCustomer.Update"
 	case "ads", "ads_sync", "meta_ads", "crm":
 		return ""
 	default:
@@ -191,10 +264,13 @@ func isSupportedCioDomain(domain string) bool {
 	switch domain {
 	case "order",
 		"pos_shop", "pos_warehouse", "pos_product", "pos_variation", "pos_category", "pos_customer",
+		"manual_order",
+		"manual_pos_shop", "manual_pos_warehouse", "manual_pos_product", "manual_pos_variation", "manual_pos_category", "manual_pos_customer",
 		"interaction_conversation", "interaction_message",
 		"fb_customer",
 		"ads", "ads_sync", "meta_ads", "crm",
-		"meta_ad_account", "meta_campaign", "meta_adset", "meta_ad", "meta_ad_insight":
+		"meta_ad_account", "meta_campaign", "meta_adset", "meta_ad", "meta_ad_insight",
+		"m_order", "m_pos_shop", "m_pos_warehouse", "m_pos_product", "m_pos_variation", "m_pos_category", "m_pos_customer":
 		return true
 	default:
 		return false
@@ -244,7 +320,7 @@ func (h *CioIngestHandler) HandleIngest(c fiber.Ctx) error {
 		return common.NewError(common.ErrCodeValidationFormat, "domain không hợp lệ", common.StatusBadRequest, nil)
 	}
 
-	perm := permissionForCioDomain(rawDomain)
+	perm := permissionForCioDomain(domain)
 	if !middleware.EnforceActiveRolePermission(c, perm) {
 		return nil
 	}
@@ -301,6 +377,48 @@ func (h *CioIngestHandler) HandleIngest(c fiber.Ctx) error {
 			return perr
 		}
 		return h.pcCustomer.SyncUpsertOneFromParts(c, filter, req.Data)
+	case "manual_order":
+		filter, perr := h.manualOrder.ProcessMergedFilter(mergedFilter)
+		if perr != nil {
+			return perr
+		}
+		return h.manualOrder.SyncUpsertOneFromParts(c, filter, req.Data)
+	case "manual_pos_shop":
+		filter, perr := h.manualShop.ProcessMergedFilter(mergedFilter)
+		if perr != nil {
+			return perr
+		}
+		return h.manualShop.SyncUpsertOneFromParts(c, filter, req.Data)
+	case "manual_pos_warehouse":
+		filter, perr := h.manualWarehouse.ProcessMergedFilter(mergedFilter)
+		if perr != nil {
+			return perr
+		}
+		return h.manualWarehouse.SyncUpsertOneFromParts(c, filter, req.Data)
+	case "manual_pos_product":
+		filter, perr := h.manualProduct.ProcessMergedFilter(mergedFilter)
+		if perr != nil {
+			return perr
+		}
+		return h.manualProduct.SyncUpsertOneFromParts(c, filter, req.Data)
+	case "manual_pos_variation":
+		filter, perr := h.manualVariation.ProcessMergedFilter(mergedFilter)
+		if perr != nil {
+			return perr
+		}
+		return h.manualVariation.SyncUpsertOneFromParts(c, filter, req.Data)
+	case "manual_pos_category":
+		filter, perr := h.manualCategory.ProcessMergedFilter(mergedFilter)
+		if perr != nil {
+			return perr
+		}
+		return h.manualCategory.SyncUpsertOneFromParts(c, filter, req.Data)
+	case "manual_pos_customer":
+		filter, perr := h.manualCustomer.ProcessMergedFilter(mergedFilter)
+		if perr != nil {
+			return perr
+		}
+		return h.manualCustomer.SyncUpsertOneFromParts(c, filter, req.Data)
 	case "interaction_conversation":
 		filter, perr := h.fbConv.ProcessMergedFilter(mergedFilter)
 		if perr != nil {

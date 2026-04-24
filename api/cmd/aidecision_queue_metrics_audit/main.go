@@ -48,7 +48,7 @@ func main() {
 	defer client.Disconnect(ctx)
 
 	db := client.Database(cfg.MongoDB_DBName_Auth)
-	coll := db.Collection("decision_events_queue")
+	coll := db.Collection("decision_job_events")
 
 	activeStatuses := []string{
 		aidecisionmodels.EventStatusPending,

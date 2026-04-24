@@ -31,14 +31,14 @@ type MongoDbCollectionInfo struct {
 
 // protectedCollections danh sách collections hệ thống không cho phép xóa toàn bộ (auth, RBAC).
 var protectedCollections = map[string]bool{
-	"auth_users":                   true,
-	"auth_permissions":             true,
-	"auth_roles":                   true,
-	"auth_role_permissions":        true,
-	"auth_user_roles":             true,
-	"auth_organizations":           true,
-	"auth_organization_config_items": true,
-	"auth_organization_shares":     true,
+	"auth_core_users":            true,
+	"auth_core_permissions":      true,
+	"auth_core_roles":            true,
+	"auth_rel_role_permissions":  true,
+	"auth_rel_user_roles":        true,
+	"auth_core_organizations":    true,
+	"auth_cfg_organization_items": true,
+	"auth_rel_organization_shares": true,
 }
 
 // MongoDbManageService service quản lý MongoDB (list, count, delete all, export, import).
